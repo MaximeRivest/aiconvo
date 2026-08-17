@@ -1,0 +1,6 @@
+# Local caches live under ~/.cache/aiconvo/, not here.
+node_modules/
+*.log
+.DS_Store
+*~
+*.swp

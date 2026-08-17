@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+// aiconvo — "Where was I?" Run it in a project directory.
+// Prints the last session there: when it ended, and the final exchange.
+'use strict';
+const http = require('http');
+
+const PORT = process.env.AICONVO_PORT || 7433;
+const dir = process.argv[2] ? require('path').resolve(process.argv[2]) : process.cwd();
+
+const B = '\x1b[1m', D = '\x1b[2m', C = '\x1b[36m', G = '\x1b[32m', R = '\x1b[0m';
+
+function ago(ts) {
+  const s = (Date.now() - new Date(ts)) / 1000;
+  if (s < 3600) return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  return Math.round(s / 86400) + ' days ago';
+}
+
+function clip(text, lines) {
+  const l = text.trim().split('\n');
+  return l.length <= lines ? l.join('\n') : l.slice(0, lines).join('\n') + `\n${D}… (${l.length - lines} more lines — open the link below)${R}`;
+}
+
+http.get(`http://127.0.0.1:${PORT}/api/here?dir=${encodeURIComponent(dir)}`, res => {
+  let body = '';
+  res.on('data', c => body += c);
+  res.on('end', () => {
+    if (res.statusCode !== 200) {
+      console.log(`${D}No sessions found for ${dir}${R}`);
+      return;
+    }
+    const d = JSON.parse(body);
+    console.log(`${B}${d.title}${R}`);
+    console.log(`${D}[${d.source}] ${d.sessionCount} session${d.sessionCount > 1 ? 's' : ''} here · last ended ${ago(d.lastTs)}${R}\n`);
+    for (const m of d.lastExchange) {
+      const tag = m.role === 'user' ? `${C}you${R}` : `${G}assistant${R}`;
+      console.log(`${tag}\n${clip(m.text, m.role === 'user' ? 12 : 30)}\n`);
+    }
+    console.log(`${D}full session → http://localhost:${PORT}/#${encodeURIComponent(d.key)}${R}`);
+  });
+}).on('error', () => {
+  console.log(`${D}aiconvo server is not running. Start it: systemctl --user start aiconvo${R}`);
+});

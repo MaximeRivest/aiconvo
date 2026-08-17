@@ -1,0 +1,194 @@
+/* aiconvo design tokens — terminal-native with brutalist edges.
+   Drop-in replacement for the :root block in app.html.
+
+   Palette derived in OKLCH (see 01-tokens.md for the theory):
+   - all chromatic colors: C = 0.13, hues spread ~equidistant (27 95 150 225 320)
+   - dark theme:  L = 0.75 on tinted neutrals
+   - light theme: L = 0.52 (accents), neutrals mirrored to L >= 0.83
+   - every accent passes WCAG AA (>= 4.5:1) against its theme background
+*/
+
+/* ---- dark (default) ---- */
+:root {
+  /* surfaces: near-black, tinted toward the accent hue (150) */
+  --bg: #0a0d0a;
+  --surface-1: #101411;
+  --surface-2: #161b17;
+  --surface-3: #1e231f;
+  --border: #292e2a;
+  --border-strong: #3d433e;
+
+  /* text */
+  --text: #c8d0c9;
+  --text-dim: #808982;
+  --text-faint: #474e48;
+
+  /* ANSI set, L .75 C .13 */
+  --green: #6cc581;
+  --cyan: #33beeb;
+  --yellow: #c8ad3f;
+  --red: #f58c81;
+  --magenta: #d292e1;
+
+  /* semantic aliases */
+  --accent: var(--green);
+  --accent-strong: #6cc581;     /* fills: inverse video, primary buttons */
+  --accent-ink: #071009;        /* text on accent fills */
+  --live: var(--green);
+  --success: var(--green);
+  --warn: var(--yellow);
+  --danger: var(--red);
+
+  /* source identity (squares + labels only) */
+  --src-claude: var(--yellow);
+  --src-pi: var(--green);
+  --src-pi-remote: var(--magenta);
+
+  /* transcript roles */
+  --role-user: var(--green);
+  --role-asst: var(--cyan);
+  --role-tool: var(--text-faint);
+
+  /* one font: mono. Everything. */
+  --font: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  --fs-title: 15px;
+  --fs-body: 13px;
+  --fs-label: 12px;
+  --fs-meta: 12px;
+  --fs-micro: 11px;
+
+  /* spacing (8pt grid, dense) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+
+  /* brutalist edges */
+  --r: 0;
+  --r-sm: 2px;
+  --shadow: none;
+
+  /* layout */
+  --list-w: 400px;
+  --read-max: 780px;
+  --header-h: 44px;
+
+  /* motion */
+  --t: 60ms linear;
+
+  color-scheme: dark;
+}
+
+/* ---- light ---- */
+/* Same hues, same chroma. Lightness mirrored. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f2f6f3;
+    --surface-1: #eaeeea;
+    --surface-2: #dfe4e0;
+    --surface-3: #d2d8d3;
+    --border: #c3c9c4;
+    --border-strong: #9aa09b;
+
+    --text: #1b211c;
+    --text-dim: #525953;
+    --text-faint: #6a716b;
+
+    --green: #1d7d3e;
+    --cyan: #0076a0;
+    --yellow: #816600;
+    --red: #a7463e;
+    --magenta: #894d97;
+
+    --accent-strong: #005f21;
+    --accent-ink: #ffffff;
+
+    --role-tool: var(--text-faint);
+
+    color-scheme: light;
+  }
+}
+
+/* manual override: <html data-theme="light"> or "dark" */
+:root[data-theme="light"] {
+  --bg: #f2f6f3;
+  --surface-1: #eaeeea;
+  --surface-2: #dfe4e0;
+  --surface-3: #d2d8d3;
+  --border: #c3c9c4;
+  --border-strong: #9aa09b;
+
+  --text: #1b211c;
+  --text-dim: #525953;
+  --text-faint: #6a716b;
+
+  --green: #1d7d3e;
+  --cyan: #0076a0;
+  --yellow: #816600;
+  --red: #a7463e;
+  --magenta: #894d97;
+
+  --accent-strong: #005f21;
+  --accent-ink: #ffffff;
+
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ---- e-ink: binary black/white (design/11-eink-theme.md) ----
+   Every color is #000 or #fff. No greys, no opacity, no motion.
+   Meaning moves from color to shape, weight, and glyphs. */
+:root[data-theme="eink"] {
+  --bg: #fff;
+  --surface-1: #fff;
+  --surface-2: #fff;
+  --surface-3: #fff;
+  --border: #000;
+  --border-strong: #000;
+  --text: #000;
+  --text-dim: #000;
+  --text-faint: #000;
+  --green: #000;
+  --cyan: #000;
+  --yellow: #000;
+  --red: #000;
+  --magenta: #000;
+  --accent: #000;
+  --accent-strong: #000;
+  --accent-ink: #fff;
+  --live: #000;
+  --success: #000;
+  --warn: #000;
+  --danger: #000;
+  color-scheme: light;
+}
+
+/* ---- grayscale: the light ramp with C=0 (design/12-grayscale-theme.md) ----
+   Semantic colors are lightness steps: the more urgent, the darker. */
+:root[data-theme="gray"] {
+  --bg: #f5f5f5;
+  --surface-1: #ededed;
+  --surface-2: #e3e3e3;
+  --surface-3: #d6d6d6;
+  --border: #c7c7c7;
+  --border-strong: #9e9e9e;
+  --text: #1f1f1f;
+  --text-dim: #575757;
+  --text-faint: #6f6f6f;
+  --green: #555555;
+  --cyan: #484848;
+  --yellow: #696969;
+  --red: #2e2e2e;
+  --magenta: #636363;
+  --accent: var(--green);
+  --accent-strong: #292929;
+  --accent-ink: #ffffff;
+  color-scheme: light;
+}

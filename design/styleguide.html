@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aiconvo — style guide</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: var(--fs-body)/1.5 var(--font); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) 80px; }
+  h1 { font-size: var(--fs-title); margin: 0 0 var(--sp-1); }
+  h1::before { content: "❯ "; color: var(--accent); }
+  h2 { font-size: var(--fs-body); font-weight: 700; margin: 40px 0 var(--sp-3); padding: 4px 8px; background: var(--surface-2); border-left: 3px solid var(--accent); }
+  p.note { color: var(--text-dim); max-width: 70ch; }
+  code { color: var(--cyan); }
+
+  /* swatches */
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 1px; background: var(--border); border: 1px solid var(--border); }
+  .sw { background: var(--surface-1); }
+  .sw i { display: block; height: 40px; }
+  .sw span { display: block; padding: 4px 8px; font-size: var(--fs-micro); color: var(--text-dim); }
+
+  /* buttons */
+  .row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: var(--sp-3) 0; }
+  button { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r); padding: 0 12px; height: 30px; font: var(--fs-label) var(--font); cursor: pointer; transition: background var(--t), color var(--t); }
+  button:hover { background: var(--surface-3); }
+  button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
+  button.primary:hover { filter: brightness(1.12); }
+  button.ghost { border-color: transparent; background: transparent; color: var(--text-dim); }
+  button.ghost:hover { color: var(--text); }
+  button.danger { border-color: var(--danger); color: var(--danger); background: transparent; }
+  button.danger:hover { background: var(--danger); color: var(--accent-ink); }
+  button:disabled { opacity: .4; cursor: default; background: var(--surface-1); }
+  :is(button, input, [tabindex]):focus-visible { outline: none; border-color: var(--accent); }
+  input[type=text] { background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--r); height: 30px; padding: 0 10px; color: var(--text); font: var(--fs-body) var(--font); min-width: 320px; }
+  input::placeholder { color: var(--text-faint); }
+  input[type=checkbox] { appearance: none; width: 14px; height: 14px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface-1); margin: 0; cursor: pointer; position: relative; flex-shrink: 0; }
+  input[type=checkbox]:checked { background: var(--accent-strong); border-color: var(--accent-strong); }
+  input[type=checkbox]:checked::after { content: "✓"; position: absolute; inset: 0; color: var(--accent-ink); font-size: 11px; line-height: 13px; text-align: center; }
+
+  /* tabs: terminal style */
+  .tabs { display: flex; border: 1px solid var(--border); }
+  .tabs button { border: 0; border-right: 1px solid var(--border); height: 28px; color: var(--text-dim); }
+  .tabs button:last-child { border-right: 0; }
+  .tabs button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
+
+  /* list */
+  .list { width: 420px; background: var(--surface-1); border: 1px solid var(--border); }
+  .item { padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; gap: 10px; align-items: flex-start; }
+  .item:hover { background: var(--surface-2); }
+  .item.active { background: var(--accent-strong); color: var(--accent-ink); }
+  .item.active .meta, .item.active .src { color: var(--accent-ink); opacity: .75; }
+  .item .title { font-weight: 700; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .item .meta { color: var(--text-dim); font-size: var(--fs-meta); margin-top: 2px; }
+  .item .snip { color: var(--text-dim); font-size: var(--fs-meta); margin-top: 3px; }
+  .src { font-size: var(--fs-meta); color: var(--text-dim); }
+  .src i { display: inline-block; width: 7px; height: 7px; margin-right: 5px; }
+  .cursor { color: var(--live); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  mark { background: none; color: var(--warn); font-weight: 700; }
+  .selbar { border-top: 1px solid var(--border-strong); padding: 6px 10px; display: flex; gap: 8px; align-items: center; font-size: var(--fs-label); background: var(--surface-1); }
+  .selbar span { flex: 1; color: var(--text-dim); }
+
+  /* transcript */
+  .msgs { max-width: var(--read-max); border: 1px solid var(--border); }
+  .msg { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; }
+  .msg:last-child { border-bottom: 0; }
+  .msg .role { font-size: var(--fs-micro); margin-bottom: 4px; color: var(--text-faint); }
+  .msg.user .role { color: var(--role-user); }
+  .msg.user .role::before { content: "❯ "; }
+  .msg.assistant { background: var(--surface-1); }
+  .msg.assistant .role { color: var(--role-asst); }
+  .msg.assistant .role::before { content: "❯ "; }
+  .msg.tool { background: var(--bg); color: var(--text-dim); font-size: 12px; }
+  .msg.tool .role { color: var(--role-tool); }
+  .msg.tool .role::before { content: "$ "; }
+
+  /* jobs */
+  .job { width: 360px; background: var(--surface-1); border: 1px solid var(--border); padding: 8px 10px; margin-bottom: 1px; }
+  .jobtop { display: flex; gap: 8px; }
+  .jobtitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+  .jobtype { color: var(--text-faint); font-size: var(--fs-meta); }
+  .jobstatus { color: var(--text-dim); font-size: var(--fs-meta); margin-top: 3px; }
+  .jobstatus .bar { color: var(--accent); }
+  .job.done .jobstatus .bar { color: var(--success); }
+  .job.error .jobstatus .bar { color: var(--danger); }
+  .ok { color: var(--success); }
+  .err { color: var(--danger); }
+
+  /* toast */
+  .toast { width: 360px; background: var(--surface-1); border: 1px solid var(--border-strong); padding: 8px 10px; font-size: var(--fs-label); margin-bottom: 6px; }
+  .toast.ok { border-left: 3px solid var(--success); }
+  .toast.err { border-left: 3px solid var(--danger); }
+
+  .empty { border: 1px solid var(--border); color: var(--text-dim); text-align: center; padding: 48px 0; }
+  .empty .hint { color: var(--text-faint); font-size: var(--fs-meta); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>aiconvo style guide <button id="themeBtn" style="float:right">theme: auto</button></h1>
+  <p class="note">Direction: terminal-native + brutalist. Mono everywhere, square
+  corners, no shadows, ANSI palette, inverse-video selection. Behavior specs:
+  <code>02-components.md</code>.</p>
+
+  <h2>surfaces</h2>
+  <div class="swatches">
+    <div class="sw"><i style="background:var(--bg);border-bottom:1px solid var(--border)"></i><span>--bg #0a0c0d</span></div>
+    <div class="sw"><i style="background:var(--surface-1)"></i><span>--surface-1</span></div>
+    <div class="sw"><i style="background:var(--surface-2)"></i><span>--surface-2</span></div>
+    <div class="sw"><i style="background:var(--surface-3)"></i><span>--surface-3</span></div>
+  </div>
+
+  <h2>ansi colors</h2>
+  <div class="swatches">
+    <div class="sw"><i style="background:var(--green)"></i><span>--green · accent</span></div>
+    <div class="sw"><i style="background:var(--cyan)"></i><span>--cyan · assistant</span></div>
+    <div class="sw"><i style="background:var(--yellow)"></i><span>--yellow · warn</span></div>
+    <div class="sw"><i style="background:var(--red)"></i><span>--red · error</span></div>
+    <div class="sw"><i style="background:var(--magenta)"></i><span>--magenta · epic</span></div>
+  </div>
+
+  <h2>buttons + inputs</h2>
+  <div class="row">
+    <button class="primary">export .md</button>
+    <button>copy</button>
+    <button class="ghost">continue browsing</button>
+    <button class="danger">discard</button>
+    <button disabled>build epic</button>
+  </div>
+  <div class="row">
+    <input type="text" placeholder="search titles — enter for full-text search">
+    <input type="checkbox" checked><input type="checkbox">
+  </div>
+  <div class="row">
+    <div class="tabs">
+      <button class="on">conversations</button><button>notes</button><button>epics</button>
+    </div>
+  </div>
+
+  <h2>list rows</h2>
+  <div class="list">
+    <div class="item active">
+      <input type="checkbox" checked>
+      <div style="min-width:0">
+        <div class="title"><span class="cursor">█</span> refactor the session indexer for incremental updates</div>
+        <div class="meta"><span class="src"><i style="background:var(--src-pi)"></i>pi</span> · ~/Projects/aiconvo · 8/13 2:41 PM · 12u/48a · note ✓</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox">
+      <div style="min-width:0">
+        <div class="title">debug tray icon not appearing on login</div>
+        <div class="meta"><span class="src"><i style="background:var(--src-claude)"></i>claude</span> · ~/Projects/aiconvo · 8/12 6:03 PM · 5u/21a</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox">
+      <div style="min-width:0">
+        <div class="title">add full-text search endpoint</div>
+        <div class="meta"><span class="src"><i style="background:var(--src-pi-remote)"></i>pi-remote</span> · build-server · 8/11 9:15 AM · 8u/30a</div>
+        <div class="snip">…the <mark>search</mark> endpoint scans all <mark>search</mark>able text…</div>
+      </div>
+    </div>
+    <div class="selbar"><span>3 selected</span><button>copy</button><button class="primary">export .md</button><button>build epic</button><button class="ghost">clear</button></div>
+  </div>
+
+  <h2>transcript</h2>
+  <div class="msgs">
+    <div class="msg user"><div class="role">user</div>Can you make the indexer skip subagent transcripts? They double the count.</div>
+    <div class="msg assistant"><div class="role">assistant</div>Done. Files under subagents/ are now skipped during the scan. The index version bumped to 2, so the next start re-indexes once.</div>
+    <div class="msg tool"><div class="role">bash</div>grep -rn "subagents" ~/.pi/agent/sessions | head</div>
+  </div>
+
+  <h2>jobs</h2>
+  <div class="job"><div class="jobtop"><b class="jobtitle">refactor the session indexer</b><span class="jobtype">distill</span></div>
+    <div class="jobstatus"><span class="bar">██████░░░░░░░░</span> 3/8 · distilling problems</div></div>
+  <div class="job done"><div class="jobtop"><b class="jobtitle">q3 indexer work</b><span class="jobtype">epic</span></div>
+    <div class="jobstatus"><span class="ok">✓</span> saved · 12 conversations</div></div>
+  <div class="job error"><div class="jobtop"><b class="jobtitle">debug tray icon</b><span class="jobtype">distill</span></div>
+    <div class="jobstatus"><span class="err">✗</span> failed: model timeout</div></div>
+
+  <h2>toasts</h2>
+  <div class="toast">● new messages in “refactor the session indexer”</div>
+  <div class="toast ok">✓ note saved: refactor the session indexer</div>
+  <div class="toast err">✗ distillation failed: model timeout</div>
+
+  <h2>empty state</h2>
+  <div class="empty">
+    <div>select a conversation to read it.</div>
+    <div class="hint">press / to search</div>
+  </div>
+</div>
+<script>
+// theme toggle: auto -> light -> dark -> auto
+const order = [null, 'light', 'dark'], labels = ['auto', 'light', 'dark'];
+let i = 0;
+document.getElementById('themeBtn').onclick = e => {
+  i = (i + 1) % 3;
+  const v = order[i];
+  v ? document.documentElement.dataset.theme = v : delete document.documentElement.dataset.theme;
+  e.target.textContent = 'theme: ' + labels[i];
+};
+</script>
+</body>
+</html>
