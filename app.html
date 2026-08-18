@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="aiconvo">
 <title>aiconvo</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <script>
 // Apply the saved theme before first paint (no flash). '' = follow the OS.
 try { const t = localStorage.getItem('aiconvo.theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
@@ -110,7 +118,12 @@ try { const t = localStorage.getItem('aiconvo.theme'); if (t) document.documentE
 /* ---- base ---- */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+html, body { overscroll-behavior: none; }
 body { margin: 0; font: var(--fs-body)/1.5 var(--font); background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+@media (display-mode: standalone) {
+  body { height: 100dvh; }
+  header { padding-top: env(safe-area-inset-top); height: calc(var(--header-h) + env(safe-area-inset-top)); }
+}
 button { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r); padding: 0 12px; height: 30px; font: var(--fs-label) var(--font); cursor: pointer; transition: background var(--t), color var(--t); }
 button:hover { background: var(--surface-3); }
 button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
@@ -134,12 +147,26 @@ header { display: flex; gap: var(--sp-2); align-items: center; padding: 0 var(--
 #brand { font-weight: 700; font-size: var(--fs-body); color: var(--text); border: 0; background: none; padding: 0 var(--sp-2) 0 0; height: auto; }
 #brand::before { content: "❯ "; color: var(--accent); }
 #brand:hover { color: var(--accent); }
+body.chrome-min header {
+  position: fixed; top: 8px; left: 8px; z-index: 60;
+  width: auto; height: auto; padding: 4px 8px;
+  border: 1px solid var(--border-strong); background: var(--bg);
+}
+body.chrome-min header > :not(#brand) { display: none !important; }
+body.chrome-min #brand { padding: 0; }
+body.chrome-min #left { display: none !important; }
+body.chrome-min.chrome-gantt #left { display: flex !important; flex: 1 1 auto; height: auto !important; min-height: 0; border-top: 0; }
+body.chrome-min.chrome-gantt #view { display: none !important; }
+body.chrome-min.chrome-gantt #ganttResize { display: none; }
+@media (display-mode: standalone) {
+  body.chrome-min header { top: calc(8px + env(safe-area-inset-top)); }
+}
 #qwrap { flex: 1; min-width: 200px; position: relative; display: flex; }
 #q { flex: 1; min-width: 0; }
 #qclear { position: absolute; right: 2px; top: 2px; height: 24px; padding: 0 8px; border: 0; background: transparent; color: var(--text-dim); }
 #qclear:hover { color: var(--text); }
 .count { color: var(--text-dim); font-size: var(--fs-meta); white-space: nowrap; }
-#jobsBtn.running { border-color: var(--accent); color: var(--accent); }
+#jobsBtn.running, #settingsBtn.on { border-color: var(--accent); color: var(--accent); }
 #ticker { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: transparent; color: var(--text-dim); font-size: var(--fs-micro); padding: 0 6px; height: 26px; }
 #ticker:hover { color: var(--text); background: transparent; }
 #ticker.flash { animation: tickflash 1.4s ease-out; }
@@ -293,6 +320,24 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .plauncher input[type=text], .plauncher select { width: 100%; max-width: 360px; }
 .plauncher .mem { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-2) 0; }
 .plauncher .mem label { margin: 0; color: var(--text); font-size: var(--fs-meta); }
+.settings-view { max-width: var(--read-max); margin: 0 auto; }
+.settings-view .hint { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
+.settings-tools { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: 0 0 var(--sp-2); }
+.settings-tools input[type=search] { flex: 1; min-width: 220px; }
+.settings-tools label { color: var(--text); font-size: var(--fs-meta); white-space: nowrap; }
+.model-list { border: 1px solid var(--border-strong); background: var(--surface-1); max-height: 58vh; overflow: auto; }
+.model-prov { border-bottom: 1px solid var(--border); }
+.model-prov > summary { cursor: pointer; padding: 7px 10px; display: flex; gap: 8px; align-items: baseline; list-style: none; }
+.model-prov > summary::-webkit-details-marker { display: none; }
+.model-prov > summary::before { content: "▸ "; color: var(--text-faint); }
+.model-prov[open] > summary::before { content: "▾ "; }
+.model-prov .ptitle { font-weight: 700; }
+.model-prov .pkind { color: var(--text-dim); font-size: var(--fs-micro); }
+.model-row { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; padding: 6px 10px 6px 22px; height: auto; }
+.model-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.model-row .meta { color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; }
+.model-row.on { background: var(--accent-strong); color: var(--accent-ink); }
+.model-row.on .meta { color: var(--accent-ink); opacity: .8; }
 .diff-view { max-width: var(--read-max); margin: 0 auto; }
 .diff-toolbar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3); }
 .diff-toolbar input[type=search] { flex: 1; min-width: 220px; }
@@ -321,6 +366,166 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 :root[data-theme="eink"] .diff-body td.old, :root[data-theme="eink"] .diff-body td.new { color: #000; background: #fff; }
 :root[data-theme="eink"] .diff-body td.old { text-decoration: line-through; }
 .diff-body td.gap { text-align: center; color: var(--text-faint); background: var(--surface-1); }
+/* Git-weaved file Gantt: one sticky row label, AI marks above Git marks. */
+.file-gantt-view { margin: 0 auto; min-width: 0; }
+.fg-toolbar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-2); }
+.fg-toolbar input[type=search] { flex: 1; min-width: 200px; }
+.fg-legend { display: flex; gap: var(--sp-3); flex-wrap: wrap; color: var(--text-dim); font-size: var(--fs-micro); margin: 4px 0 8px; }
+.fg-scroll { overflow: auto; max-height: calc(100vh - 250px); border: 1px solid var(--border-strong); background: var(--surface-1); }
+.fg-axis, .fg-row { display: grid; grid-template-columns: 260px var(--fg-width); width: max-content; min-width: 100%; }
+.fg-axis { position: sticky; top: 0; z-index: 7; height: 28px; background: var(--surface-1); border-bottom: 1px solid var(--border-strong); }
+.fg-corner, .fg-label { position: sticky; left: 0; z-index: 5; width: 260px; background: var(--surface-1); border-right: 1px solid var(--border-strong); }
+.fg-corner { padding: 6px 9px; color: var(--text-faint); font-size: var(--fs-micro); z-index: 9; }
+.fg-time-axis, .fg-track { position: relative; width: var(--fg-width); }
+.fg-time-axis { background: var(--surface-1); }
+.fg-tick { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--border); color: var(--text-faint); font-size: 9px; padding: 5px 0 0 3px; white-space: nowrap; }
+.fg-row { min-height: 32px; border-bottom: 1px solid var(--border); }
+.fg-row:last-child { border-bottom: 0; }
+.fg-row:hover .fg-label, .fg-row:hover .fg-track { background-color: var(--surface-2); }
+.fg-label { display: flex; gap: 6px; align-items: center; padding: 5px 8px; min-width: 0; }
+.fg-label .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; flex: 1; }
+.fg-label .n { color: var(--text-faint); font-size: 9px; }
+.fg-track { height: 32px; background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px); background-size: var(--fg-grid, 160px) 100%; }
+.fg-mark { position: absolute; z-index: 3; transform: translateX(-50%); width: 13px; height: 13px; padding: 0; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: 9px/11px var(--font); cursor: pointer; }
+.fg-mark.ai { top: 3px; }
+.fg-mark.git { top: 18px; width: 10px; height: 10px; border-color: var(--magenta); background: var(--magenta); transform: translateX(-50%) rotate(45deg); }
+.fg-mark.git span { display: none; }
+.fg-mark.failed { background: var(--bg); color: var(--danger); border-color: var(--danger); text-decoration: line-through; }
+.fg-mark.unresolved { background: var(--bg); color: var(--accent); }
+.fg-mark.working { border-style: dashed; }
+.fg-link { position: absolute; top: 15px; z-index: 1; height: 0; border-top: 1px dotted var(--text-dim); pointer-events: none; }
+.fg-link.high { border-top-style: solid; border-color: var(--success); }
+.fg-link.medium { border-color: var(--cyan); }
+.fg-link.low { border-color: var(--text-faint); }
+.fg-work { position: absolute; right: 2px; top: 4px; bottom: 4px; width: 3px; background: var(--warn); z-index: 2; }
+.fg-empty { padding: 30px; color: var(--text-dim); }
+.git-card pre { margin: 0; padding: 10px; max-height: 65vh; overflow: auto; white-space: pre; font: 11px/1.45 var(--font); }
+:root[data-theme="eink"] .fg-mark { background: #fff; color: #000; border: 2px solid #000; }
+:root[data-theme="eink"] .fg-mark.git { background: #000; }
+:root[data-theme="eink"] .fg-link { border-color: #000 !important; }
+/* Whole-file time comparison opened from one file-Gantt row. */
+.fg-label[data-fg-file] { border: 0; border-radius: 0; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.fg-label[data-fg-file]:hover, .fg-label[data-fg-file].on { background: var(--accent-strong); color: var(--accent-ink); }
+.fg-label[data-fg-file].on .n { color: var(--accent-ink); }
+.file-inspector { margin: var(--sp-3) 0 0; border: 1px solid var(--border-strong); background: var(--bg); }
+.fi-head { position: sticky; top: 0; z-index: 12; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
+.fi-head b { flex: 1; min-width: 220px; }
+.fi-head select { max-width: min(38vw, 520px); }
+.fi-truth { width: 100%; color: var(--text-dim); font-size: var(--fs-micro); }
+.fi-columns { overflow: auto; max-height: 72vh; font: 11px/1.45 var(--font); }
+.fi-diff-row { display: flex; justify-content: center; }
+.fi-diff-row:not(.changed) .fi-cell { flex: 0 0 50%; width: 50%; max-width: 50%; }
+.fi-diff-row.changed { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.fi-diff-row.lines { border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.fi-diff-row:hover, .fi-diff-row.selected { outline: 1px solid var(--accent); outline-offset: -1px; }
+.fi-diff-row.jump { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fi-cell { display: grid; grid-template-columns: 44px minmax(0, 1fr); min-width: 0; min-height: 18px; overflow: hidden; }
+.fi-diff-row.changed .fi-cell + .fi-cell { border-left: 1px solid var(--border); }
+:root[data-theme="eink"] .fi-diff-row.changed .fi-cell + .fi-cell { border-left: 2px solid #000; }
+.fi-cell .ln { padding: 1px 6px; color: var(--text-faint); text-align: right; user-select: none; background: var(--surface-1); cursor: pointer; }
+.fi-cell .ln:hover { color: var(--text); font-weight: 700; }
+.fi-cell .code { display: block; min-width: 0; padding: 1px 7px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fi-cell .code .sx { font: inherit; }
+.sx-k { color: var(--accent); font-weight: 700; }
+.sx-s { color: var(--cyan); }
+.sx-c { color: var(--text-faint); font-style: italic; }
+.sx-n { color: var(--magenta); }
+.sx-t { color: var(--yellow); font-weight: 700; }
+.sx-md-h { font-weight: 700; }
+.sx-md-h1 { font-size: 13px; }
+.sx-md-h2 { font-size: 12px; }
+.sx-md-q { display: inline-block; min-width: 100%; box-sizing: border-box; border-left: 3px solid var(--border-strong); padding-left: 6px; color: var(--text-dim); }
+.fi-cell .code code { font: inherit; border: 1px solid var(--border); padding: 0 3px; }
+.fi-cell .code a { color: inherit; text-decoration: underline; }
+:root[data-theme="eink"] .sx-k, :root[data-theme="eink"] .sx-t, :root[data-theme="eink"] .sx-n, :root[data-theme="eink"] .sx-md-h { color: #000; font-weight: 700; }
+:root[data-theme="eink"] .sx-s { color: #000; text-decoration: underline; }
+:root[data-theme="eink"] .sx-c { color: #000; font-style: italic; font-weight: 400; }
+:root[data-theme="eink"] .sx-md-q { color: #000; border-left: 3px solid #000; }
+:root[data-theme="eink"] .fi-cell.new-change .sx-s { text-decoration: none; font-style: italic; }
+.fi-cell.old-change { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); border-left: 3px dashed var(--danger); }
+.fi-cell.new-change { color: var(--success); background: color-mix(in srgb, var(--success) 9%, transparent); border-left: 3px solid var(--success); }
+.fi-cell.old-change .ln::before { content: '−'; margin-right: 4px; font-weight: 700; }
+.fi-cell.new-change .ln::before { content: '+'; margin-right: 4px; font-weight: 700; }
+.fi-cell.empty { margin: 0; background: var(--surface-1); text-align: left; }
+.fi-line-history { min-width: 900px; padding: 8px 10px 10px; border: 2px solid var(--accent); background: var(--surface-1); }
+.fi-line-history h4 { margin: 0 0 6px; font-size: var(--fs-label); display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.fi-history-entry { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 7px 5px; border-top: 1px solid var(--border); cursor: pointer; }
+.fi-history-entry:hover { background: var(--surface-2); }
+.fi-history-meta { color: var(--text-dim); font-size: var(--fs-micro); }
+.fi-history-change { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
+.fi-history-change pre { margin: 0; padding: 5px 7px; overflow: auto; max-height: 160px; white-space: pre; background: var(--bg); border: 1px solid var(--border); font: inherit; }
+.focused-file-view { height: calc(100vh - 82px); min-height: 520px; display: flex; flex-direction: column; margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-6)); }
+.ff-head { flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
+.ff-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ff-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+.ff-tree { min-height: 0; overflow: auto; border-right: 1px solid var(--border-strong); background: var(--surface-1); padding: 7px; }
+.ff-tree input { width: 100%; margin-bottom: 5px; }
+.ff-tree-summary { padding: 3px 5px 7px; color: var(--text-dim); font-size: var(--fs-micro); border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.ff-tree details { margin-left: 10px; }
+.ff-tree summary { cursor: pointer; padding: 3px 2px; color: var(--text-dim); user-select: none; }
+.ff-tree .ff-file { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 4px; align-items: center; width: 100%; height: auto; padding: 4px 5px 4px 14px; border: 0; border-left: 3px solid transparent; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+.ff-tree .ff-file .ff-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ff-tree .ff-file .ff-state { color: var(--text-faint); }
+.ff-tree .ff-file .ff-lines { color: var(--text-dim); font-size: 9px; white-space: nowrap; }
+.ff-tree .ff-file.changed { border-left-color: var(--accent); font-weight: 700; }
+.ff-tree .ff-file.changed .ff-state { color: var(--accent); }
+.ff-tree .ff-file:hover, .ff-tree .ff-file.on { background: var(--accent-strong); color: var(--accent-ink); }
+.ff-tree .ff-file.on .ff-state, .ff-tree .ff-file.on .ff-lines { color: var(--accent-ink); }
+:root[data-theme="eink"] .ff-tree .ff-file.changed { border-left: 4px double #000; text-decoration: underline; }
+:root[data-theme="eink"] .ff-tree .ff-file.changed .ff-state, :root[data-theme="eink"] .ff-tree .ff-file.changed .ff-lines { color: #000; }
+:root[data-theme="eink"] .ff-tree .ff-file.on .ff-state, :root[data-theme="eink"] .ff-tree .ff-file.on .ff-lines { color: #fff; }
+.ff-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.ff-timeline { flex: 0 0 auto; padding: 8px 12px 10px; border-bottom: 1px solid var(--border-strong); background: var(--surface-1); }
+.ff-track { position: relative; height: 38px; margin: 0 8px 6px; border-bottom: 1px solid var(--border-strong); cursor: crosshair; touch-action: none; }
+.ff-point { position: absolute; bottom: -5px; width: 8px; height: 8px; padding: 0; border-radius: 0; transform: translateX(-50%); border: 1px solid var(--accent); background: var(--accent); }
+.ff-point.git { transform: translateX(-50%) rotate(45deg); background: var(--magenta); border-color: var(--magenta); }
+.ff-point.current { width: 3px; height: 30px; bottom: -1px; background: var(--warn); border: 0; }
+.ff-point.boundary { width: 5px; height: 28px; bottom: -1px; background: var(--bg); border: 2px solid var(--border-strong); }
+.ff-key { --key-color: var(--accent); position: absolute; top: 0; bottom: -6px; width: 18px; transform: translateX(-50%); cursor: ew-resize; touch-action: none; z-index: 5; }
+.ff-key::after { content: ''; position: absolute; left: 8px; top: 0; bottom: 0; border-left: 2px solid var(--key-color); }
+.ff-key.old { --key-color: var(--danger); }
+.ff-key.old::after { border-left-style: dashed; }
+.ff-key.new { --key-color: var(--success); }
+.ff-key::before { content: ''; position: absolute; left: 4px; top: -5px; width: 10px; height: 10px; border: 2px solid var(--key-color); background: var(--bg); transform: rotate(45deg); box-sizing: border-box; }
+.ff-key.new::before { background: var(--key-color); }
+.ff-key.dragging { width: 28px; }
+.ff-ranges { display: grid; grid-template-columns: 42px minmax(120px, 1fr) minmax(160px, 34%); gap: 5px 8px; align-items: center; }
+.ff-ranges input[type=range] { width: 100%; accent-color: var(--accent); }
+.ff-range-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: var(--fs-micro); }
+.ff-compare { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.ff-status { flex: 0 0 auto; padding: 5px 9px; color: var(--text-dim); font-size: var(--fs-micro); border-bottom: 1px solid var(--border); }
+.ff-dock { flex: 0 0 auto; position: sticky; top: 0; z-index: 30; display: flex; gap: 6px; align-items: center; padding: 6px 8px; background: var(--bg); border-bottom: 1px solid var(--border-strong); }
+.ff-dock button { min-width: 36px; height: 28px; }
+.ff-compare .fi-columns { flex: 1; max-height: none; }
+.ff-sheet { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.ff-sheet .fi-columns { height: 100%; overflow: hidden; }
+.ff-ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; touch-action: none; z-index: 6; }
+.ff-sheet.inking .ff-ink { pointer-events: auto; cursor: crosshair; }
+.ff-sheet.erasing .ff-ink { cursor: cell; }
+body.file-full header, body.file-full #left, body.file-full #jobsTray, body.file-full #filtersPop, body.file-full #agentsPop, body.file-full .ff-head, body.file-full .ff-timeline, body.file-full .ff-status { display: none !important; }
+body.file-full #view { padding: 0; overflow: hidden; }
+body.file-full .focused-file-view { height: 100vh; min-height: 0; margin: 0; }
+body.file-full .ff-layout { grid-template-columns: minmax(0, 1fr); }
+body.file-full .ff-tree { display: none !important; }
+body.file-full.file-full-tree .ff-tree { display: block !important; }
+body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); }
+body.file-full .file-inspector { margin: 0; border: 0; height: 100vh; display: flex; flex-direction: column; }
+body.file-full .file-inspector .fi-head, body.file-full .file-inspector .fi-truth { display: none; }
+body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
+.ff-loading { padding: 30px; color: var(--text-dim); }
+@media (max-width: 1100px) { .ff-layout { grid-template-columns: 230px minmax(0, 1fr); } }
+:root[data-theme="eink"] .fi-cell.old-change, :root[data-theme="eink"] .fi-cell.new-change { color: #000; background: #fff; }
+:root[data-theme="eink"] .fi-cell.old-change { border-left: 4px dashed #000; }
+:root[data-theme="eink"] .fi-cell.old-change .code { text-decoration: line-through; }
+:root[data-theme="eink"] .fi-cell.new-change { border-left: 4px double #000; }
+:root[data-theme="eink"] .fi-cell.new-change .code { font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; }
+:root[data-theme="eink"] .ff-point { background: #fff; border: 2px solid #000; }
+:root[data-theme="eink"] .ff-point.git { background: #000; }
+:root[data-theme="eink"] .ff-point.current { background: #000; border: 0; }
+:root[data-theme="eink"] .ff-point.boundary { background: #fff; border: 2px double #000; }
+:root[data-theme="eink"] .ff-key { --key-color: #000; }
+:root[data-theme="eink"] .ff-key.old::before { background: #fff; }
+:root[data-theme="eink"] .ff-key.new::before { background: #000; }
 .blame-view { max-width: var(--read-max); margin: 0 auto; }
 .blame-head { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; background: var(--bg); border-bottom: 1px solid var(--border); padding: var(--sp-2) 0; margin-bottom: var(--sp-2); }
 .blame-head h2 { margin: 0 0 2px; font-size: var(--fs-title); }
@@ -466,52 +671,29 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .chnav button:hover { color: var(--text); background: var(--surface-2); }
 .chnav button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
 
-/* ---- conversation agent composer ---- */
-.agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); }
-.agent-compose .agent-state { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); color: var(--text-dim); font-size: var(--fs-meta); }
+/* ---- continue in Alacritty ---- */
+.agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
+.agent-compose .agent-state { display: flex; gap: var(--sp-2); align-items: center; color: var(--text-dim); font-size: var(--fs-meta); min-width: 0; }
 .agent-compose .agent-state strong { color: var(--accent); }
-.agent-compose .agent-row { display: flex; gap: var(--sp-2); align-items: flex-end; }
-.agent-compose textarea { flex: 1; min-height: 64px; max-height: 220px; resize: vertical; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text); padding: 9px 10px; font: var(--fs-body)/1.4 var(--font); }
-.agent-compose textarea:focus-visible { outline: none; border-color: var(--accent); }
-.agent-compose .agent-hint { color: var(--text-faint); margin-left: auto; }
-.agent-compose.sending { border-color: var(--accent); }
-
-/* ---- conversation terminal view (themed with the app tokens) ---- */
-.termwrap { font: 12.5px/1.35 var(--font); width: 100%; max-width: calc(80ch + 2 * var(--sp-3) + 2px); margin: var(--sp-3) auto 0; border: 1px solid var(--border-strong); background: var(--bg); outline: none; display: flex; flex-direction: column; min-height: 60vh; }
-.termwrap:focus { border-color: var(--accent); }
-.termwrap .termbar { display: flex; gap: var(--sp-2); align-items: center; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--text-dim); font-size: var(--fs-micro); }
-.termwrap .termbar strong { color: var(--text); }
-.termwrap .termbar .term-status { color: var(--accent); }
-.termwrap .termbar .term-status::before { content: "● "; }
-.termwrap .termbar .term-hint { margin-left: auto; color: var(--text-faint); }
-.termscreen { flex: 1; margin: 0; padding: var(--sp-3); overflow: auto; background: var(--bg); color: var(--text); font: inherit; white-space: pre; }
-#termToggle.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
-.termwrap.captured { border-color: var(--accent); }
-.termwrap .termbar button { height: 22px; padding: 0 8px; }
-
-/* floating terminal picture-in-picture */
-#termPip { position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: 36; width: min(560px, calc(100vw - 32px)); max-height: min(440px, calc(100vh - 80px)); display: flex; flex-direction: column; border: 1px solid var(--border-strong); background: var(--surface-1); box-shadow: 0 12px 36px color-mix(in srgb, #000 45%, transparent); }
-#termPip[hidden] { display: none; }
-#termPip.captured { border-color: var(--accent); }
-#termPip .pip-head { display: flex; gap: var(--sp-2); align-items: center; min-height: 36px; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--border); }
-#termPip .pip-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
-#termPip .pip-status { color: var(--accent); font-size: var(--fs-micro); white-space: nowrap; }
-#termPip .pip-status::before { content: "● "; }
-#termPip button { height: 26px; padding: 0 8px; }
-#termPip .termscreen { min-height: 120px; max-height: 380px; font: 10.5px/1.3 var(--font); }
-
-/* ---- live agent picture-in-picture ---- */
-#agentPip { position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: 35; width: min(520px, calc(100vw - 32px)); max-height: min(420px, calc(100vh - 80px)); display: flex; flex-direction: column; border: 1px solid var(--border-strong); background: var(--surface-1); box-shadow: 0 12px 36px color-mix(in srgb, #000 45%, transparent); }
-#agentPip[hidden] { display: none; }
-#agentPip.minimized { width: min(360px, calc(100vw - 32px)); }
-#agentPip .pip-head { display: flex; gap: var(--sp-2); align-items: center; min-height: 36px; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--border); }
-#agentPip .pip-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
-#agentPip .pip-status { color: var(--accent); font-size: var(--fs-micro); white-space: nowrap; }
-#agentPip .pip-status::before { content: "● "; }
-#agentPip button { height: 26px; padding: 0 8px; }
-#agentPip pre { min-height: 100px; max-height: 360px; overflow: auto; margin: 0; padding: var(--sp-3); white-space: pre-wrap; word-break: break-word; background: var(--bg); color: var(--text); font: var(--fs-body)/1.45 var(--font); }
-#agentPip.minimized pre, #agentPip.minimized #agentPipOpen { display: none; }
-#agentPip.minimized .pip-head { border-bottom: 0; }
+.agent-compose .agent-hint { color: var(--text-faint); }
+.agent-compose textarea { width: 100%; min-height: 64px; resize: vertical; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); padding: 8px 10px; }
+.agent-compose textarea:focus { outline: 0; border-color: var(--accent); }
+.agent-thumbs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.agent-thumbs:empty { display: none; }
+.agent-thumb { position: relative; width: 56px; height: 56px; border: 1px solid var(--border); background: var(--surface-2); }
+.agent-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.agent-thumb button { position: absolute; top: 0; right: 0; height: 18px; padding: 0 5px; font-size: 11px; }
+.agent-compose-row { display: flex; gap: var(--sp-2); align-items: center; }
+.agent-bar { flex-direction: row; align-items: center; }
+.overlay.agent-overlay { z-index: 55; padding: 12px; align-items: stretch; justify-content: stretch; }
+.agent-dialog { width: 100%; max-width: none; height: 100%; max-height: none; display: flex; flex-direction: column; gap: var(--sp-2); box-sizing: border-box; }
+.agent-dialog h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; flex: 0 0 auto; }
+.agent-dialog h3 span { color: var(--text-dim); font-weight: 400; font-size: var(--fs-meta); }
+.agent-pane { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; overflow: hidden; margin: 0; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: 14px/1.05 var(--font); white-space: pre; word-break: normal; }
+.agent-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2); flex: 0 0 auto; }
+.agent-choices:empty { display: none; }
+.agent-dialog textarea { flex: 0 0 auto; }
+.agent-compose-row { flex: 0 0 auto; }
 
 /* ---- jobs drawer ---- */
 #jobsTray { position: fixed; top: var(--header-h); right: 0; bottom: 0; width: 360px; z-index: 20; background: var(--surface-1); border-left: 1px solid var(--border-strong); display: flex; flex-direction: column; }
@@ -548,6 +730,7 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .dialog table { border-collapse: collapse; width: 100%; font-size: var(--fs-label); }
 .dialog td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
 .dialog td:first-child { color: var(--accent); white-space: nowrap; }
+.dialog.agent-dialog { width: 100%; max-width: none; height: 100%; }
 
 /* distill stream */
 .dprog { max-width: var(--read-max); margin: 0 auto; }
@@ -555,15 +738,16 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 </head>
 <body>
 <header>
-  <button id="brand" title="Home — clear search and filters">aiconvo</button>
+  <button id="brand" title="Collapse the top bar. Shift-click to go home.">aiconvo</button>
   <div id="qwrap">
     <input id="q" type="text" placeholder="search titles — enter for full-text search" autofocus>
     <button id="qclear" title="Clear search" hidden>✗</button>
   </div>
   <button id="ticker" hidden title="Open the latest active conversation"></button>
   <span class="count" id="count"></span>
-  <button id="activeBtn" hidden title="Active, recent, and Herdr agents (a)">● 0</button>
+  <button id="activeBtn" hidden title="Running, writing, and recent agents (a)">● 0</button>
   <button id="filtersBtn" title="Source, directory, and view filters">filters</button>
+  <button id="settingsBtn" title="Memory model (,)">settings</button>
   <button id="jobsBtn" title="Background work (j)">jobs [<span id="jobCount">0</span>]</button>
 </header>
 <div id="agentsPop" hidden></div>
@@ -612,28 +796,19 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
   </div>
   <div id="view"><div class="empty">select a conversation to read it.<div class="hint">press / to search</div></div></div>
 </main>
-<div id="agentPip" hidden>
-  <div class="pip-head">
-    <span class="pip-title" id="agentPipTitle">agent</span>
-    <span class="pip-status" id="agentPipStatus">working</span>
-    <button class="ghost" id="agentPipOpen" title="Open this conversation">open</button>
-    <button class="ghost" id="agentPipMin" title="Minimize live output">_</button>
-    <button class="ghost" id="agentPipClose" title="Hide live output">✗</button>
-  </div>
-  <pre id="agentPipOutput"></pre>
-</div>
-<div id="termPip" hidden>
-  <div class="pip-head">
-    <span class="pip-title" id="termPipTitle">terminal</span>
-    <span class="pip-status" id="termPipStatus">…</span>
-    <button class="ghost" id="termPipExpand" title="Open the terminal as the main view">⛶</button>
-    <button class="ghost" id="termPipClose" title="Close the terminal">✗</button>
-  </div>
-  <pre id="termPipScreen" class="termscreen"></pre>
-</div>
 <div id="jobsTray" hidden>
   <div class="jhead">background work<button class="ghost" id="jobsClose">✗</button></div>
   <div id="jobsList"></div>
+</div>
+<div class="overlay agent-overlay" id="agentOverlay" hidden>
+  <div class="dialog agent-dialog" role="dialog" aria-modal="true" aria-labelledby="agentDlgTitle">
+    <h3 id="agentDlgTitle">terminal <span id="agentStateHint">closed</span></h3>
+    <pre class="agent-pane" id="agentPane"></pre>
+    <div class="agent-choices" id="agentChoices"></div>
+    <div class="agent-compose-row">
+      <button class="ghost" id="agentClose" type="button">close live view</button>
+    </div>
+  </div>
 </div>
 <div class="overlay" id="epicOverlay" hidden>
   <div class="dialog">
@@ -658,12 +833,13 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
       <tr><td>n / b</td><td>timeline: jump to now / to the beginning</td></tr>
       <tr><td>t</td><td>timeline: jump to a date</td></tr>
       <tr><td>[ ]</td><td>e-ink: previous / next transcript page</td></tr>
-      <tr><td>a</td><td>active / recent / herdr agents</td></tr>
+      <tr><td>a</td><td>running / writing / recent agents</td></tr>
       <tr><td>1 2 3</td><td>conversations / notes / epics</td></tr>
       <tr><td>c</td><td>copy conversation</td></tr>
       <tr><td>e</td><td>export conversation</td></tr>
       <tr><td>d</td><td>distill / open note</td></tr>
       <tr><td>f</td><td>filters</td></tr>
+      <tr><td>,</td><td>settings</td></tr>
       <tr><td>j</td><td>jobs drawer</td></tr>
       <tr><td>p</td><td>project overview for the open conversation</td></tr>
       <tr><td>?</td><td>this help</td></tr>
@@ -680,10 +856,6 @@ let jobs = new Map();
 let tab = 'conv';           // conv | notes | epics
 let viewMode = 'chat';      // chat | commands | all | uniqcmd | files
 let notesList = [], epicsList = [];
-let agentStream = null, agentStreamKey = null;
-let terminalMode = false;   // main view: false = chat html, true = live Herdr terminal
-let termStream = null, termDirty = false, termKey = null, termLastScreen = null;
-let termCaptured = false, termPipOn = false, termAgentTitle = null;
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -696,6 +868,15 @@ function fmtDateShort(ts) {
     d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 function shortDir(d) { return d ? d.replace(/^\/home\/[^/]+/, '~') : '?'; }
+function fmtTokens(n) {
+  const v = Number(n) || 0;
+  if (!v) return '?';
+  if (v >= 1000000 && v % 1000000 === 0) return (v / 1000000) + 'M';
+  if (v >= 1000 && v % 1000 === 0) return (v / 1000) + 'K';
+  if (v >= 1000000) return (v / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (v >= 1000) return (v / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+  return String(v);
+}
 function errToast(msg) { toast('✗ ' + msg, null, 'err'); }
 
 let relatedCache = new Map();
@@ -764,7 +945,7 @@ function renderJobs() {
     else if (j.status === 'done') status = `<span class="ok">✓</span> ${esc(j.statusText || 'saved')}`;
     else status = `<span class="err">✗</span> <span class="err">${esc(j.error || j.statusText || 'failed')}</span>`;
     return `<div class="job ${esc(j.status)}" data-job="${esc(j.id)}">
-      <div class="jobtop"><b class="jobtitle">${esc(j.title || j.type)}</b><span class="jobtype">${esc(j.type)}</span></div>
+      <div class="jobtop"><b class="jobtitle">${esc(j.title || j.type)}</b><span class="jobtype">${esc(j.type)}${j.model ? ' · ' + esc(j.model) : ''}</span></div>
       <div class="jobstatus">${status}</div></div>`;
   }).join('') || '<div class="empty" style="margin:15px 0">no background work.<div class="hint">distill a conversation or build an epic to start a job.</div></div>';
 }
@@ -793,6 +974,8 @@ $('jobsList').onclick = e => {
     else open(job.key);
   } else if (job.type === 'evidence' && job.status === 'done' && (job.result?.sessionIds?.length === 1 || job.key)) {
     showConversationEvidence(job.key || job.result.sessionIds[0]);
+  } else if ((job.type === 'project-distill' || job.type === 'project-memory') && job.project) {
+    showProjectOverview(job.project);
   } else if (job.type === 'epic' && job.status === 'done' && job.epicId) showEpic(job.epicId);
 };
 
@@ -878,24 +1061,17 @@ async function renderAgentsPop() {
   let d;
   try { d = await (await fetch('/api/agents/active')).json(); }
   catch { pop.innerHTML = '<div class="ag-sec">could not load.</div>'; return; }
-  const convRow = a => `<div class="ag-row" data-key="${esc(a.key)}">` +
-    `<span class="src ${esc(a.source || 'claude')}"><i></i></span>` +
+  const convRow = (a, extra) => `<div class="ag-row" data-key="${esc(a.key || '')}">` +
+    `<span class="src ${esc(a.source || a.kind || 'claude')}"><i></i></span>` +
     `<span class="ag-main"><span class="ag-title">${esc(a.title || '(untitled)')}</span>` +
     `<span class="ag-dir">${esc(shortDir(a.cwd))}</span></span>` +
-    `<span class="ag-age">${ago(a.ageMs)}</span></div>`;
-  // An unmatched herdr agent (no session file yet, e.g. a fresh project
-  // conversation) is still reachable: its row opens a direct agent terminal.
-  const herdrRow = h => `<div class="ag-row${h.key || h.target ? '' : ' off'}" ` +
-    (h.key ? `data-key="${esc(h.key)}"` : h.target ? `data-agent="${esc(h.target)}" data-kind="${esc(h.agent || 'pi')}" data-title="${esc(h.title || h.label || h.name || 'agent')}"` : '') + `>` +
-    `<span class="src ${esc(h.agent === 'claude' ? 'claude' : 'pi')}"><i></i></span>` +
-    `<span class="ag-main"><span class="ag-title">${esc(h.title || h.label || h.name || h.agent || 'agent')}</span>` +
-    (h.cwd ? `<span class="ag-dir">${esc(shortDir(h.cwd))}</span>` : '') + `</span>` +
-    `<span class="ag-age">${esc(h.status || '')}</span></div>`;
+    `<span class="ag-age">${esc(extra)}</span></div>`;
+  const running = (d.running || []).filter(a => a.key);
   pop.innerHTML =
-    (d.active.length ? '<div class="ag-sec">active now</div>' + d.active.map(convRow).join('') : '') +
-    (d.herdr.length ? '<div class="ag-sec">in herdr</div>' + d.herdr.map(herdrRow).join('') : '') +
-    (d.recent.length ? '<div class="ag-sec">recent</div>' + d.recent.map(convRow).join('') : '') ||
-    '<div class="ag-sec">no active or recent agents.</div>';
+    (running.length ? '<div class="ag-sec">running</div>' + running.map(a => convRow(a, 'pid ' + a.pid)).join('') : '') +
+    ((d.writing || []).length ? '<div class="ag-sec">writing</div>' + d.writing.map(a => convRow(a, ago(a.ageMs))).join('') : '') +
+    ((d.recent || []).length ? '<div class="ag-sec">recent</div>' + d.recent.map(a => convRow(a, ago(a.ageMs))).join('') : '') ||
+    '<div class="ag-sec">no running or recent agents.</div>';
 }
 function toggleAgents(show) {
   const pop = $('agentsPop');
@@ -908,11 +1084,10 @@ function toggleAgents(show) {
 }
 $('activeBtn').onclick = e => { e.stopPropagation(); toggleAgents(); };
 $('agentsPop').onclick = e => {
-  const row = e.target.closest('.ag-row[data-key], .ag-row[data-agent]');
-  if (!row) return;
+  const row = e.target.closest('.ag-row[data-key]');
+  if (!row || !row.dataset.key) return;
   toggleAgents(false);
-  if (row.dataset.key) open(row.dataset.key);
-  else openAgentTerminal(row.dataset.agent, row.dataset.title, row.dataset.kind);
+  open(row.dataset.key);
 };
 
 // ---- index + filtering ----
@@ -1407,7 +1582,10 @@ $('list').addEventListener('click', e => {
   }
   // A project swimlane uses the whole work area. Return to the bottom layout
   // before opening a transcript, so the selected conversation is visible.
-  if (ganttMode === 'full') { ganttMode = 'h'; applyGanttMode(); }
+  if (ganttMode === 'full' || chromeState === 'gantt') {
+    if (chromeState === 'gantt') setChromeState('min');
+    else { ganttMode = chromeGanttSaved && chromeGanttSaved !== 'full' ? chromeGanttSaved : 'h'; applyGanttMode(); }
+  }
   open(rel);
 });
 
@@ -1487,15 +1665,1380 @@ async function openNoteFile(file) {
   } else noteViewer(n.text, '~/notes/aiconvo/' + n.file);
 }
 
+// ---- Git-weaved file Gantt (design/18-git-weaved-file-gantt.md) ----
+const FG_DAY = 86400000;
+let fileHistoryData = null;
+let fileGanttScale = 160;
+let fileGanttInitialScroll = true;
+let fileInspectorRowId = null;
+let focusedFileRow = null;
+let focusedFileCompare = null;
+let focusedFileWindow = null;
+let fileCompareLines = localStorage.getItem('aiconvo.fileLines') === '1';
+let focusedFileAbort = null;
+let focusedFileRequest = 0;
+let focusedCompareTimer = null;
+const focusedCompareCache = new Map();
+const focusedRowsCache = new Map();
+
+const fgAttr = value => esc(value).replace(/"/g, '&quot;');
+
+function fileHistoryBranches(data) {
+  const names = new Set();
+  for (const row of data.rows || []) {
+    for (const event of row.aiEvents || []) {
+      if (event.branch) names.add(event.branch);
+      if (event.inferredBranch) names.add(event.inferredBranch);
+    }
+    for (const commit of row.commitEvents || []) for (const branch of commit.branches || []) names.add(branch);
+  }
+  return [...names].sort();
+}
+
+function fileTickLabel(ms, interval) {
+  const date = new Date(ms);
+  if (interval < FG_DAY) return date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  if (interval < 28 * FG_DAY) return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+}
+
+function fileGanttBounds(data) {
+  const times = [];
+  for (const row of data.rows || []) {
+    for (const event of row.aiEvents || []) { const t = Date.parse(event.ts || ''); if (Number.isFinite(t)) times.push(t); }
+    for (const event of row.commitEvents || []) { const t = Date.parse(event.ts || ''); if (Number.isFinite(t)) times.push(t); }
+  }
+  const now = Date.now();
+  const min = times.length ? Math.min(...times) : now - FG_DAY;
+  const max = Math.max(now, ...(times.length ? times : [now]));
+  const pad = Math.max(3600000, Math.min(FG_DAY, (max - min) * 0.02));
+  return { start: min - pad, end: max + pad };
+}
+
+function renderFileGanttChart() {
+  const data = fileHistoryData;
+  if (!data || !$('fgRows')) return;
+  const search = $('fgSearch').value.trim().toLowerCase();
+  const branch = $('fgBranch').value;
+  const mode = $('fgMode').value;
+  const bounds = fileGanttBounds(data);
+  const span = Math.max(FG_DAY / 24, bounds.end - bounds.start);
+  const rawWidth = span / FG_DAY * fileGanttScale;
+  const width = Math.round(Math.max(900, Math.min(60000, rawWidth)));
+  const pxPerMs = (width - 40) / span;
+  const xFor = ts => Math.max(0, Math.min(width, 20 + (Date.parse(ts || '') - bounds.start) * pxPerMs));
+  const effectiveDay = FG_DAY * pxPerMs;
+  let interval = 30 * FG_DAY;
+  if (effectiveDay >= 1000) interval = 3600000;
+  else if (effectiveDay >= 280) interval = 6 * 3600000;
+  else if (effectiveDay >= 65) interval = FG_DAY;
+  else if (effectiveDay >= 14) interval = 7 * FG_DAY;
+  const firstTick = Math.floor(bounds.start / interval) * interval;
+  const ticks = [];
+  for (let time = firstTick; time <= bounds.end && ticks.length < 500; time += interval) {
+    const left = 20 + (time - bounds.start) * pxPerMs;
+    if (left >= 0 && left <= width) ticks.push(`<span class="fg-tick" style="left:${left}px">${esc(fileTickLabel(time, interval))}</span>`);
+  }
+  const filtered = [];
+  for (const row of data.rows || []) {
+    if (search && !(row.relativePath || '').toLowerCase().includes(search) && !(row.repoRoot || '').toLowerCase().includes(search)) continue;
+    let ai = (row.aiEvents || []).filter(event => !branch || event.branch === branch || event.inferredBranch === branch);
+    let commits = (row.commitEvents || []).filter(commit => !branch || (commit.branches || []).includes(branch));
+    if (mode === 'ai') commits = [];
+    else if (mode === 'commits') ai = [];
+    else if (mode === 'unpaired') { ai = ai.filter(event => !event.commitPair); commits = []; }
+    else if (mode === 'working') { ai = []; commits = []; if (!row.workingTree) continue; }
+    if (!ai.length && !commits.length && !(row.workingTree && (mode === 'all' || mode === 'working'))) continue;
+    filtered.push({ row, ai, commits });
+  }
+  const shown = filtered.slice(0, 120);
+  $('fgShown').textContent = `showing ${shown.length}/${filtered.length} files`;
+  $('fgRoot').style.setProperty('--fg-width', width + 'px');
+  $('fgRoot').style.setProperty('--fg-grid', Math.max(4, effectiveDay) + 'px');
+  $('fgAxis').innerHTML = ticks.join('');
+  $('fgRows').innerHTML = shown.map(({ row, ai, commits }) => {
+    const commitByHash = new Map(commits.map(commit => [commit.hash, commit]));
+    const links = ai.map(event => {
+      const pair = event.commitPair;
+      if (!pair || !commitByHash.has(pair.hash)) return '';
+      const a = xFor(event.ts), b = xFor(pair.ts);
+      return `<span class="fg-link ${esc(pair.confidence)}" style="left:${Math.min(a, b)}px;width:${Math.max(1, Math.abs(b - a))}px" title="${fgAttr(pair.confidence)} inferred link · ${fgAttr(pair.basis)}"></span>`;
+    }).join('');
+    const aiMarks = ai.map((event, i) => {
+      const pair = event.commitPair;
+      const state = event.outcome === 'failed' ? 'failed' : event.repositoryState === 'working-tree' ? 'working' : !pair ? 'unresolved' : '';
+      const pairText = pair ? ` · ${pair.confidence} → ${pair.shortHash}` : ` · ${event.repositoryState}`;
+      const branchText = event.inferredBranch ? `${event.branch || 'HEAD'} → ${event.inferredBranch}` : event.branch || 'branch ?';
+      const title = `${event.kind} · ${event.outcome} · ${event.conversationTitle || ''} · ${branchText}${pairText} · ${fmtDate(event.ts)}`;
+      const left = xFor(event.ts) + ((i % 5) - 2) * 2;
+      return `<button class="fg-mark ai ${state}" data-fg-ai="${esc(event.id)}" style="left:${left}px" title="${fgAttr(title)}">${diffKindGlyph(event.kind)}</button>`;
+    }).join('');
+    const commitMarks = commits.map(commit => {
+      const title = `${commit.shortHash} · ${commit.subject} · ${(commit.branches || []).join(', ') || 'detached'} · ${fmtDate(commit.ts)}`;
+      return `<button class="fg-mark git" data-fg-commit="${esc(commit.hash)}" data-fg-repo="${esc(row.repoId)}" style="left:${xFor(commit.ts)}px" title="${fgAttr(title)}"><span>◆</span></button>`;
+    }).join('');
+    const counts = `${ai.length} AI · ${commits.length} Git`;
+    return `<div class="fg-row"><button type="button" class="fg-label${fileInspectorRowId === row.id ? ' on' : ''}" data-fg-file="${fgAttr(row.id)}" title="Open the whole file and compare two times\n${fgAttr(row.path)}"><span class="path">${esc(row.relativePath)}</span><span class="n">${esc(counts)}</span></button><div class="fg-track">${links}${aiMarks}${commitMarks}${row.workingTree ? `<span class="fg-work" title="working tree: ${fgAttr(row.workingTree)}"></span>` : ''}</div></div>`;
+  }).join('') || '<div class="fg-empty">no file history matches these filters.</div>';
+  $('fgRows').querySelectorAll('[data-fg-file]').forEach(label => label.onclick = () => {
+    const row = (data.rows || []).find(item => item.id === label.dataset.fgFile);
+    if (row) enterFocusedFile(row);
+  });
+  $('fgRows').querySelectorAll('[data-fg-ai]').forEach(mark => mark.onclick = () => showDiffEvent(mark.dataset.fgAi));
+  $('fgRows').querySelectorAll('[data-fg-commit]').forEach(mark => mark.onclick = () => showGitCommit(mark.dataset.fgRepo, mark.dataset.fgCommit));
+  const scroller = $('fgScroll');
+  if (fileGanttInitialScroll) {
+    fileGanttInitialScroll = false;
+    requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth; });
+  }
+}
+
+function myersLineOps(a, b) {
+  const n = a.length, m = b.length, max = n + m;
+  if (max > 24000) return null;
+  let v = new Map([[1, 0]]);
+  const trace = [];
+  const limit = Math.min(max, 2400);
+  for (let d = 0; d <= limit; d++) {
+    trace.push(new Map(v));
+    for (let k = -d; k <= d; k += 2) {
+      const left = v.has(k - 1) ? v.get(k - 1) : -1;
+      const down = v.has(k + 1) ? v.get(k + 1) : -1;
+      let x = k === -d || (k !== d && left < down) ? Math.max(0, down) : left + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) { x++; y++; }
+      v.set(k, x);
+      if (x < n || y < m) continue;
+      const ops = [];
+      let bx = n, by = m;
+      for (let bd = trace.length - 1; bd >= 0; bd--) {
+        const bv = trace[bd], bk = bx - by;
+        const bleft = bv.has(bk - 1) ? bv.get(bk - 1) : -1;
+        const bdown = bv.has(bk + 1) ? bv.get(bk + 1) : -1;
+        const prevK = bk === -bd || (bk !== bd && bleft < bdown) ? bk + 1 : bk - 1;
+        const prevX = Math.max(0, bv.has(prevK) ? bv.get(prevK) : 0);
+        const prevY = prevX - prevK;
+        while (bx > prevX && by > prevY) { ops.push({ type: 'same', text: a[bx - 1] }); bx--; by--; }
+        if (bd === 0) break;
+        if (bx === prevX) { ops.push({ type: 'new', text: b[by - 1] }); by--; }
+        else { ops.push({ type: 'old', text: a[bx - 1] }); bx--; }
+      }
+      return ops.reverse();
+    }
+  }
+  return null;
+}
+
+const SX_CACHE = new Map();
+const SX_JS = new Set('async await break case catch class const continue debugger default delete do else export extends false finally for function if import in instanceof let new null of return static super switch this throw true try typeof undefined var void while with yield from as get set'.split(' '));
+const SX_PY = new Set('False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield'.split(' '));
+const SX_SH = new Set('case do done elif else esac export fi for function if in local return set shift then until while echo exit false test true unset'.split(' '));
+
+function fileHighlightLang(pathValue) {
+  const name = String(pathValue || '').split('/').pop().toLowerCase();
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name;
+  if (['js', 'mjs', 'cjs', 'ts', 'jsx', 'tsx'].includes(ext)) return 'js';
+  if (['html', 'htm', 'svg'].includes(ext)) return 'html';
+  if (ext === 'css') return 'css';
+  if (ext === 'json') return 'json';
+  if (ext === 'md' || ext === 'markdown') return 'md';
+  if (['sh', 'bash', 'zsh'].includes(ext) || name === 'aiconvo') return 'sh';
+  if (ext === 'py') return 'py';
+  return 'txt';
+}
+
+function sxTok(cls, text) { return text ? `<span class="sx ${cls}">${esc(text)}</span>` : ''; }
+
+function highlightHtmlTag(tag) {
+  return String(tag).replace(/^(<\/?)([A-Za-z][\w:-]*)|([A-Za-z_:][\w:.-]*)(=)|("[^"]*"|'[^']*')|(\/?>)/g, (all, open, name, attr, eq, str, close) => {
+    if (open) return esc(open) + sxTok('sx-t', name);
+    if (attr) return sxTok('sx-k', attr) + esc(eq);
+    if (str) return sxTok('sx-s', str);
+    if (close) return esc(close);
+    return esc(all);
+  });
+}
+
+function highlightPlainWords(chunk, lang) {
+  if (!chunk) return '';
+  if (lang === 'txt') return esc(chunk);
+  return chunk.replace(/[A-Za-z_$][\w$]*|\d[\w.]*|[^\w\s]+|\s+/g, tok => {
+    if (/^\s+$/.test(tok)) return tok;
+    if (/^\d/.test(tok)) return sxTok('sx-n', tok);
+    const words = lang === 'js' ? SX_JS : lang === 'py' ? SX_PY : lang === 'sh' ? SX_SH : null;
+    if (words && words.has(tok)) return sxTok('sx-k', tok);
+    if (lang === 'json' && (tok === 'true' || tok === 'false' || tok === 'null')) return sxTok('sx-k', tok);
+    if (lang === 'css' && /^-?[a-z][\w-]*$/.test(tok)) return sxTok('sx-t', tok);
+    return esc(tok);
+  });
+}
+
+function highlightCodeLine(line, lang, state) {
+  const parts = [];
+  let i = 0;
+  const hashComment = lang === 'py' || lang === 'sh';
+  if (state.block === '*/' || state.block === '-->') {
+    const end = line.indexOf(state.block);
+    if (end < 0) return sxTok('sx-c', line);
+    parts.push(sxTok('sx-c', line.slice(0, end + state.block.length)));
+    i = end + state.block.length;
+    state.block = '';
+  } else if (state.block === '"' || state.block === "'" || state.block === '`') {
+    const q = state.block;
+    let j = 0;
+    while (j < line.length) {
+      if (line[j] === '\\') { j += 2; continue; }
+      if (line[j] === q) { j++; state.block = ''; break; }
+      j++;
+    }
+    parts.push(sxTok('sx-s', line.slice(0, j)));
+    if (state.block) return parts.join('');
+    i = j;
+  }
+  while (i < line.length) {
+    if (hashComment && line[i] === '#' && (lang !== 'sh' || i === 0 || /\s/.test(line[i - 1]))) {
+      parts.push(sxTok('sx-c', line.slice(i))); break;
+    }
+    if ((lang === 'js' || lang === 'css') && line.startsWith('//', i)) { parts.push(sxTok('sx-c', line.slice(i))); break; }
+    if ((lang === 'js' || lang === 'css' || lang === 'json') && line.startsWith('/*', i)) {
+      const end = line.indexOf('*/', i + 2);
+      if (end < 0) { parts.push(sxTok('sx-c', line.slice(i))); state.block = '*/'; break; }
+      parts.push(sxTok('sx-c', line.slice(i, end + 2))); i = end + 2; continue;
+    }
+    if (lang === 'html' && line.startsWith('<!--', i)) {
+      const end = line.indexOf('-->', i + 4);
+      if (end < 0) { parts.push(sxTok('sx-c', line.slice(i))); state.block = '-->'; break; }
+      parts.push(sxTok('sx-c', line.slice(i, end + 3))); i = end + 3; continue;
+    }
+    if (lang === 'html' && line[i] === '<') {
+      const end = line.indexOf('>', i + 1);
+      const to = end < 0 ? line.length : end + 1;
+      parts.push(highlightHtmlTag(line.slice(i, to)));
+      i = to; continue;
+    }
+    const q = line[i];
+    if (q === '"' || q === "'" || (q === '`' && lang === 'js')) {
+      let j = i + 1;
+      while (j < line.length) {
+        if (line[j] === '\\') { j += 2; continue; }
+        if (line[j] === q) { j++; break; }
+        j++;
+      }
+      if (j > line.length || line[j - 1] !== q) state.block = q;
+      parts.push(sxTok('sx-s', line.slice(i, j)));
+      i = j; continue;
+    }
+    let j = i + 1;
+    while (j < line.length) {
+      const c = line[j];
+      if (c === '"' || c === "'" || (c === '`' && lang === 'js') || (c === '<' && lang === 'html')) break;
+      if (hashComment && c === '#') break;
+      if ((lang === 'js' || lang === 'css' || lang === 'json') && c === '/' && (line[j + 1] === '/' || line[j + 1] === '*')) break;
+      if (lang === 'html' && line.startsWith('<!--', j)) break;
+      j++;
+    }
+    parts.push(highlightPlainWords(line.slice(i, j), lang));
+    i = j;
+  }
+  return parts.join('');
+}
+
+function highlightMdInline(text) {
+  const re = /`([^`]+)`|\*\*((?:[^*]|\*(?!\*))+?)\*\*|(^|[^*])\*([^*\n]+)\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+  let last = 0, out = '', match;
+  while ((match = re.exec(text))) {
+    out += esc(text.slice(last, match.index));
+    if (match[1] !== undefined) out += `<code>${esc(match[1])}</code>`;
+    else if (match[2] !== undefined) out += `<b>${esc(match[2])}</b>`;
+    else if (match[4] !== undefined) out += esc(match[3]) + `<i>${esc(match[4])}</i>`;
+    else out += `<a href="${esc(match[6])}" target="_blank" rel="noopener">${esc(match[5])}</a>`;
+    last = match.index + match[0].length;
+  }
+  return out + esc(text.slice(last));
+}
+
+function highlightMdLine(line, state) {
+  const trimmed = line.trim();
+  if (state.fence !== undefined) {
+    if (/^```/.test(trimmed)) { state.fence = undefined; state.code = { block: '' }; return sxTok('sx-c', line); }
+    return highlightCodeLine(line, state.fence || 'txt', state.code);
+  }
+  if (/^```/.test(trimmed)) {
+    const spec = trimmed.slice(3).trim();
+    state.fence = spec ? fileHighlightLang('.' + spec.split(/\s+/)[0]) : 'txt';
+    state.code = { block: '' };
+    return sxTok('sx-c', line);
+  }
+  let match = line.match(/^(#{1,6})(\s+)(.*)$/);
+  if (match) return sxTok('sx-md-h sx-md-h' + match[1].length, match[1] + match[2]) + highlightMdInline(match[3]);
+  match = line.match(/^(\s*)([-*+]|\d+[.)])(\s+)(.*)$/);
+  if (match) return esc(match[1]) + sxTok('sx-k', match[2]) + esc(match[3]) + highlightMdInline(match[4]);
+  if (/^\s*>/.test(line)) return `<span class="sx-md-q">${highlightMdInline(line)}</span>`;
+  if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) return sxTok('sx-c', line);
+  return highlightMdInline(line);
+}
+
+function highlightFileLines(text, lang) {
+  const key = lang + '\0' + text;
+  const cached = SX_CACHE.get(key);
+  if (cached) return cached;
+  const lines = String(text || '').split('\n');
+  const out = new Array(lines.length);
+  const state = { block: '', fence: undefined, code: { block: '' } };
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].length > 4000) out[i] = esc(lines[i]);
+    else out[i] = lang === 'md' ? highlightMdLine(lines[i], state) : highlightCodeLine(lines[i], lang, state);
+  }
+  SX_CACHE.set(key, out);
+  if (SX_CACHE.size > 16) SX_CACHE.delete(SX_CACHE.keys().next().value);
+  return out;
+}
+
+function fileLineHtml(highlighted, n) {
+  return n ? (highlighted[n - 1] || '') : '';
+}
+
+function fileCompareCell(kind, n, html) {
+  const cls = kind === 'old' ? 'old-change' : kind === 'new' ? 'new-change' : kind === 'same' ? 'same' : 'empty';
+  if (kind === 'empty') return '<div class="fi-cell empty"><span class="ln"></span></div>';
+  return `<div class="fi-cell ${cls}"><span class="ln" title="Open the source of this change">${n || ''}</span><span class="code">${html || ''}</span></div>`;
+}
+
+function fileChangeStarts(root) {
+  const rows = [...root.querySelectorAll('.fi-diff-row.changed')];
+  const starts = [];
+  for (const row of rows) {
+    const prev = starts.length ? starts[starts.length - 1].last : null;
+    let next = prev && prev.nextElementSibling;
+    while (next && next.classList.contains('fi-line-history')) next = next.nextElementSibling;
+    if (next === row) starts[starts.length - 1].last = row;
+    else starts.push({ first: row, last: row });
+  }
+  return starts.map(item => item.first);
+}
+
+function fileCompareDockHtml(identical) {
+  const full = document.body.classList.contains('file-full');
+  return `<div class="ff-dock" id="ffDock">
+    <button id="ffDockClose" title="Leave full screen"${full ? '' : ' hidden'}>X</button>
+    ${identical ? '' : '<button id="ffDockPrev" title="Previous change">↑</button><button id="ffDockNext" title="Next change">↓</button>'}
+    <button id="ffDockFull" title="File diff full screen"${full ? ' hidden' : ''}>full</button>
+    <button id="ffDockTree" title="Open file tree"${full ? '' : ' hidden'}>${document.body.classList.contains('file-full-tree') ? 'hide tree' : 'tree'}</button>
+    <button id="ffInk" title="Draw on this page">ink</button>
+    <button id="ffErase" hidden title="Erase ink">erase</button>
+    <button id="ffInkClear" hidden title="Clear ink on this page">clear</button>
+    <button id="ffInkSend" hidden title="Send this page to the conversation">send</button>
+    <button id="ffPagePrev" title="Previous page">‹</button>
+    <span id="ffPageInfo" class="dim">1/1</span>
+    <button id="ffPageNext" title="Next page">›</button>
+  </div>`;
+}
+function syncFileDiffFullUi() {
+  const on = document.body.classList.contains('file-full');
+  if ($('ffDockClose')) $('ffDockClose').hidden = !on;
+  if ($('ffDockFull')) $('ffDockFull').hidden = on;
+  if ($('ffDockTree')) {
+    $('ffDockTree').hidden = !on || !$('ffTree');
+    $('ffDockTree').textContent = document.body.classList.contains('file-full-tree') ? 'hide tree' : 'tree';
+  }
+}
+function enterFileDiffFull() {
+  document.body.classList.add('file-full');
+  syncFileDiffFullUi();
+  const node = document.documentElement;
+  if (node.requestFullscreen) node.requestFullscreen().catch(() => {});
+  requestAnimationFrame(() => fileInk.paginate());
+}
+function exitFileDiffFull() {
+  document.body.classList.remove('file-full', 'file-full-tree');
+  syncFileDiffFullUi();
+  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  fileInk.teardown();
+}
+function wireFileCompareDock(root) {
+  if ($('ffDockPrev')) $('ffDockPrev').onclick = () => jumpFileChange(root, -1);
+  if ($('ffDockNext')) $('ffDockNext').onclick = () => jumpFileChange(root, 1);
+  if ($('ffDockFull')) $('ffDockFull').onclick = enterFileDiffFull;
+  if ($('ffDockClose')) $('ffDockClose').onclick = exitFileDiffFull;
+  if ($('ffDockTree')) $('ffDockTree').onclick = () => {
+    document.body.classList.toggle('file-full-tree');
+    syncFileDiffFullUi();
+  };
+  fileInk.bind(root);
+}
+
+const fileInk = {
+  root: null, sheet: null, canvas: null, ctx: null,
+  rows: [], compare: null, fileRow: null,
+  pages: [], page: 0, strokes: [], draft: null,
+  on: false, erase: false, lastPen: 0,
+  store: new Map(), rowBox: [], hostBox: null, haloQ: 0,
+  key() {
+    const c = this.compare || {}, r = this.fileRow || {};
+    return (r.id || c.path || '') + '\0' + (c.from || '') + '\0' + (c.to || '');
+  },
+  bind(root) {
+    this.root = root;
+    const cols = root.querySelector('.fi-columns');
+    if (!cols) return;
+    let sheet = root.querySelector('.ff-sheet');
+    if (!sheet) {
+      sheet = document.createElement('div');
+      sheet.className = 'ff-sheet';
+      cols.parentNode.insertBefore(sheet, cols);
+      sheet.appendChild(cols);
+    }
+    let canvas = sheet.querySelector('.ff-ink');
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.className = 'ff-ink';
+      sheet.appendChild(canvas);
+    }
+    this.sheet = sheet; this.canvas = canvas; this.ctx = canvas.getContext('2d');
+    this.hook();
+    requestAnimationFrame(() => this.paginate());
+  },
+  attach(compare, fileRow, rows) {
+    this.compare = compare; this.fileRow = fileRow; this.rows = rows || [];
+    this.strokes = this.store.get(this.key()) || [];
+    this.page = 0;
+    this.setMode(false, false);
+  },
+  hook() {
+    if (!this.canvas.dataset.inkHooked) {
+      this.canvas.dataset.inkHooked = '1';
+      this.canvas.onpointerdown = e => this.down(e);
+      this.canvas.onpointermove = e => this.move(e);
+      this.canvas.onpointerup = e => this.up(e);
+      this.canvas.onpointercancel = e => this.up(e);
+      window.addEventListener('resize', () => { if (this.sheet && this.sheet.isConnected) this.paginate(); });
+    }
+    if ($('ffInk')) $('ffInk').onclick = () => this.setMode(!this.on, false);
+    if ($('ffErase')) $('ffErase').onclick = () => this.setMode(true, !this.erase);
+    if ($('ffInkClear')) $('ffInkClear').onclick = () => this.clearPage();
+    if ($('ffInkSend')) $('ffInkSend').onclick = () => this.send();
+    if ($('ffPagePrev')) $('ffPagePrev').onclick = () => this.showPage(this.page - 1);
+    if ($('ffPageNext')) $('ffPageNext').onclick = () => this.showPage(this.page + 1);
+  },
+  setMode(on, erase) {
+    this.on = on; this.erase = !!(on && erase);
+    if (this.sheet) {
+      this.nativeInk = !!(window.AiconvoInk && window.AiconvoInk.setEnabled);
+      this.sheet.classList.toggle('inking', this.on && !this.nativeInk);
+      this.sheet.classList.toggle('erasing', this.erase && !this.nativeInk);
+    }
+    if ($('ffInk')) $('ffInk').classList.toggle('primary', this.on && !this.erase);
+    if ($('ffErase')) { $('ffErase').hidden = !this.on; $('ffErase').classList.toggle('primary', this.erase); }
+    if ($('ffInkClear')) $('ffInkClear').hidden = !this.on;
+    if ($('ffInkSend')) $('ffInkSend').hidden = !this.on;
+    this.nativeInk = !!(window.AiconvoInk && window.AiconvoInk.setEnabled);
+    if (this.nativeInk) {
+      try {
+        window.AiconvoInk.setEnabled(this.on);
+        window.AiconvoInk.setErase(this.erase);
+        if (!this.on && window.AiconvoInk.clearAll) window.AiconvoInk.clearAll();
+      } catch (e) {}
+    }
+    if (!this.on && this.ctx && this.canvas) this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  },
+  teardown() {
+    this.setMode(false, false);
+    this.clearNativeAll();
+    this.draft = null;
+  },
+  paginate() {
+    if (!this.sheet) return;
+    const cols = this.sheet.querySelector('.fi-columns');
+    if (!cols) return;
+    const all = [...cols.querySelectorAll('.fi-diff-row')];
+    all.forEach(row => { row.hidden = false; });
+    const limit = Math.max(220, (this.sheet.clientHeight || 600) - 4);
+    const pages = [];
+    let bucket = [], used = 0;
+    for (const row of all) {
+      const h = row.getBoundingClientRect().height || 18;
+      if (bucket.length && used + h > limit) { pages.push(bucket); bucket = []; used = 0; }
+      bucket.push(row); used += h;
+    }
+    if (bucket.length) pages.push(bucket);
+    this.pages = pages.length ? pages : [all];
+    this.showPage(Math.min(this.page, this.pages.length - 1));
+  },
+  showPage(n) {
+    if (!this.pages.length) return;
+    this.page = Math.max(0, Math.min(this.pages.length - 1, n));
+    const visible = new Set(this.pages[this.page]);
+    this.pages.flat().forEach(row => { row.hidden = !visible.has(row); });
+    if ($('ffPageInfo')) $('ffPageInfo').textContent = (this.page + 1) + '/' + this.pages.length;
+    if ($('ffPagePrev')) $('ffPagePrev').disabled = this.page <= 0;
+    if ($('ffPageNext')) $('ffPageNext').disabled = this.page >= this.pages.length - 1;
+    this.resize();
+    this.cacheRows();
+    this.draw(true);
+    this.clearNativeAll();
+  },
+  resize() {
+    if (!this.canvas || !this.sheet) return;
+    const w = Math.max(1, this.sheet.clientWidth);
+    const h = Math.max(1, this.sheet.clientHeight);
+    const dpr = 1;
+    this.canvas.width = Math.round(w * dpr);
+    this.canvas.height = Math.round(h * dpr);
+    this.canvas.style.width = w + 'px';
+    this.canvas.style.height = h + 'px';
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  },
+  cacheRows() {
+    if (!this.canvas) return;
+    this.hostBox = this.canvas.getBoundingClientRect();
+    const host = this.hostBox;
+    this.rowBox = (this.pages[this.page] || []).map(row => {
+      const box = row.getBoundingClientRect();
+      return {
+        i: Number(row.dataset.fiAny),
+        l: box.left - host.left, t: box.top - host.top,
+        w: Math.max(1, box.width), h: Math.max(1, box.height),
+      };
+    });
+    this.rowByI = new Map(this.rowBox.map(r => [r.i, r]));
+  },
+  locXY(x, y) {
+    const rows = this.rowBox;
+    let hit = null;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (y >= r.t && y <= r.t + r.h) { hit = r; break; }
+    }
+    if (!hit) {
+      const host = this.hostBox || { width: 1, height: 1 };
+      return { i: -1, x: x / Math.max(1, host.width), y: y / Math.max(1, host.height) };
+    }
+    return { i: hit.i, x: (x - hit.l) / hit.w, y: (y - hit.t) / hit.h };
+  },
+  loc(e) {
+    const r = this.hostBox || this.canvas.getBoundingClientRect();
+    return this.locXY(e.clientX - r.left, e.clientY - r.top);
+  },
+  screen(pt) {
+    if (pt.i < 0) {
+      const host = this.hostBox || { width: 1, height: 1 };
+      return { x: pt.x * host.width, y: pt.y * host.height };
+    }
+    const row = this.rowByI && this.rowByI.get(pt.i);
+    if (!row) return null;
+    return { x: row.l + pt.x * row.w, y: row.t + pt.y * row.h };
+  },
+  down(e) {
+    if (!this.on) return;
+    if (e.pointerType !== 'pen' && e.pointerType !== 'eraser') return;
+    if ((e.width || 0) > 28 || (e.height || 0) > 28) return;
+    this.lastPen = Date.now();
+    e.preventDefault();
+    this.canvas.setPointerCapture(e.pointerId);
+    const erase = this.erase || e.pointerType === 'eraser' || e.button === 5;
+    const p = this.raw(e);
+    this.draft = { erase, raw: [p], last: p };
+    if (this.nativeInk) return;
+    if (erase) this.eraseAt(p.x, p.y);
+    else this.live(p, p);
+  },
+  move(e) {
+    if (!this.draft) return;
+    e.preventDefault();
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of evs) {
+      const p = this.raw(ev);
+      const last = this.draft.last;
+      if (last && (p.x - last.x) * (p.x - last.x) + (p.y - last.y) * (p.y - last.y) < 4) continue;
+      this.draft.raw.push(p);
+      if (this.nativeInk) { this.draft.last = p; continue; }
+      if (this.draft.erase) this.eraseAt(p.x, p.y);
+      else this.live(last, p);
+      this.draft.last = p;
+    }
+  },
+  up(e) {
+    if (!this.draft) return;
+    if (e) e.preventDefault();
+    this.commitRaw(this.draft.raw, this.draft.erase);
+    this.draft = null;
+  },
+  raw(e) {
+    const r = this.hostBox || this.canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  },
+  live(a, b) {
+    if (!this.ctx || !a || !b) return;
+    this.ctx.lineCap = 'round'; this.ctx.lineJoin = 'round';
+    this.ctx.strokeStyle = document.documentElement.dataset.theme === 'eink' ? '#000' : '#c0392b';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath(); this.ctx.moveTo(a.x, a.y); this.ctx.lineTo(b.x, b.y); this.ctx.stroke();
+  },
+  commitRaw(raw, erase) {
+    if (!this.hostBox) this.cacheRows();
+    const pts = [];
+    for (const p of raw || []) pts.push(this.locXY(p.x, p.y));
+    if (erase) {
+      for (const p of pts) this.eraseNear(p);
+      this.store.set(this.key(), this.strokes);
+      this.draw(true);
+      this.clearNativeAll();
+      return;
+    }
+    if (pts.length > 1) {
+      const stroke = { erase: false, pts };
+      this.strokes.push(stroke);
+      this.store.set(this.key(), this.strokes);
+      this.queueHalo(stroke);
+    }
+  },
+  queueHalo(stroke) {
+    this.haloQ = (this.haloQ || 0) + 1;
+    const id = this.haloQ;
+    setTimeout(() => {
+      if (id !== this.haloQ || !this.ctx) return;
+      this.stroke(this.ctx, stroke.pts, false, false, true);
+    }, 80);
+  },
+  clearNative() {
+    if (window.AiconvoInk && window.AiconvoInk.clearLive) {
+      try { window.AiconvoInk.clearLive(); } catch (e) {}
+    }
+  },
+  clearNativeAll() {
+    if (window.AiconvoInk && window.AiconvoInk.clearAll) {
+      try { window.AiconvoInk.clearAll(); } catch (e) {}
+    } else this.clearNative();
+  },
+  eraseAt(x, y) {
+    const r2 = 16 * 16;
+    const before = this.strokes.length;
+    this.strokes = this.strokes.filter(stroke => {
+      for (const p of stroke.pts) {
+        const s = this.screen(p);
+        if (s && (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y) <= r2) return false;
+      }
+      return true;
+    });
+    if (this.strokes.length !== before) this.draw(true);
+  },
+  eraseNear(pt) {
+    const hit = this.screen(pt);
+    if (!hit) return;
+    this.eraseAt(hit.x, hit.y);
+  },
+  clearPage() {
+    const visible = new Set((this.pages[this.page] || []).map(row => Number(row.dataset.fiAny)));
+    this.strokes = this.strokes.filter(stroke => !stroke.pts.some(pt => visible.has(pt.i)));
+    this.store.set(this.key(), this.strokes);
+    this.draw();
+  },
+  stroke(ctx, pts, erase, ai, halo) {
+    const pts2 = pts.map(pt => this.screen(pt)).filter(Boolean);
+    if (pts2.length < 2) return;
+    const eink = document.documentElement.dataset.theme === 'eink';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (erase) return;
+    if (halo && !ai && eink) {
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; ctx.beginPath();
+      ctx.moveTo(pts2[0].x, pts2[0].y);
+      for (let i = 1; i < pts2.length; i++) ctx.lineTo(pts2[i].x, pts2[i].y);
+      ctx.stroke();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+    } else {
+      ctx.strokeStyle = ai ? '#c0392b' : (eink ? '#000' : '#c0392b');
+      ctx.lineWidth = ai ? 2.6 : 2.2;
+    }
+    ctx.beginPath();
+    ctx.moveTo(pts2[0].x, pts2[0].y);
+    for (let i = 1; i < pts2.length; i++) ctx.lineTo(pts2[i].x, pts2[i].y);
+    ctx.stroke();
+  },
+  draw(halo) {
+    if (!this.ctx || !this.canvas) return;
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    this.ctx.clearRect(0, 0, w, h);
+    const useHalo = halo !== false;
+    for (const stroke of this.strokes) this.stroke(this.ctx, stroke.pts, stroke.erase, false, useHalo);
+  },
+  pageMeta() {
+    const els = this.pages[this.page] || [];
+    const lines = els.map(el => this.rows[Number(el.dataset.fiAny)]).filter(Boolean);
+    const nums = lines.flatMap(line => [line.oldN, line.newN]).filter(Boolean);
+    const key = (fileHistoryData && fileHistoryData.scope === 'conversation' && fileHistoryData.key)
+      || (this.compare && this.compare.changes && this.compare.changes[0] && this.compare.changes[0].key)
+      || '';
+    return {
+      key,
+      path: (this.compare && (this.compare.path || this.compare.relativePath)) || (this.fileRow && this.fileRow.path) || '',
+      relativePath: (this.compare && this.compare.relativePath) || (this.fileRow && this.fileRow.relativePath) || '',
+      fromLine: nums.length ? Math.min(...nums) : 1,
+      toLine: nums.length ? Math.max(...nums) : 1,
+      page: this.page + 1,
+      pages: this.pages.length,
+      lines,
+    };
+  },
+  snapshot() {
+    const meta = this.pageMeta();
+    const w = Math.max(640, this.canvas.clientWidth);
+    const scale = w / Math.max(1, this.canvas.clientWidth);
+    const h = Math.max(1, Math.round(this.canvas.clientHeight * scale));
+    const out = document.createElement('canvas');
+    out.width = w; out.height = h;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+    ctx.save(); ctx.scale(scale, scale);
+    const host = this.canvas.getBoundingClientRect();
+    ctx.font = '11px ui-monospace, Menlo, monospace';
+    ctx.textBaseline = 'top';
+    for (const el of (this.pages[this.page] || [])) {
+      const line = this.rows[Number(el.dataset.fiAny)];
+      if (!line) continue;
+      const box = el.getBoundingClientRect();
+      const x = box.left - host.left, y = box.top - host.top;
+      const text = line.changed
+        ? ((line.oldText !== null ? '- ' + line.oldText : '') + (line.oldText !== null && line.newText !== null ? '  |  ' : '') + (line.newText !== null ? '+ ' + line.newText : ''))
+        : String(line.newText || line.oldText || '');
+      ctx.fillStyle = line.changed ? '#7a1f1f' : '#111';
+      ctx.fillText(text.replace(/\s+/g, ' ').slice(0, 220), x + 4, y + 2);
+    }
+    for (const stroke of this.strokes) this.stroke(ctx, stroke.pts, stroke.erase, true);
+    ctx.restore();
+    ctx.fillStyle = '#000'; ctx.font = '12px ui-monospace, Menlo, monospace';
+    ctx.fillText((meta.relativePath || meta.path) + ' · lines ' + meta.fromLine + '-' + meta.toLine + ' · page ' + meta.page + '/' + meta.pages, 8, 8);
+    return { meta, dataUrl: out.toDataURL('image/png') };
+  },
+  async send() {
+    const shot = this.snapshot();
+    if (!shot.meta.key) return errToast('no conversation is tied to this page');
+    if ($('ffInkSend')) { $('ffInkSend').disabled = true; $('ffInkSend').textContent = 'sending…'; }
+    try {
+      const res = await fetch('/api/file-feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: shot.meta.key, path: shot.meta.path, relativePath: shot.meta.relativePath,
+          fromLine: shot.meta.fromLine, toLine: shot.meta.toLine,
+          page: shot.meta.page, pages: shot.meta.pages, image: shot.dataUrl,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      toast('sent page ' + shot.meta.page + ' to the conversation');
+      this.teardown();
+    } catch (err) {
+      errToast(err.message || 'send failed');
+    }
+    if ($('ffInkSend')) { $('ffInkSend').disabled = false; $('ffInkSend').textContent = 'send'; }
+  },
+  acceptPacked(packed, erase) {
+    this.cacheRows();
+    const host = this.hostBox || { left: 0, top: 0 };
+    const raw = [];
+    const parts = String(packed || '').split(' ');
+    for (const part of parts) {
+      const c = part.indexOf(',');
+      if (c < 0) continue;
+      raw.push({ x: +part.slice(0, c) - host.left, y: +part.slice(c + 1) - host.top });
+    }
+    this.commitRaw(raw, !!erase);
+  },
+};
+window.fileInkAcceptPacked = (packed, erase) => fileInk.acceptPacked(packed, erase);
+function jumpFileChange(root, dir) {
+  const scroller = root.classList.contains('fi-columns') ? root : root.querySelector('.fi-columns');
+  if (!scroller) return;
+  const starts = fileChangeStarts(scroller);
+  if (!starts.length) return;
+  const edge = scroller.getBoundingClientRect().top + 28;
+  let idx = dir > 0
+    ? starts.findIndex(row => row.getBoundingClientRect().top > edge + 10)
+    : [...starts].reverse().findIndex(row => row.getBoundingClientRect().top < edge - 10);
+  if (dir < 0) idx = idx < 0 ? starts.length - 1 : starts.length - 1 - idx;
+  if (idx < 0) idx = dir > 0 ? 0 : starts.length - 1;
+  const row = starts[idx];
+  if (row.hidden && fileInk.pages) {
+    const at = fileInk.pages.findIndex(page => page.includes(row));
+    if (at >= 0) fileInk.showPage(at);
+  }
+  row.scrollIntoView({ block: 'start' });
+  row.classList.add('jump');
+  setTimeout(() => row.classList.remove('jump'), 900);
+}
+
+function fileCompareRowHtml(line, i, oldHl, newHl) {
+  const lineCls = fileCompareLines ? ' lines' : '';
+  if (!line.changed) {
+    const n = line.newN || line.oldN;
+    const html = line.newN ? fileLineHtml(newHl, line.newN) : fileLineHtml(oldHl, line.oldN);
+    return `<div class="fi-diff-row${lineCls}" data-fi-any="${i}">${fileCompareCell('same', n, html)}</div>`;
+  }
+  const left = line.oldText !== null ? fileCompareCell('old', line.oldN, fileLineHtml(oldHl, line.oldN)) : fileCompareCell('empty');
+  const right = line.newText !== null ? fileCompareCell('new', line.newN, fileLineHtml(newHl, line.newN)) : fileCompareCell('empty');
+  return `<div class="fi-diff-row changed${lineCls}" data-fi-any="${i}">${left}${right}</div>`;
+}
+
+function wholeFileDiffRows(oldText, newText) {
+  const oldLines = String(oldText || '').split('\n');
+  const newLines = String(newText || '').split('\n');
+  let ops = myersLineOps(oldLines, newLines);
+  if (!ops) {
+    ops = [];
+    for (let i = 0; i < Math.max(oldLines.length, newLines.length); i++) {
+      if (i < oldLines.length && i < newLines.length && oldLines[i] === newLines[i]) ops.push({ type: 'same', text: oldLines[i] });
+      else {
+        if (i < oldLines.length) ops.push({ type: 'old', text: oldLines[i] });
+        if (i < newLines.length) ops.push({ type: 'new', text: newLines[i] });
+      }
+    }
+  }
+  const rows = [];
+  let oldN = 0, newN = 0;
+  for (let i = 0; i < ops.length;) {
+    if (ops[i].type === 'same') {
+      oldN++; newN++;
+      rows.push({ oldText: ops[i].text, newText: ops[i].text, oldN, newN, changed: false });
+      i++;
+      continue;
+    }
+    const olds = [], news = [];
+    while (i < ops.length && ops[i].type !== 'same') {
+      if (ops[i].type === 'old') olds.push(ops[i].text);
+      else news.push(ops[i].text);
+      i++;
+    }
+    for (let j = 0; j < Math.max(olds.length, news.length); j++) {
+      const hasOld = j < olds.length, hasNew = j < news.length;
+      if (hasOld) oldN++;
+      if (hasNew) newN++;
+      rows.push({ oldText: hasOld ? olds[j] : null, newText: hasNew ? news[j] : null, oldN: hasOld ? oldN : null, newN: hasNew ? newN : null, changed: true });
+    }
+  }
+  return rows;
+}
+
+function lineToken(line) {
+  if (line === null || line === undefined) return '';
+  const raw = String(line);
+  const trimmed = raw.trim();
+  return trimmed.length >= 2 ? trimmed : raw.length >= 2 ? raw : '';
+}
+
+function fileLineHistory(changes, row) {
+  const tokens = new Set([lineToken(row.oldText), lineToken(row.newText)].filter(Boolean));
+  const selected = new Set();
+  let progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (let ci = 0; ci < (changes || []).length; ci++) {
+      if (selected.has(ci)) continue;
+      const change = changes[ci];
+      const oldLines = String(change.oldText || '').split('\n');
+      const newLines = String(change.newText || '').split('\n');
+      const oldKeys = oldLines.map(lineToken), newKeys = newLines.map(lineToken);
+      const hits = [];
+      oldKeys.forEach((key, i) => { if (key && tokens.has(key)) hits.push(i); });
+      newKeys.forEach((key, i) => { if (key && tokens.has(key)) hits.push(i); });
+      if (!hits.length) continue;
+      selected.add(ci); progressed = true;
+      for (const i of hits) {
+        for (const at of [i - 1, i, i + 1]) {
+          if (oldKeys[at]) tokens.add(oldKeys[at]);
+          if (newKeys[at]) tokens.add(newKeys[at]);
+        }
+      }
+    }
+  }
+  return { entries: (changes || []).filter((_, i) => selected.has(i)), tokens };
+}
+
+function historyExcerpt(text, tokens) {
+  const lines = String(text || '').split('\n');
+  let at = lines.findIndex(line => tokens.has(lineToken(line)));
+  if (at < 0) at = 0;
+  const start = Math.max(0, at - 2), end = Math.min(lines.length, at + 3);
+  return (start ? '…\n' : '') + lines.slice(start, end).join('\n') + (end < lines.length ? '\n…' : '');
+}
+
+function renderFileInspector(compare, row) {
+  const card = $('diffCard');
+  if (!card) return;
+  const options = (compare.points || []).map(point => `<option value="${fgAttr(point.id)}">${esc(point.label)}</option>`).join('');
+  const rows = wholeFileDiffRows(compare.old.content, compare.new.content);
+  const lang = fileHighlightLang(compare.relativePath || row.relativePath);
+  const oldHl = highlightFileLines(compare.old.content, lang);
+  const newHl = highlightFileLines(compare.new.content, lang);
+  const identical = !rows.some(line => line.changed);
+  const snapshotMeta = snapshot => `${snapshot.exact ? 'exact' : 'reconstructed'} · ${snapshot.method}${snapshot.skipped ? ` · ${snapshot.skipped} skipped` : ''}`;
+  card.className = 'file-inspector';
+  card.hidden = false;
+  card.innerHTML = `<div class="fi-head"><b>▤ ${esc(compare.relativePath)} · whole file</b>
+    <label>old <select id="fiOld">${options}</select></label><label>new <select id="fiNew">${options}</select></label>
+    <button id="fiLines">${fileCompareLines ? 'hide lines' : 'show lines'}</button>
+    <button id="fiClose">close</button>
+    <div class="fi-truth">${identical ? 'one view · no line changes' : 'common is full width · changes split − / +'} · highlight ${esc(lang)} · left: ${esc(snapshotMeta(compare.old))} · right: ${esc(snapshotMeta(compare.new))}<br>${esc(compare.truth)}</div></div>
+    ${fileCompareDockHtml(identical)}
+    <div class="fi-columns" id="fiColumns">${rows.map((line, i) => fileCompareRowHtml(line, i, oldHl, newHl)).join('')}</div>`;
+  $('fiOld').value = compare.from;
+  $('fiNew').value = compare.to;
+  const reload = () => showFileInspector(row, $('fiOld').value, $('fiNew').value, false);
+  $('fiOld').onchange = reload;
+  $('fiNew').onchange = reload;
+  $('fiLines').onclick = () => {
+    fileCompareLines = !fileCompareLines;
+    localStorage.setItem('aiconvo.fileLines', fileCompareLines ? '1' : '0');
+    renderFileInspector(compare, row);
+  };
+  fileInk.attach(compare, row, rows);
+  wireFileCompareDock(card);
+  $('fiClose').onclick = () => { card.hidden = true; fileInspectorRowId = null; if (document.body.classList.contains('file-full')) exitFileDiffFull(); renderFileGanttChart(); };
+  const openHistory = target => {
+    const already = target.classList.contains('selected') && target.nextElementSibling && target.nextElementSibling.classList.contains('fi-line-history');
+    card.querySelectorAll('.fi-diff-row.selected').forEach(el => el.classList.remove('selected'));
+    card.querySelectorAll('.fi-line-history').forEach(el => el.remove());
+    if (already) return;
+    const line = rows[Number(target.dataset.fiAny)];
+    target.classList.add('selected');
+    const history = fileLineHistory(compare.changes, line);
+    const panel = document.createElement('div');
+    panel.className = 'fi-line-history';
+    panel.innerHTML = `<h4>line history · newest first <button class="ghost" data-fi-hist-close>close</button></h4>` + (history.entries.length ? history.entries.map((change, i) => {
+      const title = change.type === 'git' ? `${change.shortHash} · ${change.subject}` : `${change.conversationTitle} · ${change.agent} · ${change.kind}`;
+      return `<div class="fi-history-entry" data-fi-change="${i}" tabindex="0" role="button" title="${change.type === 'git' ? 'Open this commit' : 'Open the conversation at this edit'}"><div class="fi-history-meta"><b>${esc(fmtDate(change.ts))}</b><br>${esc(title)}</div><div class="fi-history-change"><pre>- ${esc(historyExcerpt(change.oldText, history.tokens))}</pre><pre>+ ${esc(historyExcerpt(change.newText, history.tokens))}</pre></div></div>`;
+    }).join('') : '<div class="dim">No recorded AI or Git change in this interval matches this line.</div>');
+    target.insertAdjacentElement('afterend', panel);
+    panel.querySelector('[data-fi-hist-close]').onclick = event => { event.stopPropagation(); openHistory(target); };
+    panel.querySelectorAll('[data-fi-change]').forEach(el => {
+      const change = history.entries[Number(el.dataset.fiChange)];
+      const activate = () => change.type === 'git' ? showGitCommit(row.repoId, change.hash) : openAtTs(change.key, change.ts);
+      el.onclick = activate;
+      el.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } };
+    });
+  };
+  card.querySelectorAll('[data-fi-any]').forEach(line => {
+    line.onclick = event => { if (event.target.closest('.ln')) openHistory(line); };
+  });
+}
+
+async function showFileInspector(row, from = '', to = '', scroll = true) {
+  if (!fileHistoryData || !row) return;
+  fileInspectorRowId = row.id;
+  renderFileGanttChart();
+  const card = $('diffCard');
+  if (!card) return;
+  card.hidden = false;
+  card.className = 'file-inspector';
+  card.innerHTML = '<div class="fg-empty">loading the whole file and its time points…</div>';
+  if (scroll) card.scrollIntoView({ block: 'start' });
+  const url = '/api/project/file-history/file?name=' + encodeURIComponent(fileHistoryData.project) +
+    '&repo=' + encodeURIComponent(row.repoRoot) + '&path=' + encodeURIComponent(row.relativePath) +
+    (from ? '&from=' + encodeURIComponent(from) : '') + (to ? '&to=' + encodeURIComponent(to) : '');
+  const compare = await (await fetch(url)).json();
+  if (compare.error) { card.innerHTML = `<div class="fg-empty">${esc(compare.error)}</div>`; return; }
+  renderFileInspector(compare, row);
+}
+
+function fileEventMs(event) {
+  if (typeof event.ts === 'number') return event.ts;
+  const ms = Date.parse(event.ts || '');
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function fileWindowStats(row) {
+  if (!focusedFileWindow || !fileHistoryData || fileHistoryData.scope !== 'conversation') return null;
+  let events = 0, removed = 0, added = 0, touches = 0;
+  for (const event of row.aiEvents || []) {
+    const ms = fileEventMs(event);
+    if (ms === null || ms <= focusedFileWindow.fromMs || ms > focusedFileWindow.toMs || event.outcome === 'failed') continue;
+    events++;
+    if (event.kind === 'shell') touches++;
+    else {
+      removed += event.kind === 'write' ? 0 : ((event.stats && event.stats.oldLines) || 0);
+      added += (event.stats && event.stats.newLines) || 0;
+    }
+  }
+  return { events, removed, added, touches };
+}
+
+function conversationWindowSummary(rows) {
+  const stats = (rows || []).map(fileWindowStats).filter(Boolean);
+  const changed = stats.filter(stat => stat.events > 0);
+  return {
+    files: changed.length,
+    events: changed.reduce((sum, stat) => sum + stat.events, 0),
+    removed: changed.reduce((sum, stat) => sum + stat.removed, 0),
+    added: changed.reduce((sum, stat) => sum + stat.added, 0),
+  };
+}
+
+function fileTreeHtml(rows, selectedId, query = '') {
+  const filtered = (rows || []).filter(row => !query || row.relativePath.toLowerCase().includes(query));
+  const repos = new Map();
+  for (const row of filtered) {
+    if (!repos.has(row.repoRoot)) repos.set(row.repoRoot, { dirs: new Map(), files: [] });
+    let node = repos.get(row.repoRoot);
+    const parts = row.relativePath.split('/').filter(Boolean);
+    const file = parts.pop() || row.relativePath;
+    for (const dir of parts) {
+      if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] });
+      node = node.dirs.get(dir);
+    }
+    node.files.push({ row, file });
+  }
+  const renderNode = (node, prefix = '', repoRoot = '') => {
+    const dirs = [...node.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, child]) => {
+      const pathValue = prefix ? `${prefix}/${name}` : name;
+      const selected = focusedFileRow && focusedFileRow.repoRoot === repoRoot && focusedFileRow.relativePath.startsWith(pathValue + '/');
+      return `<details${selected || !prefix ? ' open' : ''}><summary>▸ ${esc(name)}</summary>${renderNode(child, pathValue, repoRoot)}</details>`;
+    }).join('');
+    const files = node.files.sort((a, b) => a.file.localeCompare(b.file)).map(({ row, file }) => {
+      const stats = fileWindowStats(row);
+      const changed = stats && stats.events > 0;
+      const lines = changed ? (stats.removed || stats.added ? `−${stats.removed} +${stats.added}` : `${stats.touches} touch${stats.touches === 1 ? '' : 'es'}`) : '';
+      const title = `${row.relativePath}${changed ? `\n${stats.events} changes between keyframes · ${lines}` : focusedFileWindow ? '\nno changes between keyframes' : ''}`;
+      return `<button class="ff-file${row.id === selectedId.id ? ' on' : ''}${changed ? ' changed' : ''}" data-ff-file="${fgAttr(row.id)}" title="${fgAttr(title)}"><span class="ff-state">${changed ? '●' : '·'}</span><span class="ff-name">${esc(file)}</span><span class="ff-lines">${esc(lines)}</span></button>`;
+    }).join('');
+    return dirs + files;
+  };
+  return [...repos.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([root, node]) =>
+    `<details open><summary>▣ ${esc(root.split('/').pop() || root)}</summary>${renderNode(node, '', root)}</details>`).join('') || '<div class="dim">no matching files</div>';
+}
+
+function updateFocusedTreeWindow() {
+  if (!fileHistoryData) return;
+  if ($('ffTreeSummary')) {
+    if (fileHistoryData.scope === 'conversation' && focusedFileWindow) {
+      const summary = conversationWindowSummary(fileHistoryData.rows);
+      $('ffTreeSummary').textContent = `${summary.files} files changed · ${summary.events} events · −${summary.removed} +${summary.added} lines`;
+    } else $('ffTreeSummary').textContent = `${fileHistoryData.rows.length} touched files`;
+  }
+  if (!$('ffTreeBody')) return;
+  $('ffTreeBody').querySelectorAll('[data-ff-file]').forEach(button => {
+    const row = fileHistoryData.rows.find(item => item.id === button.dataset.ffFile);
+    if (!row) return;
+    const stats = fileWindowStats(row);
+    const changed = stats && stats.events > 0;
+    const lines = changed ? (stats.removed || stats.added ? `−${stats.removed} +${stats.added}` : `${stats.touches} touch${stats.touches === 1 ? '' : 'es'}`) : '';
+    button.classList.toggle('changed', !!changed);
+    button.querySelector('.ff-state').textContent = changed ? '●' : '·';
+    button.querySelector('.ff-lines').textContent = lines;
+    button.title = `${row.relativePath}${changed ? `\n${stats.events} changes between keyframes · ${lines}` : focusedFileWindow ? '\nno changes between keyframes' : ''}`;
+  });
+}
+
+function renderFocusedFileTree(query = '') {
+  if (!$('ffTreeBody') || !fileHistoryData || !focusedFileRow) return;
+  $('ffTreeBody').innerHTML = fileTreeHtml(fileHistoryData.rows, focusedFileRow, query.trim().toLowerCase());
+  updateFocusedTreeWindow();
+  $('ffTreeBody').querySelectorAll('[data-ff-file]').forEach(button => button.onclick = () => {
+    const row = fileHistoryData.rows.find(item => item.id === button.dataset.ffFile);
+    if (!row) return;
+    const oldPoint = focusedFileCompare && focusedFileCompare.old.point;
+    const newPoint = focusedFileCompare && focusedFileCompare.new.point;
+    loadFocusedFile(row, { fromAt: oldPoint && oldPoint.ms, toAt: newPoint && newPoint.ms });
+  });
+}
+
+function focusedPointLeft(points, point) {
+  if (!points.length) return 0;
+  const min = points[0].ms, max = points[points.length - 1].ms;
+  return max === min ? 50 : Math.max(0, Math.min(100, (point.ms - min) / (max - min) * 100));
+}
+
+function renderFocusedTimeline(compare, row) {
+  if (!$('ffTimeline')) return;
+  const points = compare.points || [];
+  const oldIndex = Math.max(0, points.findIndex(point => point.id === compare.from));
+  const newIndex = Math.max(0, points.findIndex(point => point.id === compare.to));
+  const pointMarks = points.map((point, i) => `<button class="ff-point ${esc(point.kind)}" data-ff-point="${i}" style="left:${focusedPointLeft(points, point)}%" title="${fgAttr(point.label)}"></button>`).join('');
+  $('ffTimeline').innerHTML = `<div class="ff-track" id="ffTrack">${pointMarks}<span class="ff-key old" id="ffOldKey" tabindex="0" role="slider" aria-label="Old keyframe"></span><span class="ff-key new" id="ffNewKey" tabindex="0" role="slider" aria-label="New keyframe"></span></div>
+    <div class="ff-ranges"><b>OLD</b><input id="ffOldRange" type="range" min="0" max="${Math.max(0, points.length - 1)}" step="1" value="${oldIndex}"><span class="ff-range-label" id="ffOldLabel"></span>
+      <b>NEW</b><input id="ffNewRange" type="range" min="0" max="${Math.max(0, points.length - 1)}" step="1" value="${newIndex}"><span class="ff-range-label" id="ffNewLabel"></span></div>`;
+  const oldRange = $('ffOldRange'), newRange = $('ffNewRange');
+  const updateKeys = () => {
+    const oldPoint = points[Number(oldRange.value)], newPoint = points[Number(newRange.value)];
+    $('ffOldKey').style.left = focusedPointLeft(points, oldPoint) + '%';
+    $('ffNewKey').style.left = focusedPointLeft(points, newPoint) + '%';
+    $('ffOldLabel').textContent = oldPoint.label;
+    $('ffNewLabel').textContent = newPoint.label;
+    $('ffOldKey').setAttribute('aria-valuetext', oldPoint.label);
+    $('ffNewKey').setAttribute('aria-valuetext', newPoint.label);
+    focusedFileWindow = { fromMs: oldPoint.ms, toMs: newPoint.ms };
+    updateFocusedTreeWindow();
+  };
+  const schedule = changed => {
+    if (changed === 'old' && Number(oldRange.value) > Number(newRange.value)) newRange.value = oldRange.value;
+    if (changed === 'new' && Number(newRange.value) < Number(oldRange.value)) oldRange.value = newRange.value;
+    updateKeys();
+    clearTimeout(focusedCompareTimer);
+    focusedCompareTimer = setTimeout(() => loadFocusedFile(row, {
+      from: points[Number(oldRange.value)].id, to: points[Number(newRange.value)].id,
+    }, { keepTree: true, keepTimeline: true, quiet: true }), 70);
+  };
+  const setKeyframe = (kind, at) => {
+    at = Math.max(0, Math.min(points.length - 1, at));
+    if (kind === 'old') oldRange.value = at;
+    else newRange.value = at;
+    schedule(kind);
+  };
+  const pointAtX = clientX => {
+    const rect = $('ffTrack').getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    const min = points[0].ms, max = points[points.length - 1].ms;
+    const targetMs = min + ratio * (max - min);
+    let best = 0;
+    for (let i = 1; i < points.length; i++) if (Math.abs(points[i].ms - targetMs) < Math.abs(points[best].ms - targetMs)) best = i;
+    return best;
+  };
+  const dragKey = (element, kind) => {
+    element.onpointerdown = event => {
+      event.preventDefault(); event.stopPropagation();
+      element.classList.add('dragging');
+      element.setPointerCapture(event.pointerId);
+      setKeyframe(kind, pointAtX(event.clientX));
+    };
+    element.onpointermove = event => {
+      if (!element.hasPointerCapture(event.pointerId)) return;
+      event.preventDefault();
+      setKeyframe(kind, pointAtX(event.clientX));
+    };
+    const finish = event => {
+      if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
+      element.classList.remove('dragging');
+    };
+    element.onpointerup = finish;
+    element.onpointercancel = finish;
+    element.onkeydown = event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const currentValue = kind === 'old' ? Number(oldRange.value) : Number(newRange.value);
+      setKeyframe(kind, event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : currentValue + (event.key === 'ArrowLeft' ? -1 : 1));
+    };
+  };
+  oldRange.oninput = () => schedule('old');
+  newRange.oninput = () => schedule('new');
+  dragKey($('ffOldKey'), 'old');
+  dragKey($('ffNewKey'), 'new');
+  $('ffTrack').onpointerdown = event => {
+    if (event.target.closest('.ff-key, .ff-point')) return;
+    const at = pointAtX(event.clientX);
+    const oldDistance = Math.abs(points[at].ms - points[Number(oldRange.value)].ms);
+    const newDistance = Math.abs(points[at].ms - points[Number(newRange.value)].ms);
+    setKeyframe(oldDistance <= newDistance ? 'old' : 'new', at);
+  };
+  $('ffTimeline').querySelectorAll('[data-ff-point]').forEach(mark => mark.onclick = event => {
+    event.stopPropagation();
+    const at = Number(mark.dataset.ffPoint);
+    const oldDistance = Math.abs(points[at].ms - points[Number(oldRange.value)].ms);
+    const newDistance = Math.abs(points[at].ms - points[Number(newRange.value)].ms);
+    setKeyframe(oldDistance <= newDistance ? 'old' : 'new', at);
+  });
+  updateKeys();
+}
+
+function renderFocusedComparison(compare, row) {
+  const target = $('ffCompare');
+  if (!target) return;
+  const rowCacheKey = `${row.id}\x00${compare.from}\x00${compare.to}`;
+  let rows = focusedRowsCache.get(rowCacheKey);
+  if (!rows) {
+    rows = wholeFileDiffRows(compare.old.content, compare.new.content);
+    focusedRowsCache.set(rowCacheKey, rows);
+    if (focusedRowsCache.size > 20) focusedRowsCache.delete(focusedRowsCache.keys().next().value);
+  }
+  const lang = fileHighlightLang(compare.relativePath || row.relativePath);
+  const oldHl = highlightFileLines(compare.old.content, lang);
+  const newHl = highlightFileLines(compare.new.content, lang);
+  const identical = !rows.some(line => line.changed);
+  const snapshotMeta = snapshot => `${snapshot.exact ? 'exact' : 'reconstructed'} · ${snapshot.method}${snapshot.skipped ? ` · ${snapshot.skipped} skipped` : ''}`;
+  target.innerHTML = `<div class="ff-status"><button id="ffLines">${fileCompareLines ? 'hide lines' : 'show lines'}</button> ${identical ? 'one view · no line changes' : 'common is full width · changes split − / +'} · highlight ${esc(lang)} · left: ${esc(snapshotMeta(compare.old))} · right: ${esc(snapshotMeta(compare.new))} · ${esc(compare.truth)}</div>
+    ${fileCompareDockHtml(identical)}
+    <div class="fi-columns">${rows.map((line, i) => fileCompareRowHtml(line, i, oldHl, newHl)).join('')}</div>`;
+  $('ffLines').onclick = () => {
+    fileCompareLines = !fileCompareLines;
+    localStorage.setItem('aiconvo.fileLines', fileCompareLines ? '1' : '0');
+    renderFocusedComparison(compare, row);
+  };
+  fileInk.attach(compare, row, rows);
+  wireFileCompareDock(target);
+  const openHistory = lineElement => {
+    const already = lineElement.classList.contains('selected') && lineElement.nextElementSibling && lineElement.nextElementSibling.classList.contains('fi-line-history');
+    target.querySelectorAll('.fi-diff-row.selected').forEach(element => element.classList.remove('selected'));
+    target.querySelectorAll('.fi-line-history').forEach(element => element.remove());
+    if (already) return;
+    const line = rows[Number(lineElement.dataset.fiAny)];
+    lineElement.classList.add('selected');
+    const history = fileLineHistory(compare.changes, line);
+    const panel = document.createElement('div');
+    panel.className = 'fi-line-history';
+    panel.innerHTML = `<h4>line history · newest first <button class="ghost" data-fi-hist-close>close</button></h4>` + (history.entries.length ? history.entries.map((change, i) => {
+      const title = change.type === 'git' ? `${change.shortHash} · ${change.subject}` : `${change.conversationTitle} · ${change.agent} · ${change.kind}`;
+      return `<div class="fi-history-entry" data-ffi-change="${i}" tabindex="0" role="button" title="${change.type === 'git' ? 'Open this commit' : 'Open the conversation at this edit'}"><div class="fi-history-meta"><b>${esc(fmtDate(change.ts))}</b><br>${esc(title)}</div><div class="fi-history-change"><pre>- ${esc(historyExcerpt(change.oldText, history.tokens))}</pre><pre>+ ${esc(historyExcerpt(change.newText, history.tokens))}</pre></div></div>`;
+    }).join('') : '<div class="dim">No recorded AI or Git change in this interval matches this line.</div>');
+    lineElement.insertAdjacentElement('afterend', panel);
+    panel.querySelector('[data-fi-hist-close]').onclick = event => { event.stopPropagation(); openHistory(lineElement); };
+    panel.querySelectorAll('[data-ffi-change]').forEach(element => {
+      const change = history.entries[Number(element.dataset.ffiChange)];
+      const activate = () => change.type === 'git' ? showGitCommit(row.repoId, change.hash) : openAtTs(change.key, change.ts);
+      element.onclick = activate;
+      element.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } };
+    });
+  };
+  target.querySelectorAll('[data-fi-any]').forEach(element => {
+    element.onclick = event => { if (event.target.closest('.ln')) openHistory(element); };
+  });
+}
+
+async function loadFocusedFile(row, selection = {}, options = {}) {
+  if (!fileHistoryData || !row || !$('ffMain')) return;
+  focusedFileRow = row;
+  renderFocusedFileTree($('ffTreeSearch') ? $('ffTreeSearch').value : '');
+  $('ffTitle').textContent = row.relativePath;
+  if (!options.quiet) $('ffCompare').innerHTML = '<div class="ff-loading">loading this file and its keyframes…</div>';
+  else if ($('ffStatusLive')) $('ffStatusLive').textContent = 'updating…';
+  const conversationScope = fileHistoryData.scope === 'conversation';
+  const query = new URLSearchParams(conversationScope
+    ? { id: fileHistoryData.key, repo: row.repoRoot, path: row.relativePath }
+    : { name: fileHistoryData.project, repo: row.repoRoot, path: row.relativePath });
+  if (selection.from) query.set('from', selection.from);
+  if (selection.to) query.set('to', selection.to);
+  if (selection.fromAt) query.set('fromAt', selection.fromAt);
+  if (selection.toAt) query.set('toAt', selection.toAt);
+  const cacheKey = `${fileHistoryData.scope || 'project'}\x00${fileHistoryData.key || fileHistoryData.project}\x00${row.id}\x00${selection.from || selection.fromAt || ''}\x00${selection.to || selection.toAt || ''}`;
+  let compare = focusedCompareCache.get(cacheKey);
+  const request = ++focusedFileRequest;
+  if (!compare) {
+    if (focusedFileAbort) focusedFileAbort.abort();
+    focusedFileAbort = new AbortController();
+    try {
+      compare = await (await fetch((conversationScope ? '/api/conversation/file-history/file?' : '/api/project/file-history/file?') + query, { signal: focusedFileAbort.signal })).json();
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      compare = { error: error.message };
+    }
+    if (request !== focusedFileRequest) return;
+    if (!compare.error) {
+      focusedCompareCache.set(cacheKey, compare);
+      if (focusedCompareCache.size > 30) focusedCompareCache.delete(focusedCompareCache.keys().next().value);
+    }
+  }
+  if (compare.error) { $('ffCompare').innerHTML = `<div class="ff-loading">${esc(compare.error)}</div>`; return; }
+  focusedFileCompare = compare;
+  if (!options.keepTimeline) renderFocusedTimeline(compare, row);
+  renderFocusedComparison(compare, row);
+}
+
+function jumpToLatestConversationChanges() {
+  if (!fileHistoryData || fileHistoryData.scope !== 'conversation') return;
+  const candidates = [];
+  for (const row of fileHistoryData.rows || []) for (const event of row.aiEvents || []) {
+    const ms = fileEventMs(event);
+    if (ms !== null && event.outcome !== 'failed') candidates.push({ row, event, ms });
+  }
+  const contentCandidates = candidates.filter(item => item.event.kind !== 'shell');
+  const latest = (contentCandidates.length ? contentCandidates : candidates).sort((a, b) => b.ms - a.ms)[0];
+  if (!latest) return;
+  const rowEvents = (latest.row.aiEvents || []).map(event => ({ event, ms: fileEventMs(event) }))
+    .filter(item => item.ms !== null && item.event.outcome !== 'failed' && item.event.kind !== 'shell')
+    .sort((a, b) => a.ms - b.ms);
+  let at = rowEvents.findIndex(item => item.event.id === latest.event.id);
+  if (at < 0) at = rowEvents.length - 1;
+  let burstStart = at;
+  while (burstStart > 0 && rowEvents[burstStart].ms - rowEvents[burstStart - 1].ms <= 2 * 60 * 1000) burstStart--;
+  const prior = rowEvents[burstStart - 1];
+  const startMs = prior ? prior.ms : (Date.parse(fileHistoryData.firstTs || '') || rowEvents[0].ms - 1);
+  loadFocusedFile(latest.row, { fromAt: startMs, to: `ai:${latest.event.id}` });
+}
+
+function enterFocusedFile(row) {
+  if (!fileHistoryData || !row) return;
+  focusedFileRow = row;
+  const conversationScope = fileHistoryData.scope === 'conversation';
+  $('view').innerHTML = `<div class="focused-file-view"><div class="ff-head"><button id="ffBack">${conversationScope ? '← conversation' : '← all files'}</button><b id="ffTitle">${esc(row.relativePath)}</b>${conversationScope ? '<button id="ffLatest">jump to latest changes</button>' : ''}<span class="dim">${conversationScope ? 'only changes from this conversation · ' : ''}two draggable keyframes · complete file</span></div>
+    <div class="ff-layout"><aside class="ff-tree" id="ffTree"><input id="ffTreeSearch" type="search" placeholder="filter file tree"><div class="ff-tree-summary" id="ffTreeSummary"></div><div id="ffTreeBody"></div></aside>
+      <main class="ff-main" id="ffMain"><div class="ff-timeline" id="ffTimeline"></div><div class="ff-compare" id="ffCompare"><div class="ff-loading">loading…</div></div><div class="diff-card" id="diffCard" hidden></div></main></div></div>`;
+  $('ffBack').onclick = () => conversationScope ? open(fileHistoryData.key) : showProjectFileHistory(fileHistoryData.project, true);
+  if ($('ffLatest')) $('ffLatest').onclick = jumpToLatestConversationChanges;
+  $('ffTreeSearch').oninput = event => renderFocusedFileTree(event.target.value);
+  renderFocusedFileTree();
+  loadFocusedFile(row);
+}
+
+async function showGitCommit(repoId, hash) {
+  const data = fileHistoryData;
+  const repo = data && data.repositories.find(item => item.id === repoId);
+  if (!repo) return;
+  const result = await (await fetch('/api/project/file-history/commit?name=' + encodeURIComponent(data.project) +
+    '&repo=' + encodeURIComponent(repo.root) + '&hash=' + encodeURIComponent(hash))).json();
+  if (result.error) return errToast(result.error);
+  let card = $('diffCard');
+  card.hidden = false;
+  card.className = 'diff-card git-card';
+  card.innerHTML = `<div class="diff-card-head"><b>◆ ${esc(result.shortHash)} · ${esc(result.subject)}</b>
+    <span class="dim">${esc(result.author)} · ${fmtDate(result.ts)} · ${esc((result.branches || []).join(', ') || 'detached')}</span>
+    <button id="gitCopyHash">copy hash</button></div><pre>${esc(result.patch || '')}</pre>`;
+  $('gitCopyHash').onclick = async () => { await navigator.clipboard.writeText(result.hash); flashCopied($('gitCopyHash')); };
+  card.scrollIntoView({ block: 'start' });
+}
+
+async function showProjectFileHistory(name, reuse = false) {
+  if (!name) return;
+  projectOverviewName = name;
+  fileInspectorRowId = null;
+  focusedFileRow = null;
+  focusedFileWindow = null;
+  location.hash = 'project=' + encodeURIComponent(name) + '&files';
+  let data = reuse && fileHistoryData && fileHistoryData.project === name ? fileHistoryData : null;
+  if (!data) {
+    $('view').innerHTML = `<div class="file-gantt-view"><div class="phead"><h2>file history · ${esc(name)}</h2><div class="pmeta">mining AI edits and Git history…</div></div></div>`;
+    data = await (await fetch('/api/project/file-history?name=' + encodeURIComponent(name))).json();
+    focusedCompareCache.clear();
+    focusedRowsCache.clear();
+  }
+  if (data.error) { $('view').innerHTML = `<div class="empty">could not build file history.<div class="hint">${esc(data.error)}</div></div>`; return; }
+  fileHistoryData = data;
+  fileGanttInitialScroll = true;
+  diffScope = { scope: 'project' };
+  const branches = fileHistoryBranches(data);
+  const totals = data.totals || {};
+  $('view').innerHTML = `<div class="file-gantt-view" id="fgRoot">
+    <div class="phead"><h2>❯ ${esc(data.project)} · file history</h2>
+      <div class="pmeta">${totals.files || 0} files · ${totals.aiEvents || 0} in-repository AI edits (${totals.failed || 0} failed) · ${totals.commits || 0} commits · ${totals.paired || 0} inferred pairs · ${totals.workingTreeFiles || 0} working-tree files${totals.externalAiEvents ? ` · ${totals.externalAiEvents} external file touches excluded` : ''}</div>
+      <div class="pactions"><button id="fgBack">back to project</button><button id="fgList">edit list</button></div></div>
+    <div class="fg-toolbar">
+      <input id="fgSearch" type="search" placeholder="filter file path">
+      <select id="fgBranch"><option value="">all branches</option>${branches.map(branch => `<option value="${fgAttr(branch)}">${esc(branch)}</option>`).join('')}</select>
+      <select id="fgMode"><option value="all">AI + Git</option><option value="ai">AI edits</option><option value="commits">Git commits</option><option value="unpaired">unpaired AI</option><option value="working">working tree</option></select>
+      <button data-fg-scale="1440">hrs</button><button data-fg-scale="160">days</button><button data-fg-scale="28">wks</button>
+      <button id="fgMinus">−</button><button id="fgPlus">+</button><button id="fgBegin">beginning</button><button id="fgNow">now</button>
+      <span class="dim" id="fgShown"></span>
+    </div>
+    <div class="fg-legend"><span>■ AI edit</span><span>◆ Git commit</span><span>⋯ inferred pair</span><span class="ok">solid = high confidence</span><span class="warn">right bar = working tree</span><span>click a file name = whole-file time compare</span></div>
+    <div class="fg-scroll" id="fgScroll"><div class="fg-axis"><div class="fg-corner">repository-relative file</div><div class="fg-time-axis" id="fgAxis"></div></div><div id="fgRows"></div></div>
+    <div class="diff-card" id="diffCard" hidden></div>
+  </div>`;
+  $('fgBack').onclick = () => showProjectOverview(name);
+  $('fgList').onclick = () => showProjectDiffs(name);
+  $('fgSearch').oninput = renderFileGanttChart;
+  $('fgBranch').onchange = renderFileGanttChart;
+  $('fgMode').onchange = renderFileGanttChart;
+  $('view').querySelectorAll('[data-fg-scale]').forEach(button => button.onclick = () => { fileGanttScale = Number(button.dataset.fgScale); fileGanttInitialScroll = true; renderFileGanttChart(); });
+  $('fgMinus').onclick = () => { fileGanttScale = Math.max(8, fileGanttScale / 1.6); renderFileGanttChart(); };
+  $('fgPlus').onclick = () => { fileGanttScale = Math.min(3000, fileGanttScale * 1.6); renderFileGanttChart(); };
+  $('fgBegin').onclick = () => { $('fgScroll').scrollLeft = 0; };
+  $('fgNow').onclick = () => { $('fgScroll').scrollLeft = $('fgScroll').scrollWidth; };
+  renderFileGanttChart();
+}
+
 // ---- agent file diffs (design/15-file-diff-timeline.md) ----
 let diffScope = null;
 let diffSelectedEvent = null;
 
-function diffKindGlyph(kind) { return kind === 'write' ? '+' : kind === 'multi-edit' ? '±' : '~'; }
+function diffKindGlyph(kind) { return kind === 'write' ? '+' : kind === 'multi-edit' ? '±' : kind === 'shell' ? '›' : '~'; }
 function diffStats(e) {
   const oldLines = e.stats && e.stats.oldLines || 0;
   const newLines = e.stats && e.stats.newLines || 0;
-  return e.kind === 'write' ? `+${newLines}` : `-${oldLines} +${newLines}`;
+  return e.kind === 'write' ? `+${newLines}` : e.kind === 'shell' ? 'shell path' : `-${oldLines} +${newLines}`;
 }
 function diffRowsFromEvents(events) {
   const files = new Map();
@@ -1559,6 +3102,7 @@ function unifiedDiffRows(oldText, newText, context = 3) {
 }
 
 function diffTableHtml(event, full = false) {
+  if (event.kind === 'shell') return `<pre style="margin:0;padding:10px;white-space:pre-wrap">${esc(event.command || '(shell mutation command unavailable)')}</pre>`;
   if (event.kind === 'write') {
     const lines = String(event.newText || '').split('\n');
     const shown = full ? lines : lines.slice(0, 120);
@@ -1586,19 +3130,24 @@ async function showDiffEvent(id) {
     if ($('diffFiles')) $('diffFiles').after(card);
     else $('view').appendChild(card);
   }
+  card.className = 'diff-card';
+  const pair = event.commitPair;
   card.innerHTML = `<div class="diff-card-head"><b>${diffKindGlyph(event.kind)} ${esc(event.relativePath || event.path)}</b>
-    <span class="dim">${esc(event.conversationTitle || '')} · ${esc(event.agent || '')} · ${fmtDate(event.ts)}</span>
-    <button id="diffCompact">compact</button><button id="diffFull">full</button><button id="diffCopy">copy diff</button><button id="diffOpen">open conversation</button></div>
+    <span class="dim">${esc(event.conversationTitle || '')} · ${esc(event.agent || '')} · ${esc(event.inferredBranch ? `${event.branch || 'HEAD'} → ${event.inferredBranch}` : event.branch || 'branch ?')} · ${esc(event.outcome || 'unknown')} · ${fmtDate(event.ts)}${pair ? ` · ${esc(pair.confidence)} pair → ${esc(pair.shortHash)}` : ''}</span>
+    <button id="diffCompact">compact</button><button id="diffFull">full</button><button id="diffCopy">copy diff</button><button id="diffOpen">open conversation</button>${pair ? '<button id="diffCommit">open commit</button>' : ''}</div>
+    ${event.resultSummary ? `<div class="pmeta" style="padding:6px 10px;margin:0;border-bottom:1px solid var(--border)">tool result: ${esc(event.resultSummary)}</div>` : ''}
     <div class="diff-body" id="diffBody">${diffTableHtml(event, false)}</div>`;
   $('diffCompact').onclick = () => $('diffBody').innerHTML = diffTableHtml(event, false);
   $('diffFull').onclick = () => $('diffBody').innerHTML = diffTableHtml(event, true);
   $('diffCopy').onclick = async () => {
     const oldLines = String(event.oldText || '').split('\n').map(l => '-' + l).join('\n');
     const newLines = String(event.newText || '').split('\n').map(l => '+' + l).join('\n');
-    await navigator.clipboard.writeText(`--- ${event.path}\n+++ ${event.path}\n${oldLines}\n${newLines}\n`);
+    const text = event.kind === 'shell' ? event.command || '' : `--- ${event.path}\n+++ ${event.path}\n${oldLines}\n${newLines}\n`;
+    await navigator.clipboard.writeText(text);
     flashCopied($('diffCopy'));
   };
   $('diffOpen').onclick = () => open(event.key);
+  if ($('diffCommit')) $('diffCommit').onclick = () => showGitCommit(event.repoId, pair.hash);
   card.hidden = false;
   card.scrollIntoView({ block: 'start' });
 }
@@ -1639,11 +3188,21 @@ function renderDiffView(scope, rows, title, meta, related = null) {
 
 async function showConversationDiffs(key) {
   activeRel = key;
-  const d = await (await fetch('/api/conversation/diffs?id=' + encodeURIComponent(key))).json();
-  if (d.error) return errToast(d.error);
-  const related = await relatedFor(key);
-  const rows = diffRowsFromEvents(d.events || []);
-  renderDiffView('conversation', rows, `diffs · ${d.timelineTitle || d.title || key}`, `${d.events.length} edits · ${rows.length} files`, { key, related });
+  location.hash = 'diffs=' + encodeURIComponent(key);
+  $('view').innerHTML = '<div class="empty">building the conversation file Gantt…</div>';
+  const data = await (await fetch('/api/conversation/file-history?id=' + encodeURIComponent(key))).json();
+  if (data.error) return errToast(data.error);
+  if (!data.rows || !data.rows.length) {
+    $('view').innerHTML = `<div class="empty">no file changes in this conversation.<div class="hint"><button id="diffsBackEmpty">back to conversation</button></div></div>`;
+    $('diffsBackEmpty').onclick = () => open(key);
+    return;
+  }
+  fileHistoryData = data;
+  focusedFileWindow = null;
+  focusedCompareCache.clear();
+  focusedRowsCache.clear();
+  diffScope = { scope: 'conversation', key };
+  enterFocusedFile(data.rows[0]);
 }
 
 // ---- agent blame (design/16-agent-blame.md) ----
@@ -1732,6 +3291,7 @@ function projectStartDefaults(d) {
 
 async function showProjectOverview(name) {
   if (!name) return;
+  markSettingsClosed();
   projectOverviewName = name;
   location.hash = 'project=' + encodeURIComponent(name);
   $('view').innerHTML = `<div class="project-overview"><div class="phead"><h2>${esc(name)}</h2><div class="pmeta">loading project overview…</div></div></div>`;
@@ -1744,13 +3304,14 @@ async function showProjectOverview(name) {
   const color = projectColor(name);
   const recentEpicIds = d.epics.slice(0, 2).map(e => e.id);
   const freshness = d.freshness || {};
+  const memory = d.memory || null;
   $('view').innerHTML = `<div class="project-overview">
     <div class="phead" style="border-left-color:${color.fill}">
       <h2>❯ ${esc(d.project)}</h2>
       <div class="pmeta"><code>${esc(shortDir(d.cwd))}</code> · ${d.conversations} conversations · ${d.notes} notes · ${d.epics.length} epics · latest ${fmtDate(d.latestTs)}</div>
       <div class="pactions">
         <button id="pRefresh">refresh evidence</button>
-        <button id="pDiffs">file diffs</button>
+        <button id="pDiffs">file Gantt</button>
         <button id="pLatest" class="ghost">latest conversation</button>
         <button id="pBack" class="ghost">back</button>
       </div>
@@ -1759,14 +3320,37 @@ async function showProjectOverview(name) {
       <div class="pfresh">
         <div><b>${freshness.freshNotes || 0}</b><span>fresh notes</span></div>
         <div><b>${freshness.staleNotes || 0}</b><span>stale notes</span></div>
+        <div><b>${freshness.missingNotes || 0}</b><span>missing notes</span></div>
         <div><b>${freshness.freshEvidence || 0}</b><span>fresh evidence</span></div>
         <div><b>${freshness.staleEvidence || 0}</b><span>stale evidence</span></div>
+        <div><b>${freshness.missingEvidence || 0}</b><span>missing evidence</span></div>
       </div>
       <div class="pactions">
-        <button id="pRefreshMissing">refresh missing</button>
-        <button id="pRefreshStale">refresh stale</button>
+        <button id="pDistillAll" class="primary" title="Distill every missing note and update every stale note in this project">${(freshness.missingNotes || 0) + (freshness.staleNotes || 0) ? `update all notes (${(freshness.missingNotes || 0) + (freshness.staleNotes || 0)})` : 'all notes current'}</button>
+        <button id="pRefreshMissing">refresh missing evidence</button>
+        <button id="pRefreshStale">refresh stale evidence</button>
         <button id="pBuildAll" class="ghost">build all evidence</button>
       </div>
+    </section>
+    <section class="psection"><h3>project memory</h3>
+      ${memory ? `<div class="pcard">
+        <div class="pbody">
+          <p><b>${memory.stale ? '⚠ stale' : '✓ current'}</b> · built ${fmtDate(memory.builtAt)} · ${memory.classifiedMessages || 0} user messages classified · ${memory.selectedIntentMessages || 0} intent messages selected</p>
+          <p>${esc(memory.overview?.summary || '(no overview)')}</p>
+          <div class="pbuttons">
+            <button data-p-memory="overview">high-level overview</button>
+            <button data-p-memory="intent">deep intent</button>
+            <button data-p-memory="environment">environment</button>
+            <button data-p-memory="status">todo / focus</button>
+            <button id="pMemoryBuild">${memory.stale ? 'update project memory' : 'rebuild project memory'}</button>
+          </div>
+        </div>
+      </div>
+      ${memory.candidates?.length ? `<h3 style="margin-top:var(--sp-4)">discovered epic candidates</h3>${memory.candidates.map(c => `<div class="item">
+        <div style="min-width:0;flex:1"><div class="title">${esc(c.title)}</div><div class="meta">${c.sessionIds.length} conversations · ${esc(c.abstract || c.reason || '')}</div></div>
+        <button data-p-candidate="${esc(c.id)}">build epic</button>
+      </div>`).join('')}` : '<div class="hint">no uncovered multi-session epic candidates.</div>'}` : `<div class="empty" style="margin:10px 0;text-align:left">no project memory yet.<div class="hint">Build it to uncover deep intent, setup facts, current work, and epic candidates.</div></div>
+      <button id="pMemoryBuild" class="primary">build project memory</button>`}
     </section>
     <section class="psection"><h3>workstreams / epics</h3>
       ${d.epics.length ? d.epics.slice(0, 12).map((e, i) => `
@@ -1791,21 +3375,26 @@ async function showProjectOverview(name) {
       <div class="mem">
         <label><input type="checkbox" checked disabled> project map</label>
         <label><input type="checkbox" id="pMemEpics" checked> current epics (${Math.min(2, d.epics.length)})</label>
-        <label><input type="checkbox" id="pMemNotes"> all fresh notes</label>
+        <label><input type="checkbox" id="pMemNotes"> read all current notes</label>
         <label><input type="checkbox" id="pMemEvidence"> selected evidence</label>
       </div>
-      <button id="pStart" class="primary">start conversation</button>
+      <button id="pStart" class="primary">start in alacritty</button>
       <span id="pStartStatus" class="dim"></span>
     </section>
   </div>`;
   $('pAgent').value = projectStartDefaults(d);
   $('pBack').onclick = () => { projectOverview = null; projectOverviewName = null; location.hash = ''; $('view').innerHTML = '<div class="empty">select a conversation to read it.<div class="hint">press / to search</div></div>'; };
   $('pLatest').onclick = () => d.recent[0] && open(d.recent[0].key);
-  $('pDiffs').onclick = () => showProjectDiffs(d.project);
+  $('pDiffs').onclick = () => showProjectFileHistory(d.project);
   $('pRefresh').onclick = () => projectRefreshEvidence(d, 'all');
+  $('pDistillAll').disabled = !((freshness.missingNotes || 0) + (freshness.staleNotes || 0));
+  $('pDistillAll').onclick = () => projectUpdateAllNotes(d);
   $('pRefreshMissing').onclick = () => projectRefreshEvidence(d, 'missing');
   $('pRefreshStale').onclick = () => projectRefreshEvidence(d, 'stale');
   $('pBuildAll').onclick = () => projectRefreshEvidence(d, 'all', true);
+  $('pMemoryBuild').onclick = () => projectBuildMemory(d);
+  $('view').querySelectorAll('[data-p-memory]').forEach(b => b.onclick = () => showProjectMemoryDoc(d.project, b.dataset.pMemory));
+  $('view').querySelectorAll('[data-p-candidate]').forEach(b => b.onclick = () => buildDiscoveredEpic(d, b.dataset.pCandidate));
   $('view').querySelectorAll('[data-p-epic-open]').forEach(b => b.onclick = () => showEpic(b.dataset.pEpicOpen));
   $('view').querySelectorAll('[data-p-epic-rebuild]').forEach(b => b.onclick = () => {
     const epic = d.epics.find(e => e.id === b.dataset.pEpicRebuild);
@@ -1817,6 +3406,61 @@ async function showProjectOverview(name) {
   $('view').querySelectorAll('[data-p-conv]').forEach(b => b.onclick = () => open(b.dataset.pConv));
   $('pAgent').onchange = () => localStorage.setItem('aiconvo.projectAgent:' + d.project, $('pAgent').value);
   $('pStart').onclick = () => startProjectConversation(d, recentEpicIds);
+}
+
+async function projectBuildMemory(d) {
+  if (!confirm(`Analyze all ${d.conversations} project conversations for deep intent, environment facts, current work, and epic candidates?`)) return;
+  const res = await fetch('/api/project/memory/build', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: d.project }),
+  });
+  const job = await res.json();
+  if (job.error) return errToast('project memory failed to start: ' + job.error);
+  updateJob(job);
+  $('pMemoryBuild').disabled = true;
+  $('pMemoryBuild').textContent = 'building project memory…';
+  toggleJobs(true);
+  toast('project memory analysis started.');
+}
+
+async function showProjectMemoryDoc(project, kind) {
+  const res = await fetch('/api/project/memory/file?name=' + encodeURIComponent(project) + '&kind=' + encodeURIComponent(kind));
+  const data = await res.json();
+  if (data.error) return errToast(data.error);
+  projectOverviewName = project;
+  noteViewer(data.text, data.path);
+  $('noteHeadBtns').innerHTML = '<button id="projectMemoryBack">back to project</button>';
+  $('projectMemoryBack').onclick = () => showProjectOverview(project);
+}
+
+function buildDiscoveredEpic(d, candidateId) {
+  const candidate = d.memory?.candidates?.find(item => item.id === candidateId);
+  if (!candidate) return;
+  if (!confirm(`Build “${candidate.title}” from ${candidate.sessionIds.length} discovered conversations?`)) return;
+  selected = new Set(candidate.sessionIds);
+  runBuildEpic(null, candidate.title);
+}
+
+async function projectUpdateAllNotes(d) {
+  const freshness = d.freshness || {};
+  const missing = freshness.missingNotes || 0;
+  const stale = freshness.staleNotes || 0;
+  const total = missing + stale;
+  if (!total) return toast('all project notes are current.');
+  if (!confirm(`Distill ${missing} missing notes and update ${stale} stale notes? This starts ${total} background distillations.`)) return;
+  const res = await fetch('/api/project/distill', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: d.project }),
+  });
+  const job = await res.json();
+  if (job.error) return errToast('project distillation failed to start: ' + job.error);
+  updateJob(job);
+  $('pMemNotes').checked = true;
+  $('pDistillAll').disabled = true;
+  $('pDistillAll').textContent = 'updating all notes…';
+  $('pStart').disabled = true;
+  $('pStartStatus').textContent = ' wait for all notes…';
+  toast(`updating ${total} project notes. The new-conversation button will unlock when they are ready.`);
 }
 
 async function projectRefreshEvidence(d, mode, confirmAll = false) {
@@ -1853,10 +3497,7 @@ async function startProjectConversation(d, epicIds) {
   if (out.error) { status.textContent = '' ; return errToast(out.error); }
   status.textContent = ' started: ' + out.name;
   if (out.warning) errToast(out.warning);
-  else toast('✓ started ' + out.kind + ' in ' + d.project + (out.kickoff ? ' · memory briefing sent' : ''), () => toggleAgents(true), 'ok');
-  // Land in the new agent's terminal right away: its session file does not
-  // exist until the first message, so no conversation can be opened yet.
-  openAgentTerminal(out.name, ($('pName').value.trim() || 'new ' + out.kind + ' conversation') + ' · ' + d.project, out.kind);
+  else toast('✓ started ' + out.kind + ' in Alacritty · ' + d.project + (out.kickoff ? ' · memory briefing sent' : ''), () => toggleAgents(true), 'ok');
 }
 
 // ---- conversation view ----
@@ -2027,7 +3668,7 @@ function convHead(d, entry, related) {
     <div class="ch-row">
       <span class="ch-meta"><span class="src ${esc(d.source || 'claude')}"><i></i>${esc(d.source || 'claude')}</span> · <code>${esc(shortDir(d.cwd))}</code>${d.gitBranch ? ` · <code>${esc(d.gitBranch)}</code>` : ''} · ${fmtDateShort(d.firstTs)} → ${fmtDateShort(d.lastTs)}</span>
       <span id="convHeadExtra"></span>
-      ${['claude', 'pi', 'pi-remote'].includes(d.source) ? `<button id="termToggle" class="${terminalMode ? 'on' : ''}" title="Toggle between the chat view and the live Herdr terminal">terminal</button><button id="termAttach" title="Open this conversation's Herdr agent in Alacritty">⬈ alacritty</button>` : ''}
+      ${['claude', 'pi', 'pi-remote'].includes(d.source) ? `<button id="termAttach" title="Continue this conversation in Alacritty">continue in alacritty</button>` : ''}
       <select id="mode" title="What to show and export" style="height:26px">
         <option value="chat">chat only</option>
         <option value="commands">commands only</option>
@@ -2045,28 +3686,7 @@ function wireHead() {
   $('mode').onchange = () => { viewMode = $('mode').value; renderConv(); };
   $('distill').onclick = () => distillAction(activeRel);
   const ta = $('termAttach');
-  if (ta) ta.onclick = async () => {
-    ta.disabled = true;
-    ta.textContent = 'opening…';
-    try {
-      const res = await fetch('/api/herdr/conversation/attach', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: activeRel }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'Could not attach.');
-      toast('opened in Alacritty — detach with Ctrl+B, Q');
-    } catch (e) { errToast(e.message); }
-    ta.disabled = false;
-    ta.textContent = '⬈ alacritty';
-  };
-  const tt = $('termToggle');
-  if (tt) tt.onclick = () => {
-    terminalMode = !terminalMode;
-    setTermPref(activeRel, terminalMode);
-    if (terminalMode) termPipOn = false;
-    renderConv('bottom');
-  };
+  if (ta) ta.onclick = () => continueInAlacritty(ta);
   wireContextNav();
 }
 
@@ -2079,640 +3699,394 @@ function distillAction(rel) {
   queueDistill(rel, !!hasNote);
 }
 
+async function continueInAlacritty(btn) {
+  if (!activeRel) return;
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'opening…'; }
+  try {
+    const res = await fetch('/api/conversation/open', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: activeRel }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not open Alacritty.');
+    toast(data.created ? 'opened in Alacritty' : (data.focused ? 'focused the open Alacritty window' : 'already open in a terminal'));
+  } catch (e) { errToast(e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = old || 'continue in alacritty'; }
+}
+
 function agentComposerHtml(d) {
+  if (!['claude', 'pi', 'pi-remote'].includes(d.source)) return '';
   const kind = d.source === 'claude' ? 'Claude Code' : 'Pi';
   return `<div class="agent-compose" id="agentCompose">
-    <div class="agent-state"><strong id="agentKind">${kind}</strong><span id="agentState">checking Herdr…</span><span class="agent-hint">Ctrl+Enter to send</span></div>
-    <div class="agent-row"><textarea id="agentPrompt" data-key="${esc(d.key)}" placeholder="Continue this conversation with ${kind}…"></textarea><button class="primary" id="agentSend">send</button></div>
+    <div class="agent-state"><strong>${kind}</strong><span id="agentBarHint">type a prompt. / opens slash commands</span>
+      <button type="button" class="ghost" id="agentOpenLive" title="Raw terminal view if something gets stuck">live view</button>
+    </div>
+    <textarea id="agentText" rows="3" placeholder="type a prompt, or / for slash commands. paste or drop images."></textarea>
+    <div class="agent-thumbs" id="agentThumbs"></div>
+    <div class="agent-compose-row">
+      <button id="agentAttach" type="button">attach image</button>
+      <input id="agentFiles" type="file" accept="image/*" multiple hidden>
+      <select id="agentModel" title="Change model with /model"><option value="">model…</option></select>
+      <button class="primary" id="agentSend" type="button">open &amp; send</button>
+    </div>
   </div>`;
 }
 
-async function refreshConversationAgentState(key = activeRel) {
-  const state = $('agentState');
-  if (!state || !key) return;
-  try {
-    const res = await fetch('/api/herdr/conversation?id=' + encodeURIComponent(key));
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Herdr is unavailable.');
-    state.textContent = data.open ? `${data.agent.agent_status} in Herdr` : 'will resume in Herdr when you send';
-  } catch (e) { state.textContent = e.message; }
+function fileToImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read image.'));
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) return reject(new Error('Bad image data.'));
+      resolve({ mime: m[1], data: m[2], name: file.name || 'image', preview: dataUrl });
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
-async function sendConversationPrompt() {
-  const key = activeRel;
-  const compose = $('agentCompose'), input = $('agentPrompt'), button = $('agentSend');
-  const prompt = input && input.value.trim();
-  if (!key || !compose || !prompt) return;
-  compose.classList.add('sending');
-  button.disabled = true;
-  $('agentState').textContent = 'opening or resuming in Herdr…';
+function renderAgentThumbs() {
+  const box = $('agentThumbs');
+  if (!box) return;
+  box.innerHTML = (window._agentImages || []).map((img, i) =>
+    `<div class="agent-thumb"><img src="${img.preview}" alt=""><button type="button" data-rm="${i}">x</button></div>`
+  ).join('');
+  box.querySelectorAll('[data-rm]').forEach(b => {
+    b.onclick = () => { window._agentImages.splice(Number(b.dataset.rm), 1); renderAgentThumbs(); };
+  });
+}
+
+async function addAgentFiles(files) {
+  window._agentImages = window._agentImages || [];
+  for (const file of files) {
+    if (!file || !String(file.type || '').startsWith('image/')) continue;
+    if (window._agentImages.length >= 8) break;
+    window._agentImages.push(await fileToImage(file));
+  }
+  renderAgentThumbs();
+}
+
+async function sendToAlacritty(btn) {
+  if (!activeRel) return;
+  const text = ($('agentText') && $('agentText').value) || '';
+  const images = (window._agentImages || []).map(({ mime, data }) => ({ mime, data }));
+  if (!text.trim() && !images.length) { errToast('Type text or attach an image first.'); return; }
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'sending…'; }
   try {
-    const res = await fetch('/api/herdr/conversation/prompt', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ id: key, prompt }),
+    const res = await fetch('/api/conversation/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: activeRel, text, images }),
+    });
+    const raw = await res.text();
+    let data = {};
+    try { data = raw ? JSON.parse(raw) : {}; }
+    catch { throw new Error(raw.slice(0, 160) || 'Could not send to Alacritty.'); }
+    if (data.blocked) {
+      applyAgentPane(data);
+      throw new Error(data.error || 'The terminal is waiting for a choice.');
+    }
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not send to Alacritty.');
+    if ($('agentText')) $('agentText').value = '';
+    window._agentImages = [];
+    renderAgentThumbs();
+    toast(data.created ? 'sent — watch the transcript' : 'sent — watch the transcript');
+    closeAgentModal();
+    if (activeRel) open(activeRel, 'bottom');
+  } catch (e) { errToast(e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = old || 'send'; }
+}
+
+function fitAgentPane() {
+  const pane = $('agentPane');
+  if (!pane || !agentModalOpen()) return;
+  const grid = window._agentGrid || { rows: 24, cols: 80 };
+  const rows = Math.max(1, grid.rows || 24);
+  const cols = Math.max(1, grid.cols || 80);
+  const padX = 20, padY = 16;
+  const w = Math.max(40, pane.clientWidth - padX);
+  const h = Math.max(40, pane.clientHeight - padY);
+  const size = Math.max(8, Math.min(w / (cols * 0.62), h / rows));
+  pane.style.fontSize = size.toFixed(2) + 'px';
+  pane.style.lineHeight = '1.05';
+  pane.style.letterSpacing = '0';
+}
+
+function applyAgentPane(data) {
+  const pane = $('agentPane');
+  const choices = $('agentChoices');
+  const hint = $('agentStateHint');
+  if (!pane) return;
+  const rows = Math.max(1, (data && data.rows) || 24);
+  const cols = Math.max(1, (data && data.cols) || 80);
+  window._agentGrid = { rows, cols };
+  const lines = String(data && data.text ? data.text : '').split('\n').map(l => l.slice(0, cols));
+  while (lines.length < rows) lines.push('');
+  pane.textContent = lines.slice(0, rows).join('\n');
+  const label = {
+    ready: 'ready for a prompt',
+    picker: 'waiting for a choice',
+    permission: 'waiting for a permission answer',
+    booting: 'starting…',
+    offline: 'no live terminal — send will open one',
+  }[data && data.state] || (data && data.attached ? 'live' : 'no live terminal');
+  if (hint) hint.textContent = label + ' · ' + rows + '×' + cols;
+  if ($('agentBarHint')) $('agentBarHint').textContent = data && data.state === 'ready' ? 'type a prompt. / opens slash commands' : label;
+  if (choices) {
+    choices.innerHTML = ((data && data.choices) || []).map(c =>
+      `<button type="button" data-choice="${esc(c.id)}">${esc(c.label)}</button>`
+    ).join('');
+    choices.querySelectorAll('[data-choice]').forEach(b => {
+      b.onclick = () => actOnAgent(b.dataset.choice);
+    });
+  }
+  requestAnimationFrame(fitAgentPane);
+}
+
+function agentModalOpen() {
+  return $('agentOverlay') && !$('agentOverlay').hidden;
+}
+
+function openAgentModal() {
+  const ov = $('agentOverlay');
+  if (!ov) return;
+  ov.hidden = false;
+  window._agentModal = true;
+  wireAgentOverlayOnce();
+  const ta = $('agentText');
+  if (ta) ta.focus();
+  requestAnimationFrame(fitAgentPane);
+  refreshAgentPane();
+}
+
+function closeAgentModal() {
+  const ov = $('agentOverlay');
+  if (ov) ov.hidden = true;
+  window._agentModal = false;
+}
+
+async function refreshAgentPane() {
+  if (!activeRel || (!agentModalOpen() && !$('agentCompose'))) return;
+  try {
+    const res = await fetch('/api/conversation/pane?id=' + encodeURIComponent(activeRel));
+    const data = await res.json();
+    if (!res.ok || data.error) return;
+    applyAgentPane(data);
+  } catch {}
+}
+
+async function actOnAgent(choice) {
+  if (!activeRel) return;
+  try {
+    const res = await fetch('/api/conversation/act', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: activeRel, choice }),
     });
     const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Could not send the message.');
-    if (key !== activeRel) return;
-    input.value = '';
-    $('agentState').textContent = data.created ? 'resumed in Herdr · working' : 'working in Herdr';
-    showAgentPip(key, data.agent.agent, data.created ? 'resuming' : 'working');
-    streamConversationAgent(data.runId, key);
-  } catch (e) {
-    errToast(e.message);
-    $('agentState').textContent = 'send failed';
-    compose.classList.remove('sending');
-    button.disabled = false;
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not send that choice.');
+    applyAgentPane(data);
+    toast('sent choice ' + choice);
+  } catch (e) { errToast(e.message); }
+}
+
+function agentLiveQueue(fn) {
+  window._agentLiveQ = (window._agentLiveQ || Promise.resolve()).then(fn).catch(err => {
+    errToast(err.message || String(err));
+  });
+  return window._agentLiveQ;
+}
+
+async function agentLiveKeys(data) {
+  if (!activeRel || data == null || data === '') return;
+  const res = await fetch('/api/conversation/act', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: activeRel, keys: data, quick: true }),
+  });
+  const raw = await res.text();
+  let out = {};
+  try { out = raw ? JSON.parse(raw) : {}; } catch { throw new Error(raw.slice(0, 160)); }
+  if (!res.ok || out.error) throw new Error(out.error || 'Could not send keys.');
+  window._agentLiveOn = true;
+}
+
+function fillAgentModels(models) {
+  const sel = $('agentModel');
+  if (!sel) return;
+  const cur = sel.value;
+  const opts = ['<option value="">model…</option>'].concat(
+    (models || []).slice(0, 80).map(m =>
+      `<option value="${esc(m.model)}">${esc(m.id)}</option>`)
+  );
+  sel.innerHTML = opts.join('');
+  if (cur) sel.value = cur;
+}
+
+async function loadAgentModels() {
+  try {
+    const res = await fetch('/api/models');
+    const data = await res.json();
+    if (data && data.models) fillAgentModels(data.models);
+  } catch {}
+}
+
+function wireAgentOverlayOnce() {
+  if (window._agentOverlayWired) return;
+  window._agentOverlayWired = true;
+  const box = $('agentOverlay');
+  const closer = $('agentClose');
+  if (closer) closer.onclick = () => closeAgentModal();
+  if (box) box.addEventListener('click', e => { if (e.target === box) closeAgentModal(); });
+  const pane = $('agentPane');
+  if (pane) {
+    pane.addEventListener('wheel', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const grid = window._agentGrid || { rows: 24, cols: 80 };
+      const rect = pane.getBoundingClientRect();
+      const col = Math.min(grid.cols, Math.max(1, Math.floor((e.clientX - rect.left) / Math.max(1, rect.width / grid.cols)) + 1));
+      const row = Math.min(grid.rows, Math.max(1, Math.floor((e.clientY - rect.top) / Math.max(1, rect.height / grid.rows)) + 1));
+      const steps = Math.max(1, Math.min(8, Math.round(Math.abs(e.deltaY) / 40) || 1));
+      const up = e.deltaY < 0;
+      let keys = '';
+      for (let i = 0; i < steps; i++) {
+        keys += '\x1b[<' + (up ? 64 : 65) + ';' + col + ';' + row + 'M';
+      }
+      agentLiveQueue(() => agentLiveKeys(keys));
+    }, { passive: false });
   }
-}
-
-function showAgentPip(key, kind, status) {
-  agentStreamKey = key;
-  const entry = sessions.find(session => session.key === key) || {};
-  $('agentPipTitle').textContent = `${kind === 'claude' ? 'Claude Code' : 'Pi'} · ${entry.timelineTitle || entry.title || 'conversation'}`;
-  $('agentPipStatus').textContent = status;
-  $('agentPipOutput').textContent = 'waiting for output…';
-  $('agentPip').hidden = false;
-  $('agentPip').classList.remove('minimized');
-}
-
-$('agentPipMin').onclick = () => {
-  $('agentPip').classList.toggle('minimized');
-  $('agentPipMin').textContent = $('agentPip').classList.contains('minimized') ? '□' : '_';
-};
-$('agentPipClose').onclick = () => { $('agentPip').hidden = true; };
-$('agentPipOpen').onclick = () => { if (agentStreamKey) open(agentStreamKey, 'bottom'); };
-
-$('termPipClose').onclick = () => termStop();
-$('termPipExpand').onclick = () => {
-  const key = termKey;
-  if (!key) return;
-  termPipOn = false;
-  $('termPip').hidden = true;
-  setTermPref(key, true);
-  terminalMode = true;
-  if (key === activeRel) renderConv('bottom');
-  else open(key, 'bottom');
-};
-$('termPipScreen').addEventListener('mousedown', () => {
-  if (termStream) { termCaptured = true; updateTermBars(); }
-});
-
-function streamConversationAgent(runId, key) {
-  if (agentStream) agentStream.close();
-  const es = new EventSource('/api/herdr/conversation/stream?run=' + encodeURIComponent(runId));
-  agentStream = es;
-  agentStreamKey = key;
-  es.onmessage = async event => {
-    const data = JSON.parse(event.data);
-    if (data.type === 'output') {
-      $('agentPipStatus').textContent = data.status;
-      const output = $('agentPipOutput');
-      output.textContent = data.output || 'working…';
-      output.scrollTop = output.scrollHeight;
-      if (key === activeRel && $('agentState')) $('agentState').textContent = `${data.status} in Herdr`;
-    } else if (data.type === 'complete') {
-      es.close();
-      if (agentStream === es) agentStream = null;
-      $('agentPipStatus').textContent = 'done';
-      await load();
-      if (key === activeRel) await open(key, 'bottom');
-      setTimeout(() => {
-        if (!agentStream && agentStreamKey === key) $('agentPip').hidden = true;
-      }, 1200);
-    } else if (data.type === 'error') {
-      es.close();
-      if (agentStream === es) agentStream = null;
-      $('agentPipStatus').textContent = 'error';
-      errToast(data.error);
-      if (key === activeRel && $('agentCompose')) $('agentCompose').classList.remove('sending');
-      if (key === activeRel && $('agentSend')) $('agentSend').disabled = false;
-    }
+  if (!window._agentFitObs && $('agentPane') && typeof ResizeObserver === 'function') {
+    window._agentFitObs = new ResizeObserver(() => fitAgentPane());
+    window._agentFitObs.observe($('agentPane'));
+  }
+  window.addEventListener('resize', fitAgentPane);
+  const tick = async () => {
+    if (activeRel && (agentModalOpen() || $('agentCompose'))) await refreshAgentPane();
+    const fast = window._agentLiveOn || agentModalOpen() || (($('agentText') || {}).value || '').startsWith('/');
+    setTimeout(tick, fast ? 200 : 1500);
   };
-  es.onerror = () => {
-    es.close();
-    if (agentStream === es) agentStream = null;
-    $('agentPipStatus').textContent = 'disconnected';
-  };
+  tick();
 }
 
 function wireAgentComposer() {
-  if (!$('agentCompose')) return;
-  $('agentSend').onclick = sendConversationPrompt;
-  $('agentPrompt').addEventListener('keydown', event => {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      sendConversationPrompt();
-    }
-  });
-  refreshConversationAgentState();
-}
-
-// ---- live Herdr terminal view (design: toggles with the chat html view) ----
-
-// Terminal palettes matched to the app design tokens, one set per theme.
-// The 16 ANSI colors map onto the app's green/cyan/yellow/red/magenta family.
-const TERM_PAL = {
-  dark: {
-    light: false, fg: '#c8d0c9', bg: '#0a0d0a',
-    pal: ['#232823','#f58c81','#6cc581','#c8ad3f','#58a6f0','#d292e1','#33beeb','#c8d0c9',
-          '#5b635c','#ff9d92','#7fdd95','#e0c44f','#79bcff','#e9a8f5','#4fd4ff','#f2f6f3'],
-  },
-  light: {
-    light: true, fg: '#1b211c', bg: '#f2f6f3',
-    pal: ['#1b211c','#a7463e','#1d7d3e','#816600','#1a5fb4','#894d97','#0076a0','#525953',
-          '#6a716b','#8f3a32','#166534','#6b5500','#144d94','#71407d','#005f80','#404741'],
-  },
-  // Grayscale: the light ramp desaturated. The lightness-only adaptation
-  // (flip by direction, contrast floor) transfers unchanged.
-  gray: {
-    light: true, gray: true, fg: '#1f1f1f', bg: '#f5f5f5',
-    pal: ['#1f1f1f','#2e2e2e','#3a3a3a','#484848','#555555','#636363','#404040','#575757',
-          '#6f6f6f','#1b1b1b','#242424','#292929','#333333','#3d3d3d','#2b2b2b','#454545'],
-  },
-  // E-ink: binary. Foregrounds are always black; 'dim' is dropped upstream.
-  eink: {
-    light: true, eink: true, fg: '#000000', bg: '#ffffff',
-    pal: ['#000000','#000000','#000000','#000000','#000000','#000000','#000000','#000000',
-          '#000000','#000000','#000000','#000000','#000000','#000000','#000000','#000000'],
-  },
-};
-
-function termTheme() {
-  const t = document.documentElement.dataset.theme;
-  if (t === 'eink') return TERM_PAL.eink;
-  if (t === 'gray') return TERM_PAL.gray;
-  const light = t === 'light' || (t !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches);
-  return TERM_PAL[light ? 'light' : 'dark'];
-}
-
-// Color helpers for the terminal renderer. Colors move through HSL so the
-// light theme can flip lightness and enforce contrast while hue stays.
-function termHsl(r, g, b) {
-  const R = r / 255, G = g / 255, B = b / 255;
-  const mx = Math.max(R, G, B), mn = Math.min(R, G, B), d = mx - mn;
-  const l = (mx + mn) / 2;
-  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
-  let h = 0;
-  if (d) {
-    if (mx === R) h = ((G - B) / d + 6) % 6;
-    else if (mx === G) h = (B - R) / d + 2;
-    else h = (R - G) / d + 4;
-    h *= 60;
-  }
-  return { h, s, l };
-}
-
-function termHexHsl(hex) {
-  return termHsl(parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16));
-}
-
-function termCss(c) {
-  return `hsl(${c.h.toFixed(0)},${(c.s * 100).toFixed(0)}%,${(c.l * 100).toFixed(0)}%)`;
-}
-
-// Minimal ANSI SGR renderer: colors (16/256/truecolor), bold, dim, italic,
-// underline, inverse. All other escape sequences are stripped.
-function ansiToHtml(raw) {
-  const theme = termTheme();
-  const themeBg = termHexHsl(theme.bg);
-  // Palette colors stay as indexes so bold can promote 0-7 to the bright row.
-  // Absolute (256-cube and truecolor) values keep their rgb until style time.
-  const c256 = n => {
-    if (n < 16) return { idx: n };
-    if (n < 232) {
-      n -= 16;
-      const v = x => x ? 55 + x * 40 : 0;
-      return { abs: termHsl(v(Math.floor(n / 36)), v(Math.floor(n % 36 / 6)), v(n % 6)) };
-    }
-    const v = 8 + (n - 232) * 10;
-    return { abs: termHsl(v, v, v) };
-  };
-  const st = { fg: null, bg: null, b: 0, d: 0, i: 0, u: 0, r: 0 };
-  // Palette entries are tuned per theme for foreground use. Absolute colors
-  // may come from a dark-themed OR a light-themed TUI (Pi follows its own
-  // theme), so in light mode adapt by direction instead of blindly flipping:
-  // backgrounds keep whichever side of the lightness scale is light, and
-  // foregrounds keep whichever side is dark. Output that is already tuned
-  // for a light background passes through unchanged.
-  const lightFg = l => Math.min(l, 1 - l);
-  const lightBg = l => Math.max(l, 1 - l);
-  const resolve = (c, isFg) => {
-    if (!c) return null;
-    if (theme.eink) {
-      // Binary threshold: foregrounds paint black; backgrounds keep only
-      // the dark half of inputs as solid black bars, the rest paints white.
-      if (isFg) return { h: 0, s: 0, l: 0 };
-      const l = c.abs ? c.abs.l : termHexHsl(theme.pal[c.idx]).l;
-      return { h: 0, s: 0, l: l < 0.55 ? 0 : 1 };
-    }
-    if (c.abs) {
-      if (theme.gray) return { h: 0, s: 0, l: isFg ? lightFg(c.abs.l) : lightBg(c.abs.l) };
-      if (!theme.light) return c.abs;
-      return { ...c.abs, l: isFg ? lightFg(c.abs.l) : lightBg(c.abs.l) };
-    }
-    const idx = isFg && st.b && c.idx < 8 ? c.idx + 8 : c.idx;
-    const col = termHexHsl(theme.pal[idx]);
-    if (!isFg && theme.light) return { ...col, l: lightBg(col.l) };
-    return col;
-  };
-  const style = () => {
-    let fg = resolve(st.fg, true), bg = resolve(st.bg, false);
-    if (st.r) { const t = fg; fg = bg || themeBg; bg = t || termHexHsl(theme.fg); }
-    // E-ink: a foreground that matches its background flips to the opposite
-    // pole — black on black becomes white on black. Never a grey.
-    if (theme.eink && fg && Math.abs(fg.l - (bg ? bg.l : themeBg.l)) < 0.5) {
-      fg = { h: 0, s: 0, l: (bg ? bg.l : themeBg.l) >= 0.5 ? 0 : 1 };
-    }
-    // Light mode: a flip can land a foreground too close to its background.
-    // Push the foreground's lightness away until the pair reads clearly.
-    if (theme.light && !theme.eink && fg) {
-      const back = bg ? bg.l : themeBg.l;
-      if (Math.abs(fg.l - back) < 0.35) {
-        fg = { ...fg, l: back > 0.5 ? Math.min(fg.l, 0.38) : Math.max(fg.l, 0.72) };
-      }
-    }
-    let s = '';
-    if (fg) s += `color:${termCss(fg)};`;
-    if (bg) s += `background:${termCss(bg)};`;
-    if (st.b) s += 'font-weight:700;';
-    if (st.d && !theme.eink) s += 'opacity:.6;';
-    if (st.i) s += 'font-style:italic;';
-    if (st.u) s += 'text-decoration:underline;';
-    return s;
-  };
-  const apply = params => {
-    const p = params.length ? params.split(/[;:]/).map(Number) : [0];
-    for (let i = 0; i < p.length; i++) {
-      const n = p[i] || 0;
-      if (n === 0) Object.assign(st, { fg: null, bg: null, b: 0, d: 0, i: 0, u: 0, r: 0 });
-      else if (n === 1) st.b = 1;
-      else if (n === 2) st.d = 1;
-      else if (n === 3) st.i = 1;
-      else if (n === 4) st.u = 1;
-      else if (n === 7) st.r = 1;
-      else if (n === 22) { st.b = 0; st.d = 0; }
-      else if (n === 23) st.i = 0;
-      else if (n === 24) st.u = 0;
-      else if (n === 27) st.r = 0;
-      else if (n === 39) st.fg = null;
-      else if (n === 49) st.bg = null;
-      else if (n >= 30 && n <= 37) st.fg = { idx: n - 30 };
-      else if (n >= 90 && n <= 97) st.fg = { idx: n - 82 };
-      else if (n >= 40 && n <= 47) st.bg = { idx: n - 40 };
-      else if (n >= 100 && n <= 107) st.bg = { idx: n - 92 };
-      else if (n === 38 || n === 48) {
-        const dest = n === 38 ? 'fg' : 'bg';
-        if (p[i + 1] === 5) { st[dest] = c256(p[i + 2] || 0); i += 2; }
-        else if (p[i + 1] === 2) { st[dest] = { abs: termHsl(p[i + 2] || 0, p[i + 3] || 0, p[i + 4] || 0) }; i += 4; }
-      }
-    }
-  };
-  let out = '';
-  const parts = raw.split(/\x1b\[([0-9;:]*)m/);
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2) { apply(parts[i]); continue; }
-    let text = parts[i]
-      .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, '')
-      .replace(/\x1b[\[\(][0-9;?]*[A-Za-z@]/g, '')
-      .replace(/\x1b[=>]/g, '')
-      .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
-    // The pane pads each row with spaces to its full width, which forces a
-    // horizontal scrollbar. Trim end-of-line padding unless it paints a
-    // background (status bars keep their colored run).
-    if (!st.bg && !st.r) {
-      text = text.replace(/ +(?=\n)/g, '');
-      if (i === parts.length - 1) text = text.replace(/ +$/, '');
-    }
-    if (!text) continue;
-    const s = style();
-    out += s ? `<span style="${s}">${esc(text)}</span>` : esc(text);
-  }
-  return out;
-}
-
-// Width of the pane in characters: the rows arrive padded to the pane's full
-// width, so the longest raw row IS the pane width. Background-painted rows
-// keep that padding when rendered, so the box must match it exactly.
-function termScreenCols(raw) {
-  const plain = raw
-    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, '')
-    .replace(/\x1b[\[\(][0-9;?]*[A-Za-z@]/g, '')
-    .replace(/[\x00-\x09\x0b-\x1f\x7f]/g, '');
-  let max = 0;
-  for (const line of plain.split('\n')) {
-    if (line.length > max) max = line.length;
-  }
-  return max;
-}
-
-// Re-render the last frame when the theme flips (OS setting or data-theme),
-// so the open terminal follows the app theme at once.
-function termRepaint() {
-  if (typeof termPaintScreens === 'function') termPaintScreens();
-}
-matchMedia('(prefers-color-scheme: light)').addEventListener('change', termRepaint);
-new MutationObserver(termRepaint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-
-// Per-conversation view preference: remember that this conversation was in
-// terminal view, and land there again only while its Herdr agent is open.
-const termPrefs = (() => { try { return JSON.parse(localStorage.termPrefs || '{}'); } catch { return {}; } })();
-function setTermPref(key, on) {
-  if (on) termPrefs[key] = 1; else delete termPrefs[key];
-  try { localStorage.termPrefs = JSON.stringify(termPrefs); } catch {}
-}
-
-async function termShouldLand(rel, source) {
-  if (!termPrefs[rel] || !['claude', 'pi', 'pi-remote'].includes(source)) return false;
-  try {
-    const res = await fetch('/api/herdr/conversation?id=' + encodeURIComponent(rel));
-    const data = await res.json();
-    if (res.ok && data.open) return true;
-  } catch {}
-  setTermPref(rel, false);  // the agent is gone — land on the transcript again
-  return false;
-}
-
-function termStop() {
-  if (termStream) { termStream.close(); termStream = null; }
-  termQueue.length = 0;
-  termLastScreen = null;
-  termCaptured = false;
-  termPipOn = false;
-  const pip = $('termPip');
-  if (pip) pip.hidden = true;
-  if (termDirty && termKey) {
-    // The user typed in the terminal — re-index so the chat view is fresh.
-    termDirty = false;
-    const key = termKey;
-    fetch('/api/herdr/terminal/refresh', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: key }),
-    }).then(() => load()).catch(() => {});
-  }
-  termKey = null;
-  termAgentTitle = null;
-  updateTermBars();
-}
-
-function terminalHtml(d) {
-  const kind = d.source === 'claude' ? 'Claude Code' : 'Pi';
-  return '<div class="termwrap" id="termWrap" tabindex="0">' +
-    '<div class="termbar">' +
-      '<strong>' + kind + '</strong>' +
-      '<span class="term-status" id="termStatus">connecting…</span>' +
-      '<span class="term-hint" id="termHint"></span>' +
-      '<button class="ghost" id="termPipBtn" title="Keep the terminal as a floating picture-in-picture and go back to the transcript">pip</button>' +
-    '</div>' +
-    '<pre id="termScreen" class="termscreen">opening the Herdr terminal…</pre>' +
-  '</div>';
-}
-
-const TERM_KEYS = {
-  Enter: 'enter', Escape: 'esc', Tab: 'tab', Backspace: 'backspace',
-  ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
-};
-// Keys Herdr has no name for: send their raw terminal escape sequences as text.
-const TERM_SEQ = {
-  Delete: '\x1b[3~', Home: '\x1b[1~', End: '\x1b[4~',
-  PageUp: '\x1b[5~', PageDown: '\x1b[6~', Insert: '\x1b[2~',
-};
-
-// Map a browser key event to Herdr input. Returns null for bare modifiers,
-// 'browser' for combos left to the browser (Ctrl+Shift+…, so copy, paste and
-// devtools still work), an object otherwise.
-function termKeyItem(e) {
-  if (e.key === 'F8') return null;
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey) return 'browser';
-  const mods = ((e.ctrlKey || e.metaKey) ? 'ctrl+' : '') + (e.altKey ? 'alt+' : '');
-  if (/^F([1-9]|1[0-2])$/.test(e.key)) return { keys: [mods + e.key.toLowerCase()] };
-  const special = TERM_KEYS[e.key];
-  if (special) return { keys: [mods + (e.shiftKey ? 'shift+' : '') + special] };
-  const seq = TERM_SEQ[e.key];
-  if (seq) return { text: seq };
-  if (e.key.length === 1) {
-    if (!mods) return { text: e.key };
-    return { keys: [mods + e.key.toLowerCase()] };
-  }
-  return null;
-}
-
-// Sends are serialized so keystrokes arrive in order. The whole pending queue
-// flushes as one request; adjacent text batches into one item.
-const termQueue = [];
-let termSending = false;
-function termSend(item) {
-  const last = termQueue[termQueue.length - 1];
-  if (item.text && last && last.text) last.text += item.text;
-  else termQueue.push(item);
-  termDirty = true;
-  pumpTermQueue();
-}
-async function pumpTermQueue() {
-  if (termSending || !termKey) return;
-  termSending = true;
-  try {
-    while (termQueue.length) {
-      const seq = termQueue.splice(0, termQueue.length);
-      const res = await fetch('/api/herdr/terminal/input', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: termKey, seq }),
+  wireAgentOverlayOnce();
+  window._agentImages = window._agentImages || [];
+  window._agentLiveText = window._agentLiveText || '';
+  const send = $('agentSend');
+  const attach = $('agentAttach');
+  const files = $('agentFiles');
+  const ta = $('agentText');
+  const box = $('agentCompose');
+  const model = $('agentModel');
+  const live = $('agentOpenLive');
+  if (live) live.onclick = () => openAgentModal();
+  if (send) send.onclick = () => {
+    if (ta && ta.value.startsWith('/')) {
+      agentLiveQueue(async () => {
+        await agentLiveKeys('\r');
+        window._agentLiveText = '';
+        ta.value = '';
+        refreshAgentPane();
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.error) throw new Error(data.error || 'Input failed.');
+      return;
     }
-  } catch (e) {
-    termQueue.length = 0;
-    errToast(e.message);
-  } finally { termSending = false; }
-}
-
-// While captured, every key goes to the agent (F8 releases; Ctrl+Shift+… stays
-// with the browser). The listener runs in the capture phase, ahead of the app.
-document.addEventListener('keydown', e => {
-  if (!termStream) return;
-  if (e.key === 'F8') {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    termCaptured = !termCaptured;
-    updateTermBars();
-    return;
-  }
-  if (!termCaptured) return;
-  const item = termKeyItem(e);
-  if (item === 'browser') return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  if (item) termSend(item);
-}, true);
-document.addEventListener('paste', e => {
-  if (!termStream || !termCaptured) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  const text = (e.clipboardData || window.clipboardData).getData('text');
-  if (text) termSend({ text });
-}, true);
-
-function updateTermBars() {
-  const hint = $('termHint');
-  if (hint) hint.textContent = termCaptured
-    ? 'keys go to the agent — F8 releases them'
-    : 'keys stay in the app — F8 or a click captures them';
-  const wrap = $('termWrap');
-  if (wrap) wrap.classList.toggle('captured', termCaptured);
-  const pip = $('termPip');
-  if (pip) pip.classList.toggle('captured', termCaptured);
-  const pipStatus = $('termPipStatus');
-  if (pipStatus && !termStream) pipStatus.textContent = 'closed';
-}
-
-function termFitCols(el, screen) {
-  const cols = Math.max(40, Math.min(220, termScreenCols(screen) || 80));
-  if (el.dataset.cols !== String(cols)) {
-    el.dataset.cols = String(cols);
-    el.style.maxWidth = 'calc(' + cols + 'ch + 2 * var(--sp-3) + 2px)';
-  }
-}
-
-function termPaintScreens() {
-  if (termLastScreen == null) return;
-  const html = ansiToHtml(termLastScreen);
-  for (const id of ['termScreen', 'termPipScreen']) {
-    const el = document.getElementById(id);
-    if (!el || el.closest('[hidden]')) continue;
-    const stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    el.innerHTML = html;
-    if (stick) el.scrollTop = el.scrollHeight;
-  }
-  const wrap = $('termWrap');
-  if (wrap) termFitCols(wrap, termLastScreen);
-}
-
-function termSetStatus(status) {
-  const el = $('termStatus');
-  if (el) el.textContent = status;
-  const pipStatus = $('termPipStatus');
-  if (pipStatus) pipStatus.textContent = status;
-}
-
-// One live stream at a time. It survives view changes while the picture-in-
-// picture panel is up, so you can browse other conversations meanwhile.
-function termEnsureStream(key) {
-  if (termStream && termKey === key) return;
-  if (termStream) termStop();
-  termKey = key;
-  termCaptured = true;
-  const es = new EventSource('/api/herdr/terminal?id=' + encodeURIComponent(key));
-  termStream = es;
-  es.onmessage = event => {
-    const data = JSON.parse(event.data);
-    if (data.type === 'open') {
-      termSetStatus(data.created ? 'resumed' : data.status || 'attached');
-    } else if (data.type === 'status') {
-      termSetStatus(data.status);
-    } else if (data.type === 'frame') {
-      termSetStatus(data.status);
-      termLastScreen = data.screen || '';
-      termPaintScreens();
-    } else if (data.type === 'error') {
-      es.close();
-      if (termStream === es) termStream = null;
-      termSetStatus('error');
-      const el = $('termScreen') || $('termPipScreen');
-      if (el) el.textContent = data.error;
-      updateTermBars();
-    }
+    sendToAlacritty(send);
   };
-  es.onerror = () => termSetStatus('disconnected');
-  updateTermBars();
-}
-
-function termShowPip() {
-  termPipOn = true;
-  const entry = sessions.find(session => session.key === termKey) || {};
-  $('termPipTitle').textContent = entry.timelineTitle || entry.title || termAgentTitle || 'terminal';
-  $('termPip').hidden = false;
-  termPaintScreens();
-  updateTermBars();
-}
-
-// A live Herdr agent with no indexed conversation yet (pi and claude write
-// their session file at the first message, so a fresh project conversation
-// is invisible to the index). Bind a terminal to the agent itself so it is
-// reachable right away. Once the file appears, the agent matches a normal
-// conversation and the per-conversation terminal takes over.
-function openAgentTerminal(target, title, kind) {
-  current = null;
-  activeRel = null;
-  termAgentTitle = title || target;
-  $('view').innerHTML =
-    `<div class="convhead"><div class="ch-top"><div class="ch-title">${esc(termAgentTitle)}</div></div>` +
-    `<div class="ch-row"><span class="ch-meta">live Herdr agent · the conversation appears in the list after its first message</span></div></div>` +
-    terminalHtml({ source: kind === 'claude' ? 'claude' : 'pi' });
-  termEnsureStream('agent:' + target);
-  $('termPip').hidden = true;
-  termPipOn = false;
-  const wrap = $('termWrap');
-  wrap.addEventListener('mousedown', () => { termCaptured = true; updateTermBars(); });
-  $('termPipBtn').onclick = e => {
-    e.stopPropagation();
-    termShowPip();
-    $('view').innerHTML = '<div class="empty">the agent keeps running in the floating panel.<div class="hint">select a conversation to read it.</div></div>';
-  };
-  $('view').scrollTop = 0;
-}
-
-function wireTerminal(key) {
-  const wrap = $('termWrap');
-  if (!wrap) return;
-  termEnsureStream(key);
-  $('termPip').hidden = true;
-  termPipOn = false;
-  wrap.addEventListener('mousedown', () => { termCaptured = true; updateTermBars(); });
-  $('termPipBtn').onclick = e => {
-    e.stopPropagation();
-    termShowPip();
-    terminalMode = false;
-    renderConv('bottom');
-  };
-  termPaintScreens();
-  updateTermBars();
-}
-
-// The composer survives live-update re-renders: the DOM is replaced,
-// but the draft, focus, and caret come back. Drafts never cross conversations.
-function saveComposerDraft() {
-  const el = $('agentPrompt');
-  if (!el || el.dataset.key !== activeRel) return null;
-  return { v: el.value, f: document.activeElement === el, s: el.selectionStart, e: el.selectionEnd };
-}
-function restoreComposerDraft(draft) {
-  const el = $('agentPrompt');
-  if (!draft || !el) return;
-  el.value = draft.v;
-  if (draft.f) { el.focus(); el.setSelectionRange(draft.s, draft.e); }
+  if (attach && files) {
+    attach.onclick = () => files.click();
+    files.onchange = () => { addAgentFiles(files.files); files.value = ''; };
+  }
+  if (model) {
+    model.onchange = () => {
+      const name = model.value;
+      if (!name) return;
+      const cmd = '/model ' + name;
+      if (ta) ta.value = cmd;
+      window._agentLiveOn = true;
+      agentLiveQueue(async () => {
+        await agentLiveKeys('\x15' + cmd + '\r');
+        window._agentLiveText = '';
+        if (ta) ta.value = '';
+        model.value = '';
+        setTimeout(refreshAgentPane, 250);
+      });
+    };
+    loadAgentModels();
+  }
+  if (ta) {
+    ta.oninput = () => {
+      const v = ta.value;
+      if (v.startsWith('/') || window._agentLiveOn) {
+        window._agentLiveOn = v.startsWith('/');
+        const prev = window._agentLiveText || '';
+        if (v === prev) return;
+        let raw;
+        if (v.startsWith(prev)) raw = v.slice(prev.length);
+        else if (prev.startsWith(v)) raw = '\x7f'.repeat(prev.length - v.length);
+        else raw = '\x15' + v;
+        window._agentLiveText = v;
+        agentLiveQueue(() => agentLiveKeys(raw));
+      } else {
+        window._agentLiveText = '';
+      }
+    };
+    ta.onkeydown = e => {
+      const slash = ta.value.startsWith('/') || window._agentLiveOn;
+      if (slash && e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        agentLiveQueue(async () => {
+          await agentLiveKeys('\r');
+          window._agentLiveText = '';
+          window._agentLiveOn = false;
+          ta.value = '';
+          setTimeout(refreshAgentPane, 200);
+        });
+        return;
+      }
+      if (slash && e.key === 'Escape') {
+        e.preventDefault();
+        agentLiveQueue(async () => {
+          await agentLiveKeys('\x1b');
+          window._agentLiveText = '';
+          window._agentLiveOn = false;
+          ta.value = '';
+          refreshAgentPane();
+        });
+        return;
+      }
+      if (slash && e.key === 'Tab') {
+        e.preventDefault();
+        agentLiveQueue(() => agentLiveKeys('\t'));
+        return;
+      }
+      if (slash && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        const map = { ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C', ArrowLeft: '\x1b[D' };
+        agentLiveQueue(() => agentLiveKeys(map[e.key]));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); sendToAlacritty(send); }
+    };
+    ta.onpaste = e => {
+      const items = [...(e.clipboardData && e.clipboardData.items || [])]
+        .map(it => it.kind === 'file' ? it.getAsFile() : null).filter(Boolean);
+      if (items.length) { e.preventDefault(); addAgentFiles(items); }
+    };
+  }
+  if (box) {
+    box.ondragover = e => { e.preventDefault(); };
+    box.ondrop = e => {
+      e.preventDefault();
+      addAgentFiles(e.dataTransfer && e.dataTransfer.files);
+    };
+  }
+  renderAgentThumbs();
 }
 
 async function renderConv(scroll) {
   const d = current;
   if (!d) return;
-  const draft = saveComposerDraft();
-  if (terminalMode && ['claude', 'pi', 'pi-remote'].includes(d.source)) {
-    const entry = sessions.find(s => s.key === activeRel) || {};
-    const related = await relatedFor(activeRel);
-    if (d !== current) return;
-    $('view').innerHTML = convHead(d, entry, related) + terminalHtml(d);
-    $('copyConv').onclick = () => copyAsMarkdown([activeRel], $('copyConv'));
-    wireHead();
-    wireTerminal(activeRel);
-    return;
-  }
-  if (terminalMode) terminalMode = false;
-  // Transcript view: stop this conversation's stream unless it lives on in
-  // the picture-in-picture panel. Streams for other conversations persist.
-  // A direct agent terminal has no conversation of its own: leaving it for a
-  // transcript also stops it unless it is pipped.
-  if (termStream && !termPipOn && (termKey === activeRel || String(termKey).startsWith('agent:'))) termStop();
   const mode = viewMode;
   const q = searchMode ? $('q').value.trim() : '';
   const hl = t => {
@@ -2730,7 +4104,6 @@ async function renderConv(scroll) {
     $('copyConv').onclick = () => copyAsMarkdown([activeRel], $('copyConv'));
     wireHead();
     wireAgentComposer();
-    restoreComposerDraft(draft);
     $('view').scrollTop = scroll === 'top' ? 0 : $('view').scrollHeight;
     return;
   }
@@ -2761,7 +4134,6 @@ async function renderConv(scroll) {
   $('copyConv').onclick = () => copyAsMarkdown([activeRel], $('copyConv'));
   wireHead();
   wireAgentComposer();
-  restoreComposerDraft(draft);
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // On e-ink the transcript is paginated instead of scrolled.
   $('view').classList.remove('paged');
@@ -2837,6 +4209,8 @@ function flashCopied(btn) {
 let progressStream = null;
 
 async function open(rel, scroll) {
+  if (window.fileInk && fileInk.teardown) fileInk.teardown();
+  markSettingsClosed();
   if (progressStream) { progressStream.close(); progressStream = null; }
   activeRel = rel;
   einkPage = -1; // a fresh conversation lands on the last page
@@ -2847,9 +4221,6 @@ async function open(rel, scroll) {
     current = null;
     return;
   }
-  // Land in the remembered view: terminal only when this conversation was in
-  // terminal view before AND its Herdr agent is still open. Otherwise transcript.
-  terminalMode = await termShouldLand(rel, current.source);
   if (rel !== activeRel) return;
   await renderConv(scroll);
 }
@@ -3034,6 +4405,7 @@ function mdRender(src, q = '') {
 }
 
 function noteViewer(text, pathLabel, context = null) {
+  markSettingsClosed();
   const n = parseNote(text);
   const treeHtml = nodes => '<ul>' + nodes.map(c => {
     const id = 'n' + Math.random().toString(36).slice(2, 9);
@@ -3183,8 +4555,8 @@ function selectTreeNode(key, n, el, wrap, source) {
   const isPi = source === 'pi' || source === 'pi-remote';
   acts.innerHTML =
     `<button class="primary" data-act="read" title="Open the transcript at this message">read from here</button>` +
-    (isPi ? `<button data-act="branch" title="Continue this same conversation after this message. The tree grows a new branch here; no copy is made. If the conversation has an idle Herdr agent, it is closed automatically first.">continue from here</button>` : '') +
-    (isPi && n.role === 'user' ? `<button data-act="edit" title="Fork into a NEW session that stops just before this message, and put its text in the composer so you can edit and resend it. The original does not change.">edit this message</button>` : '') +
+    (isPi ? `<button data-act="branch" title="Continue this same conversation after this message. The tree grows a new branch here; no copy is made. Quit the Alacritty window first if this conversation is open.">continue from here</button>` : '') +
+    (isPi && n.role === 'user' ? `<button data-act="edit" title="Fork into a NEW session that stops just before this message. Open the new conversation in Alacritty to edit and resend it. The original does not change.">edit this message</button>` : '') +
     `<button data-act="fork" title="Copy the path from the start to this message into a NEW session file and continue there. The original does not change. For Claude this is the only option: its CLI always continues at the file end.">fork (copy)</button>` +
     `<span class="tmeta2">${n.count > 1 ? n.count + ' messages' : '1 message'} · ${Math.round(n.chars / 100) / 10}k chars</span>`;
   acts.onclick = ev => ev.stopPropagation();
@@ -3205,9 +4577,7 @@ async function branchFrom(key, n, btn) {
     const res = await fetch('/api/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
     const d = await res.json();
     if (d.error) throw new Error(d.error);
-    toast(d.closedAgent
-      ? 'closed the Herdr agent and branched — the next message continues from this point'
-      : 'branched — the next message continues from this point');
+    toast('branched — continue in Alacritty to resume from this point');
     openAtTs(key, n.jumpTs);
   } catch (e) {
     btn.disabled = false;
@@ -3225,15 +4595,12 @@ async function editFrom(key, n, btn) {
     const res = await fetch('/api/fork-edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
     const d = await res.json();
     if (d.error) throw new Error(d.error);
-    toast('forked before this message — edit it and send');
+    if (d.text) {
+      try { await navigator.clipboard.writeText(d.text); } catch {}
+    }
+    toast('forked before this message — the old text is on the clipboard. Continue in Alacritty to edit and resend');
     await load();
     await open(d.key);
-    const input = $('agentPrompt');
-    if (input) {
-      input.value = d.text || '';
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    }
   } catch (e) {
     btn.disabled = false;
     btn.textContent = 'edit this message';
@@ -3272,6 +4639,7 @@ async function forkFrom(key, n, btn) {
 
 // ---- epics ----
 async function showEpic(id, focusKey = activeRel) {
+  markSettingsClosed();
   const d = await (await fetch('/api/epic?id=' + encodeURIComponent(id))).json();
   if (d.error) return errToast(d.error);
   const key = focusKey && d.sessions.some(s => s.key === focusKey) ? focusKey : (d.sessions[0] && d.sessions[0].key);
@@ -3356,6 +4724,7 @@ async function showEpicEvidence(id, focusKey = activeRel) {
 }
 
 function setTab(t) {
+  if (window.fileInk && fileInk.teardown) fileInk.teardown();
   tab = t;
   delete $('list').dataset.initScroll; // each tab scrolls to "now" on first paint
   document.querySelectorAll('#tabs button[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
@@ -3473,10 +4842,10 @@ function renderTabList() {
 }
 
 // ---- Gantt layout: bottom / left / full project swimlanes / off ----
-function applyGanttMode() {
+function applyGanttMode(persist = true) {
   document.body.classList.remove('g-v', 'g-full', 'g-off');
   if (ganttMode !== 'h') document.body.classList.add('g-' + ganttMode);
-  localStorage.setItem('aiconvo.gantt', ganttMode);
+  if (persist) localStorage.setItem('aiconvo.gantt', ganttMode);
   document.querySelectorAll('#ganttSeg button').forEach(b => b.classList.toggle('on', b.dataset.g === ganttMode));
   renderTabList();
 }
@@ -3699,15 +5068,207 @@ async function buildEvidence(ids = [...selected], force = false) {
 }
 $('buildEvidence').onclick = () => buildEvidence();
 
-// ---- brand: home ----
-$('brand').onclick = () => {
-  $('q').value = ''; $('src').value = ''; $('dir').value = ''; $('ganttProject').value = ''; viewMode = 'chat'; $('densityTools').checked = false;
-  renderFiltersBtn();
-  setTab('conv');
-  applyFilter();
+// ---- settings: memory model ----
+let settingsState = null;
+let modelsState = null;
+let settingsOpen = false;
+let settingsQuery = '';
+let settingsReadyOnly = true;
+
+function settingsThinkingOptions(current, supportsThinking) {
+  const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+  return levels.map(level => {
+    const disabled = !supportsThinking && level !== 'off';
+    return `<option value="${level}"${level === current ? ' selected' : ''}${disabled ? ' disabled' : ''}>${level}</option>`;
+  }).join('');
+}
+
+function currentSettingsModel() {
+  const resolved = settingsState && settingsState.resolved || {};
+  return { provider: resolved.provider || '', model: resolved.model || '', usePiDefault: !!(settingsState && settingsState.settings && settingsState.settings.usePiDefault) };
+}
+
+function modelSupportsThinking(provider, model) {
+  const hit = modelsState && modelsState.models && modelsState.models.find(item => item.provider === provider && item.model === model);
+  return !hit || hit.thinking;
+}
+
+function renderSettings() {
+  if (!settingsOpen || !$('settingsRoot')) return;
+  const resolved = (settingsState && settingsState.resolved) || {};
+  const piDefault = (settingsState && settingsState.piDefault) || (modelsState && modelsState.piDefault) || {};
+  const ready = new Set((modelsState && modelsState.readyProviders) || (settingsState && settingsState.readyProviders) || []);
+  const current = currentSettingsModel();
+  const q = settingsQuery.trim().toLowerCase();
+  const models = (modelsState && modelsState.models) || [];
+  const filtered = models.filter(item => {
+    if (settingsReadyOnly && !ready.has(item.provider) && !(item.provider === current.provider && item.model === current.model)) return false;
+    if (!q) return true;
+    return (item.provider + '/' + item.model).toLowerCase().includes(q);
+  });
+  const groups = new Map();
+  for (const item of filtered) {
+    if (!groups.has(item.provider)) groups.set(item.provider, []);
+    groups.get(item.provider).push(item);
+  }
+  const defaultLabel = [piDefault.provider, piDefault.model].filter(Boolean).join('/') || 'pi settings';
+  const catalog = !modelsState
+    ? '<div class="empty" style="margin:10px 0;text-align:left">loading pi catalog…</div>'
+    : modelsState.error && !models.length
+      ? `<div class="empty" style="margin:10px 0;text-align:left">could not list pi models.<div class="hint">${esc(modelsState.error)}</div></div>`
+      : !filtered.length
+        ? '<div class="empty" style="margin:10px 0;text-align:left">no models match.<div class="hint">clear the search or show all providers.</div></div>'
+        : `<div class="model-list">${[...groups.entries()].map(([provider, items]) => {
+            const open = provider === current.provider || (q && items.length);
+            return `<details class="model-prov" ${open ? 'open' : ''}>
+              <summary><span class="ptitle">${esc(provider)}</span><span class="pkind">${items.length} model${items.length === 1 ? '' : 's'}${ready.has(provider) ? (provider === 'claude-code' ? ' · Claude Code login' : ' · signed in') : ''}</span></summary>
+              ${items.map(item => {
+                const on = !current.usePiDefault && item.provider === current.provider && item.model === current.model;
+                return `<button class="model-row${on ? ' on' : ''}" data-set-provider="${esc(item.provider)}" data-set-model="${esc(item.model)}" data-set-context="${item.context}" data-set-thinking="${item.thinking ? '1' : '0'}">
+                  <span class="name">${esc(item.model)}</span>
+                  <span class="meta">${esc(item.contextLabel || '')}${item.thinking ? ' · think' : ''}${on ? ' · current' : ''}</span>
+                </button>`;
+              }).join('')}
+            </details>`;
+          }).join('')}</div>`;
+  $('settingsRoot').innerHTML = `<div class="settings-view">
+    <div class="phead">
+      <h2>settings</h2>
+      <div class="pmeta">memory model · ${esc(resolved.label || 'not set')} · ${esc(fmtTokens(resolved.contextTokens))} · thinking ${esc(resolved.thinking || 'off')}</div>
+      <div class="pactions"><button id="setBack" class="ghost">back</button></div>
+    </div>
+    <section class="psection">
+      <h3>memory model</h3>
+      <p class="hint">Notes, evidence, epics, titles, and project memory use this Pi model. The change applies to the next model call.</p>
+      <label for="setThinking">thinking</label>
+      <select id="setThinking">${settingsThinkingOptions(resolved.thinking || 'off', modelSupportsThinking(current.provider, current.model))}</select>
+      <div class="pactions" style="margin-top:var(--sp-2)">
+        <button id="setPiDefault"${current.usePiDefault ? ' class="primary"' : ''}>use pi default (${esc(defaultLabel)})</button>
+      </div>
+    </section>
+    <section class="psection">
+      <h3>pi catalog</h3>
+      <div class="settings-tools">
+        <input id="setModelQ" type="search" placeholder="search provider or model" value="${esc(settingsQuery)}">
+        <label><input id="setReadyOnly" type="checkbox"${settingsReadyOnly ? ' checked' : ''}> signed-in providers only</label>
+        <button id="setRefresh" class="ghost">reload catalog</button>
+      </div>
+      <div id="setModels">${catalog}</div>
+    </section>
+  </div>`;
+  $('setBack').onclick = () => closeSettings();
+  $('setThinking').onchange = () => saveSettings({ thinking: $('setThinking').value });
+  $('setPiDefault').onclick = () => saveSettings({ usePiDefault: true, provider: '', model: '' });
+  $('setModelQ').oninput = () => { settingsQuery = $('setModelQ').value; renderSettings(); $('setModelQ').focus(); const el = $('setModelQ'); el.setSelectionRange(el.value.length, el.value.length); };
+  $('setReadyOnly').onchange = () => { settingsReadyOnly = $('setReadyOnly').checked; renderSettings(); };
+  $('setRefresh').onclick = () => loadModels(true);
+  $('settingsRoot').querySelectorAll('[data-set-model]').forEach(btn => btn.onclick = () => saveSettings({
+    usePiDefault: false,
+    provider: btn.dataset.setProvider,
+    model: btn.dataset.setModel,
+    contextTokens: Number(btn.dataset.setContext) || undefined,
+    thinking: btn.dataset.setThinking === '1' ? (settingsState && settingsState.settings && settingsState.settings.thinking) || 'off' : 'off',
+  }));
+}
+
+async function loadSettings() {
+  const res = await fetch('/api/settings');
+  settingsState = await res.json();
+  if (settingsState && settingsState.resolved) {
+    $('settingsBtn').title = 'Memory model: ' + settingsState.resolved.label + ' (,)';
+  }
+  if (settingsOpen) renderSettings();
+}
+
+async function loadModels(refresh = false) {
+  if (refresh) modelsState = null;
+  if (settingsOpen) renderSettings();
+  const res = await fetch('/api/models' + (refresh ? '?refresh=1' : ''));
+  modelsState = await res.json();
+  if (settingsOpen) renderSettings();
+}
+
+async function saveSettings(patch) {
+  const current = (settingsState && settingsState.settings) || {};
+  const res = await fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...current, ...patch }),
+  });
+  const data = await res.json();
+  if (data.error) return errToast(data.error);
+  settingsState = data;
+  $('settingsBtn').title = 'Memory model: ' + data.resolved.label + ' (,)';
+  toast('memory model: ' + data.resolved.label);
+  renderSettings();
+}
+
+async function showSettings() {
+  settingsOpen = true;
+  location.hash = 'settings';
+  $('settingsBtn').classList.add('on');
+  $('view').innerHTML = '<div id="settingsRoot"></div>';
+  renderSettings();
+  if (!settingsState) await loadSettings();
+  else renderSettings();
+  if (!modelsState) loadModels();
+}
+
+function markSettingsClosed() {
+  settingsOpen = false;
+  if ($('settingsBtn')) $('settingsBtn').classList.remove('on');
+}
+function closeSettings() {
+  if (!settingsOpen) return;
+  markSettingsClosed();
+  if (location.hash.replace(/^#/, '') === 'settings') location.hash = '';
   $('view').innerHTML = '<div class="empty">select a conversation to read it.<div class="hint">press / to search</div></div>';
-  activeRel = null; current = null;
-  render();
+}
+
+$('settingsBtn').onclick = () => settingsOpen ? closeSettings() : showSettings();
+
+let chromeState = localStorage.getItem('aiconvo.chrome') || 'full';
+if (!['full', 'min', 'gantt'].includes(chromeState)) chromeState = 'full';
+let chromeGanttSaved = localStorage.getItem('aiconvo.gantt') || 'h';
+function setChromeState(state) {
+  chromeState = state;
+  localStorage.setItem('aiconvo.chrome', state);
+  document.body.classList.toggle('chrome-min', state !== 'full');
+  document.body.classList.toggle('chrome-gantt', state === 'gantt');
+  $('brand').title = state === 'full'
+    ? 'Hide the top bar and Gantt. Shift-click to go home.'
+    : state === 'min'
+      ? 'Open the conversation Gantt full screen. Shift-click to go home.'
+      : 'Show the top bar. Shift-click to go home.';
+  if (state !== 'full') {
+    if ($('filtersPop')) $('filtersPop').hidden = true;
+    if ($('agentsPop')) $('agentsPop').hidden = true;
+    if ($('jobsTray')) $('jobsTray').hidden = true;
+  }
+  if (state === 'gantt') {
+    chromeGanttSaved = ['h', 'v', 'full', 'off'].includes(ganttMode) && ganttMode !== 'full' ? ganttMode : (chromeGanttSaved || 'h');
+    ganttMode = 'full';
+    applyGanttMode(false);
+  } else if (ganttMode === 'full' && chromeGanttSaved && chromeGanttSaved !== 'full') {
+    ganttMode = chromeGanttSaved;
+    applyGanttMode(false);
+  }
+}
+setChromeState(chromeState);
+$('brand').onclick = e => {
+  if (e.shiftKey) {
+    setChromeState('full');
+    $('q').value = ''; $('src').value = ''; $('dir').value = ''; $('ganttProject').value = ''; viewMode = 'chat'; $('densityTools').checked = false;
+    renderFiltersBtn();
+    setTab('conv');
+    applyFilter();
+    closeSettings();
+    $('view').innerHTML = '<div class="empty">select a conversation to read it.<div class="hint">press / to search</div></div>';
+    activeRel = null; current = null;
+    render();
+    return;
+  }
+  setChromeState(chromeState === 'full' ? 'min' : chromeState === 'min' ? 'gantt' : 'full');
 };
 
 // ---- search wiring ----
@@ -3738,16 +5299,28 @@ function moveActive(dir) {
 }
 
 document.addEventListener('keydown', e => {
-  // Shortcuts never fire while typing: any field, editable region, or the Herdr terminal.
-  const inField = e.target.closest && e.target.closest('input, select, textarea, [contenteditable="true"], #termWrap');
+  // Shortcuts never fire while typing in a field or editable region.
+  const inField = e.target.closest && e.target.closest('input, select, textarea, [contenteditable="true"]');
   if (e.key === 'Escape') {
+    if (document.body.classList.contains('file-full')) { exitFileDiffFull(); return; }
+    if (agentModalOpen()) {
+      if (window._agentLiveOn || (($('agentText') || {}).value || '').startsWith('/')) return;
+      closeAgentModal();
+      return;
+    }
     if (!$('epicOverlay').hidden) return closeEpicDialog();
     if (!$('helpOverlay').hidden) { $('helpOverlay').hidden = true; return; }
+    if (settingsOpen) { closeSettings(); return; }
     if (!$('jobsTray').hidden) return toggleJobs(false);
     if (!$('filtersPop').hidden) { $('filtersPop').hidden = true; return; }
     if (!$('agentsPop').hidden) { toggleAgents(false); return; }
     if (inField) { e.target.blur(); return; }
     if (searchMode) { $('q').value = ''; applyFilter(); }
+    return;
+  }
+  if (agentModalOpen()) {
+    const ta = $('agentText');
+    if (!inField && ta) ta.focus();
     return;
   }
   if (inField) return;
@@ -3759,6 +5332,15 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     const btn = $((e.key === ']' || e.key === 'PageDown') ? 'pgNext' : 'pgPrev');
     if (btn && !btn.disabled) btn.click();
+    return;
+  }
+  if ($('fgRoot') && ['+', '=', '-', '_', '0', 'n', 'b'].includes(e.key)) {
+    e.preventDefault();
+    if (e.key === '+' || e.key === '=') $('fgPlus').click();
+    else if (e.key === '-' || e.key === '_') $('fgMinus').click();
+    else if (e.key === '0') { fileGanttScale = 160; fileGanttInitialScroll = true; renderFileGanttChart(); }
+    else if (e.key === 'n') $('fgNow').click();
+    else $('fgBegin').click();
     return;
   }
   switch (e.key) {
@@ -3793,6 +5375,7 @@ document.addEventListener('keydown', e => {
     case 'b': jumpToStart(); break;
     case 't': e.preventDefault(); $('ganttDate').focus(); break;
     case 'a': toggleAgents(); break;
+    case ',': e.preventDefault(); settingsOpen ? closeSettings() : showSettings(); break;
     case 'j': toggleJobs(); break;
     case 'p': {
       const entry = activeRel && sessions.find(s => s.key === activeRel);
@@ -3855,18 +5438,38 @@ live.onmessage = ev => {
   if (d.type === 'job') {
     const old = jobs.get(d.job.id);
     updateJob(d.job);
-    if (d.job.status === 'done' && (!old || old.status === 'running')) {
+    if (d.job.status === 'done' && (!old || old.status === 'running') && !d.job.parentId) {
       if (d.job.type === 'epic') relatedCache.clear();
       else if (d.job.key) relatedCache.delete(d.job.key);
-      const label = d.job.type === 'epic' ? 'epic saved' : d.job.type === 'evidence' ? 'evidence ready' : 'note saved';
+      const label = d.job.type === 'epic' ? 'epic saved' :
+        d.job.type === 'evidence' ? 'evidence ready' :
+        d.job.type === 'project-distill' ? 'all project notes ready' :
+        d.job.type === 'project-memory' ? 'project memory ready' : 'note saved';
       toast('✓ ' + label + ': ' + d.job.title, () => {
         if (d.job.type === 'epic') showEpic(d.job.epicId);
         else if (d.job.type === 'evidence' && (d.job.result?.sessionIds?.length === 1 || d.job.key)) showConversationEvidence(d.job.key || d.job.result.sessionIds[0]);
+        else if (d.job.type === 'project-distill' || d.job.type === 'project-memory') showProjectOverview(d.job.project);
         else if (d.job.type === 'distill') startDistill(d.job.key);
       }, 'ok');
+      if ((d.job.type === 'project-distill' || d.job.type === 'project-memory') && projectOverviewName === d.job.project && $('projectStart')) {
+        showProjectOverview(d.job.project).then(() => {
+          if (d.job.type === 'project-distill' && $('pMemNotes')) $('pMemNotes').checked = true;
+        });
+      }
     }
-    if (d.job.status === 'error' && (!old || old.status === 'running'))
-      errToast((d.job.type === 'epic' ? 'epic failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
+    if (d.job.status === 'error' && (!old || old.status === 'running') && !d.job.parentId) {
+      errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'project-memory' ? 'project memory failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
+      if (d.job.type === 'project-memory' && projectOverviewName === d.job.project && $('pMemoryBuild')) {
+        $('pMemoryBuild').disabled = false;
+        $('pMemoryBuild').textContent = 'retry project memory';
+      }
+      if (d.job.type === 'project-distill' && projectOverviewName === d.job.project && $('projectStart')) {
+        $('pDistillAll').disabled = false;
+        $('pDistillAll').textContent = 'retry note update';
+        $('pStart').disabled = false;
+        $('pStartStatus').textContent = ' some notes failed';
+      }
+    }
     return;
   }
   if (d.type !== 'update') return;
@@ -3899,18 +5502,26 @@ live.onmessage = ev => {
 // refresh the █ markers as sessions go quiet
 setInterval(() => { if (!searchMode && tab === 'conv') render(); }, 60000);
 
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && document.body.classList.contains('file-full')) exitFileDiffFull();
+});
 updateScaleSeg();
 applyGanttMode();
 loadJobs();
+loadSettings();
 load().then(() => {
   const h = decodeURIComponent(location.hash.slice(1));
-  if (h.startsWith('note=')) {
+  if (h === 'settings') {
+    showSettings();
+  } else if (h.startsWith('note=')) {
     openNoteFile(h.slice(5));
   } else if (h.startsWith('tree=')) {
     showTree(h.slice(5));
   } else if (h.startsWith('project=')) {
     const project = h.slice(8);
-    project.endsWith('&diffs') ? showProjectDiffs(project.slice(0, -6)) : showProjectOverview(project);
+    if (project.endsWith('&files')) showProjectFileHistory(project.slice(0, -6));
+    else if (project.endsWith('&diffs')) showProjectDiffs(project.slice(0, -6));
+    else showProjectOverview(project);
   } else if (h.startsWith('diffs=')) {
     showConversationDiffs(h.slice(6));
   } else if (h.startsWith('blame=')) {
@@ -3919,6 +5530,9 @@ load().then(() => {
 });
 setInterval(load, 30000);
 setInterval(loadJobs, 15000);
+if (window.isSecureContext && navigator.serviceWorker) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>

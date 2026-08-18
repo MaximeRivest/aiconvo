@@ -7,11 +7,14 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const os = require('os');
+const crypto = require('crypto');
 const readline = require('readline');
 const net = require('net');
-const { execFile, spawn } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 const { claudeForkContent } = require('./sessionfork.js');
+const settingsLib = require('./settings.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
@@ -23,6 +26,70 @@ const CACHE_DIR = path.join(os.homedir(), '.cache', 'aiconvo');
 const SESS_DIR = path.join(CACHE_DIR, 'sessions');
 const INDEX_FILE = path.join(CACHE_DIR, 'index.json');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7433;
+const HOST = process.env.AICONVO_HOST || (process.env.AICONVO_LAN === '1' ? '0.0.0.0' : '127.0.0.1');
+const TLS_PORT = process.env.AICONVO_TLS_PORT ? Number(process.env.AICONVO_TLS_PORT) : 7443;
+const LAN_TOKEN_FILE = path.join(CACHE_DIR, 'lan-token');
+function loadLanToken() {
+  if (process.env.AICONVO_TOKEN) return String(process.env.AICONVO_TOKEN);
+  if (HOST === '127.0.0.1' || HOST === '::1') return '';
+  try {
+    const existing = fs.readFileSync(LAN_TOKEN_FILE, 'utf8').trim();
+    if (existing) return existing;
+  } catch {}
+  const created = crypto.randomBytes(18).toString('base64url');
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+  fs.writeFileSync(LAN_TOKEN_FILE, created + '\n', { mode: 0o600 });
+  return created;
+}
+const LAN_TOKEN = loadLanToken();
+function requestIp(req) {
+  return String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+}
+function isLocalRequest(req) {
+  const ip = requestIp(req);
+  return ip === '127.0.0.1' || ip === '::1';
+}
+function cookieValue(req, name) {
+  const raw = String(req.headers.cookie || '');
+  for (const part of raw.split(';')) {
+    const at = part.indexOf('=');
+    if (at < 0) continue;
+    if (part.slice(0, at).trim() !== name) continue;
+    return decodeURIComponent(part.slice(at + 1).trim());
+  }
+  return '';
+}
+function hasLanToken(req) {
+  if (!LAN_TOKEN) return false;
+  if (cookieValue(req, 'aiconvo') === LAN_TOKEN) return true;
+  const hdr = String(req.headers.authorization || '');
+  if (hdr.startsWith('Bearer ') && hdr.slice(7) === LAN_TOKEN) return true;
+  if (hdr.startsWith('Basic ')) {
+    const decoded = Buffer.from(hdr.slice(6), 'base64').toString('utf8');
+    const pass = decoded.includes(':') ? decoded.slice(decoded.indexOf(':') + 1) : decoded;
+    return pass === LAN_TOKEN;
+  }
+  return false;
+}
+function lanLoginPage(error = '') {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo</title>
+<style>html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:28rem;margin:12vh auto;padding:1rem}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}</style></head>
+<body><main><p>Enter the LAN token from the laptop. After this, the tablet stays signed in.</p>
+${error ? `<p class="err">${error.replace(/</g, '&lt;')}</p>` : ''}
+<form method="post" action="/login"><label for="token">token</label><input id="token" name="token" autocomplete="off" autofocus><button type="submit">open aiconvo</button></form></main></body></html>`;
+}
+function lanAddresses() {
+  const nets = os.networkInterfaces();
+  const out = [];
+  for (const list of Object.values(nets)) {
+    for (const net of list || []) {
+      if (net.internal || net.family !== 'IPv4') continue;
+      if (net.address.startsWith('172.') || net.address.startsWith('10.0.3.') || net.address.startsWith('192.168.122.') || net.address.startsWith('192.168.250.')) continue;
+      out.push(net.address);
+    }
+  }
+  return out;
+}
 
 fs.mkdirSync(SESS_DIR, { recursive: true });
 
@@ -233,6 +300,10 @@ async function indexFile(source, relPath, stat) {
     const firstUser = messages.find(m => m.role === 'user');
     const fullTitle = firstUser ? firstUser.text.slice(0, 200).replace(/\s+/g, ' ').trim() : '(no user message)';
     const titleHash = crypto.createHash('sha256').update('v2\x00' + fullTitle).digest('hex').slice(0, 16);
+    const memoryHash = crypto.createHash('sha256').update('v1\x00' + JSON.stringify(
+      messages.filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => [m.role, m.text || '', m.ts || null, !!m.off])
+    )).digest('hex').slice(0, 24);
     const savedTimelineTitle = timelineTitles[key];
     const entry = {
       v: CACHE_VERSION,
@@ -250,6 +321,7 @@ async function indexFile(source, relPath, stat) {
       timelineTitle: savedTimelineTitle && savedTimelineTitle.hash === titleHash
         ? savedTimelineTitle.title : timelineTitle(fullTitle),
       timelineTitleHash: titleHash,
+      memoryHash,
       firstTs: meta.firstTs,
       lastTs: meta.lastTs,
       userCount: messages.filter(m => m.role === 'user').length,
@@ -658,7 +730,7 @@ function sessionPathsFor(key) {
 }
 
 // Per-session-file operation queue: fork and branch surgery on one file never
-// interleaves. Live ownership (an open Herdr agent) is checked separately.
+// interleaves. Live ownership (a running pi/claude process) is checked separately.
 const sessionFileOps = new Map();
 function withSessionOp(absPath, fn) {
   const prev = sessionFileOps.get(absPath) || Promise.resolve();
@@ -732,31 +804,10 @@ async function branchSession(key, nodeId) {
   if (entry.source === 'claude')
     throw new Error('Claude cannot branch in place — its CLI always continues at the file end. Use fork instead.');
   // A running pi keeps its own leaf in memory and would ignore the new anchor.
-  // Close the conversation's Herdr agent automatically — but only when it is
-  // not working. Killing active work silently would lose more than a warning.
-  // pi persists every entry as it happens, so closing an idle pi is safe.
-  let closedAgent = false;
-  {
-    let agents = [];
-    try { agents = await herdrAgents(); } catch {} // herdr not running: nothing to close
-    const info = herdrConversationInfo(key);
-    const agent = agents.find(item => agentMatchesConversation(item, info));
-    if (agent) {
-      if (agent.agent_status === 'working') {
-        throw new Error("This conversation's Herdr agent is working. Wait for it to finish, then branch.");
-      }
-      await herdrApi('pane.close', { pane_id: agent.pane_id });
-      // The anchor only works once the agent is really gone.
-      const deadline = Date.now() + 8000;
-      for (;;) {
-        let still = null;
-        try { still = (await herdrAgents()).find(item => agentMatchesConversation(item, info)); } catch {}
-        if (!still) break;
-        if (Date.now() > deadline) throw new Error('Could not close the Herdr agent. Close it in Herdr, then branch.');
-        await new Promise(resolve => setTimeout(resolve, 250));
-      }
-      closedAgent = true;
-    }
+  // Refuse if a process still holds this session. Do not kill a native TUI.
+  const running = findRunningConversation(key);
+  if (running) {
+    throw new Error('This conversation is open in a terminal (pid ' + running.pid + '). Quit that window, then branch.');
   }
   const absPath = absPathForKey(key);
   return withSessionOp(absPath, async () => {
@@ -775,14 +826,13 @@ async function branchSession(key, nodeId) {
       targetId: nodeId,
     };
     await fsp.appendFile(absPath, JSON.stringify(anchor) + '\n');
-    return { ok: true, key, node: nodeId, closedAgent };
+    return { ok: true, key, node: nodeId };
   });
 }
 
 // ---------- distillation ----------
 // Two steps. Step 1 maps the full conversation into a problem tree.
 // Step 2 distills each problem with generous context (too much beats too little).
-const crypto = require('crypto');
 const NOTES_DIR = path.join(os.homedir(), 'notes', 'aiconvo');
 const EPICS_DIR = path.join(NOTES_DIR, 'epics');
 const EPICS_FILE = path.join(CACHE_DIR, 'epics.json');
@@ -820,20 +870,95 @@ const segHash = (seg, title) => crypto.createHash('sha256').update('v1\x00' + ti
 const TREES_DIR = path.join(CACHE_DIR, 'trees');
 fs.mkdirSync(TREES_DIR, { recursive: true });
 const treePathFor = key => path.join(TREES_DIR, key.replace(/[:\/\\]/g, '__') + '.json');
-const PI_ARGS = [
-  '-p', '--no-session', '--no-tools', '--no-extensions', '--no-skills',
-  '--no-prompt-templates', '--no-context-files', '--thinking', 'off',
-  '--provider', 'openai-codex', '--model', 'gpt-5.6-sol',
-];
-const PI_CONTEXT_TOKENS = 272000;
-const PI_TARGET_TOKENS = Math.floor(PI_CONTEXT_TOKENS * 0.80);
+const SETTINGS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'settings.json');
+const PI_SETTINGS_FILE = path.join(os.homedir(), '.pi', 'agent', 'settings.json');
+const PI_AUTH_FILE = path.join(os.homedir(), '.pi', 'agent', 'auth.json');
+const CLAUDE_CODE_CRED_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
+const CLAUDE_CODE_EXT = path.join(os.homedir(), '.pi', 'agent', 'extensions', 'claude-code-fable-5', 'index.ts');
+let appSettings = settingsLib.normalizeSettings(settingsLib.DEFAULT_SETTINGS);
+try { appSettings = settingsLib.normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch {}
+function saveAppSettings() {
+  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(appSettings, null, 2) + '\n', { mode: 0o600 });
+}
+function readPiDefault() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(PI_SETTINGS_FILE, 'utf8'));
+    return { provider: raw.defaultProvider || '', model: raw.defaultModel || '' };
+  } catch { return { provider: '', model: '' }; }
+}
+function readyProviders() {
+  const ready = new Set();
+  try {
+    for (const name of Object.keys(JSON.parse(fs.readFileSync(PI_AUTH_FILE, 'utf8')))) ready.add(name);
+  } catch {}
+  // claude-code auth lives in the Claude Code CLI login, not Pi auth.json.
+  try {
+    if (settingsLib.hasClaudeCodeCredential(JSON.parse(fs.readFileSync(CLAUDE_CODE_CRED_FILE, 'utf8')))) {
+      ready.add('claude-code');
+    }
+  } catch {}
+  return [...ready];
+}
+let modelsCache = { at: 0, models: [], text: '', error: null };
+let modelsPending = null;
+function listPiModels(force = false) {
+  if (!force && modelsCache.models.length && Date.now() - modelsCache.at < 5 * 60 * 1000) {
+    return Promise.resolve(modelsCache);
+  }
+  if (modelsPending) return modelsPending;
+  modelsPending = new Promise(resolve => {
+    execFile('pi', ['--list-models'], { timeout: 30000, maxBuffer: 2 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        modelsCache = {
+          at: Date.now(),
+          models: modelsCache.models || [],
+          text: modelsCache.text || '',
+          error: String(stderr || '').trim() || err.message,
+        };
+      } else {
+        modelsCache = { at: Date.now(), models: settingsLib.parseListModels(stdout), text: stdout, error: null };
+      }
+      modelsPending = null;
+      resolve(modelsCache);
+    });
+  });
+  return modelsPending;
+}
+function piArgs() {
+  return settingsLib.buildPiArgs(appSettings, {
+    claudeCodeExtension: fs.existsSync(CLAUDE_CODE_EXT) ? CLAUDE_CODE_EXT : '',
+  });
+}
+function piContextTokens() {
+  return appSettings.contextTokens || settingsLib.DEFAULT_CONTEXT_TOKENS;
+}
+function piTargetTokens() { return Math.floor(piContextTokens() * 0.80); }
+function currentModelLabel() { return settingsLib.modelLabel(appSettings, readPiDefault()); }
+function settingsResponse() {
+  const piDefault = readPiDefault();
+  return {
+    settings: appSettings,
+    resolved: {
+      provider: appSettings.usePiDefault ? piDefault.provider : appSettings.provider,
+      model: appSettings.usePiDefault ? piDefault.model : appSettings.model,
+      label: currentModelLabel(),
+      contextTokens: piContextTokens(),
+      thinking: appSettings.thinking,
+    },
+    piDefault,
+    readyProviders: readyProviders(),
+    path: SETTINGS_FILE,
+  };
+}
 // Code and JSON can use close to one token per two bytes. This is safer than chars / 4.
 const estimateInputTokens = text => Math.max(
   Math.ceil(Buffer.byteLength(String(text), 'utf8') / 2),
   Math.ceil(String(text).split(/\s+/).filter(Boolean).length * 1.35),
 );
 
-function splitTextToTokenBudget(text, tokenBudget = PI_TARGET_TOKENS) {
+function splitTextToTokenBudget(text, tokenBudget) {
+  if (tokenBudget == null) tokenBudget = piTargetTokens();
   const input = String(text);
   if (estimateInputTokens(input) <= tokenBudget) return [input];
   const parts = [];
@@ -858,7 +983,7 @@ function runPi(fileContent, prompt, onChunk) {
   return new Promise((resolve, reject) => {
     const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
     fs.writeFileSync(tmp, fileContent);
-    const child = execFile('pi', [...PI_ARGS, '@' + tmp, prompt], { maxBuffer: 64 * 1024 * 1024, timeout: 600000 },
+    const child = execFile('pi', [...piArgs(), '@' + tmp, prompt], { maxBuffer: 64 * 1024 * 1024, timeout: 600000 },
       (err, stdout, stderr) => {
         fs.unlink(tmp, () => {});
         if (err) reject(new Error(stderr.trim() || err.message));
@@ -1157,7 +1282,7 @@ async function summarizeEpicSection(section, prompt, emit, depth = 0) {
 
 async function summarizeLargeEpicEvidence(transcript, emit = () => {}) {
   const promptReserve = 6000;
-  const sections = splitTextToTokenBudget(transcript, PI_TARGET_TOKENS - promptReserve);
+  const sections = splitTextToTokenBudget(transcript, piTargetTokens() - promptReserve);
   if (sections.length === 1) return summarizeEpicSection(transcript, EPIC_EVIDENCE_PROMPT, emit);
   const summaries = await mapLimit(sections, 3, async (section, i) => {
     emit({ phase: 'section', section: i + 1, sections: sections.length });
@@ -1171,12 +1296,12 @@ async function summarizeLargeEpicEvidence(transcript, emit = () => {}) {
   });
   let level = summaries.map((text, i) => `=== SECTION ${i + 1}/${summaries.length} ===\n${text}`);
   let pass = 1;
-  while (level.length > 1 || estimateInputTokens(level[0]) > PI_TARGET_TOKENS - promptReserve) {
+  while (level.length > 1 || estimateInputTokens(level[0]) > piTargetTokens() - promptReserve) {
     const groups = [];
     let group = [], tokens = 0;
     for (const item of level) {
       const n = estimateInputTokens(item);
-      if (group.length && tokens + n > PI_TARGET_TOKENS - promptReserve) { groups.push(group); group = []; tokens = 0; }
+      if (group.length && tokens + n > piTargetTokens() - promptReserve) { groups.push(group); group = []; tokens = 0; }
       group.push(item); tokens += n;
     }
     if (group.length) groups.push(group);
@@ -1258,6 +1383,389 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
+// ---------- project-level memory ----------
+// A project memory bundle separates durable intent from implementation detail.
+// It also keeps setup facts, current work, and reviewable epic candidates.
+const PROJECT_MEMORY_DIR = path.join(NOTES_DIR, 'projects');
+const PROJECT_MEMORY_INPUTS_DIR = path.join(CACHE_DIR, 'project-memory');
+fs.mkdirSync(PROJECT_MEMORY_DIR, { recursive: true });
+fs.mkdirSync(PROJECT_MEMORY_INPUTS_DIR, { recursive: true });
+
+const PROJECT_PROFILE_PROMPT =
+  'The attached file contains dated, session-id-tagged notes or evidence for one software project. ' +
+  'Build a durable project profile. Separate the user purpose from current implementation. ' +
+  'Find coherent multi-session epic candidates not already covered by the listed existing epics. ' +
+  'Extract practical environment facts, but NEVER output passwords, tokens, private keys, secret values, or copied credentials. ' +
+  'Use dates and prefer the newest evidence. Do not present superseded tools or setup as current; put unresolved conflicts in cautions. ' +
+  'For authentication, state only the method, command, variable name, or credential location. ' +
+  'Infer unfinished work only from clear evidence. This build itself creates the overview, deep-intent, environment, status, and reviewable epic-candidate artifacts. Do not list creation of those outputs as unfinished work. ' +
+  'Reply with STRICT JSON only, no prose or code fence: ' +
+  '{"overview":{"summary":"2-4 sentences","purpose":"...","vision":"...","desiredOutcomes":["..."],"principles":["..."],"nonGoals":["..."]},' +
+  '"environment":{"summary":"...","setup":["..."],"commands":["..."],"services":["..."],"locations":["..."],"tooling":["..."],"authentication":["..."],"cautions":["..."]},' +
+  '"status":{"recentFocus":["..."],"unfinished":["..."],"todos":["..."],"openQuestions":["..."]},' +
+  '"epicCandidates":[{"title":"max 70 chars","abstract":"2-4 sentences","reason":"...","sessionIds":["exact session id"]}]}. ' +
+  'Epic candidates need at least two related sessions. Use only exact session ids from the input.';
+
+const PROJECT_PROFILE_PARTIAL_PROMPT = PROJECT_PROFILE_PROMPT +
+  ' This is one chronological section of a larger project. Produce a partial profile for later merging.';
+
+const INTENT_CLASSIFY_PROMPT =
+  'The attached JSON contains a high-level project overview and user messages. Each user message includes the assistant response immediately before it when available. ' +
+  'Classify EVERY item, but return only messages that reveal durable, implementation-independent user intent. ' +
+  'Intent includes vision, motivation, desired outcome or experience, values, product principles, durable constraints, trade-offs, and explicit non-goals. ' +
+  'Do not select routine commands, narrow implementation requests, status checks, or transient fixes unless they clearly reveal a deeper durable intent. ' +
+  'Reply with STRICT JSON only: {"selected":[{"id":N,"kind":"vision|motivation|outcome|principle|constraint|preference|non-goal","confidence":0.0,"reason":"one line"}]}.';
+
+const INTENT_SYNTHESIS_PROMPT =
+  'The attached file contains all user messages classified as durable project intent, with the preceding assistant response for context. ' +
+  'Recover what the user truly wants to achieve, why it matters, and what must remain true across implementation changes. ' +
+  'Resolve repetition and evolution. Keep tensions instead of forcing false agreement. Do not turn current implementation details into goals. ' +
+  'Reply with STRICT JSON only: {"coreIntent":"...","vision":"...","whatMatters":["..."],"desiredOutcomes":["..."],"principles":["..."],"constraints":["..."],"tensions":["..."],"nonGoals":["..."],"openIntentQuestions":["..."]}.';
+
+const INTENT_PARTIAL_PROMPT = INTENT_SYNTHESIS_PROMPT +
+  ' This is one section of a larger evidence set. Produce a partial intent model for later merging.';
+const INTENT_MERGE_PROMPT = INTENT_SYNTHESIS_PROMPT +
+  ' The attached file contains partial intent models. Merge them without losing disagreements or changes over time.';
+
+function modelJson(raw) {
+  return JSON.parse(String(raw).replace(/^```(?:json)?\s*|\s*```$/g, ''));
+}
+
+function projectMemorySlug(project) {
+  const slug = String(project || 'project').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'project';
+  const hash = crypto.createHash('sha256').update(String(project)).digest('hex').slice(0, 8);
+  return `${slug}-${hash}`;
+}
+
+function projectMemoryPaths(project) {
+  const dir = path.join(PROJECT_MEMORY_DIR, projectMemorySlug(project));
+  return {
+    dir,
+    manifest: path.join(dir, 'manifest.json'),
+    overview: path.join(dir, 'overview.md'),
+    intent: path.join(dir, 'intent.md'),
+    environment: path.join(dir, 'environment.md'),
+    status: path.join(dir, 'status.md'),
+    inputs: path.join(PROJECT_MEMORY_INPUTS_DIR, projectMemorySlug(project) + '.json'),
+  };
+}
+
+function projectSourceHash(meta) {
+  const rows = meta.entries.map(({ key, entry }) => [
+    key, entry.memoryHash || `legacy:${entry.lastTs || ''}:${entry.userCount || 0}:${entry.assistantCount || 0}`,
+    entry.notePath || '', entry.notedAt || 0,
+  ])
+    .sort((a, b) => a[0].localeCompare(b[0]));
+  return crypto.createHash('sha256').update('project-memory-v1\x00' + JSON.stringify(rows)).digest('hex').slice(0, 32);
+}
+
+const clipped = (text, max = 12000) => {
+  const value = String(text || '');
+  if (value.length <= max) return value;
+  const side = Math.floor((max - 80) / 2);
+  return value.slice(0, side) + '\n… [middle omitted for project analysis] …\n' + value.slice(-side);
+};
+
+function stringItems(value) {
+  return Array.isArray(value) ? value.map(x => oneLine(x, '')).filter(Boolean) : [];
+}
+
+function packTextBlocks(blocks, budget) {
+  const groups = [];
+  let group = [], tokens = 0;
+  for (const block of blocks) {
+    const pieces = estimateInputTokens(block) > budget ? splitTextToTokenBudget(block, budget) : [block];
+    for (const piece of pieces) {
+      const n = estimateInputTokens(piece);
+      if (group.length && tokens + n > budget) { groups.push(group); group = []; tokens = 0; }
+      group.push(piece); tokens += n;
+    }
+  }
+  if (group.length) groups.push(group);
+  return groups;
+}
+
+async function projectSourceBlocks(meta) {
+  const rows = [];
+  const sorted = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
+  for (const { key, entry } of sorted) {
+    let data = null;
+    try { data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')); } catch { continue; }
+    let memory = '', source = 'raw excerpt';
+    if (entry.notePath) {
+      try {
+        memory = await fsp.readFile(entry.notePath, 'utf8');
+        const noteState = noteStateForEntry(entry);
+        source = noteState === 'fresh' ? 'fresh note' : 'stale note plus recent raw chat';
+        if (noteState === 'stale') {
+          const chat = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant').slice(-12);
+          memory += '\n\n## Recent raw chat (the note predates some project activity)\n\n' +
+            chat.map(m => `${m.role}: ${clipped(m.text, 6000)}`).join('\n\n');
+        }
+      } catch {}
+    }
+    if (!memory) {
+      const latest = latestCachedEvidenceForKey(key);
+      if (latest && latest.cached && latest.cached.text) { memory = latest.cached.text; source = 'cached evidence'; }
+    }
+    if (!memory) {
+      const chat = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
+      memory = chat.slice(0, 2).concat(chat.slice(-4)).map(m => `${m.role}: ${clipped(m.text, 4000)}`).join('\n\n');
+    }
+    const block = [
+      `=== SESSION ${key} ===`,
+      `Date: ${data.firstTs || entry.firstTs || '?'} -> ${data.lastTs || entry.lastTs || '?'}`,
+      `Title: ${oneLine(data.title || entry.title, '(untitled)')}`,
+      `Memory source: ${source}`,
+      '', memory,
+    ].join('\n');
+    rows.push({ key, data, block, source });
+  }
+  return rows;
+}
+
+async function analyzeProjectProfile(project, meta, rows, emit) {
+  const existing = meta.epics.map(e => ({ title: e.title, abstract: e.abstract, sessionIds: e.sessionIds }));
+  const header = `PROJECT: ${project}\nEXISTING EPICS (do not duplicate):\n${JSON.stringify(existing)}\n\n`;
+  const blocks = rows.map(row => row.block);
+  const budget = piTargetTokens() - 16000;
+  if (estimateInputTokens(header + blocks.join('\n\n')) <= budget) {
+    emit('Building the high-level project overview…', 1, 5);
+    return modelJson(await runPi(header + blocks.join('\n\n'), PROJECT_PROFILE_PROMPT));
+  }
+  const groups = packTextBlocks(blocks, budget - estimateInputTokens(header));
+  emit(`Building ${groups.length} project overview sections…`, 1, 5);
+  const partials = await mapLimit(groups, 2, (items, i) => runPi(
+    `${header}SECTION ${i + 1}/${groups.length}\n\n${items.join('\n\n')}`, PROJECT_PROFILE_PARTIAL_PROMPT));
+  emit('Merging the high-level project overview…', 1, 5);
+  return modelJson(await runPi(`${header}PARTIAL PROFILES:\n${partials.join('\n\n=== PARTIAL ===\n')}`, PROJECT_PROFILE_PROMPT));
+}
+
+function projectIntentItems(rows) {
+  const items = [];
+  let id = 0;
+  for (const row of rows) {
+    let previousAssistant = '';
+    const messages = row.data.messages || [];
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      if (message.role === 'assistant') previousAssistant = message.text || '';
+      if (message.role !== 'user') continue;
+      items.push({
+        id: id++, key: row.key, messageIndex: i, ts: message.ts || row.data.firstTs || null,
+        title: row.data.title || '', user: message.text || '', assistantBefore: previousAssistant,
+      });
+    }
+  }
+  return items;
+}
+
+async function classifyProjectIntent(project, overview, items, emit) {
+  const compact = items.map(item => ({
+    id: item.id, sessionId: item.key, date: item.ts,
+    assistantBefore: clipped(item.assistantBefore, 6000), user: clipped(item.user, 12000),
+  }));
+  const prefix = JSON.stringify({ project, overview });
+  const blocks = compact.map(item => JSON.stringify(item));
+  const groups = packTextBlocks(blocks, piTargetTokens() - estimateInputTokens(prefix) - 12000);
+  let done = 0;
+  const results = await mapLimit(groups, 2, async group => {
+    emit(`Classifying user intent ${++done}/${groups.length}…`, 2, 5);
+    const raw = await runPi(JSON.stringify({ project, overview, messages: group.map(line => JSON.parse(line)) }), INTENT_CLASSIFY_PROMPT);
+    return modelJson(raw).selected || [];
+  });
+  const byId = new Map(items.map(item => [item.id, item]));
+  const selected = [];
+  const seen = new Set();
+  for (const result of results.flat()) {
+    const item = byId.get(Number(result.id));
+    if (!item || seen.has(item.id)) continue;
+    seen.add(item.id);
+    selected.push({ ...item, kind: result.kind || 'outcome', confidence: Number(result.confidence) || 0, reason: oneLine(result.reason, '') });
+  }
+  return selected;
+}
+
+function intentEvidenceBlock(item) {
+  return [
+    `=== INTENT EVIDENCE ${item.id} ===`,
+    `Session: ${item.key}`,
+    `Date: ${item.ts || '?'}`,
+    `Kind: ${item.kind}; classifier reason: ${item.reason || '?'}`,
+    '', 'ASSISTANT BEFORE:', clipped(item.assistantBefore, 10000) || '(none)',
+    '', 'USER:', clipped(item.user, 24000),
+  ].join('\n');
+}
+
+async function synthesizeProjectIntent(project, overview, selected, emit) {
+  if (!selected.length) return {
+    coreIntent: overview.purpose || overview.summary || '', vision: overview.vision || '',
+    whatMatters: overview.principles || [], desiredOutcomes: overview.desiredOutcomes || [],
+    principles: overview.principles || [], constraints: [], tensions: [], nonGoals: overview.nonGoals || [], openIntentQuestions: [],
+  };
+  const header = `PROJECT: ${project}\nHIGH-LEVEL OVERVIEW:\n${JSON.stringify(overview)}\n\n`;
+  const blocks = selected.map(intentEvidenceBlock);
+  const budget = piTargetTokens() - 16000;
+  emit(`Synthesizing ${selected.length} intent messages…`, 3, 5);
+  if (estimateInputTokens(header + blocks.join('\n\n')) <= budget) {
+    return modelJson(await runPi(header + blocks.join('\n\n'), INTENT_SYNTHESIS_PROMPT));
+  }
+  const groups = packTextBlocks(blocks, budget - estimateInputTokens(header));
+  const partials = await mapLimit(groups, 2, (items, i) => runPi(
+    `${header}INTENT SECTION ${i + 1}/${groups.length}\n\n${items.join('\n\n')}`, INTENT_PARTIAL_PROMPT));
+  return modelJson(await runPi(`${header}PARTIAL INTENT MODELS:\n${partials.join('\n\n=== PARTIAL ===\n')}`, INTENT_MERGE_PROMPT));
+}
+
+const mdList = (items, empty = 'None found.') => {
+  const values = stringItems(items);
+  return values.length ? values.map(item => `- ${item}`).join('\n') : `- ${empty}`;
+};
+
+function projectDocMeta(project, builtAt, sourceHash) {
+  return `- **Project:** ${project}\n- **Generated:** ${new Date(builtAt).toISOString()}\n- **Source snapshot:** ${sourceHash}`;
+}
+
+function renderProjectOverviewDoc(project, profile, builtAt, sourceHash) {
+  const o = profile.overview || {};
+  return `# Project overview: ${project}\n\n**Abstract.** ${o.summary || ''}\n\n${projectDocMeta(project, builtAt, sourceHash)}\n\n## Purpose\n\n${o.purpose || '(not established)'}\n\n## Vision\n\n${o.vision || '(not established)'}\n\n## Desired outcomes\n\n${mdList(o.desiredOutcomes)}\n\n## Product principles\n\n${mdList(o.principles)}\n\n## Non-goals\n\n${mdList(o.nonGoals)}\n`;
+}
+
+function quoteIntent(text) {
+  return clipped(text, 1600).split('\n').map(line => `> ${line}`).join('\n');
+}
+
+function renderProjectIntentDoc(project, intent, selected, builtAt, sourceHash) {
+  const parts = [
+    `# Deep project intent: ${project}`, '',
+    `**Abstract.** ${intent.coreIntent || intent.vision || ''}`, '', projectDocMeta(project, builtAt, sourceHash), '',
+    '## Core intent', '', intent.coreIntent || '(not established)', '',
+    '## Vision', '', intent.vision || '(not established)', '',
+    '## What matters', '', mdList(intent.whatMatters), '',
+    '## Desired outcomes', '', mdList(intent.desiredOutcomes), '',
+    '## Durable principles', '', mdList(intent.principles), '',
+    '## Durable constraints', '', mdList(intent.constraints), '',
+    '## Tensions and trade-offs', '', mdList(intent.tensions), '',
+    '## Non-goals', '', mdList(intent.nonGoals), '',
+    '## Open intent questions', '', mdList(intent.openIntentQuestions), '',
+    '## Intent evidence', '',
+    'The classifier selected these user messages. The preceding assistant response is kept in the saved evidence snapshot.', '',
+  ];
+  for (const item of selected) {
+    parts.push(
+      `### ${String(item.ts || '?').slice(0, 10)} — ${oneLine(item.title, '(untitled)')}`, '',
+      `- **Kind:** ${item.kind}`, `- **Why selected:** ${item.reason || '(no reason)'}`,
+      `- **Session:** \`${item.key}\``, `- **Message:** #${item.messageIndex}`,
+      `- **Original transcript:** \`${absPathForKey(item.key) || '?'}\``, '',
+      quoteIntent(item.user), ''
+    );
+  }
+  return parts.join('\n');
+}
+
+function renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash) {
+  const e = environment || {};
+  return `# Development environment: ${project}\n\n**Abstract.** ${e.summary || 'Project setup facts for new agents.'}\n\n${projectDocMeta(project, builtAt, sourceHash)}\n\n> Secret values are intentionally excluded. Store only authentication methods, variable names, and credential locations.\n\n## Setup\n\n${mdList(e.setup)}\n\n## Commands\n\n${mdList(e.commands)}\n\n## Services and addresses\n\n${mdList(e.services)}\n\n## Important locations\n\n${mdList(e.locations)}\n\n## Tools and CLIs\n\n${mdList(e.tooling)}\n\n## Authentication\n\n${mdList(e.authentication)}\n\n## Cautions\n\n${mdList(e.cautions)}\n`;
+}
+
+function normalizeProjectStatus(status) {
+  const s = { ...(status || {}) };
+  s.unfinished = stringItems(s.unfinished).map(item =>
+    /automatic project-wide epic discovery/i.test(item)
+      ? 'Unattended epic attachment and conservative rebuilding remain unfinished; discovered candidates require review.'
+      : item
+  );
+  s.todos = stringItems(s.todos).map(item =>
+    /(?:design|implement).*automatic epic discovery/i.test(item)
+      ? 'Add confidence, audit history, and conservative update rules to reviewed epic candidates.'
+      : item
+  );
+  return s;
+}
+
+function renderProjectStatusDoc(project, status, builtAt, sourceHash) {
+  const s = status || {};
+  return `# Project status: ${project}\n\n**Abstract.** Recent focus, unfinished work, and next actions.\n\n${projectDocMeta(project, builtAt, sourceHash)}\n\n## Recent focus\n\n${mdList(s.recentFocus)}\n\n## Unfinished work\n\n${mdList(s.unfinished)}\n\n## Todo\n\n${mdList(s.todos)}\n\n## Open questions\n\n${mdList(s.openQuestions)}\n`;
+}
+
+function cleanEpicCandidates(profile, meta) {
+  const validIds = new Set(meta.entries.map(({ key }) => key));
+  const existing = meta.epics.map(epic => new Set(epic.sessionIds));
+  const out = [];
+  for (const candidate of Array.isArray(profile.epicCandidates) ? profile.epicCandidates : []) {
+    const ids = [...new Set((candidate.sessionIds || []).filter(id => validIds.has(id)))];
+    if (ids.length < 2) continue;
+    const duplicate = existing.some(set => ids.filter(id => set.has(id)).length / ids.length >= 0.8);
+    if (duplicate) continue;
+    out.push({
+      id: crypto.createHash('sha256').update(ids.slice().sort().join('\x00')).digest('hex').slice(0, 12),
+      title: oneLine(candidate.title, 'Discovered epic').slice(0, 70),
+      abstract: oneLine(candidate.abstract, ''), reason: oneLine(candidate.reason, ''), sessionIds: ids,
+    });
+  }
+  return out.slice(0, 20);
+}
+
+async function buildProjectMemory(project, emit = () => {}) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const sourceHash = projectSourceHash(meta);
+  emit('Reading project memory sources…', 0, 5);
+  const rows = await projectSourceBlocks(meta);
+  if (!rows.length) throw new Error('no readable project conversations');
+  const profile = await analyzeProjectProfile(project, meta, rows, emit);
+  profile.status = normalizeProjectStatus(profile.status);
+  const items = projectIntentItems(rows);
+  const selected = await classifyProjectIntent(project, profile.overview || {}, items, emit);
+  const intent = await synthesizeProjectIntent(project, profile.overview || {}, selected, emit);
+  emit('Writing project memory documents…', 4, 5);
+  const builtAt = Date.now();
+  const paths = projectMemoryPaths(project);
+  await fsp.mkdir(paths.dir, { recursive: true });
+  const candidates = cleanEpicCandidates(profile, meta);
+  await Promise.all([
+    fsp.writeFile(paths.overview, renderProjectOverviewDoc(project, profile, builtAt, sourceHash)),
+    fsp.writeFile(paths.intent, renderProjectIntentDoc(project, intent, selected, builtAt, sourceHash)),
+    fsp.writeFile(paths.environment, renderProjectEnvironmentDoc(project, profile.environment, builtAt, sourceHash)),
+    fsp.writeFile(paths.status, renderProjectStatusDoc(project, profile.status, builtAt, sourceHash)),
+    fsp.writeFile(paths.inputs, JSON.stringify({
+      project, builtAt, sourceHash,
+      sourceSessions: rows.map(row => ({ key: row.key, source: row.source })),
+      classifiedMessages: items.length,
+      selectedIntentMessages: selected.map(item => ({ ...item, originalPath: absPathForKey(item.key) })),
+      profile, intent,
+    })),
+  ]);
+  const manifest = {
+    project, builtAt, sourceHash, conversations: rows.length, classifiedMessages: items.length,
+    selectedIntentMessages: selected.length, overview: profile.overview || {}, candidates,
+    paths: { overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status, inputs: paths.inputs },
+  };
+  await fsp.writeFile(paths.manifest, JSON.stringify(manifest));
+  emit('Project memory saved.', 5, 5);
+  return manifest;
+}
+
+async function projectMemoryInfo(project, meta = projectMetaFor(project)) {
+  if (!meta) return null;
+  const paths = projectMemoryPaths(project);
+  try {
+    const manifest = JSON.parse(await fsp.readFile(paths.manifest, 'utf8'));
+    return {
+      builtAt: manifest.builtAt, stale: manifest.sourceHash !== projectSourceHash(meta),
+      conversations: manifest.conversations, classifiedMessages: manifest.classifiedMessages,
+      selectedIntentMessages: manifest.selectedIntentMessages,
+      overview: manifest.overview || {}, candidates: manifest.candidates || [], paths: manifest.paths || {},
+    };
+  } catch { return null; }
+}
+
+async function projectMemoryDocument(project, kind) {
+  const paths = projectMemoryPaths(project);
+  const file = ({ overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status })[kind];
+  if (!file) throw new Error('unknown project memory document');
+  return { project, kind, path: file, text: await fsp.readFile(file, 'utf8') };
+}
+
 const oneLine = (s, fallback) => String(s || fallback).replace(/\s+/g, ' ').trim();
 
 async function buildEpicStory(evidenceInputs, focus, emit = () => {}) {
@@ -1269,7 +1777,7 @@ async function buildEpicStory(evidenceInputs, focus, emit = () => {}) {
     `Evidence source: ${e.source}`,
     '', e.text,
   ].join('\n'));
-  const budget = PI_TARGET_TOKENS - 12000;
+  const budget = piTargetTokens() - 12000;
   if (estimateInputTokens(blocks.join('\n\n')) <= budget) {
     return runPi(blocks.join('\n\n'), EPIC_PROMPT(focus));
   }
@@ -1439,16 +1947,20 @@ async function epicEvidenceResponse(epic) {
 
 // Background jobs survive browser navigation. Finished jobs stay visible for one hour.
 const distillJobs = new Map(); // key -> job
+const projectDistillJobs = new Map(); // project -> batch job
+const projectMemoryJobs = new Map(); // project -> project memory job
 const evidenceJobs = new Map(); // batch id -> job
 const epicJobs = new Map();    // epic id -> job
 
 function jobView(job) {
   return {
     id: job.id, type: job.type, key: job.key || null, epicId: job.epicId || null,
+    project: job.project || null, parentId: job.parentId || null,
     title: job.title, status: job.status, statusText: job.statusText,
     done: job.done || 0, total: job.total || 0,
     startedAt: job.startedAt, finishedAt: job.finishedAt || null,
     result: job.result || null, error: job.error || null,
+    model: job.model || null,
   };
 }
 
@@ -1458,15 +1970,20 @@ function jobChanged(job) {
 }
 
 function allJobs() {
-  return [...distillJobs.values(), ...evidenceJobs.values(), ...epicJobs.values()]
+  return [...distillJobs.values(), ...projectDistillJobs.values(), ...projectMemoryJobs.values(), ...evidenceJobs.values(), ...epicJobs.values()]
     .map(jobView).sort((a, b) => b.startedAt - a.startedAt);
 }
 
-function startDistillJob(key, data) {
+function startDistillJob(key, data, options = {}) {
+  // Capture the source version now. If the conversation grows while this job
+  // runs, its final note remains correctly marked as stale.
+  const sourceMtime = index[key] && index[key].mtimeMs || Date.now();
   const job = {
     id: 'distill:' + key, type: 'distill', key, title: data.title || key,
+    project: options.project || null, parentId: options.parentId || null,
     events: [], listeners: new Set(), finished: false, status: 'running',
     statusText: 'Starting distillation…', done: 0, total: 0, startedAt: Date.now(),
+    model: currentModelLabel(),
   };
   distillJobs.set(key, job);
   const emit = ev => {
@@ -1479,7 +1996,7 @@ function startDistillJob(key, data) {
     jobChanged(job);
     for (const fn of job.listeners) fn(ev);
   };
-  (async () => {
+  job.completion = (async () => {
     try {
       const { note } = await distill(data, emit);
       emit({ type: 'status', text: 'Titling and saving…' });
@@ -1500,7 +2017,7 @@ function startDistillJob(key, data) {
       // Re-distills update the existing file in place — no orphaned notes.
       const file = (index[key] && index[key].notePath) || noteFileFor(data, title);
       await fsp.writeFile(file, finalNote);
-      if (index[key]) { index[key].notePath = file; index[key].notedAt = Date.now(); saveIndexSoon(); }
+      if (index[key]) { index[key].notePath = file; index[key].notedAt = sourceMtime; saveIndexSoon(); }
       broadcast({ type: 'update', key, ...index[key] });
       emit({ type: 'saved', notePath: file, title: title || data.title });
     } catch (e) {
@@ -1515,6 +2032,92 @@ function startDistillJob(key, data) {
   return job;
 }
 
+function startProjectDistillJob(project) {
+  const running = projectDistillJobs.get(project);
+  if (running && !running.finished) return running;
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const targets = meta.entries.filter(({ entry }) => noteStateForEntry(entry) !== 'fresh');
+  const job = {
+    id: 'project-distill:' + project, type: 'project-distill', project,
+    title: `${project}: update all notes`, status: 'running',
+    statusText: targets.length ? 'Preparing project notes…' : 'All project notes are current.',
+    done: 0, total: targets.length, startedAt: Date.now(), finished: false,
+    model: currentModelLabel(),
+  };
+  projectDistillJobs.set(project, job);
+  jobChanged(job);
+  job.completion = (async () => {
+    let updated = 0;
+    const failures = [];
+    await mapLimit(targets, 2, async ({ key }) => {
+      try {
+        let child = distillJobs.get(key);
+        if (!child || child.finished) {
+          const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+          child = startDistillJob(key, data, { project, parentId: job.id });
+        }
+        await child.completion;
+        if (child.status !== 'done') throw new Error(child.error || child.statusText || 'distillation failed');
+        updated++;
+      } catch (e) {
+        failures.push(`${key}: ${e.message}`);
+      } finally {
+        job.done++;
+        job.statusText = `Updating project notes ${job.done}/${job.total}…`;
+        jobChanged(job);
+      }
+    });
+    job.result = { project, updated, failed: failures.length };
+    if (failures.length) {
+      job.status = 'error';
+      job.error = `${failures.length} of ${targets.length} notes failed.`;
+      job.statusText = job.error;
+    } else {
+      job.status = 'done';
+      job.statusText = targets.length ? `All project notes are current: ${updated} updated.` : 'All project notes are current.';
+    }
+    job.finished = true;
+    job.finishedAt = Date.now();
+    jobChanged(job);
+    setTimeout(() => {
+      if (projectDistillJobs.get(project) === job) projectDistillJobs.delete(project);
+    }, 60 * 60 * 1000);
+  })();
+  return job;
+}
+
+function startProjectMemoryJob(project) {
+  const running = projectMemoryJobs.get(project);
+  if (running && !running.finished) return running;
+  if (!projectMetaFor(project)) throw new Error('project not found');
+  const job = {
+    id: 'project-memory:' + project, type: 'project-memory', project,
+    title: `${project}: build project memory`, status: 'running', statusText: 'Starting project memory…',
+    done: 0, total: 5, startedAt: Date.now(), finished: false,
+    model: currentModelLabel(),
+  };
+  projectMemoryJobs.set(project, job);
+  jobChanged(job);
+  job.completion = (async () => {
+    try {
+      const result = await buildProjectMemory(project, (text, done, total) => {
+        job.statusText = text; job.done = done; job.total = total; jobChanged(job);
+      });
+      job.status = 'done';
+      job.statusText = 'Project memory saved.';
+      job.done = job.total;
+      job.result = { project, paths: result.paths, candidates: result.candidates.length };
+    } catch (e) {
+      job.status = 'error'; job.statusText = e.message; job.error = e.message;
+    } finally {
+      job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
+      setTimeout(() => { if (projectMemoryJobs.get(project) === job) projectMemoryJobs.delete(project); }, 60 * 60 * 1000);
+    }
+  })();
+  return job;
+}
+
 function startEvidenceJob(ids, force = false) {
   const sessionIds = [...new Set(ids)].filter(id => index[id]);
   if (!sessionIds.length) throw new Error('select at least one conversation');
@@ -1524,6 +2127,7 @@ function startEvidenceJob(ids, force = false) {
     title: `${sessionIds.length} evidence card${sessionIds.length === 1 ? '' : 's'}`,
     status: 'running', statusText: 'Reading conversations…', done: 0, total: sessionIds.length,
     startedAt: Date.now(), finished: false, sessionIds,
+    model: currentModelLabel(),
   };
   evidenceJobs.set(id, job);
   jobChanged(job);
@@ -1570,6 +2174,7 @@ function startEpicJob(ids, epicId, focus) {
     title: focus || (epics[id] && epics[id].title) || 'New epic',
     status: 'running', statusText: 'Starting epic…', done: 0, total: 0,
     startedAt: Date.now(), finished: false,
+    model: currentModelLabel(),
   };
   epicJobs.set(id, job);
   jobChanged(job);
@@ -1599,112 +2204,499 @@ function startEpicJob(ids, epicId, focus) {
   return job;
 }
 
-// ---------- Herdr agents ----------
-const HERDR_BIN = process.env.HERDR_BIN || path.join(os.homedir(), '.local', 'bin', 'herdr');
-
-function runHerdr(args, timeout = 10000, parseJson = true) {
-  return new Promise((resolve, reject) => {
-    execFile(HERDR_BIN, args, { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
-      let parsed = null;
-      try { parsed = JSON.parse(stdout || stderr); } catch {}
-      if (err) {
-        const detail = parsed && parsed.error && parsed.error.message;
-        reject(new Error(detail || String(stderr || stdout || err.message).trim()));
-      } else {
-        resolve(parseJson ? parsed : String(stdout).trim());
-      }
-    });
-  });
+// ---------- native Alacritty launch + process scan ----------
+function firstExisting(paths) {
+  return paths.find(p => p && fs.existsSync(p)) || null;
 }
 
-// Direct socket API: one JSON-line request per connection, ~100ms server tick.
-// Much faster than spawning the CLI, and requests run concurrently.
-const HERDR_SOCK = process.env.HERDR_SOCK || path.join(os.homedir(), '.config', 'herdr', 'herdr.sock');
-
-function herdrApi(method, params = {}, timeout = 10000) {
-  return new Promise((resolve, reject) => {
-    const sock = net.connect(HERDR_SOCK);
-    let buf = '', done = false;
-    const timer = setTimeout(() => fail(new Error('herdr socket timeout: ' + method)), timeout);
-    const fail = error => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      sock.destroy();
-      reject(error);
-    };
-    sock.on('connect', () => sock.write(JSON.stringify({ id: 'aiconvo', method, params }) + '\n'));
-    sock.on('data', chunk => {
-      buf += chunk;
-      const i = buf.indexOf('\n');
-      if (i < 0 || done) return;
-      done = true;
-      clearTimeout(timer);
-      sock.end();
-      try {
-        const msg = JSON.parse(buf.slice(0, i));
-        if (msg.error) reject(new Error(msg.error.message || msg.error.code));
-        else resolve(msg.result);
-      } catch (error) { reject(error); }
-    });
-    sock.on('error', fail);
-  });
+function alacrittyBin() {
+  return process.env.AICONVO_TERMINAL
+    || firstExisting(['/snap/bin/alacritty', '/usr/bin/alacritty', '/usr/local/bin/alacritty'])
+    || 'alacritty';
 }
 
-async function herdrAgents() {
-  let result;
-  try { result = await herdrApi('agent.list'); }
-  catch { result = (await runHerdr(['agent', 'list'])).result; }
-  return (result && result.agents || []).map(agent => ({
-    ...agent,
-    target: agent.name || agent.pane_id,
-  }));
+function python3Bin() {
+  return firstExisting(['/usr/bin/python3', '/usr/local/bin/python3']) || 'python3';
 }
 
-function herdrConversationName(key) {
-  return 'aiconvo-' + crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
+function bridgeScript() {
+  return path.join(__dirname, 'aiconvo-bridge.py');
 }
 
-function herdrConversationInfo(key) {
-  const entry = index[key];
-  if (!entry) throw new Error('Conversation not found.');
-  const kind = entry.source === 'claude' ? 'claude'
-    : entry.source === 'pi' || entry.source === 'pi-remote' ? 'pi' : null;
-  if (!kind) throw new Error('This conversation source cannot open in Herdr.');
-  const relPath = key.slice(entry.source.length + 1);
-  const sessionPath = path.resolve(SOURCES[entry.source], relPath);
-  const cwd = entry.cwd && fs.existsSync(entry.cwd) ? entry.cwd : os.homedir();
+function socketPathForTitle(title) {
+  return path.join(CACHE_DIR, 'pty', String(title || 'unknown') + '.sock');
+}
+
+function piBin() {
+  return process.env.AICONVO_PI
+    || firstExisting([
+      path.join(os.homedir(), '.nvm/versions/node/v22.23.1/bin/pi'),
+      '/usr/local/bin/pi',
+    ])
+    || 'pi';
+}
+
+function claudeBin() {
+  return process.env.AICONVO_CLAUDE
+    || firstExisting([
+      path.join(os.homedir(), '.local/bin/claude'),
+      '/usr/local/bin/claude',
+    ])
+    || 'claude';
+}
+
+function agentEnv() {
+  const extra = [
+    path.join(os.homedir(), '.local/bin'),
+    path.join(os.homedir(), '.nvm/versions/node/v22.23.1/bin'),
+    '/snap/bin',
+  ].filter(d => fs.existsSync(d));
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
+  const xauthority = process.env.XAUTHORITY
+    || firstExisting([
+      path.join(os.homedir(), '.Xauthority'),
+      '/run/user/' + uid + '/gdm/Xauthority',
+    ]);
   return {
-    key, entry, kind, cwd, sessionPath, relPath, source: entry.source,
-    name: herdrConversationName(key),
-    sessionId: entry.sessionId || null,
+    ...process.env,
+    HOME: os.homedir(),
+    DISPLAY: process.env.DISPLAY || ':0',
+    ...(xauthority ? { XAUTHORITY: xauthority } : {}),
+    PATH: [...extra, process.env.PATH || '/usr/bin:/bin'].join(':'),
   };
 }
 
-// Find the index key for a Herdr agent: by aiconvo name, session id, or session path.
-function matchHerdrAgentToKey(agent) {
-  for (const [key, e] of Object.entries(index)) {
-    const kind = e.source === 'claude' ? 'claude'
-      : e.source === 'pi' || e.source === 'pi-remote' ? 'pi' : null;
-    if (!kind || agent.agent !== kind) continue;
-    if (agent.name && agent.name === herdrConversationName(key)) return key;
-    const value = agent.agent_session && agent.agent_session.value;
-    if (!value) continue;
-    if (e.sessionId && value === e.sessionId) return key;
-    if (agent.agent_session.kind === 'path') {
-      const relPath = key.slice(e.source.length + 1);
-      try { if (path.resolve(SOURCES[e.source], relPath) === path.resolve(value)) return key; } catch {}
+function conversationKind(entry) {
+  if (entry.source === 'claude') return 'claude';
+  if (entry.source === 'pi' || entry.source === 'pi-remote') return 'pi';
+  return null;
+}
+
+function windowTitleFor(key) {
+  return 'aiconvo-' + crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
+}
+
+function flagValue(args, names) {
+  for (let i = 0; i < args.length; i++) {
+    for (const name of names) {
+      if (args[i] === name && args[i + 1]) return args[i + 1];
+      if (args[i].startsWith(name + '=')) return args[i].slice(name.length + 1);
     }
   }
   return null;
 }
 
-function agentMatchesConversation(agent, info) {
-  if (agent.name === info.name) return true;
-  if (agent.agent !== info.kind || !agent.agent_session) return false;
-  const value = agent.agent_session.value;
-  if (info.sessionId && value === info.sessionId) return true;
-  return agent.agent_session.kind === 'path' && path.resolve(value) === info.sessionPath;
+function parseCmdline(pid) {
+  try {
+    return fs.readFileSync('/proc/' + pid + '/cmdline').toString().split('\0').filter(Boolean);
+  } catch { return null; }
+}
+
+function isInteractiveAgent(args) {
+  if (!args || !args.length) return false;
+  if (args.includes('--no-session') || args.includes('-p') || args.includes('--print')) return false;
+  const names = args.map(a => path.basename(a).toLowerCase());
+  return names.includes('pi') || names.includes('claude') || names.includes('alacritty');
+}
+
+function matchArgsToKey(args) {
+  const title = flagValue(args, ['--title', '-t']);
+  if (title && title.startsWith('aiconvo-') && !title.startsWith('aiconvo-project-')) {
+    for (const key of Object.keys(index)) {
+      if (windowTitleFor(key) === title) return key;
+    }
+  }
+  const session = flagValue(args, ['--session']);
+  if (session) {
+    let resolved = session;
+    try { resolved = path.resolve(session); } catch {}
+    for (const [key, e] of Object.entries(index)) {
+      const relPath = key.slice(e.source.length + 1);
+      try {
+        if (path.resolve(SOURCES[e.source], relPath) === resolved) return key;
+      } catch {}
+      if (e.sessionId && (session === e.sessionId || e.sessionId.startsWith(session) || session.startsWith(e.sessionId))) return key;
+    }
+  }
+  const resume = flagValue(args, ['--resume', '-r', '--session-id']);
+  if (resume) {
+    for (const [key, e] of Object.entries(index)) {
+      if (e.sessionId && (resume === e.sessionId || e.sessionId.startsWith(resume) || resume.startsWith(e.sessionId))) return key;
+    }
+  }
+  return null;
+}
+
+function listRunningAgents() {
+  const running = [];
+  const seen = new Set();
+  let pids = [];
+  try { pids = fs.readdirSync('/proc'); } catch { return running; }
+  for (const pid of pids) {
+    if (!/^\d+$/.test(pid)) continue;
+    const args = parseCmdline(pid);
+    if (!isInteractiveAgent(args)) continue;
+    const key = matchArgsToKey(args);
+    const title = flagValue(args, ['--title', '-t']);
+    const names = args.map(a => path.basename(a).toLowerCase());
+    const kind = names.includes('claude') ? 'claude' : names.includes('pi') ? 'pi' : null;
+    if (!key && !(title && title.startsWith('aiconvo-'))) continue;
+    const id = key || title;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    let cwd = null;
+    try { cwd = fs.readlinkSync('/proc/' + pid + '/cwd'); } catch {}
+    const entry = key ? index[key] : null;
+    running.push({
+      pid: Number(pid),
+      key: key || null,
+      kind: kind || (entry && conversationKind(entry)) || 'pi',
+      title: entry ? (entry.timelineTitle || entry.title) : title,
+      cwd: cwd || (entry && entry.cwd) || null,
+      windowTitle: title || (key && windowTitleFor(key)) || null,
+      source: entry ? entry.source : (kind || 'pi'),
+    });
+  }
+  return running;
+}
+
+function findRunningConversation(key) {
+  if (!key) return null;
+  return listRunningAgents().find(item => item.key === key) || null;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function findWindowId(title) {
+  if (!title) return null;
+  const patterns = ['^' + title + '$', title];
+  for (const name of patterns) {
+    try {
+      const out = execFileSync('xdotool', ['search', '--onlyvisible', '--name', name], {
+        encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'], env: agentEnv(),
+      });
+      const wid = String(out).trim().split('\n').filter(Boolean).pop();
+      if (wid) return wid;
+    } catch {}
+  }
+  return null;
+}
+
+function focusWindow(title) {
+  const wid = findWindowId(title);
+  if (!wid) return false;
+  try {
+    execFileSync('xdotool', ['windowactivate', '--sync', wid], {
+      timeout: 3000, stdio: 'ignore', env: agentEnv(),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForWindow(title, ms = 15000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const wid = findWindowId(title);
+    if (wid) return wid;
+    await sleep(200);
+  }
+  return null;
+}
+
+function setClipboard(kind, payload, mime) {
+  const args = ['-selection', 'clipboard'];
+  if (kind === 'image') args.push('-t', mime || 'image/png');
+  execFileSync('xclip', args, {
+    input: payload,
+    timeout: 10000,
+    env: agentEnv(),
+  });
+}
+
+function sendKeys(wid, combo) {
+  execFileSync('xdotool', ['windowactivate', '--sync', wid], {
+    timeout: 3000, stdio: 'ignore', env: agentEnv(),
+  });
+  execFileSync('xdotool', ['key', '--window', wid, '--clearmodifiers', combo], {
+    timeout: 3000, stdio: 'ignore', env: agentEnv(),
+  });
+}
+
+function spawnAlacritty(cwd, title, argv) {
+  const term = alacrittyBin();
+  const sock = socketPathForTitle(title);
+  fs.mkdirSync(path.dirname(sock), { recursive: true });
+  const child = spawn(term, [
+    '--title', title,
+    '--working-directory', cwd,
+    '-e', python3Bin(), bridgeScript(), sock, '--', ...argv,
+  ], {
+    detached: true,
+    stdio: 'ignore',
+    cwd,
+    env: agentEnv(),
+  });
+  child.unref();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve({ ok: true, title, terminal: term, socket: sock }), 200);
+    child.on('error', err => {
+      clearTimeout(timer);
+      reject(new Error('Could not start ' + term + ': ' + err.message));
+    });
+  });
+}
+
+function bridgeRequest(title, msg, timeoutMs = 3000) {
+  const sock = socketPathForTitle(title);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      client.destroy();
+      reject(new Error('bridge timeout'));
+    }, timeoutMs);
+    const client = net.createConnection(sock);
+    let buf = '';
+    client.on('error', err => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    client.on('data', chunk => {
+      buf += chunk;
+      const nl = buf.indexOf('\n');
+      if (nl < 0) return;
+      clearTimeout(timer);
+      client.end();
+      try { resolve(JSON.parse(buf.slice(0, nl))); }
+      catch (e) { reject(e); }
+    });
+    client.on('connect', () => client.write(JSON.stringify(msg) + '\n'));
+  });
+}
+
+async function bridgePing(title) {
+  try {
+    const res = await bridgeRequest(title, { op: 'ping' }, 800);
+    return !!(res && res.ok);
+  } catch {
+    return false;
+  }
+}
+
+async function waitForBridge(title, ms = 15000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (await bridgePing(title)) return true;
+    await sleep(150);
+  }
+  return false;
+}
+
+function extractChoices(text) {
+  const choices = [];
+  const re = /^[ \t]*[›>❯]?\s*(\d+)\.\s+(\S.+)$/gm;
+  let m;
+  while ((m = re.exec(text))) {
+    const label = m[2].replace(/\s+$/, '');
+    if (label.length > 120) continue;
+    choices.push({ id: m[1], label });
+  }
+  const seen = new Set();
+  return choices.filter(c => (seen.has(c.id) ? false : (seen.add(c.id), true)));
+}
+
+function classifyPane(text) {
+  const raw = String(text || '');
+  const t = raw.toLowerCase();
+  const choices = extractChoices(raw);
+  if (/resume from summary/.test(t) && /resume full session/.test(t)) {
+    return { state: 'picker', reason: 'claude-resume', choices: choices.length ? choices : [
+      { id: '1', label: 'Resume from summary (recommended)' },
+      { id: '2', label: 'Resume full session as-is' },
+      { id: '3', label: "Don't ask me again" },
+    ] };
+  }
+  if (choices.length >= 2 && (/enter to confirm/.test(t) || /esc to cancel/.test(t))) {
+    return { state: 'picker', reason: 'numbered', choices };
+  }
+  if (/\byes\b/.test(t) && /\bno\b/.test(t) && (/allow/.test(t) || /permission/.test(t))) {
+    return { state: 'permission', reason: 'permission', choices: [
+      { id: 'y', label: 'Yes / allow' },
+      { id: 'n', label: 'No / deny' },
+    ] };
+  }
+  if (!raw.trim()) return { state: 'booting', reason: 'empty', choices: [] };
+  return { state: 'ready', reason: 'prompt', choices: [] };
+}
+
+async function captureConversation(key) {
+  const entry = index[key];
+  if (!entry) throw new Error('Conversation not found.');
+  const title = windowTitleFor(key);
+  const running = findRunningConversation(key);
+  const liveTitle = (running && running.windowTitle) || title;
+  if (!(await bridgePing(liveTitle))) {
+    return { ok: true, attached: false, title: liveTitle, text: '', state: 'offline', choices: [] };
+  }
+  const cap = await bridgeRequest(liveTitle, { op: 'capture' });
+  const text = (cap && cap.text) || '';
+  const cls = classifyPane(text);
+  return { ok: true, attached: true, title: liveTitle, text, rows: cap.rows, cols: cap.cols, ...cls };
+}
+
+async function actOnConversation(key, payload) {
+  const opened = await openConversationInTerminal(key, { focus: !payload || !payload.quick });
+  const title = opened.title;
+  if (!(await waitForBridge(title))) throw new Error('Terminal bridge did not start.');
+  if (payload && payload.keys != null) {
+    await bridgeRequest(title, { op: 'keys', data: String(payload.keys) });
+  } else if (payload && payload.choice != null) {
+    const choice = String(payload.choice);
+    const data = /^[yn]$/i.test(choice) ? choice : choice + '\r';
+    await bridgeRequest(title, { op: 'keys', data });
+  } else if (payload && payload.enter) {
+    await bridgeRequest(title, { op: 'enter' });
+  } else if (payload && payload.esc) {
+    await bridgeRequest(title, { op: 'esc' });
+  } else {
+    throw new Error('No action.');
+  }
+  if (payload && payload.quick) return { ok: true, acted: true, ...opened };
+  await sleep(200);
+  const pane = await captureConversation(key);
+  return { ok: true, acted: true, ...opened, ...pane };
+}
+
+async function openConversationInTerminal(key, opts) {
+  const focus = !opts || opts.focus !== false;
+  const entry = index[key];
+  if (!entry) throw new Error('Conversation not found.');
+  const kind = conversationKind(entry);
+  if (!kind) throw new Error('This conversation source cannot open in a terminal.');
+  const title = windowTitleFor(key);
+  const running = findRunningConversation(key);
+  if (running) {
+    const focused = focus ? focusWindow(running.windowTitle || title) : false;
+    return { ok: true, created: false, focused, pid: running.pid, title: running.windowTitle || title, kind };
+  }
+  if (focus && focusWindow(title)) return { ok: true, created: false, focused: true, title, kind };
+  const { sessionPath, cwd } = sessionPathsFor(key);
+  const argv = kind === 'claude'
+    ? [claudeBin(), '--resume', entry.sessionId]
+    : [piBin(), '--session', sessionPath];
+  if (!argv[2]) throw new Error('This conversation has no session identifier.');
+  await spawnAlacritty(cwd, title, argv);
+  return { ok: true, created: true, focused: false, title, kind, cwd };
+}
+
+function decodeImagePayload(img) {
+  if (!img || !img.data) return null;
+  const mime = String(img.mime || 'image/png').toLowerCase();
+  if (!mime.startsWith('image/')) return null;
+  const buf = Buffer.from(String(img.data), 'base64');
+  if (!buf.length) return null;
+  return { mime, buf };
+}
+
+async function sendToConversation(key, payload) {
+  const text = payload && payload.text != null ? String(payload.text) : '';
+  const rawImages = Array.isArray(payload && payload.images) ? payload.images : [];
+  const images = rawImages.map(decodeImagePayload).filter(Boolean).slice(0, 8);
+  if (!text.trim() && !images.length) throw new Error('Type text or attach an image first.');
+  const opened = await openConversationInTerminal(key);
+  const title = opened.title;
+  const hasBridge = await waitForBridge(title, opened.created ? 15000 : 800);
+  if (hasBridge) {
+    if (opened.created) await sleep(600);
+    const pane = await captureConversation(key);
+    if (pane.state && pane.state !== 'ready') {
+      const err = new Error(pane.state === 'picker'
+        ? 'The terminal is waiting for a choice. Pick one below.'
+        : pane.state === 'permission'
+          ? 'The terminal is waiting for a permission answer.'
+          : 'The terminal is not ready for a prompt yet.');
+      err.blocked = { ...pane, opened };
+      throw err;
+    }
+    for (const img of images) {
+      setClipboard('image', img.buf, img.mime);
+      await sleep(60);
+      await bridgeRequest(title, { op: 'ctrl', key: 'v' });
+      await sleep(400);
+    }
+    if (text) {
+      await bridgeRequest(title, { op: 'paste', text });
+      await sleep(120);
+    }
+    await bridgeRequest(title, { op: 'enter' });
+    return { ok: true, sent: true, via: 'bridge', images: images.length, chars: text.length, ...opened };
+  }
+  const wid = await waitForWindow(title);
+  if (!wid) {
+    const env = agentEnv();
+    throw new Error(
+      'Alacritty did not open (DISPLAY=' + (env.DISPLAY || '?') +
+      ', XAUTHORITY=' + (env.XAUTHORITY ? 'set' : 'missing') + ').'
+    );
+  }
+  if (opened.created) await sleep(1800);
+  else await sleep(150);
+  for (const img of images) {
+    setClipboard('image', img.buf, img.mime);
+    await sleep(80);
+    sendKeys(wid, 'ctrl+v');
+    await sleep(450);
+  }
+  if (text) {
+    setClipboard('text', text);
+    await sleep(80);
+    sendKeys(wid, 'ctrl+shift+v');
+    await sleep(150);
+  }
+  sendKeys(wid, 'Return');
+  return { ok: true, sent: true, via: 'xdotool', images: images.length, chars: text.length, ...opened };
+}
+
+async function sendFileFeedback(body) {
+  const key = body.key || '';
+  const entry = index[key];
+  if (!entry) throw new Error('conversation not found');
+  const image = String(body.image || '');
+  const match = image.match(/^data:image\/png;base64,(.+)$/);
+  if (!match) throw new Error('image must be a PNG data URL');
+  const dir = path.join(CACHE_DIR, 'feedback');
+  await fsp.mkdir(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const pngPath = path.join(dir, stamp + '.png');
+  const mdPath = path.join(dir, stamp + '.md');
+  await fsp.writeFile(pngPath, Buffer.from(match[1], 'base64'));
+  const rel = body.relativePath || body.path || 'file';
+  const md = [
+    '# Inked file feedback',
+    '',
+    `- File: ${body.path || rel}`,
+    `- Lines: ${body.fromLine || '?'}–${body.toLine || '?'}`,
+    `- Page: ${body.page || 1}/${body.pages || 1}`,
+    `- Image: ${pngPath}`,
+    `- Conversation: ${key}`,
+    '',
+    'The red ink is the user\'s requested edit. Apply those marks to the file.',
+    '',
+  ].join('\n');
+  await fsp.writeFile(mdPath, md);
+  if (findRunningConversation(key)) {
+    return { ok: true, launched: false, pngPath, mdPath, warning: 'that conversation is already open. The marked page was saved.' };
+  }
+  const kind = conversationKind(entry);
+  const { sessionPath, cwd } = sessionPathsFor(key);
+  const prompt = `Read ${mdPath} and the PNG at ${pngPath}. The red ink is requested file feedback for ${rel} lines ${body.fromLine}–${body.toLine} (page ${body.page}/${body.pages}). Apply those edits.`;
+  const argv = kind === 'claude'
+    ? [claudeBin(), '--resume', entry.sessionId, prompt]
+    : [piBin(), '--session', sessionPath, '@' + pngPath, prompt];
+  await spawnAlacritty(cwd || entry.cwd || os.homedir(), windowTitleFor(key) + ' feedback', argv);
+  return { ok: true, launched: true, pngPath, mdPath };
 }
 
 // ---------- agent file diffs ----------
@@ -1723,11 +2715,12 @@ function diffEventHash(parts) {
 }
 
 function lineCount(text) { return text ? String(text).split('\n').length : 0; }
-function makeDiffEvent(key, entry, pathValue, kind, oldText, newText, ts, editIndex) {
+function makeDiffEvent(key, entry, pathValue, kind, oldText, newText, ts, editIndex, callId = null) {
   if (!pathValue) return null;
   // pi often records relative paths; resolve them against the session cwd so
   // grouping and disk reads work across conversations.
-  if (!path.isAbsolute(String(pathValue)) && entry.cwd) pathValue = path.resolve(entry.cwd, String(pathValue));
+  if (String(pathValue).startsWith('~/')) pathValue = path.join(os.homedir(), String(pathValue).slice(2));
+  else if (!path.isAbsolute(String(pathValue)) && entry.cwd) pathValue = path.resolve(entry.cwd, String(pathValue));
   const oldLines = lineCount(oldText), newLines = lineCount(newText);
   const relativePath = entry.cwd && String(pathValue).startsWith(entry.cwd + '/')
     ? String(pathValue).slice(entry.cwd.length + 1)
@@ -1737,8 +2730,9 @@ function makeDiffEvent(key, entry, pathValue, kind, oldText, newText, ts, editIn
     id, key, source: entry.source || 'claude', project: projectOfEntry(entry),
     path: String(pathValue), relativePath, ts: ts || null, kind,
     conversationTitle: entry.timelineTitle || entry.title || key,
-    agent: entry.source === 'claude' ? 'claude' : 'pi',
-    oldText: oldText || null, newText: newText || null, editIndex,
+    agent: entry.source === 'claude' ? 'claude' : 'pi', branch: entry.gitBranch || null,
+    oldText: oldText || null, newText: newText || null, editIndex, callId,
+    outcome: 'unknown', resultSummary: null,
     stats: {
       oldChars: oldText ? oldText.length : 0,
       newChars: newText ? newText.length : 0,
@@ -1747,45 +2741,168 @@ function makeDiffEvent(key, entry, pathValue, kind, oldText, newText, ts, editIn
   };
 }
 
-function diffEventsFromContent(key, entry, name, input, ts) {
+function shellWords(text) {
+  return [...String(text || '').matchAll(/"([^"]+)"|'([^']+)'|([^\s;&|]+)/g)].map(match => match[1] || match[2] || match[3]);
+}
+
+function shellWithoutHeredocBodies(command) {
+  const kept = [];
+  let delimiter = null;
+  for (const line of String(command || '').split('\n')) {
+    if (delimiter) {
+      if (line.trim() === delimiter) delimiter = null;
+      continue;
+    }
+    kept.push(line);
+    const match = line.match(/<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/);
+    if (match) delimiter = match[1];
+  }
+  return kept.join('\n');
+}
+
+function shellSegments(command) {
+  const out = [];
+  let part = '', quote = null, escaped = false;
+  const text = String(command || '');
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (escaped) { part += char; escaped = false; continue; }
+    if (char === '\\') { part += char; escaped = true; continue; }
+    if (quote) {
+      part += char;
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; part += char; continue; }
+    const pair = text.slice(i, i + 2);
+    if (char === '\n' || char === ';' || pair === '&&' || pair === '||') {
+      if (part.trim()) out.push(part.trim());
+      part = '';
+      if (pair === '&&' || pair === '||') i++;
+      continue;
+    }
+    part += char;
+  }
+  if (part.trim()) out.push(part.trim());
+  return out;
+}
+
+function shellMutationPaths(command) {
+  const source = String(command || '');
+  const shell = shellWithoutHeredocBodies(source);
+  const found = new Set();
+  const add = value => {
+    value = String(value || '').trim().replace(/^['"]|['"]$/g, '');
+    if (!value || /[$*?<>()[\]{}]/.test(value) || value === '/dev/null' || value.startsWith('-')) return;
+    found.add(value);
+  };
+  // Patch and literal-language writes remain useful inside a heredoc.
+  for (const match of source.matchAll(/^\s*\*\*\*\s+(?:Update|Add|Delete) File:\s*(.+)$/gm)) add(match[1]);
+  for (const match of source.matchAll(/\bPath\(\s*['"]([^'"]+)['"]\s*\)\.(?:write_text|write_bytes|rename|replace)\b/g)) add(match[1]);
+  for (const match of source.matchAll(/\bopen\(\s*['"]([^'"]+)['"]\s*,\s*['"][wa]/g)) add(match[1]);
+  for (const match of source.matchAll(/\b(?:writeFileSync|writeFile)\(\s*['"]([^'"]+)['"]/g)) add(match[1]);
+  for (const match of shell.matchAll(/(?:^|[\s\d])>>?\s*(['"]?[^\s;&|'"]+['"]?)/gm)) add(match[1]);
+  for (const segment of shellSegments(shell)) {
+    let words = shellWords(segment.trim());
+    while (words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]) || ['then', 'do', 'sudo', 'env', 'command'].includes(words[0]))) words.shift();
+    if (!words.length) continue;
+    let commandName = path.basename(words[0]);
+    let args = words.slice(1);
+    if (commandName === 'git' && ['mv', 'rm'].includes(args[0])) { commandName = args[0]; args = args.slice(1); }
+    if (['sed', 'perl'].includes(commandName)) {
+      if (args.some(word => /^-(?:i|pi)/.test(word))) add(args[args.length - 1]);
+      continue;
+    }
+    if (!['mv', 'cp', 'install', 'rm', 'touch', 'truncate', 'tee'].includes(commandName)) continue;
+    args = args.filter(word => !word.startsWith('-'));
+    if (commandName === 'mv') args.slice(-2).forEach(add);
+    else if (commandName === 'cp' || commandName === 'install') args.slice(-1).forEach(add);
+    else args.forEach(add);
+  }
+  return [...found];
+}
+
+function shellMutationEvents(key, entry, input, ts, callId) {
+  const command = input && (input.command || input.cmd) || '';
+  let shellEntry = entry;
+  const cd = String(command).match(/^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&]+))\s*&&/);
+  if (cd && entry.cwd) shellEntry = { ...entry, cwd: path.resolve(entry.cwd, cd[1] || cd[2] || cd[3]) };
+  const hasOtherCd = /(?:^|[;&|]\s*)cd\s+/m.test(String(command).replace(/^\s*cd\s+[^;&|]+\s*&&/, ''));
+  return shellMutationPaths(command).filter(file => path.isAbsolute(file) || file.startsWith('~/') || !hasOtherCd).map((file, i) => {
+    const event = makeDiffEvent(key, shellEntry, file, 'shell', null, null, ts, i, callId);
+    if (event) event.command = clipped(command, 8000);
+    return event;
+  }).filter(Boolean);
+}
+
+function diffEventsFromContent(key, entry, name, input, ts, callId = null) {
   const out = [];
   if (!input || typeof input !== 'object') return out;
   const lower = String(name || '').toLowerCase();
+  if (lower === 'bash' || lower === 'shell') return shellMutationEvents(key, entry, input, ts, callId);
   const pathValue = input.file_path || input.path || input.notebook_path || null;
   if (!pathValue) return out;
-  if (lower === 'write') out.push(makeDiffEvent(key, entry, pathValue, 'write', null, input.content || '', ts, 0));
+  if (lower === 'write') out.push(makeDiffEvent(key, entry, pathValue, 'write', null, input.content || '', ts, 0, callId));
   else if (Array.isArray(input.edits)) {
-    input.edits.forEach((edit, i) => out.push(makeDiffEvent(key, entry, pathValue, 'multi-edit', edit.oldText || edit.old_string || '', edit.newText || edit.new_string || '', ts, i)));
+    input.edits.forEach((edit, i) => out.push(makeDiffEvent(key, entry, pathValue, 'multi-edit', edit.oldText || edit.old_string || '', edit.newText || edit.new_string || '', ts, i, callId)));
   } else if (lower === 'edit' || lower === 'multiedit') {
-    out.push(makeDiffEvent(key, entry, pathValue, lower === 'multiedit' ? 'multi-edit' : 'edit', input.oldText || input.old_string || '', input.newText || input.new_string || '', ts, 0));
+    out.push(makeDiffEvent(key, entry, pathValue, lower === 'multiedit' ? 'multi-edit' : 'edit', input.oldText || input.old_string || '', input.newText || input.new_string || '', ts, 0, callId));
   }
   return out.filter(Boolean);
+}
+
+function toolResultText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map(item => typeof item === 'string' ? item : item && (item.text || item.content) || '').filter(Boolean).join('\n');
 }
 
 async function conversationDiffs(key) {
   const entry = index[key];
   if (!entry) throw new Error('not found');
-  const cacheKey = 'v2:' + String(entry.mtimeMs || 0) + ':' + String(entry.size || 0);
+  const cacheKey = 'v6:' + String(entry.mtimeMs || 0) + ':' + String(entry.size || 0);
   const cached = diffCache[key];
   if (cached && cached.cacheKey === cacheKey) return cached.events;
   const raw = await fsp.readFile(absPathForKey(key), 'utf8');
-  const events = [];
+  const records = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
-    let d; try { d = JSON.parse(line); } catch { continue; }
+    try { records.push(JSON.parse(line)); } catch {}
+  }
+  const results = new Map();
+  for (const d of records) {
+    if (entry.source === 'claude') {
+      for (const block of (d.message && d.message.content) || []) {
+        if (!block || block.type !== 'tool_result' || !block.tool_use_id) continue;
+        const text = toolResultText(block.content);
+        results.set(block.tool_use_id, { outcome: block.is_error ? 'failed' : 'applied', text });
+      }
+    } else if (d.type === 'message' && d.message && d.message.role === 'toolResult' && d.message.toolCallId) {
+      const text = toolResultText(d.message.content);
+      results.set(d.message.toolCallId, { outcome: d.message.isError || d.message.is_error ? 'failed' : 'applied', text });
+    }
+  }
+  const events = [];
+  for (const d of records) {
     if (entry.source === 'claude') {
       if (d.type !== 'assistant' || d.isSidechain || d.isMeta) continue;
       for (const b of (d.message && d.message.content) || []) {
         if (!b || b.type !== 'tool_use') continue;
-        events.push(...diffEventsFromContent(key, entry, b.name, b.input, d.timestamp));
+        events.push(...diffEventsFromContent(key, entry, b.name, b.input, d.timestamp, b.id || null));
       }
     } else {
       if (d.type !== 'message' || !d.message || d.message.role !== 'assistant') continue;
       for (const b of d.message.content || []) {
         if (!b || b.type !== 'toolCall') continue;
-        events.push(...diffEventsFromContent(key, entry, b.name, b.arguments, d.timestamp));
+        events.push(...diffEventsFromContent(key, entry, b.name, b.arguments, d.timestamp, b.id || null));
       }
     }
+  }
+  for (const event of events) {
+    const result = event.callId && results.get(event.callId);
+    if (!result) continue;
+    event.outcome = result.outcome;
+    event.resultSummary = clipped(result.text, 500);
   }
   events.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.path.localeCompare(b.path) || a.editIndex - b.editIndex);
   diffCache[key] = { cacheKey, events, createdAt: Date.now() };
@@ -1826,6 +2943,675 @@ async function projectDiffResponse(project, includeFull = false) {
   const projectDiffEvents = projectDiffEventsFor(project);
   projectDiffEvents.set(Date.now(), { at: Date.now(), events: [...fileHashes.values()] });
   return { project, cwd: meta.cwd, scanned: candidates.length, totalConversations: meta.entries.length, files: rows };
+}
+
+// ---------- Git-weaved project file history ----------
+const gitHistoryCache = new Map();
+const gitPatchCache = new Map();
+
+function execText(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 30000, ...options },
+      (error, stdout, stderr) => error ? reject(new Error(String(stderr || error.message).trim())) : resolve(String(stdout || '')));
+  });
+}
+
+async function gitText(root, args) {
+  return execText('git', ['-C', root, ...args]);
+}
+
+async function projectGitRepositories(meta) {
+  const roots = new Set();
+  for (const cwd of [...new Set(meta.entries.map(({ entry }) => entry.cwd).filter(Boolean))]) {
+    try {
+      const root = (await gitText(cwd, ['rev-parse', '--show-toplevel'])).trim();
+      if (root && fs.existsSync(root)) roots.add(path.resolve(root));
+    } catch {}
+  }
+  return [...roots].sort((a, b) => b.length - a.length);
+}
+
+function renamedNumstatPath(value) {
+  const text = String(value || '');
+  const brace = text.match(/^(.*)\{([^{}]*) => ([^{}]*)\}(.*)$/);
+  if (brace) return brace[1] + brace[3] + brace[4];
+  const arrow = text.lastIndexOf(' => ');
+  return arrow >= 0 ? text.slice(arrow + 4) : text;
+}
+
+function parseGitLog(text, root) {
+  const commits = [];
+  for (const record of String(text).split('\x1e')) {
+    if (!record.trim()) continue;
+    const lines = record.replace(/^\n/, '').split('\n');
+    const fields = lines.shift().split('\x1f');
+    if (fields.length < 7) continue;
+    const [hash, shortHash, parents, ts, author, email, subject] = fields;
+    const files = [];
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const match = line.match(/^(-|\d+)\t(-|\d+)\t(.+)$/);
+      if (!match) continue;
+      files.push({
+        path: renamedNumstatPath(match[3]),
+        additions: match[1] === '-' ? null : Number(match[1]),
+        deletions: match[2] === '-' ? null : Number(match[2]),
+      });
+    }
+    commits.push({
+      hash, shortHash, parents: parents ? parents.split(' ') : [], ts, author, email, subject,
+      repoRoot: root, branches: [], files,
+    });
+  }
+  return commits;
+}
+
+function parseGitStatus(text) {
+  const rows = [];
+  const parts = String(text).split('\0').filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const item = parts[i];
+    const status = item.slice(0, 2);
+    let file = item.slice(3);
+    if ((status.includes('R') || status.includes('C')) && parts[i + 1]) file = parts[++i];
+    rows.push({ path: file, status });
+  }
+  return rows;
+}
+
+async function loadGitRepository(root) {
+  const refsText = await gitText(root, ['for-each-ref', '--format=%(refname:short)%09%(objectname)', 'refs/heads', 'refs/remotes']).catch(() => '');
+  const reflogText = await gitText(root, ['reflog', 'show', '--all', '--max-count=2000', '--format=%H%x09%gD']).catch(() => '');
+  const statusText = await gitText(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']).catch(() => '');
+  const signature = crypto.createHash('sha256').update(refsText + '\x00' + reflogText + '\x00' + statusText).digest('hex').slice(0, 24);
+  const cached = gitHistoryCache.get(root);
+  if (cached && cached.signature === signature) return cached.value;
+  const logText = await gitText(root, [
+    'log', '--all', '--reflog', '--max-count=2000', '--date=iso-strict', '--find-renames', '--diff-merges=first-parent',
+    '--format=%x1e%H%x1f%h%x1f%P%x1f%cI%x1f%aN%x1f%aE%x1f%s', '--numstat',
+  ]).catch(() => '');
+  const commits = parseGitLog(logText, root);
+  const byHash = new Map(commits.map(commit => [commit.hash, commit]));
+  const refs = refsText.split('\n').filter(Boolean).map(line => {
+    const [name, hash] = line.split('\t'); return { name, hash };
+  }).filter(ref => ref.name && ref.hash);
+  const refsByTip = new Map();
+  for (const ref of refs.slice(0, 40)) {
+    if (!refsByTip.has(ref.hash)) refsByTip.set(ref.hash, []);
+    refsByTip.get(ref.hash).push(ref.name);
+  }
+  for (const [tip, names] of refsByTip) {
+    const hashes = (await gitText(root, ['rev-list', '--max-count=2000', tip]).catch(() => '')).split('\n').filter(Boolean);
+    for (const hash of hashes) {
+      const commit = byHash.get(hash);
+      if (commit) commit.branches.push(...names);
+    }
+  }
+  for (const commit of commits) commit.branches = [...new Set(commit.branches)].slice(0, 12);
+  let currentBranch = null, head = null;
+  try { currentBranch = (await gitText(root, ['branch', '--show-current'])).trim() || null; } catch {}
+  try { head = (await gitText(root, ['rev-parse', 'HEAD'])).trim() || null; } catch {}
+  const value = {
+    id: crypto.createHash('sha256').update(root).digest('hex').slice(0, 12), root,
+    currentBranch, head, refs, commits, workingTree: parseGitStatus(statusText), truncated: commits.length >= 2000,
+  };
+  gitHistoryCache.set(root, { signature, value });
+  return value;
+}
+
+function repoForEvent(event, repositories) {
+  const full = path.resolve(event.path);
+  return repositories.find(repo => full === repo.root || full.startsWith(repo.root + path.sep)) || null;
+}
+
+function usefulLineSet(text) {
+  return new Set(String(text || '').split('\n').map(line => line.trim())
+    .filter(line => line.length >= 4 && /[a-zA-Z0-9]/.test(line)));
+}
+
+function setCoverage(wanted, actual) {
+  if (!wanted.size) return null;
+  let hit = 0;
+  for (const line of wanted) if (actual.has(line)) hit++;
+  return hit / wanted.size;
+}
+
+function patchLineSets(patch) {
+  const added = new Set(), removed = new Set();
+  for (const line of String(patch).split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---')) continue;
+    const text = line.slice(1).trim();
+    if (text.length < 4 || !/[a-zA-Z0-9]/.test(text)) continue;
+    if (line.startsWith('+')) added.add(text);
+    else if (line.startsWith('-')) removed.add(text);
+  }
+  return { added, removed };
+}
+
+async function cachedGitObject(root, cacheKey, args, fallback = '') {
+  const key = `${root}\x00${cacheKey}`;
+  if (gitPatchCache.has(key)) return gitPatchCache.get(key);
+  const pending = gitText(root, args).catch(() => fallback);
+  gitPatchCache.set(key, pending);
+  const value = await pending;
+  gitPatchCache.set(key, value);
+  if (gitPatchCache.size > 3000) gitPatchCache.delete(gitPatchCache.keys().next().value);
+  return value;
+}
+
+async function commitPatch(root, hash, file) {
+  return cachedGitObject(root, `patch\x00${hash}\x00${file}`, ['show', '--format=', '--find-renames', '--unified=0', hash, '--', file]);
+}
+
+async function commitBlob(root, hash, file) {
+  return cachedGitObject(root, `blob\x00${hash}\x00${file}`, ['show', `${hash}:${file}`], null);
+}
+
+function branchMatches(eventBranch, branches) {
+  if (!eventBranch) return false;
+  return (branches || []).some(branch => branch === eventBranch || branch.endsWith('/' + eventBranch));
+}
+
+async function pairEventToCommit(event, repo, commitsForFile) {
+  if (event.outcome === 'failed') return null;
+  const eventMs = Date.parse(event.ts || '');
+  if (!Number.isFinite(eventMs)) return null;
+  const windowed = commitsForFile.filter(commit => {
+    const delta = Date.parse(commit.ts) - eventMs;
+    return delta >= -10 * 60 * 1000 && delta <= 14 * 86400000;
+  }).sort((a, b) => {
+    const ab = branchMatches(event.branch, a.branches) ? 1 : 0;
+    const bb = branchMatches(event.branch, b.branches) ? 1 : 0;
+    if (ab !== bb) return bb - ab;
+    return Math.abs(Date.parse(a.ts) - eventMs) - Math.abs(Date.parse(b.ts) - eventMs);
+  }).slice(0, 6);
+  let best = null;
+  const wantedNew = usefulLineSet(event.newText);
+  const wantedOld = usefulLineSet(event.oldText);
+  for (const commit of windowed) {
+    const patch = await commitPatch(repo.root, commit.hash, event.repoRelativePath);
+    const lines = patchLineSets(patch);
+    const newCoverage = setCoverage(wantedNew, lines.added);
+    const oldCoverage = setCoverage(wantedOld, lines.removed);
+    const coverages = [newCoverage, oldCoverage].filter(value => value !== null);
+    let contentScore = coverages.length ? coverages.reduce((a, b) => a + b, 0) / coverages.length : 0;
+    let exactBlob = false;
+    if (event.kind === 'write' && event.newText && windowed.indexOf(commit) < 3) {
+      const blob = await commitBlob(repo.root, commit.hash, event.repoRelativePath);
+      if (blob !== null && String(blob).replace(/\n$/, '') === String(event.newText).replace(/\n$/, '')) {
+        exactBlob = true; contentScore = 1;
+      }
+    }
+    const deltaMs = Date.parse(commit.ts) - eventMs;
+    const timeScore = Math.max(0, 1 - Math.max(0, deltaMs) / (14 * 86400000));
+    const branchScore = branchMatches(event.branch, commit.branches) ? 1 : 0;
+    const score = contentScore * 0.78 + timeScore * 0.14 + branchScore * 0.08;
+    if (!best || score > best.score) best = { commit, score, contentScore, exactBlob, deltaMs, branchScore };
+  }
+  if (!best) return null;
+  let confidence = null, basis = 'content';
+  if (best.exactBlob || best.contentScore >= 0.75) confidence = 'high';
+  else if (best.contentScore >= 0.35) confidence = 'medium';
+  else if (best.contentScore >= 0.12) confidence = 'low';
+  else if (best.branchScore && best.deltaMs >= 0 && best.deltaMs <= 48 * 3600000) { confidence = 'low'; basis = 'time-and-branch-only'; }
+  if (!confidence) return null;
+  return {
+    hash: best.commit.hash, shortHash: best.commit.shortHash, subject: best.commit.subject,
+    ts: best.commit.ts, branches: best.commit.branches, confidence, basis,
+    score: Number(best.score.toFixed(3)), contentScore: Number(best.contentScore.toFixed(3)),
+    deltaMs: best.deltaMs,
+  };
+}
+
+async function projectFileHistoryResponse(project) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const roots = await projectGitRepositories(meta);
+  const repositories = await mapLimit(roots, 3, loadGitRepository);
+  if (!repositories.length && meta.cwd && fs.existsSync(meta.cwd)) {
+    const root = path.resolve(meta.cwd);
+    repositories.push({
+      id: crypto.createHash('sha256').update('workspace:' + root).digest('hex').slice(0, 12),
+      root, currentBranch: null, head: null, refs: [], commits: [], workingTree: [], truncated: false, isGit: false,
+    });
+  }
+  const allEvents = [];
+  const conversations = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
+  for (const { key } of conversations) {
+    try { allEvents.push(...await conversationDiffs(key)); } catch {}
+  }
+  const fullEvents = new Map();
+  for (const event of allEvents) {
+    fullEvents.set(event.id, event);
+    const repo = repoForEvent(event, repositories);
+    if (!repo) continue;
+    event.repoRoot = repo.root;
+    event.repoId = repo.id;
+    event.repoRelativePath = path.relative(repo.root, event.path).replace(/\\/g, '/');
+  }
+  const commitFilesByRepo = new Map();
+  for (const repo of repositories) {
+    const byFile = new Map();
+    for (const commit of repo.commits) {
+      for (const file of commit.files) {
+        if (!byFile.has(file.path)) byFile.set(file.path, []);
+        byFile.get(file.path).push(commit);
+      }
+    }
+    commitFilesByRepo.set(repo.id, byFile);
+  }
+  await mapLimit(allEvents.filter(event => event.repoId), 4, async event => {
+    const repo = repositories.find(item => item.id === event.repoId);
+    const commits = commitFilesByRepo.get(repo.id).get(event.repoRelativePath) || [];
+    event.commitPair = await pairEventToCommit(event, repo, commits);
+    const working = new Set(repo.workingTree.map(item => item.path));
+    event.repositoryState = event.outcome === 'failed' ? 'failed' : event.commitPair ? 'committed' : working.has(event.repoRelativePath) ? 'working-tree' : 'unresolved';
+    event.inferredBranch = event.branch === 'HEAD'
+      ? event.commitPair && event.commitPair.branches && event.commitPair.branches[0] || (event.repositoryState === 'working-tree' ? repo.currentBranch : null)
+      : null;
+  });
+  const rows = new Map();
+  const rowFor = (repo, relativePath) => {
+    const id = `${repo.id}:${relativePath}`;
+    let row = rows.get(id);
+    if (!row) {
+      row = { id, repoId: repo.id, repoRoot: repo.root, relativePath, path: path.join(repo.root, relativePath), aiEvents: [], commitEvents: [], workingTree: null, latestTs: null };
+      rows.set(id, row);
+    }
+    return row;
+  };
+  for (const event of allEvents) {
+    if (!event.repoId) continue;
+    const repo = repositories.find(item => item.id === event.repoId);
+    const row = rowFor(repo, event.repoRelativePath);
+    row.aiEvents.push({
+      id: event.id, key: event.key, ts: event.ts, kind: event.kind, stats: event.stats,
+      conversationTitle: event.conversationTitle, agent: event.agent, branch: event.branch,
+      inferredBranch: event.inferredBranch || null,
+      outcome: event.outcome, repositoryState: event.repositoryState, commitPair: event.commitPair,
+      command: event.command || null,
+    });
+    if (!row.latestTs || String(event.ts || '') > String(row.latestTs)) row.latestTs = event.ts;
+  }
+  let totalCommitFileEvents = 0;
+  for (const repo of repositories) {
+    for (const commit of repo.commits) {
+      for (const file of commit.files) {
+        const row = rowFor(repo, file.path);
+        row.commitEvents.push({
+          id: `git:${repo.id}:${commit.hash}:${file.path}`, hash: commit.hash, shortHash: commit.shortHash,
+          ts: commit.ts, subject: commit.subject, author: commit.author, parents: commit.parents,
+          branches: commit.branches, additions: file.additions, deletions: file.deletions,
+        });
+        totalCommitFileEvents++;
+        if (!row.latestTs || String(commit.ts || '') > String(row.latestTs)) row.latestTs = commit.ts;
+      }
+    }
+    for (const working of repo.workingTree) rowFor(repo, working.path).workingTree = working.status;
+  }
+  const projectDiffEvents = projectDiffEventsFor(project);
+  projectDiffEvents.set(Date.now(), { at: Date.now(), events: [...fullEvents.values()] });
+  const outputRows = [...rows.values()].sort((a, b) => String(b.latestTs || '').localeCompare(String(a.latestTs || '')) || a.relativePath.localeCompare(b.relativePath));
+  const repositoryEvents = allEvents.filter(event => event.repoId);
+  const paired = repositoryEvents.filter(event => event.commitPair).length;
+  return {
+    project, cwd: meta.cwd,
+    repositories: repositories.map(repo => ({
+      id: repo.id, root: repo.root, currentBranch: repo.currentBranch, head: repo.head,
+      refs: repo.refs.map(ref => ref.name), commitCount: repo.commits.length,
+      workingTreeFiles: repo.workingTree.length, truncated: repo.truncated, isGit: repo.isGit !== false,
+    })),
+    conversations: conversations.length, rows: outputRows, totals: {
+      files: outputRows.length, aiEvents: repositoryEvents.length, externalAiEvents: allEvents.length - repositoryEvents.length,
+      applied: repositoryEvents.filter(event => event.outcome === 'applied').length,
+      failed: repositoryEvents.filter(event => event.outcome === 'failed').length, paired,
+      commits: repositories.reduce((sum, repo) => sum + repo.commits.length, 0), commitFileEvents: totalCommitFileEvents,
+      workingTreeFiles: repositories.reduce((sum, repo) => sum + repo.workingTree.length, 0),
+    },
+  };
+}
+
+async function projectCommitResponse(project, root, hash) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const roots = await projectGitRepositories(meta);
+  const resolved = path.resolve(root || '');
+  if (!roots.includes(resolved)) throw new Error('repository is not part of this project');
+  if (!/^[0-9a-f]{7,40}$/i.test(hash || '')) throw new Error('bad commit hash');
+  const repo = await loadGitRepository(resolved);
+  const commit = repo.commits.find(item => item.hash === hash || item.hash.startsWith(hash));
+  if (!commit) throw new Error('commit not found in indexed history');
+  const patch = await gitText(resolved, ['show', '--format=fuller', '--find-renames', '--stat', '--patch', commit.hash, '--']).catch(e => e.message);
+  return { ...commit, repoId: repo.id, patch: clipped(patch, 2 * 1024 * 1024) };
+}
+
+const projectFileContextCache = new Map();
+const projectFileSnapshotCache = new Map();
+
+function normalizedRepoFile(root, file) {
+  const resolved = path.resolve(root, String(file || ''));
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) throw new Error('file is outside the repository');
+  return { fullPath: resolved, relativePath: path.relative(root, resolved).replace(/\\/g, '/') };
+}
+
+async function projectFileContext(project, rootValue, fileValue) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const gitRoots = await projectGitRepositories(meta);
+  const fallbackRoot = !gitRoots.length && meta.cwd ? path.resolve(meta.cwd) : null;
+  const root = path.resolve(rootValue || '');
+  if (!gitRoots.includes(root) && root !== fallbackRoot) throw new Error('repository is not part of this project');
+  const { fullPath, relativePath } = normalizedRepoFile(root, fileValue);
+  const cacheKey = `${project}\x00${root}\x00${relativePath}`;
+  const cached = projectFileContextCache.get(cacheKey);
+  let diskMtime = 0;
+  try { diskMtime = (await fsp.stat(fullPath)).mtimeMs; } catch {}
+  if (cached && Date.now() - cached.at < 15000 && cached.diskMtime === diskMtime) return cached.context;
+  const repo = gitRoots.includes(root) ? await loadGitRepository(root) : {
+    id: crypto.createHash('sha256').update('workspace:' + root).digest('hex').slice(0, 12),
+    root, commits: [], workingTree: [], isGit: false,
+  };
+  const events = [];
+  const conversations = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
+  for (const { key } of conversations) {
+    try {
+      for (const event of await conversationDiffs(key)) {
+        if (path.resolve(event.path) !== fullPath) continue;
+        events.push(event);
+      }
+    } catch {}
+  }
+  events.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.editIndex - b.editIndex || a.id.localeCompare(b.id));
+  const commits = repo.commits.filter(commit => commit.files.some(file => file.path === relativePath))
+    .sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.hash.localeCompare(b.hash));
+  let current = null;
+  try { current = await fsp.readFile(fullPath, 'utf8'); } catch {}
+  const version = diffEventHash([diskMtime, repo.head || '', events.map(event => `${event.id}:${event.outcome}`), commits.map(commit => commit.hash)]);
+  const context = { project, root, relativePath, fullPath, repo, events, commits, current, version };
+  projectFileContextCache.set(cacheKey, { at: Date.now(), diskMtime, context });
+  if (projectFileContextCache.size > 200) projectFileContextCache.delete(projectFileContextCache.keys().next().value);
+  return context;
+}
+
+function applyEventText(text, event, reverse = false) {
+  if (event.outcome === 'failed' || event.kind === 'shell') return { text, applied: false };
+  if (event.kind === 'write') {
+    if (reverse) return { text, applied: false };
+    return { text: String(event.newText || ''), applied: true };
+  }
+  const from = String((reverse ? event.newText : event.oldText) || '');
+  const to = String((reverse ? event.oldText : event.newText) || '');
+  if (!from) return { text, applied: false };
+  const at = text.indexOf(from);
+  if (at < 0) return { text, applied: false };
+  return { text: text.slice(0, at) + to + text.slice(at + from.length), applied: true };
+}
+
+function fileHistoryPoints(ctx) {
+  const points = [];
+  for (const event of ctx.events) {
+    const ms = Date.parse(event.ts || '');
+    if (!Number.isFinite(ms)) continue;
+    points.push({
+      id: `ai:${event.id}`, kind: 'ai', ts: event.ts, ms, eventId: event.id,
+      label: `${event.kind} · ${event.conversationTitle} · ${new Date(ms).toLocaleString()}`,
+      key: event.key, outcome: event.outcome,
+    });
+  }
+  for (const commit of ctx.commits) {
+    const ms = Date.parse(commit.ts || '');
+    if (!Number.isFinite(ms)) continue;
+    points.push({
+      id: `git:${commit.hash}`, kind: 'git', ts: commit.ts, ms, hash: commit.hash,
+      label: `${commit.shortHash} · ${commit.subject} · ${new Date(ms).toLocaleString()}`,
+    });
+  }
+  points.sort((a, b) => a.ms - b.ms || (a.kind === b.kind ? a.id.localeCompare(b.id) : a.kind === 'ai' ? -1 : 1));
+  points.forEach((point, order) => { point.order = order; });
+  if (ctx.current !== null) points.push({
+    id: 'current', kind: 'current', ts: new Date().toISOString(), ms: Date.now(), order: points.length,
+    label: 'current working file',
+  });
+  return points;
+}
+
+async function snapshotAtFilePoint(ctx, point) {
+  const cacheKey = `${ctx.root}\x00${ctx.relativePath}\x00${ctx.version}\x00${point.id}`;
+  if (projectFileSnapshotCache.has(cacheKey)) return projectFileSnapshotCache.get(cacheKey);
+  let snapshot;
+  if (point.kind === 'current') snapshot = { point, content: ctx.current || '', exact: true, method: 'current file', applied: 0, skipped: 0 };
+  if (point.kind === 'git') {
+    const content = await commitBlob(ctx.root, point.hash, ctx.relativePath);
+    snapshot = { point, content: content === null ? '' : content, exact: true, method: `Git ${point.hash.slice(0, 10)}`, applied: 0, skipped: 0 };
+  }
+  if (snapshot) {
+    projectFileSnapshotCache.set(cacheKey, snapshot);
+    return snapshot;
+  }
+  const target = ctx.events.find(event => event.id === point.eventId);
+  if (!target) throw new Error('AI edit point not found');
+  const targetMs = Date.parse(target.ts || '');
+  const candidates = [];
+  const baseline = [...ctx.commits].filter(commit => Date.parse(commit.ts || '') <= targetMs).pop() || null;
+  const baselineContent = baseline ? await commitBlob(ctx.root, baseline.hash, ctx.relativePath) : null;
+  if (baselineContent !== null) {
+    let content = baselineContent, applied = 0, skipped = 0;
+    const baselineMs = Date.parse(baseline.ts || '');
+    for (const event of ctx.events) {
+      const eventMs = Date.parse(event.ts || '');
+      if (!Number.isFinite(eventMs) || eventMs <= baselineMs || eventMs > targetMs) continue;
+      const result = applyEventText(content, event, false);
+      content = result.text;
+      if (result.applied) applied++; else if (event.outcome !== 'failed') skipped++;
+      if (event.id === target.id) break;
+    }
+    candidates.push({ content, method: `replayed after Git ${baseline.shortHash}`, applied, skipped, preference: 0 });
+  }
+  if (ctx.current !== null) {
+    let content = ctx.current, applied = 0, skipped = 0;
+    for (const event of [...ctx.events].reverse()) {
+      const eventMs = Date.parse(event.ts || '');
+      if (!Number.isFinite(eventMs) || eventMs <= targetMs) continue;
+      const result = applyEventText(content, event, true);
+      content = result.text;
+      if (result.applied) applied++; else if (event.outcome !== 'failed') skipped++;
+    }
+    candidates.push({ content, method: 'reverse-replayed from current file', applied, skipped, preference: 1 });
+  }
+  if (!candidates.length) {
+    let content = '', applied = 0, skipped = 0;
+    for (const event of ctx.events) {
+      const eventMs = Date.parse(event.ts || '');
+      if (!Number.isFinite(eventMs) || eventMs > targetMs) continue;
+      const result = applyEventText(content, event, false);
+      content = result.text;
+      if (result.applied) applied++; else if (event.outcome !== 'failed') skipped++;
+      if (event.id === target.id) break;
+    }
+    candidates.push({ content, method: 'replayed from recorded writes', applied, skipped, preference: 2 });
+  }
+  candidates.sort((a, b) => a.skipped - b.skipped || b.applied - a.applied || a.preference - b.preference);
+  const best = candidates[0];
+  snapshot = { point, content: best.content, exact: false, method: best.method, applied: best.applied, skipped: best.skipped };
+  projectFileSnapshotCache.set(cacheKey, snapshot);
+  if (projectFileSnapshotCache.size > 1000) projectFileSnapshotCache.delete(projectFileSnapshotCache.keys().next().value);
+  return snapshot;
+}
+
+function patchChangeText(patch) {
+  const oldLines = [], newLines = [];
+  for (const line of String(patch || '').split('\n')) {
+    if (line.startsWith('---') || line.startsWith('+++')) continue;
+    if (line.startsWith('-')) oldLines.push(line.slice(1));
+    else if (line.startsWith('+')) newLines.push(line.slice(1));
+  }
+  return { oldText: oldLines.join('\n'), newText: newLines.join('\n') };
+}
+
+function nearestFilePoint(points, value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const ms = Number(value);
+  if (!Number.isFinite(ms)) return null;
+  return points.reduce((best, point) => !best || Math.abs(point.ms - ms) < Math.abs(best.ms - ms) ? point : best, null);
+}
+
+async function projectFileCompareResponse(project, root, file, fromId = '', toId = '', fromAt = '', toAt = '') {
+  const ctx = await projectFileContext(project, root, file);
+  const points = fileHistoryPoints(ctx);
+  if (!points.length) throw new Error('this file has no selectable history points');
+  let to = points.find(point => point.id === toId) || nearestFilePoint(points, toAt) || points[points.length - 1];
+  const beforeTo = points.filter(point => point.order < to.order);
+  const defaultFrom = [...beforeTo].reverse().find(point => point.kind === 'git') || beforeTo[beforeTo.length - 1] || to;
+  let from = points.find(point => point.id === fromId) || nearestFilePoint(points, fromAt) || defaultFrom;
+  if (from.order > to.order) [from, to] = [to, from];
+  const [oldSnapshot, newSnapshot] = await Promise.all([snapshotAtFilePoint(ctx, from), snapshotAtFilePoint(ctx, to)]);
+  const changes = [];
+  for (const event of ctx.events) {
+    const point = points.find(item => item.eventId === event.id);
+    if (!point || point.order <= from.order || point.order > to.order) continue;
+    changes.push({
+      type: 'ai', id: event.id, key: event.key, ts: event.ts, kind: event.kind,
+      agent: event.agent, conversationTitle: event.conversationTitle, outcome: event.outcome,
+      oldText: event.oldText || '', newText: event.newText || '',
+    });
+  }
+  for (const commit of ctx.commits) {
+    const point = points.find(item => item.hash === commit.hash);
+    if (!point || point.order <= from.order || point.order > to.order) continue;
+    const patch = await commitPatch(ctx.root, commit.hash, ctx.relativePath);
+    changes.push({
+      type: 'git', id: commit.hash, hash: commit.hash, shortHash: commit.shortHash,
+      ts: commit.ts, kind: 'commit', subject: commit.subject, ...patchChangeText(patch),
+    });
+  }
+  changes.sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
+  return {
+    project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
+    points, from: from.id, to: to.id, old: oldSnapshot, new: newSnapshot, changes,
+    truth: 'Git and current-file points are exact. AI points replay recorded tool calls and can skip divergent edits.',
+  };
+}
+
+async function conversationFileHistoryResponse(key) {
+  const entry = index[key];
+  if (!entry) throw new Error('conversation not found');
+  const events = await conversationDiffs(key);
+  const project = projectOfEntry(entry);
+  const meta = projectMetaFor(project);
+  const roots = meta ? await projectGitRepositories(meta) : [];
+  const rows = new Map();
+  for (const event of events) {
+    let root = roots.find(candidate => event.path === candidate || event.path.startsWith(candidate + path.sep));
+    if (!root && entry.cwd && (event.path === entry.cwd || event.path.startsWith(entry.cwd + path.sep))) root = entry.cwd;
+    if (!root) root = path.dirname(event.path);
+    root = path.resolve(root);
+    const relativePath = path.relative(root, event.path).replace(/\\/g, '/') || path.basename(event.path);
+    const repoId = crypto.createHash('sha256').update(root).digest('hex').slice(0, 12);
+    const id = `${repoId}:${relativePath}`;
+    let row = rows.get(id);
+    if (!row) {
+      row = { id, repoId, repoRoot: root, relativePath, path: event.path, aiEvents: [], commitEvents: [], workingTree: null, latestTs: null, contentEvents: 0 };
+      rows.set(id, row);
+    }
+    row.aiEvents.push({
+      id: event.id, key: event.key, ts: event.ts, kind: event.kind, stats: event.stats,
+      conversationTitle: event.conversationTitle, agent: event.agent, outcome: event.outcome,
+    });
+    if (event.kind !== 'shell') row.contentEvents++;
+    if (!row.latestTs || String(event.ts || '') > String(row.latestTs)) row.latestTs = event.ts;
+  }
+  const outputRows = [...rows.values()].sort((a, b) => Number(b.contentEvents > 0) - Number(a.contentEvents > 0) || String(b.latestTs || '').localeCompare(String(a.latestTs || '')) || a.relativePath.localeCompare(b.relativePath));
+  return {
+    scope: 'conversation', key, project, cwd: entry.cwd || null,
+    title: entry.timelineTitle || entry.title || key, firstTs: entry.firstTs || null, lastTs: entry.lastTs || null,
+    repositories: [...new Map(outputRows.map(row => [row.repoId, { id: row.repoId, root: row.repoRoot }])).values()],
+    rows: outputRows, totals: { files: outputRows.length, aiEvents: events.length, failed: events.filter(event => event.outcome === 'failed').length },
+  };
+}
+
+async function conversationFileContext(key, root, file) {
+  const entry = index[key];
+  if (!entry) throw new Error('conversation not found');
+  const conversationEvents = await conversationDiffs(key);
+  const { fullPath } = normalizedRepoFile(path.resolve(root || ''), file);
+  if (!conversationEvents.some(event => path.resolve(event.path) === fullPath)) throw new Error('file was not touched in this conversation');
+  const project = projectOfEntry(entry);
+  try { return await projectFileContext(project, root, file); }
+  catch {
+    const meta = projectMetaFor(project);
+    const events = [];
+    for (const { key: candidateKey } of meta ? meta.entries : [{ key }]) {
+      try {
+        for (const event of await conversationDiffs(candidateKey)) if (path.resolve(event.path) === fullPath) events.push(event);
+      } catch {}
+    }
+    events.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.editIndex - b.editIndex || a.id.localeCompare(b.id));
+    const resolvedRoot = path.resolve(root);
+    let repo;
+    try { repo = await loadGitRepository(resolvedRoot); }
+    catch { repo = { id: crypto.createHash('sha256').update('workspace:' + resolvedRoot).digest('hex').slice(0, 12), root: resolvedRoot, commits: [], workingTree: [], isGit: false }; }
+    const relativePath = path.relative(resolvedRoot, fullPath).replace(/\\/g, '/');
+    const commits = (repo.commits || []).filter(commit => commit.files.some(changed => changed.path === relativePath))
+      .sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.hash.localeCompare(b.hash));
+    let current = null, diskMtime = 0;
+    try { const stat = await fsp.stat(fullPath); diskMtime = stat.mtimeMs; current = await fsp.readFile(fullPath, 'utf8'); } catch {}
+    const version = diffEventHash([diskMtime, repo.head || '', events.map(event => `${event.id}:${event.outcome}`), commits.map(commit => commit.hash)]);
+    return { project, root: resolvedRoot, relativePath, fullPath, repo, events, commits, current, version };
+  }
+}
+
+async function conversationFileCompareResponse(key, root, file, fromId = '', toId = '', fromAt = '', toAt = '') {
+  const ctx = await conversationFileContext(key, root, file);
+  const allPoints = fileHistoryPoints(ctx);
+  const scopedEvents = ctx.events.filter(event => event.key === key);
+  const eventPoints = scopedEvents.map(event => allPoints.find(point => point.eventId === event.id)).filter(Boolean);
+  if (!eventPoints.length) throw new Error('this conversation has no timed file changes for this file');
+  const entry = index[key];
+  const firstGlobal = eventPoints[0], lastGlobal = eventPoints[eventPoints.length - 1];
+  const previous = [...allPoints].reverse().find(point => point.order < firstGlobal.order) || null;
+  const entryStart = Date.parse(entry.firstTs || '');
+  const entryEnd = Date.parse(entry.lastTs || '');
+  const startMs = Number.isFinite(entryStart) ? Math.min(entryStart, firstGlobal.ms - 1) : Math.max(0, firstGlobal.ms - 1);
+  const endMs = Number.isFinite(entryEnd) ? Math.max(entryEnd, lastGlobal.ms + 1) : lastGlobal.ms + 1;
+  const startBoundary = {
+    id: 'conversation-start', kind: 'boundary', ts: new Date(startMs).toISOString(), ms: startMs, order: 0,
+    label: 'conversation start · before this file changed', sourcePoint: previous,
+  };
+  const endBoundary = {
+    id: 'conversation-end', kind: 'boundary', ts: new Date(endMs).toISOString(), ms: endMs, order: eventPoints.length + 1,
+    label: 'conversation end · after this file changed', sourcePoint: lastGlobal,
+  };
+  const points = [startBoundary, ...eventPoints.map((point, i) => ({ ...point, order: i + 1 })), endBoundary];
+  let to = points.find(point => point.id === toId) || nearestFilePoint(points, toAt) || points[points.length - 1];
+  let from = points.find(point => point.id === fromId) || nearestFilePoint(points, fromAt) || points[0];
+  if (from.order > to.order) [from, to] = [to, from];
+  const scopedSnapshot = async point => {
+    if (point.kind !== 'boundary') return snapshotAtFilePoint(ctx, point);
+    if (point.sourcePoint) {
+      const source = await snapshotAtFilePoint(ctx, point.sourcePoint);
+      return { ...source, point };
+    }
+    const firstEvent = scopedEvents[0];
+    if (firstEvent.kind === 'write') return { point, content: '', exact: false, method: 'before the first recorded write', applied: 0, skipped: 0 };
+    const after = await snapshotAtFilePoint(ctx, firstGlobal);
+    const reversed = applyEventText(after.content, firstEvent, true);
+    return { point, content: reversed.text, exact: false, method: 'reversed from the first conversation edit', applied: reversed.applied ? 1 : 0, skipped: reversed.applied ? 0 : 1 };
+  };
+  const [oldSnapshot, newSnapshot] = await Promise.all([scopedSnapshot(from), scopedSnapshot(to)]);
+  const changes = scopedEvents.map(event => {
+    const point = points.find(item => item.eventId === event.id);
+    if (!point || point.order <= from.order || point.order > to.order) return null;
+    return {
+      type: 'ai', id: event.id, key: event.key, ts: event.ts, kind: event.kind,
+      agent: event.agent, conversationTitle: event.conversationTitle, outcome: event.outcome,
+      oldText: event.oldText || '', newText: event.newText || '',
+    };
+  }).filter(Boolean).sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
+  return {
+    scope: 'conversation', key, project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
+    points, from: from.id, to: to.id, old: oldSnapshot, new: newSnapshot, changes,
+    truth: 'This view includes only file changes recorded in this conversation. Complete AI snapshots are reconstructed and can skip divergent edits.',
+  };
 }
 
 // Replay recorded edit/write events to attribute each current line to the
@@ -1948,6 +3734,11 @@ function projectMetaFor(project) {
   return { project, cwd, entries, epics: epicsForProject, latestMs };
 }
 
+function noteStateForEntry(entry) {
+  if (!entry || !entry.notePath) return 'missing';
+  return entry.mtimeMs && entry.notedAt && entry.mtimeMs > entry.notedAt ? 'stale' : 'fresh';
+}
+
 async function projectResponse(project) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
@@ -1959,8 +3750,7 @@ async function projectResponse(project) {
   for (const { key, entry } of sorted) {
     let data = null;
     try { data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')); } catch {}
-    const notedAt = entry.notedAt || 0;
-    const noteState = entry.notePath ? (entry.mtimeMs && notedAt && entry.mtimeMs > notedAt ? 'stale' : 'fresh') : 'missing';
+    const noteState = noteStateForEntry(entry);
     if (entry.notePath) { notes++; if (noteState === 'fresh') freshNotes++; }
     let evidenceState = 'missing';
     if (data) {
@@ -1980,10 +3770,14 @@ async function projectResponse(project) {
       });
     }
   }
+  const memory = await projectMemoryInfo(project, meta);
   return {
-    project, cwd, conversations: entries.length, notes, epics: projectEpics,
+    project, cwd, conversations: entries.length, notes, epics: projectEpics, memory,
     latestTs: latestMs ? new Date(latestMs).toISOString() : null,
-    freshness: { freshNotes, staleNotes: notes - freshNotes, freshEvidence, staleEvidence: evidenceCards - freshEvidence },
+    freshness: {
+      freshNotes, staleNotes: notes - freshNotes, missingNotes: entries.length - notes,
+      freshEvidence, staleEvidence: evidenceCards - freshEvidence, missingEvidence: entries.length - evidenceCards,
+    },
     recent,
     agents: ['pi', 'claude'],
   };
@@ -2014,6 +3808,16 @@ async function buildProjectBriefing(project, include, focusName) {
   for (const r of info.recent) {
     lines.push(`- ${r.lastTs ? r.lastTs.slice(0, 10) : '?'} · ${r.title}` +
       (r.notePath ? ` · note: ${r.notePath}${r.note === 'stale' ? ' (stale: the conversation grew after distillation)' : ''}` : ''));
+  }
+
+  const projectMemory = await projectMemoryInfo(project, meta);
+  if (projectMemory) {
+    lines.push('', `## Project memory${projectMemory.stale ? ' (stale: new project activity exists)' : ''}`);
+    lines.push('Read these first. They separate durable intent, project setup, and current work:');
+    lines.push(`- High-level overview: ${projectMemory.paths.overview}`);
+    lines.push(`- Deep user intent: ${projectMemory.paths.intent}`);
+    lines.push(`- Development environment: ${projectMemory.paths.environment}`);
+    lines.push(`- Todo, unfinished work, and recent focus: ${projectMemory.paths.status}`);
   }
 
   const wantedEpics = Array.isArray(include.epics) ? include.epics.filter(id => epics[id]) : [];
@@ -2069,190 +3873,23 @@ async function startProjectConversation(options) {
   const kind = options.agent === 'claude' ? 'claude' : 'pi';
   const label = String(options.name || 'Project: ' + options.project).slice(0, 80);
   const name = 'aiconvo-project-' + crypto.createHash('sha256').update(options.project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
-  const started = await herdrStartAgentInNewWorkspace({ cwd, label, name, kind });
-  // Inject the selected memory: write the briefing, then send one kickoff
-  // prompt pointing at it. A kickoff failure never kills the started agent.
-  let briefing = null, kickoff = false, warning = null;
-  try {
-    briefing = await buildProjectBriefing(options.project, options.include || {}, options.name || '');
-    const focus = options.name ? ` Today's focus: "${options.name}".` : '';
-    const text = `Read ${briefing} — it maps this project's work memory (notes, epics, evidence) with full file paths. Read the files you need.${focus}` +
-      ' Then reply with at most 3 lines on where the project stands, and wait for instructions.';
-    const target = started.agent.target;
-    // Keystrokes sent while the TUI still starts up are lost. Wait until the
-    // agent settles at its prompt, then submit with a verified wait: herdr
-    // must observe the agent go to work, or the submission did not land.
-    // Herdr's agent detection flaps during TUI startup: the agent can report
-    // idle and a moment later be "no longer the pane foreground process"
-    // (agent_not_ready). Require two consecutive settled reads, then retry
-    // every transient not-ready error within one time budget.
-    const settleDeadline = Date.now() + 30000;
-    let settledReads = 0;
-    while (Date.now() < settleDeadline && settledReads < 2) {
-      const list = await herdrApi('agent.list').catch(() => null);
-      const a = (list && list.agents || []).find(x => (x.name || x.pane_id) === target);
-      settledReads = a && (a.agent_status === 'idle' || a.agent_status === 'blocked') ? settledReads + 1 : 0;
-      await new Promise(resolve => setTimeout(resolve, 400));
-    }
-    const TRANSIENT = /stalled|timeout|not ready|no longer the pane foreground|not an active named agent/i;
-    const promptDeadline = Date.now() + 45000;
-    for (;;) {
-      try {
-        await herdrApi('agent.prompt', { target, text, wait: { until: ['working'], timeout_ms: 8000 } }, 20000);
-        break;
-      } catch (error) {
-        if (Date.now() < promptDeadline && TRANSIENT.test(String(error.message))) {
-          await new Promise(resolve => setTimeout(resolve, 1200));
-          continue;
-        }
-        throw error;
-      }
-    }
-    kickoff = true;
-  } catch (error) {
-    warning = 'The agent started, but the memory kickoff failed: ' + error.message;
-  }
+  const briefing = await buildProjectBriefing(options.project, options.include || {}, options.name || '');
+  const focus = options.name ? ` Today's focus: "${options.name}".` : '';
+  const memory = await projectMemoryInfo(options.project, meta);
+  const first = memory ? ' Read every file listed under "Project memory" first.' : '';
+  const reading = options.include && options.include.notes
+    ? ' Read every file listed under "Fresh distilled notes".'
+    : ' Read the other files you need.';
+  const text = `Read ${briefing} — it maps this project's work memory (notes, epics, evidence) with full file paths.${first}${reading}${focus}` +
+    ' Then reply with at most 3 lines on where the project stands, and wait for instructions.';
+  const argv = kind === 'claude'
+    ? [claudeBin(), text]
+    : [piBin(), '--name', label, text];
+  await spawnAlacritty(cwd, name, argv);
   return {
-    workspaceId: started.workspaceId, paneId: started.paneId, name, kind, cwd,
-    project: options.project, include: options.include || {}, briefing, kickoff, warning,
+    name, kind, cwd, title: name,
+    project: options.project, include: options.include || {}, briefing, kickoff: true,
   };
-}
-
-// Create a Herdr workspace and start an agent in its root pane. Herdr is a
-// tool: aiconvo owns the workspaces it creates — it waits for the shell,
-// retries while the pane spins up, and closes the workspace on failure.
-// agent.start on a pane whose shell is still launching returns
-// agent_pane_busy ("is not an available shell"); both the readiness wait and
-// the retry exist because of that race.
-async function herdrStartAgentInNewWorkspace({ cwd, label, name, kind, args = [] }) {
-  const created = await herdrApi('workspace.create', { cwd, label: String(label || name).slice(0, 80), focus: false });
-  const workspaceId = created && created.workspace && created.workspace.workspace_id;
-  const paneId = created && created.root_pane && created.root_pane.pane_id;
-  if (!workspaceId || !paneId) throw new Error('Herdr did not create the workspace.');
-  try {
-    // Wait until the pane runs exactly its bare shell.
-    const deadline = Date.now() + 15000;
-    for (;;) {
-      const state = await herdrApi('pane.process_info', { pane_id: paneId }).catch(() => null);
-      const proc = state && state.process_info;
-      if (proc && proc.foreground_processes && proc.foreground_processes.length === 1 &&
-          proc.foreground_processes[0].pid === proc.shell_pid) break;
-      if (Date.now() > deadline) throw new Error('The new Herdr shell did not become ready.');
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    // The readiness check and agent.start can still race; retry on busy.
-    let started;
-    for (let attempt = 0; ; attempt++) {
-      try {
-        started = await herdrApi('agent.start', { name, kind, pane_id: paneId, args, timeout_ms: 120000 }, 130000);
-        break;
-      } catch (error) {
-        if (attempt < 20 && /not an available shell/.test(String(error.message))) {
-          await new Promise(resolve => setTimeout(resolve, 300));
-          continue;
-        }
-        throw error;
-      }
-    }
-    const agent = started && started.agent;
-    if (!agent) throw new Error('Herdr did not return the started agent.');
-    return { workspaceId, paneId, agent: { ...agent, target: agent.name || agent.pane_id } };
-  } catch (error) {
-    await herdrApi('workspace.close', { workspace_id: workspaceId }).catch(() => {});
-    throw error;
-  }
-}
-
-async function openHerdrConversation(key) {
-  const info = herdrConversationInfo(key);
-  let agent = (await herdrAgents()).find(item => agentMatchesConversation(item, info));
-  if (agent) return { agent, created: false };
-
-  const resumeArgs = info.kind === 'claude'
-    ? ['--resume', info.sessionId]
-    : ['--session', info.sessionPath];
-  if (!resumeArgs[1]) throw new Error('This conversation has no session identifier.');
-  try {
-    const started = await herdrStartAgentInNewWorkspace({
-      cwd: info.cwd,
-      label: info.entry.timelineTitle || info.entry.title || info.kind,
-      name: info.name, kind: info.kind, args: resumeArgs,
-    });
-    return { agent: started.agent, created: true };
-  } catch (error) {
-    // A concurrent request can win the start race. Use that agent instead.
-    agent = (await herdrAgents()).find(item => agentMatchesConversation(item, info));
-    if (agent) return { agent, created: false };
-    throw error;
-  }
-}
-
-// Resolve the live Herdr agent behind a terminal id. A conversation key opens
-// (or resumes) that conversation's agent. An "agent:<target>" id binds to a
-// running agent directly — e.g. a fresh project conversation whose session
-// file does not exist yet, so no conversation key can reach it.
-async function terminalAgentFor(id) {
-  if (String(id || '').startsWith('agent:')) {
-    const target = String(id).slice(6);
-    const agent = (await herdrAgents()).find(a => a.target === target || a.name === target || a.pane_id === target);
-    if (!agent) throw new Error('Herdr agent ' + target + ' is not running.');
-    return { agent, created: false };
-  }
-  return openHerdrConversationOnce(id);
-}
-
-const herdrConversationStarts = new Map();
-function openHerdrConversationOnce(key) {
-  if (!herdrConversationStarts.has(key)) {
-    const pending = openHerdrConversation(key)
-      .finally(() => herdrConversationStarts.delete(key));
-    herdrConversationStarts.set(key, pending);
-  }
-  return herdrConversationStarts.get(key);
-}
-
-async function readHerdrAgent(target, lines = 180) {
-  // Socket enum is recent_unwrapped (the CLI flag is recent-unwrapped); the
-  // wrong value made this call silently fall back to the CLI on every read.
-  const result = await herdrApi('agent.read', {
-    target, source: 'recent_unwrapped', lines, format: 'text', strip_ansi: true,
-  }).catch(() => null);
-  if (result && result.read) return result.read.text;
-  return runHerdr([
-    'agent', 'read', target, '--source', 'recent-unwrapped',
-    '--lines', String(lines), '--format', 'text',
-  ], 10000, false);
-}
-
-function herdrLiveTail(before, current) {
-  if (!before) return current.slice(-24000);
-  if (current.startsWith(before)) return current.slice(before.length).trimStart().slice(-24000);
-  const beforeLines = before.split('\n');
-  const currentLines = current.split('\n');
-  // The fixed-size terminal snapshot shifts as new rows arrive. Find the old
-  // snapshot suffix at the start of the new snapshot, then keep only new rows.
-  let overlap = 0;
-  const max = Math.min(beforeLines.length, currentLines.length);
-  for (let size = max; size > 0; size--) {
-    let same = true;
-    for (let i = 0; i < size; i++) {
-      if (beforeLines[beforeLines.length - size + i] !== currentLines[i]) { same = false; break; }
-    }
-    if (same) { overlap = size; break; }
-  }
-  return currentLines.slice(overlap).join('\n').trimStart().slice(-24000);
-}
-
-const herdrRuns = new Map();
-
-async function refreshConversationIndex(key) {
-  const info = herdrConversationInfo(key);
-  try {
-    const stat = await fsp.stat(info.sessionPath);
-    await indexFile(info.source, info.relPath, stat);
-  } catch (error) {
-    console.error('Herdr conversation refresh failed:', key, error.message);
-  }
 }
 
 // ---------- HTTP ----------
@@ -2265,6 +3902,41 @@ function json(res, code, obj) {
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   try {
+    if (LAN_TOKEN && !isLocalRequest(req)) {
+      const setLanCookie = (next) => {
+        res.writeHead(302, {
+          Location: next || '/',
+          'Set-Cookie': `aiconvo=${encodeURIComponent(LAN_TOKEN)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`,
+        });
+        res.end();
+      };
+      if (u.searchParams.get('token') === LAN_TOKEN) return setLanCookie(u.pathname === '/' ? '/' : u.pathname);
+      if (req.method === 'POST' && u.pathname === '/login') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const posted = new URLSearchParams(body).get('token') || '';
+        if (posted === LAN_TOKEN) return setLanCookie('/');
+        res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(lanLoginPage('That token is wrong. Try again.'));
+      }
+      if (!hasLanToken(req)) {
+        res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(lanLoginPage());
+      }
+    }
+    const staticFile = {
+      '/manifest.webmanifest': { file: 'manifest.webmanifest', type: 'application/manifest+json', cache: 'no-store' },
+      '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-store' },
+      '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400' },
+      '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400' },
+      '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400' },
+      '/icon.svg': { file: 'icon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
+      '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store' },
+    }[u.pathname];
+    if (staticFile) {
+      res.writeHead(200, { 'Content-Type': staticFile.type, 'Cache-Control': staticFile.cache });
+      return res.end(await fsp.readFile(path.join(__dirname, staticFile.file)));
+    }
     if (u.pathname === '/') {
       // no-store: without it the browser heuristically caches this page and
       // can keep serving a stale app.html after the file changes on disk.
@@ -2323,10 +3995,33 @@ const server = http.createServer(async (req, res) => {
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
       try { json(res, 200, { key, ...(index[key] || {}), events: await conversationDiffs(key) }); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/file-history') {
+      try { json(res, 200, await conversationFileHistoryResponse(u.searchParams.get('id') || '')); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/file-history/file') {
+      try { json(res, 200, await conversationFileCompareResponse(
+        u.searchParams.get('id') || '', u.searchParams.get('repo') || '', u.searchParams.get('path') || '',
+        u.searchParams.get('from') || '', u.searchParams.get('to') || '',
+        u.searchParams.get('fromAt') || '', u.searchParams.get('toAt') || ''));
+      } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/project/diffs') {
       const project = u.searchParams.get('name') || '';
       try { json(res, 200, await projectDiffResponse(project, u.searchParams.get('include') === 'full')); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/project/file-history') {
+      const project = u.searchParams.get('name') || '';
+      try { json(res, 200, await projectFileHistoryResponse(project)); }
+      catch (e) { json(res, e.message === 'project not found' ? 404 : 500, { error: e.message }); }
+    } else if (u.pathname === '/api/project/file-history/commit') {
+      try { json(res, 200, await projectCommitResponse(
+        u.searchParams.get('name') || '', u.searchParams.get('repo') || '', u.searchParams.get('hash') || ''));
+      } catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/project/file-history/file') {
+      try { json(res, 200, await projectFileCompareResponse(
+        u.searchParams.get('name') || '', u.searchParams.get('repo') || '', u.searchParams.get('path') || '',
+        u.searchParams.get('from') || '', u.searchParams.get('to') || '',
+        u.searchParams.get('fromAt') || '', u.searchParams.get('toAt') || ''));
+      } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/file/blame') {
       const pathValue = u.searchParams.get('path') || '';
       if (!pathValue) return json(res, 400, { error: 'missing path' });
@@ -2337,6 +4032,26 @@ const server = http.createServer(async (req, res) => {
       const event = await findDiffEvent(id, u.searchParams.get('project') || '', u.searchParams.get('key') || '');
       if (!event) return json(res, 404, { error: 'not found' });
       json(res, 200, event);
+    } else if (u.pathname === '/api/project/memory' && req.method === 'GET') {
+      const project = u.searchParams.get('name') || '';
+      const memory = await projectMemoryInfo(project);
+      if (!memory) return json(res, 404, { error: 'no project memory yet' });
+      json(res, 200, memory);
+    } else if (u.pathname === '/api/project/memory/file' && req.method === 'GET') {
+      try { json(res, 200, await projectMemoryDocument(u.searchParams.get('name') || '', u.searchParams.get('kind') || '')); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/project/memory/build' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 202, jobView(startProjectMemoryJob(parsed.project || ''))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/distill' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 202, jobView(startProjectDistillJob(parsed.project || ''))); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/start' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -2403,252 +4118,82 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { key, title: data.title, cwd: data.cwd, firstTs: data.firstTs, lastTs: data.lastTs, ...evidence });
     } else if (u.pathname === '/api/jobs') {
       json(res, 200, allJobs());
+    } else if (u.pathname === '/api/settings' && req.method === 'GET') {
+      json(res, 200, settingsResponse());
+    } else if (u.pathname === '/api/settings' && (req.method === 'PUT' || req.method === 'POST')) {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      const piDefault = readPiDefault();
+      const listed = (modelsCache.models.length ? modelsCache : await listPiModels()).models;
+      if (!parsed.usePiDefault && parsed.provider && parsed.model && listed.length && !settingsLib.findModel(listed, parsed.provider, parsed.model)) {
+        return json(res, 400, { error: 'unknown model: ' + parsed.provider + '/' + parsed.model });
+      }
+      appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
+      saveAppSettings();
+      json(res, 200, settingsResponse());
+    } else if (u.pathname === '/api/models') {
+      const listed = await listPiModels(u.searchParams.get('refresh') === '1');
+      json(res, 200, {
+        models: listed.models,
+        readyProviders: readyProviders(),
+        fetchedAt: listed.at,
+        error: listed.error,
+        piDefault: readPiDefault(),
+      });
     } else if (u.pathname === '/api/agents/active') {
-      // Active: file changed in the last 5 min. Recent: last hour.
+      // running: a live pi/claude process. writing: file changed in 5 min.
+      // recent: file changed in the last hour and not already listed.
       const nowMs = Date.now();
-      const active = [], recent = [];
+      const running = listRunningAgents().map(item => ({
+        key: item.key, source: item.source, title: item.title, cwd: item.cwd,
+        pid: item.pid, kind: item.kind, windowTitle: item.windowTitle,
+      }));
+      const runningKeys = new Set(running.map(item => item.key).filter(Boolean));
+      const writing = [], recent = [];
       for (const [key, e] of Object.entries(index)) {
         if (!e.mtimeMs) continue;
         const ageMs = nowMs - e.mtimeMs;
         const row = { key, source: e.source, title: e.timelineTitle || e.title, cwd: e.cwd, lastTs: e.lastTs, ageMs };
-        if (ageMs < 5 * 60 * 1000) active.push(row);
-        else if (ageMs < 60 * 60 * 1000) recent.push(row);
-      }
-      active.sort((a, b) => a.ageMs - b.ageMs);
-      recent.sort((a, b) => a.ageMs - b.ageMs);
-      // Herdr agents, matched to conversations when possible. Never fails the endpoint.
-      let herdr = [];
-      try {
-        herdr = (await herdrAgents()).map(a => {
-          const key = matchHerdrAgentToKey(a);
-          return {
-            name: a.name || null, agent: a.agent || null, target: a.target || null,
-            status: a.agent_status || null, label: a.workspace_label || a.label || null,
-            key,
-            title: key ? (index[key].timelineTitle || index[key].title) : null,
-            cwd: a.foreground_cwd || a.cwd || (key ? index[key].cwd : null),
-          };
-        });
-      } catch {}
-      json(res, 200, { active, recent: recent.slice(0, 15), herdr });
-    } else if (u.pathname === '/api/herdr/conversation' && req.method === 'GET') {
-      const key = u.searchParams.get('id');
-      const info = herdrConversationInfo(key);
-      const agent = (await herdrAgents()).find(item => agentMatchesConversation(item, info));
-      json(res, 200, { open: Boolean(agent), agent: agent || null, kind: info.kind });
-    } else if (u.pathname === '/api/herdr/conversation/prompt' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) {
-        body += chunk;
-        if (body.length > 1024 * 1024) throw new Error('Prompt is too large.');
-      }
-      const parsed = JSON.parse(body || '{}');
-      const prompt = typeof parsed.prompt === 'string' ? parsed.prompt.trim() : '';
-      if (!prompt) return json(res, 400, { error: 'Write a message first.' });
-      const opened = await openHerdrConversationOnce(parsed.id);
-      const baseline = await readHerdrAgent(opened.agent.target).catch(() => '');
-      const runId = crypto.randomUUID();
-      const run = {
-        id: runId, key: parsed.id, target: opened.agent.target, baseline,
-        startedAt: Date.now(), done: false, error: null,
-      };
-      // Herdr owns completion: agent.prompt submits the text and waits
-      // server-side (event-driven, occupant-pinned) until the agent settles.
-      // agent_prompt_stalled means Herdr saw no agent activity after submit.
-      const WAIT_MS = 30 * 60 * 1000;
-      run.wait = herdrApi('agent.prompt', {
-        target: opened.agent.target, text: prompt,
-        wait: { until: ['idle', 'done', 'blocked'], timeout_ms: WAIT_MS },
-      }, WAIT_MS + 15000)
-        .catch(error => {
-          run.error = /agent_prompt_stalled/.test(String(error.message))
-            ? new Error('Herdr saw no agent activity after the prompt. The agent may be stuck; open the terminal view.')
-            : error;
-        })
-        .finally(() => { run.done = true; });
-      herdrRuns.set(runId, run);
-      setTimeout(() => herdrRuns.delete(runId), WAIT_MS);
-      json(res, 202, { ok: true, runId, ...opened });
-    } else if (u.pathname === '/api/herdr/conversation/stream' && req.method === 'GET') {
-      const run = herdrRuns.get(u.searchParams.get('run'));
-      if (!run) return json(res, 404, { error: 'Herdr stream not found.' });
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      });
-      let closed = false, reading = false;
-      const send = event => {
-        if (!closed) res.write('data: ' + JSON.stringify(event) + '\n\n');
-      };
-      const finish = async () => {
-        if (closed) return;
-        await new Promise(resolve => setTimeout(resolve, 700));
-        await refreshConversationIndex(run.key);
-        send({ type: 'complete' });
-        herdrRuns.delete(run.id);
-        closed = true;
-        res.end();
-      };
-      // The poll only feeds the live output tail. Completion comes from the
-      // server-side agent.prompt wait (run.done / run.error), not from status
-      // heuristics.
-      const poll = async () => {
-        if (closed || reading) return;
-        reading = true;
-        try {
-          const [agents, output] = await Promise.all([
-            herdrAgents(),
-            readHerdrAgent(run.target),
-          ]);
-          const agent = agents.find(item => item.target === run.target);
-          const status = agent && agent.agent_status || 'unknown';
-          send({ type: 'output', status, output: herdrLiveTail(run.baseline, output) });
-          if (run.error) throw run.error;
-          if (run.done) {
-            clearInterval(timer);
-            await finish();
-          }
-        } catch (error) {
-          send({ type: 'error', error: error.message });
-          clearInterval(timer);
-          closed = true;
-          res.end();
-        } finally { reading = false; }
-      };
-      const timer = setInterval(poll, 250);
-      send({ type: 'status', status: 'sent' });
-      poll();
-      req.on('close', () => { closed = true; clearInterval(timer); });
-    } else if (u.pathname === '/api/herdr/terminal' && req.method === 'GET') {
-      // Live terminal view of a Herdr agent. A conversation id opens or
-      // resumes its agent; an "agent:<target>" id attaches to a running agent
-      // directly. Streams the visible screen (ANSI) until the client closes.
-      const key = u.searchParams.get('id');
-      const opened = await terminalAgentFor(key);
-      const target = opened.agent.target;
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      });
-      const paneId = opened.agent.pane_id;
-      let closed = false, reading = false, lastScreen = null, status = opened.agent.agent_status || 'unknown';
-      const send = event => {
-        if (!closed) res.write('data: ' + JSON.stringify(event) + '\n\n');
-      };
-      // Screen polls and status polls run over the socket API (~100ms server
-      // tick, and requests run concurrently). The screen comes from 'recent'
-      // with history, so the client can scroll back through the session.
-      const poll = async () => {
-        if (closed || reading) return;
-        reading = true;
-        try {
-          const read = await herdrApi('pane.read', {
-            pane_id: paneId, source: 'recent', format: 'ansi', strip_ansi: false, lines: 600,
-          });
-          const screen = read && read.read && read.read.text || '';
-          if (screen !== lastScreen) {
-            lastScreen = screen;
-            send({ type: 'frame', status, screen });
-          }
-        } catch (error) {
-          send({ type: 'error', error: error.message });
-          closed = true;
-          clearInterval(timer);
-          clearInterval(statusTimer);
-          res.end();
-        } finally { reading = false; }
-      };
-      const pollStatus = async () => {
-        if (closed) return;
-        try {
-          const result = await herdrApi('agent.list');
-          const agent = (result && result.agents || []).find(item => item.pane_id === paneId);
-          const next = agent && agent.agent_status || 'unknown';
-          if (next !== status) {
-            status = next;
-            send({ type: 'status', status });
-          }
-        } catch {}
-      };
-      const timer = setInterval(poll, 120);
-      const statusTimer = setInterval(pollStatus, 1000);
-      send({ type: 'open', created: opened.created, status, agent: {
-        name: opened.agent.name, pane_id: paneId, agent: opened.agent.agent,
-      } });
-      poll();
-      req.on('close', () => { closed = true; clearInterval(timer); clearInterval(statusTimer); });
-    } else if (u.pathname === '/api/herdr/terminal/input' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) {
-        body += chunk;
-        if (body.length > 256 * 1024) throw new Error('Input is too large.');
-      }
-      const parsed = JSON.parse(body || '{}');
-      let agent;
-      if (String(parsed.id || '').startsWith('agent:')) {
-        const target = String(parsed.id).slice(6);
-        agent = (await herdrAgents()).find(a => a.target === target || a.name === target || a.pane_id === target);
-      } else {
-        const info = herdrConversationInfo(parsed.id);
-        agent = (await herdrAgents()).find(item => agentMatchesConversation(item, info));
-      }
-      if (!agent) return json(res, 409, { error: 'The terminal is not open. Toggle the terminal view first.' });
-      // Ordered sequence of {text} / {keys} items in one request; each item is
-      // one socket call (pane.send_input), so a typing burst costs one call.
-      const seq = Array.isArray(parsed.seq) ? parsed.seq
-        : [{ text: parsed.text, keys: parsed.keys }];
-      for (const item of seq.slice(0, 64)) {
-        const payload = { pane_id: agent.pane_id };
-        if (typeof item.text === 'string' && item.text.length) payload.text = item.text.slice(0, 16384);
-        if (Array.isArray(item.keys) && item.keys.length) {
-          const keys = item.keys.filter(k => typeof k === 'string' && /^[a-z0-9+]{1,24}$/i.test(k)).slice(0, 64);
-          if (keys.length) payload.keys = keys;
+        if (ageMs < 5 * 60 * 1000) {
+          if (!runningKeys.has(key)) writing.push(row);
+        } else if (ageMs < 60 * 60 * 1000) {
+          recent.push(row);
         }
-        if (!payload.text && !payload.keys) continue;
-        await herdrApi('pane.send_input', payload);
       }
-      json(res, 200, { ok: true });
-    } else if (u.pathname === '/api/herdr/conversation/attach' && req.method === 'POST') {
-      // Open this conversation's Herdr agent in a real terminal on the desktop.
+      writing.sort((a, b) => a.ageMs - b.ageMs);
+      recent.sort((a, b) => a.ageMs - b.ageMs);
+      json(res, 200, { running, writing, recent: recent.slice(0, 15) });
+    } else if (u.pathname === '/api/file-feedback' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await sendFileFeedback(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/open' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
-      const opened = await openHerdrConversationOnce(parsed.id);
-      const term = process.env.AICONVO_TERMINAL
-        || ['/snap/bin/alacritty', '/usr/bin/alacritty', '/usr/local/bin/alacritty']
-          .find(p => fs.existsSync(p))
-        || 'alacritty';
-      const child = require('child_process').spawn(term, [
-        '-e', HERDR_BIN, 'agent', 'attach', opened.agent.target,
-      ], {
-        detached: true, stdio: 'ignore',
-        env: { ...process.env, DISPLAY: process.env.DISPLAY || ':0' },
-      });
-      let failed = false;
-      child.on('error', () => { failed = true; });
-      child.unref();
-      setTimeout(() => {
-        if (failed) json(res, 500, { error: 'Could not start ' + term });
-        else json(res, 200, { ok: true, agent: opened.agent.target, terminal: term });
-      }, 150);
-    } else if (u.pathname === '/api/herdr/terminal/refresh' && req.method === 'POST') {
-      // Re-index the transcript after a terminal interaction, so the chat view is fresh.
+      try { json(res, 200, await openConversationInTerminal(parsed.id)); }
+      catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/send' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
-      if (String(parsed.id || '').startsWith('agent:')) {
-        // Direct agent terminal: if its session file appeared by now, the
-        // agent matches a conversation — refresh that one.
-        const target = String(parsed.id).slice(6);
-        const agent = (await herdrAgents()).find(a => a.target === target || a.name === target || a.pane_id === target);
-        const key = agent && matchHerdrAgentToKey(agent);
-        if (key) await refreshConversationIndex(key);
-      } else {
-        await refreshConversationIndex(parsed.id);
+      try { json(res, 200, await sendToConversation(parsed.id, parsed)); }
+      catch (e) {
+        if (e.blocked) json(res, 409, { error: e.message, blocked: true, ...e.blocked });
+        else json(res, 500, { error: e.message });
       }
-      json(res, 200, { ok: true });
+    } else if (u.pathname === '/api/conversation/pane' && req.method === 'GET') {
+      const key = u.searchParams.get('id');
+      try { json(res, 200, await captureConversation(key)); }
+      catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/act' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 200, await actOnConversation(parsed.id, parsed)); }
+      catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/export' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -2756,7 +4301,7 @@ const server = http.createServer(async (req, res) => {
       await fullScan();
       json(res, 200, { ok: true, count: Object.keys(index).length });
     } else {
-      res.writeHead(404); res.end('not found');
+      json(res, 404, { error: 'not found' });
     }
   } catch (e) {
     json(res, 500, { error: e.message });
@@ -2765,7 +4310,37 @@ const server = http.createServer(async (req, res) => {
 
 server.requestTimeout = 0; // distillation can take minutes
 server.headersTimeout = 60000;
-server.listen(PORT, '127.0.0.1', () => {
+function ensureLanTls() {
+  const dir = path.join(CACHE_DIR, 'tls');
+  const keyFile = path.join(dir, 'key.pem');
+  const certFile = path.join(dir, 'cert.pem');
+  const stampFile = path.join(dir, 'san.txt');
+  const san = ['DNS:localhost', 'IP:127.0.0.1', ...lanAddresses().map(ip => 'IP:' + ip)].join(',');
+  let reuse = false;
+  try { reuse = fs.existsSync(keyFile) && fs.existsSync(certFile) && fs.readFileSync(stampFile, 'utf8').trim() === san; } catch {}
+  if (!reuse) {
+    fs.mkdirSync(dir, { recursive: true });
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-days', '825', '-nodes',
+      '-keyout', keyFile, '-out', certFile, '-subj', '/CN=aiconvo', '-addext', 'subjectAltName=' + san], { stdio: 'ignore' });
+    fs.writeFileSync(stampFile, san + '\n');
+  }
+  return { key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) };
+}
+server.listen(PORT, HOST, () => {
   console.log(`aiconvo → http://localhost:${PORT}`);
+  if (HOST !== '127.0.0.1' && HOST !== '::1') {
+    for (const ip of lanAddresses()) console.log(`aiconvo LAN → http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
+    console.log(`aiconvo LAN token file → ${LAN_TOKEN_FILE}`);
+    try {
+      const tls = ensureLanTls();
+      https.createServer(tls, (req, res) => server.emit('request', req, res)).listen(TLS_PORT, HOST, () => {
+        for (const ip of lanAddresses()) console.log(`aiconvo PWA → https://${ip}:${TLS_PORT}/?token=${LAN_TOKEN}`);
+        console.log('Install the tablet icon from the HTTPS URL: browser menu → Add to Home screen.');
+      });
+    } catch (error) {
+      console.log('aiconvo TLS skipped: ' + error.message);
+    }
+  }
   fullScan().then(watch);
+  listPiModels().finally(() => setTimeout(() => listPiModels(true), 2500));
 });
