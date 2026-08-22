@@ -10672,6 +10672,8 @@ function renderSettings() {
       <label style="display:flex;gap:6px;align-items:center"><input id="setSemantic" type="checkbox"${(settingsState && settingsState.settings && settingsState.settings.semanticSearch) ? ' checked' : ''}> enable semantic search</label>
       <label for="setSemanticUrl" style="margin-top:var(--sp-2)">server URL</label>
       <input id="setSemanticUrl" type="text" value="${esc((settingsState && settingsState.settings && settingsState.settings.semanticUrl) || '')}" spellcheck="false">
+      <label for="setSemanticNs" style="margin-top:var(--sp-2)">namespace — one per user on a shared server</label>
+      <input id="setSemanticNs" type="text" value="${esc((settingsState && settingsState.settings && settingsState.settings.semanticNs) || '')}" spellcheck="false">
       <div class="pmeta" id="semStatus" style="margin-top:var(--sp-2)"></div>
     </section>
     <section class="psection">
@@ -10687,6 +10689,7 @@ function renderSettings() {
   $('setBack').onclick = () => closeSettings();
   $('setSemantic').onchange = () => saveSettings({ semanticSearch: $('setSemantic').checked }, 'semantic search ' + ($('setSemantic').checked ? 'on — backfill starts now' : 'off'));
   $('setSemanticUrl').onchange = () => saveSettings({ semanticUrl: $('setSemanticUrl').value.trim() }, 'semantic server saved');
+  $('setSemanticNs').onchange = () => saveSettings({ semanticNs: $('setSemanticNs').value.trim() }, 'semantic namespace saved — full re-push starts');
   refreshSemanticStatus();
   $('setThinking').onchange = () => saveSettings({ thinking: $('setThinking').value });
   $('setPiDefault').onclick = () => saveSettings({ usePiDefault: true, provider: '', model: '' });
@@ -10744,7 +10747,8 @@ async function refreshSemanticStatus() {
     if (!s.enabled) { el.textContent = 'off — lexical search only.'; return; }
     if (s.error) { el.textContent = 'enabled, but unreachable: ' + s.error; return; }
     const sync = s.sync ? ` · pushed ${s.sync.synced}/${s.sync.total} sources` : '';
-    el.textContent = `● reachable · ${s.health.model.split('/').pop()} on ${s.health.device} · ${s.health.units} units${sync}`;
+    const units = (s.health.spaces && s.ns in s.health.spaces) ? s.health.spaces[s.ns] : s.health.units;
+    el.textContent = `● reachable · ${s.health.model.split('/').pop()} on ${s.health.device} · ${units} units in “${s.ns}”${sync}`;
   } catch { el.textContent = 'status check failed.'; }
 }
 

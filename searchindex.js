@@ -290,6 +290,10 @@ class SearchIndex {
 
   semanticDrop(src) { this.db.prepare('DELETE FROM semsync WHERE src = ?').run(src); }
 
+  // Forget all push marks: the next sync re-pushes every source. Used when
+  // the remote target (URL or namespace) changes.
+  semanticResetSync() { this.db.exec('DELETE FROM semsync'); }
+
   semanticStats() {
     return {
       synced: this.db.prepare('SELECT count(*) AS n FROM semsync').get().n,

@@ -1,6 +1,14 @@
 'use strict';
 
+const os = require('os');
+
 const DEFAULT_CONTEXT_TOKENS = 272000;
+
+// One semantic namespace per user: the GPU index never mixes two installs.
+function defaultSemanticNs() {
+  try { return String(os.userInfo().username || '').trim() || 'default'; }
+  catch { return 'default'; }
+}
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const DEFAULT_SETTINGS = {
   usePiDefault: false,
@@ -11,6 +19,7 @@ const DEFAULT_SETTINGS = {
   // Optional GPU-server late-interaction search stage (off by default).
   semanticSearch: false,
   semanticUrl: 'http://192.168.2.24:8090',
+  semanticNs: defaultSemanticNs(),
   // Engine for web sends: 'sdk' embeds pi in-process (fast forks, full
   // extension UI); 'rpc' spawns pi child processes (isolation fallback).
   piEngine: 'sdk',
@@ -113,10 +122,11 @@ function normalizeSettings(input) {
     : DEFAULT_SETTINGS.contextTokens;
   const semanticSearch = src.semanticSearch === true;
   const semanticUrl = String(src.semanticUrl || DEFAULT_SETTINGS.semanticUrl).trim().replace(/\/$/, '');
+  const semanticNs = String(src.semanticNs || DEFAULT_SETTINGS.semanticNs).trim().replace(/[^\w.-]+/g, '-') || 'default';
   const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
   const piTheme = typeof src.piTheme === 'string' && src.piTheme.trim() ? src.piTheme.trim() : DEFAULT_SETTINGS.piTheme;
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, piEngine, piTheme };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme };
   }
   return {
     usePiDefault: false,
@@ -126,6 +136,7 @@ function normalizeSettings(input) {
     contextTokens,
     semanticSearch,
     semanticUrl,
+    semanticNs,
     piEngine,
     piTheme,
   };

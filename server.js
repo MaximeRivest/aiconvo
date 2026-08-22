@@ -648,6 +648,11 @@ function semanticEnabled() {
   return !!(searchIdx && appSettings.semanticSearch && appSettings.semanticUrl);
 }
 
+// One namespace per install on the shared GPU stage (settings → semanticNs).
+function semNs() {
+  return String(appSettings.semanticNs || 'default');
+}
+
 async function semFetch(route, body, ms = 20000) {
   const r = await fetch(appSettings.semanticUrl + route, {
     method: body === undefined ? 'GET' : 'POST',
@@ -672,15 +677,15 @@ async function syncSemantic() {
       const { push, drop } = searchIdx.semanticPending(50);
       if (!push.length && !drop.length) break;
       for (const src of drop) {
-        await semFetch('/remove', { prefix: src + '|' });
+        await semFetch('/remove', { ns: semNs(), prefix: src + '|' });
         searchIdx.semanticDrop(src);
         dropped++;
       }
       for (const { src, sig } of push) {
         const units = searchIdx.listUnits(src);
-        await semFetch('/remove', { prefix: src + '|' });
+        await semFetch('/remove', { ns: semNs(), prefix: src + '|' });
         for (let i = 0; i < units.length; i += 48) {
-          await semFetch('/upsert', { units: units.slice(i, i + 48) }, 120000);
+          await semFetch('/upsert', { ns: semNs(), units: units.slice(i, i + 48) }, 120000);
         }
         searchIdx.semanticMark(src, sig);
         pushed++;
@@ -6752,13 +6757,13 @@ const server = http.createServer(async (req, res) => {
       if (!semanticEnabled() || q.length < 2) return json(res, 200, { q, semantic: semanticEnabled(), groups: [] });
       const t0 = Date.now();
       try {
-        const r = await semFetch('/search', { q, limit: 30 }, 8000);
+        const r = await semFetch('/search', { ns: semNs(), q, limit: 30 }, 8000);
         json(res, 200, { q, semantic: true, tookMs: Date.now() - t0, groups: semanticGroups(r.hits || []) });
       } catch (e) {
         json(res, 200, { q, semantic: true, groups: [], error: 'semantic stage unreachable' });
       }
     } else if (u.pathname === '/api/search/semantic-status') {
-      const out = { enabled: semanticEnabled(), url: appSettings.semanticUrl || '' };
+      const out = { enabled: semanticEnabled(), url: appSettings.semanticUrl || '', ns: semNs() };
       if (searchIdx) out.sync = searchIdx.semanticStats();
       if (out.enabled) {
         try { out.health = await semFetch('/health', undefined, 4000); }
@@ -7189,10 +7194,14 @@ const server = http.createServer(async (req, res) => {
       if (!parsed.usePiDefault && parsed.provider && parsed.model && listed.length && !settingsLib.findModel(listed, parsed.provider, parsed.model)) {
         return json(res, 400, { error: 'unknown model: ' + parsed.provider + '/' + parsed.model });
       }
-      const wasSemantic = semanticEnabled();
+      const prevSemTarget = (appSettings.semanticUrl || '') + '|' + semNs();
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
       saveAppSettings();
-      if (!wasSemantic && semanticEnabled()) scheduleSemanticSync(500); // backfill starts now
+      // A new URL or namespace means a different remote index: re-push all.
+      if (searchIdx && (appSettings.semanticUrl || '') + '|' + semNs() !== prevSemTarget) {
+        searchIdx.semanticResetSync();
+      }
+      if (semanticEnabled()) scheduleSemanticSync(500); // backfill starts now
       json(res, 200, settingsResponse());
     } else if (u.pathname === '/api/models') {
       const listed = await listPiModels(u.searchParams.get('refresh') === '1');
