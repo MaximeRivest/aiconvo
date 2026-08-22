@@ -1507,6 +1507,14 @@ function unlockLandscape() {
 
 function setRouteKind(kind, crumbs) {
   viewKind = kind;
+  // Systematic: every navigation starts at the top. #view is the scroller;
+  // without this, a new view inherits the old scroll offset and opens
+  // mid-document (worst on the phone: head and TOC land off-screen).
+  // Views that manage their own position (transcript bottom, anchors)
+  // scroll after render and are unaffected.
+  const viewEl = $('view');
+  if (viewEl) viewEl.scrollTop = 0;
+  window.scrollTo(0, 0);
   if (kind !== 'conversation' && $('matchHud')) $('matchHud').remove();
   document.body.classList.toggle('home', kind === 'home');
   if (kind === 'home') lockLandscape(); else unlockLandscape();
