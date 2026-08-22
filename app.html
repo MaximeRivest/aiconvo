@@ -929,7 +929,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg .msg-file:hover { background: transparent; text-decoration: underline; }
 /* file changes: a quiet right-aligned footer under the assistant reply */
 .msg.filetouch { background: transparent; padding: 0 14px 12px; margin: -6px 10% 0 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; justify-content: flex-end; }
-.msg.filetouch .ft-label { font-size: 10px; color: var(--text-faint); }
 .msg.filetouch button { height: 18px; padding: 0 6px; font-size: 10px; color: var(--text-faint); background: transparent; border: 0; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg.filetouch button:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
 .msg .more { color: var(--cyan); cursor: pointer; background: none; border: 0; padding: 0; height: auto; font: inherit; }
@@ -941,7 +940,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .md h1, .md h2 { font-size: var(--fs-title); border-bottom: 1px solid var(--border); padding-bottom: 3px; }
 .md pre { background: var(--surface-2); border: 1px solid var(--border); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; margin: 8px 0; white-space: pre; }
 .md pre.md-code[data-lang]::before { content: attr(data-lang); display: block; float: right; margin: -4px -4px 4px 8px; color: var(--text-faint); font-size: 10px; }
-.md code { background: var(--surface-2); padding: 1px 5px; font-size: 12.5px; }
+/* inline code (mostly paths): no ground, just a quieter italic voice */
+.md code { background: transparent; padding: 0; font-size: 13px; font-style: italic; color: var(--text-dim); }
 .md pre code { background: none; padding: 0; }
 .md ul, .md ol { margin: 6px 0; padding-left: 22px; }
 .md li { margin: 2px 0; }
@@ -6797,7 +6797,7 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
     // Synthetic row: file writes hidden by the current view mode still
     // surface as links into the whole-file diff view.
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
-    return `<div class="msg filetouch"${anchor}><span class="ft-label">▤ files changed</span>` +
+    return `<div class="msg filetouch"${anchor}>` +
       m.files.map(f => `<button data-file-diff="${esc(f.path)}" data-file-ts="${esc(f.ts || '')}" data-file-anchor="${esc(m.ts || '')}" data-file-call="${esc(f.call || '')}" title="Open this file change\n${esc(f.path)}">${esc(shortFilePath(f.path))}</button>`).join('') + `</div>`;
   }
   // data-i: the message's index in the cached array — the anchor a search
