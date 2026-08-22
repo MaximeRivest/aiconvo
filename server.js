@@ -1089,7 +1089,27 @@ async function conversationContextResponse(key, leafId) {
 // pi session operations run through pi's own runtime (pirpc.js + the
 // aiconvo-bridge extension). Claude keeps a hand copier: no native
 // arbitrary-node fork exists (verified empirically).
-const { piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm } = require('./pirpc.js');
+// Two interchangeable pi engines behind one surface. 'sdk' (default) runs
+// sessions in-process — aiconvo as a pi face: ms forks, MB sessions, full
+// extension dialogs. 'rpc' spawns pi child processes — the isolation
+// fallback (settings.json: "piEngine": "rpc"). Events and handles have
+// identical shapes, so everything downstream works on either engine.
+const pirpc = require('./pirpc.js');
+const pisdk = require('./pisdk.js');
+const { piListCommands } = pirpc; // command palette probe stays process-isolated
+function piEng() { return appSettings.piEngine === 'rpc' ? pirpc : pisdk; }
+function stopAnyWarmSession(sessionPath) {
+  let stopped = false;
+  try { stopped = pirpc.stopWarmSession(sessionPath) || stopped; } catch {}
+  try { stopped = pisdk.stopWarmSession(sessionPath) || stopped; } catch {}
+  return stopped;
+}
+function stopAllEngineSessions() {
+  let n = 0;
+  try { n += pirpc.stopAllWarmSessions(); } catch {}
+  try { n += pisdk.stopAllWarmSessions(); } catch {}
+  return n;
+}
 
 function sessionPathsFor(key) {
   const entry = index[key];
@@ -1134,9 +1154,9 @@ async function indexNewSessionFile(newAbs) {
 async function forkSession(key, nodeId) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   return withSessionOp(sessionPath, async () => {
-    stopWarmSession(sessionPath);
+    stopAnyWarmSession(sessionPath);
     if (entry.source !== 'claude') {
-      const forked = await piForkAt({ sessionPath, cwd, env: agentEnv() }, nodeId);
+      const forked = await piEng().piForkAt({ sessionPath, cwd, env: agentEnv() }, nodeId);
       return { key: await indexNewSessionFile(forked.file), path: forked.file, sessionId: forked.sessionId };
     }
     const raw = await fsp.readFile(sessionPath, 'utf8');
@@ -1158,7 +1178,7 @@ async function forkSessionForEdit(key, nodeId) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (entry.source === 'claude') throw new Error('Editing a past message needs pi. Claude conversations can only fork.');
   return withSessionOp(sessionPath, async () => {
-    const forked = await piForkBefore({ sessionPath, cwd, env: agentEnv() }, nodeId);
+    const forked = await piEng().piForkBefore({ sessionPath, cwd, env: agentEnv() }, nodeId);
     return { key: await indexNewSessionFile(forked.file), path: forked.file, sessionId: forked.sessionId, text: forked.text };
   });
 }
@@ -1183,7 +1203,7 @@ async function branchSession(key, nodeId) {
   }
   const absPath = absPathForKey(key);
   return withSessionOp(absPath, async () => {
-    stopWarmSession(absPath);
+    stopAnyWarmSession(absPath);
     const raw = await fsp.readFile(absPath, 'utf8');
     let found = false;
     for (const line of raw.split('\n')) {
@@ -1322,7 +1342,7 @@ function scanAgentProcs() {
 // Join the raw process list with what the server knows: warm RPC sessions,
 // tracked terminal windows, and the conversation index.
 function agentProcsView(running) {
-  const warmByPid = new Map(listWarmSessions().map(w => [w.pid, w]));
+  const warmByPid = new Map(pirpc.listWarmSessions().map(w => [w.pid, w]));
   const keyByBase = new Map(Object.keys(index).map(k => [path.basename(k), k]));
   const keyBySessionId = new Map();
   for (const [k, e] of Object.entries(index)) if (e.sessionId) keyBySessionId.set(e.sessionId, k);
@@ -1354,6 +1374,19 @@ function agentProcsView(running) {
     });
   }
   const weight = { web: 0, terminal: 1, server: 2, 'remote-pi': 3, untracked: 4 };
+  // In-process (sdk) sessions are not separate OS processes: add them as
+  // virtual rows so the agents view shows and can kill every live session.
+  for (const w of pisdk.listWarmSessions()) {
+    const key = keyByBase.get(path.basename(w.sessionPath)) || null;
+    const entry = key ? index[key] : null;
+    const run = headlessOwner(path.resolve(w.sessionPath));
+    out.push({
+      pid: process.pid, kind: 'pi', rpc: true, engine: 'sdk', key,
+      title: entry ? (entry.timelineTitle || entry.title) : null,
+      cwd: entry ? entry.cwd : null, ageMs: null, owner: 'web',
+      busy: w.busy, model: w.model || undefined, jobId: run ? run.jobId : undefined,
+    });
+  }
   out.sort((a, b) => (weight[a.owner] - weight[b.owner]) || ((a.ageMs || 0) - (b.ageMs || 0)));
   return out;
 }
@@ -1372,7 +1405,7 @@ async function releaseHeadless(absPath, reason) {
     try { if (run.handle && run.handle.abort) await run.handle.abort(); } catch {}
     try { await Promise.race([run.handle.done, sleep(4000)]); } catch {}
   }
-  stopWarmSession(absPath);
+  stopAnyWarmSession(absPath);
   return !!(run);
 }
 
@@ -1450,7 +1483,7 @@ function runEventForwarder(job) {
       statusText: job.statusText, model: job.model, startedAt: job.startedAt, tail: blocks.map(slim),
       uiRequests: job.uiRequests || [], notices: job.notices || [],
       extStatus: job.extStatus ? Object.values(job.extStatus).join(' · ') : '',
-      widgets: job.widgets || null });
+      widgets: job.widgets || null, customViews: job.customViews || null });
   };
   state.push = push;
   const liveText = () => { for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i].kind === 'text' && !blocks[i].done) return blocks[i]; return null; };
@@ -1565,6 +1598,12 @@ function runEventForwarder(job) {
           job.widgets = job.widgets || {};
           if (Array.isArray(event.widgetLines) && event.widgetLines.length) job.widgets[event.widgetKey || ''] = event.widgetLines.map(String).slice(0, 12);
           else delete job.widgets[event.widgetKey || ''];
+        } else if (event.method === 'custom_render' && event.id) {
+          // A hosted TUI view (ctx.ui.custom): ANSI lines for the browser.
+          job.customViews = job.customViews || {};
+          job.customViews[event.id] = Array.isArray(event.lines) ? event.lines.map(String).slice(0, 200) : [];
+        } else if (event.method === 'custom_end' && event.id) {
+          if (job.customViews) delete job.customViews[event.id];
         } else if (event.method === 'set_editor_text') {
           broadcast({ type: 'editor-text', key: job.key, text: String(event.text || '').slice(0, 20000) });
         }
@@ -1602,7 +1641,9 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     // while the model streams. Branch-targeted sends still refuse.
     if (allowQueue && !node) {
       const record = headlessRuns.get(sessionPath);
-      if (await piQueuePrompt({ sessionPath }, message, null, images).catch(() => false)) {
+      const queuedOk = await pisdk.piQueuePrompt({ sessionPath }, message, null, images).catch(() => false)
+        || await pirpc.piQueuePrompt({ sessionPath }, message, null, images).catch(() => false);
+      if (queuedOk) {
         const job = agentRunJobs.get(record.jobId);
         if (job) { job.statusText = 'follow-up queued'; jobChanged(job); }
         return { queued: true, job };
@@ -1639,9 +1680,9 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       if (node) {
         const leaf = await lastEntryIdOf(sessionPath);
         if (leaf !== node) {
-          // Warm RPC still has the old leaf in memory: kill it so the next
-          // process loads the file after the branch anchor.
-          stopWarmSession(sessionPath);
+          // A warm session still has the old leaf in memory: kill it so the
+          // next one loads the file after the branch anchor.
+          stopAnyWarmSession(sessionPath);
           // pi's own in-file branch anchor: one label entry, nothing rewritten.
           const raw = await fsp.readFile(sessionPath, 'utf8');
           let found = false;
@@ -1656,7 +1697,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       }
       job.statusText = 'running';
       jobChanged(job);
-      const handle = piHeadlessRun({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, { provider, modelId, message, images, onEvent: runEventForwarder(job) });
+      const handle = piEng().piHeadlessRun({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, { provider, modelId, message, images, onEvent: runEventForwarder(job) });
       record.handle = handle;
       await handle.done;
       if (record.yielded) await finish('done', 'stopped — ' + record.yielded);
@@ -1769,7 +1810,7 @@ async function setConversationModel(key, provider, modelId, force) {
     reopen = true;
   }
   if (headlessRuns.has(sessionPath)) throw new Error('A web run is active on this conversation. Wait or abort it.');
-  await withSessionOp(sessionPath, () => piSetModel({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, provider, modelId));
+  await withSessionOp(sessionPath, () => piEng().piSetModel({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, provider, modelId));
   try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
   if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
   return { ok: true, model: provider + '/' + modelId, reopened: reopen };
@@ -3141,6 +3182,7 @@ function jobView(job) {
     model: job.model || null,
     uiRequests: job.uiRequests && job.uiRequests.length ? job.uiRequests : undefined,
     notices: job.notices && job.notices.length ? job.notices : undefined,
+    customViews: job.customViews && Object.keys(job.customViews).length ? job.customViews : undefined,
   };
 }
 
@@ -6054,6 +6096,155 @@ function includeFlag(include, name) {
   return !!(include && include[name]);
 }
 
+// ---- pi prompt modes (ModeDef JSON in ~/.pi/agent/modes) ----
+// The modes extension (modes.ts in ~/.pi/agent/extensions) owns mode
+// semantics: opener/appendix ride on the base system prompt, systemPrompt
+// replaces it, removeSections drops named sections, tools replaces the tool
+// set. aiconvo only reads and writes the same JSON files with the same
+// validation, so the TUI and this UI stay one source of truth.
+const MODES_DIR = path.join(os.homedir(), '.pi', 'agent', 'modes');
+const MODE_SECTIONS = ['available_tools', 'custom_tools_note', 'guidelines', 'pi_docs', 'append_prompt', 'project_context', 'skills', 'date', 'cwd'];
+const BUILTIN_MODES = [
+  { key: 'coding', label: 'Coding', appendix: 'Focus on concise, practical coding help.' },
+  { key: 'plan', label: 'Plan', opener: 'Make a concise implementation plan before changing files.', appendix: 'Do not edit files unless the user asks you to proceed.' },
+  { key: 'review', label: 'Review', opener: 'Review the current work for correctness, risks, and missing tests.' },
+  { key: 'explain', label: 'Explain', opener: 'Explain the relevant code and decisions clearly before proposing changes.' },
+];
+
+function validateModeDef(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'expected a JSON object' };
+  const allowed = new Set(['key', 'label', 'opener', 'appendix', 'systemPrompt', 'removeSections', 'tools']);
+  const unknown = Object.keys(raw).filter(k => !allowed.has(k));
+  if (unknown.length) return { error: 'unknown field' + (unknown.length === 1 ? '' : 's') + ': ' + unknown.join(', ') };
+  const key = String(raw.key ?? '').trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]*$/.test(key)) return { error: 'key must match ^[a-z][a-z0-9_-]*$' };
+  const label = String(raw.label ?? '').trim();
+  if (!label) return { error: 'label must be a non-empty string' };
+  for (const f of ['opener', 'appendix', 'systemPrompt']) {
+    if (raw[f] !== undefined && typeof raw[f] !== 'string') return { error: f + ' must be a string' };
+  }
+  if (raw.removeSections !== undefined) {
+    if (!Array.isArray(raw.removeSections) || raw.removeSections.some(s => !MODE_SECTIONS.includes(s))) {
+      return { error: 'removeSections must contain only: ' + MODE_SECTIONS.join(', ') };
+    }
+  }
+  if (raw.tools !== undefined) {
+    if (!Array.isArray(raw.tools) || raw.tools.some(t => typeof t !== 'string' || !t.trim())) {
+      return { error: 'tools must be an array of non-empty strings' };
+    }
+  }
+  const opener = String(raw.opener ?? '').trim();
+  const appendix = String(raw.appendix ?? '').trim();
+  const systemPrompt = String(raw.systemPrompt ?? '').trim();
+  if (!opener && !appendix && !systemPrompt) return { error: 'at least one of opener, appendix, or systemPrompt must be non-empty' };
+  const mode = { key, label };
+  if (opener) mode.opener = opener;
+  if (appendix) mode.appendix = appendix;
+  if (systemPrompt) mode.systemPrompt = systemPrompt;
+  if (Array.isArray(raw.removeSections) && raw.removeSections.length) mode.removeSections = [...raw.removeSections];
+  if (raw.tools !== undefined) mode.tools = [...new Set(raw.tools.map(t => String(t).trim()))];
+  return { mode };
+}
+
+function listPromptModes() {
+  const byKey = new Map(BUILTIN_MODES.map(m => [m.key, { ...m, builtin: true, custom: false }]));
+  try {
+    if (fs.existsSync(MODES_DIR)) for (const file of fs.readdirSync(MODES_DIR)) {
+      if (!file.endsWith('.json')) continue;
+      try {
+        const def = validateModeDef(JSON.parse(fs.readFileSync(path.join(MODES_DIR, file), 'utf8')));
+        if (!def.mode) continue;
+        const prev = byKey.get(def.mode.key);
+        byKey.set(def.mode.key, { ...def.mode, builtin: !!prev?.builtin, custom: true });
+      } catch {}
+    }
+  } catch {}
+  return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+// The injected context bundle. Unlike the briefing map (paths only), every
+// included artifact is INLINED: the agent starts with the full memory in its
+// system prompt (--append-system-prompt) and spends zero turns fetching.
+async function buildProjectContextBundle(project, include, focusName) {
+  const info = await projectResponse(project);
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const parts = [];
+  parts.push(`# aiconvo project context: ${project}`);
+  parts.push('');
+  parts.push(`- Generated: ${new Date().toISOString()}`);
+  parts.push(`- Project root: ${info.cwd || '(unknown)'}`);
+  parts.push(`- On record: ${info.conversations} conversations · ${info.notes} distilled notes (${info.freshness.freshNotes} fresh) · ${info.epics.length} epics`);
+  if (focusName) parts.push(`- Focus for this new conversation: ${focusName}`);
+  parts.push('');
+  parts.push('Injected by aiconvo at conversation start. This is AI-generated work memory — a map, not verified truth. Items labeled [unverified] were never human-reviewed.');
+
+  let docCount = 0;
+  if (include.map !== false) {
+    const docs = [];
+    for (const kind of ['overview', 'intent', 'environment', 'status']) {
+      try {
+        const doc = await projectMemoryDocument(project, kind);
+        docs.push(`### ${kind} · ${doc.path} ${trustLabel(doc.path)}\n\n${doc.text.trim()}`);
+        docCount++;
+      } catch {}
+    }
+    if (docs.length) {
+      parts.push('', '## Project memory (read first — durable intent, setup facts, current work)', '', docs.join('\n\n---\n\n'));
+    }
+  }
+
+  const wantedEpics = Array.isArray(include.epics) ? include.epics.filter(id => epics[id]) : [];
+  if (wantedEpics.length) {
+    const blocks = [];
+    for (const id of wantedEpics.slice(0, 6)) {
+      const epic = epics[id];
+      const file = epicPathFor(id);
+      let body = epic.abstract || '';
+      try { body = (await fsp.readFile(file, 'utf8')).trim(); } catch {}
+      blocks.push(`### ${epic.title || id} · ${file} ${trustLabel(file)}\n\n${body}`);
+    }
+    parts.push('', '## Epics (cross-session narratives)', '', blocks.join('\n\n---\n\n'));
+  }
+
+  let noteCount = 0;
+  if (includeFlag(include, 'notes')) {
+    const blocks = [];
+    for (const { entry } of meta.entries) {
+      if (!entry.notePath) continue;
+      if (entry.mtimeMs && entry.notedAt && entry.mtimeMs > entry.notedAt) continue; // stale
+      try {
+        const text = (await fsp.readFile(entry.notePath, 'utf8')).trim();
+        blocks.push(`### ${path.basename(entry.notePath)} · ${entry.notePath} ${trustLabel(entry.notePath)}\n\n${text}`);
+        noteCount++;
+      } catch {}
+    }
+    parts.push('', `## Fresh distilled notes (${noteCount})`, '', blocks.length ? blocks.join('\n\n---\n\n') : '(none yet)');
+  }
+
+  let evidenceCount = 0;
+  if (Array.isArray(include.evidenceKeys) && include.evidenceKeys.length) {
+    const blocks = [];
+    for (const key of include.evidenceKeys.slice(0, 20)) {
+      const entry = index[key];
+      if (!entry) continue;
+      const latest = latestCachedEvidenceForKey(key);
+      const head = `### ${entry.timelineTitle || entry.title || key}${entry.notePath ? ` · note: ${entry.notePath}` : ''}`;
+      blocks.push(head + (latest && latest.cached.text ? `\n\n${latest.cached.text.trim()}` : ''));
+      evidenceCount++;
+    }
+    parts.push('', '## Selected conversation evidence', '', blocks.join('\n\n---\n\n'));
+  }
+
+  const text = parts.join('\n') + '\n';
+  return {
+    text,
+    bytes: Buffer.byteLength(text),
+    tokens: estimateInputTokens(text),
+    counts: { memoryDocs: docCount, epics: wantedEpics.length, notes: noteCount, evidence: evidenceCount },
+  };
+}
+
 // Wait for the session file the just-spawned agent creates. `existing` is a
 // snapshot of index keys taken before the spawn: only a key that was not in
 // the index before counts. Without that guard, any busy conversation in the
@@ -6089,15 +6280,32 @@ async function startProjectConversation(options) {
   const kind = options.agent === 'claude' ? 'claude' : 'pi';
   const label = String(options.name || 'Project: ' + options.project).slice(0, 80);
   const name = 'aiconvo-project-' + crypto.createHash('sha256').update(options.project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
+  const mode = kind === 'pi' && typeof options.mode === 'string' && options.mode.trim() ? options.mode.trim() : null;
   const include = options.include || {};
+  // Inline-context path (pi only): the user composed and approved the bundle
+  // in the UI. It rides in the system prompt via --append-system-prompt, so
+  // the agent spends zero fetch turns. Claude has no equivalent through our
+  // spawn path and keeps the briefing-map behavior below.
+  let contextFile = null;
+  if (kind === 'pi' && typeof options.context === 'string' && options.context.trim()) {
+    contextFile = path.join(BRIEFINGS_DIR,
+      new Date().toISOString().replace(/[:.]/g, '-') + '-' + String(options.project).replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 60) + '-context.md');
+    await fsp.writeFile(contextFile, options.context.trim() + '\n');
+  }
   const wantMap = include.map !== false;
   const wantNotes = includeFlag(include, 'notes');
   const wantEpics = Array.isArray(include.epics) && include.epics.length;
   const wantEvidence = Array.isArray(include.evidenceKeys) && include.evidenceKeys.length;
-  const wantBriefing = wantMap || wantNotes || wantEpics || wantEvidence;
+  const wantBriefing = !contextFile && (wantMap || wantNotes || wantEpics || wantEvidence);
   let briefing = null;
   let text = String(options.name || '').trim();
-  if (wantBriefing) {
+  if (contextFile) {
+    // The context is already in the system prompt: the first user message
+    // stays small and real, so it never pollutes the transcript.
+    const focus = options.name ? ` Today's focus: "${options.name}".` : '';
+    text = `Your system prompt carries this project's work memory.` + focus +
+      ' Reply with at most 3 lines on where the project stands, then wait for instructions.';
+  } else if (wantBriefing) {
     briefing = await buildProjectBriefing(options.project, include, options.name || '');
     const focus = options.name ? ` Today's focus: "${options.name}".` : '';
     const memory = wantMap ? await projectMemoryInfo(options.project, meta) : null;
@@ -6108,13 +6316,20 @@ async function startProjectConversation(options) {
     text = `Read ${briefing} — it maps this project's work memory (notes, epics, evidence) with full file paths.${first}${reading}${focus}` +
       ' Then reply with at most 3 lines on where the project stands, and wait for instructions.';
   }
+  // pi flags that carry the mode and the injected context. Both RPC warm
+  // starts and alacritty spawns get them; the modes extension composes
+  // --prompt-mode with --append-system-prompt.
+  const piCtxArgs = [
+    ...(mode ? ['--prompt-mode', mode] : []),
+    ...(contextFile ? ['--append-system-prompt', contextFile] : []),
+  ];
   const argv = kind === 'claude'
     ? (text ? [claudeBin(), text] : [claudeBin()])
-    : (text ? [piBin(), '--name', label, text] : [piBin(), '--name', label]);
+    : [piBin(), '--name', label, ...piProviderExtraArgs(), ...piCtxArgs, ...(text ? [text] : [])];
   const useRpc = kind === 'pi' && options.surface !== 'alacritty';
   let key = null;
   if (useRpc) {
-    const begun = await piBeginWarm({ cwd, env: agentEnv(), extraArgs: ['--name', label, ...piProviderExtraArgs()] });
+    const begun = await piEng().piBeginWarm({ cwd, env: agentEnv(), extraArgs: ['--name', label, ...piProviderExtraArgs(), ...piCtxArgs] });
     // Pi reports sessionFile before it writes. The first prompt creates the file.
     const job = {
       id: 'run:' + crypto.randomUUID().slice(0, 8),
@@ -6125,7 +6340,7 @@ async function startProjectConversation(options) {
     };
     let handle = null;
     if (text) {
-      handle = piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, {
+      handle = piEng().piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(), extraArgs: [...piProviderExtraArgs(), ...piCtxArgs] }, {
         message: text, onEvent: runEventForwarder(job),
       });
     }
@@ -6136,7 +6351,7 @@ async function startProjectConversation(options) {
     }
     try { await fsp.stat(begun.file); }
     catch {
-      stopWarmSession(begun.file);
+      stopAnyWarmSession(begun.file);
       endLiveRunTail(job.id);
       throw new Error('pi did not write the session file');
     }
@@ -6170,7 +6385,8 @@ async function startProjectConversation(options) {
     }
     return {
       name, kind, cwd, title: name, key, surface: 'rpc',
-      project: options.project, include, briefing, kickoff: wantBriefing,
+      project: options.project, include, briefing, kickoff: wantBriefing || !!contextFile,
+      contextFile, mode,
     };
   }
   const startedAt = Date.now();
@@ -6180,7 +6396,8 @@ async function startProjectConversation(options) {
   if (key) recordLaunchedTitle(name, key);
   return {
     name, kind, cwd, title: name, key, surface: 'alacritty',
-    project: options.project, include, briefing, kickoff: wantBriefing,
+    project: options.project, include, briefing, kickoff: wantBriefing || !!contextFile,
+    contextFile, mode,
   };
 }
 
@@ -6635,6 +6852,38 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}');
       try { json(res, 200, await startProjectConversation(parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/project/context' && req.method === 'POST') {
+      // Assemble the inline context bundle for preview. Nothing starts; the
+      // user edits/approves the text before /api/project/start sends it.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 200, await buildProjectContextBundle(parsed.project, parsed.include || {}, parsed.name || '')); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/modes' && req.method === 'GET') {
+      json(res, 200, { modes: listPromptModes() });
+    } else if (u.pathname === '/api/modes' && (req.method === 'PUT' || req.method === 'POST')) {
+      // Save a custom mode. A key that matches a builtin overrides it, the
+      // same rule the modes extension applies.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const def = validateModeDef(JSON.parse(body || '{}'));
+      if (def.error) return json(res, 400, { error: def.error });
+      try {
+        fs.mkdirSync(MODES_DIR, { recursive: true });
+        fs.writeFileSync(path.join(MODES_DIR, def.mode.key + '.json'), JSON.stringify(def.mode, null, 2) + '\n');
+        json(res, 200, { ok: true, mode: { ...def.mode, builtin: BUILTIN_MODES.some(m => m.key === def.mode.key), custom: true } });
+      } catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/modes/delete' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      const key = String(parsed.key || '').trim().toLowerCase();
+      if (!/^[a-z][a-z0-9_-]*$/.test(key)) return json(res, 400, { error: 'bad mode key' });
+      const file = path.join(MODES_DIR, key + '.json');
+      if (!fs.existsSync(file)) return json(res, 404, { error: 'no custom mode file for ' + key });
+      try { fs.unlinkSync(file); json(res, 200, { ok: true }); }
+      catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/project-folds') {
       json(res, 200, await projectFoldsResponse());
     } else if (u.pathname === '/api/project/fold' && req.method === 'POST') {
@@ -6725,6 +6974,20 @@ const server = http.createServer(async (req, res) => {
         if (!record) return json(res, 404, { error: 'run not found or already finished' });
         record.yielded = 'aborted by you';
         if (record.handle && record.handle.abort) await record.handle.abort();
+        json(res, 200, { ok: true });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/run/ui-input' && req.method === 'POST') {
+      // Keyboard input for a hosted TUI view (ctx.ui.custom). data is raw
+      // terminal key data ('\r', '\x1b[B', …); data:null closes the view.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const record = [...headlessRuns.values()].find(r => r.jobId === p.jobId);
+        if (!record || !record.handle || !record.handle.uiInput) return json(res, 404, { error: 'run not found or already finished' });
+        if (!record.handle.uiInput(String(p.id || ''), p.data === null ? null : String(p.data || ''))) {
+          return json(res, 404, { error: 'that view is no longer open' });
+        }
         json(res, 200, { ok: true });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/run/ui-response' && req.method === 'POST') {
@@ -6897,12 +7160,21 @@ const server = http.createServer(async (req, res) => {
         const p = JSON.parse(body || '{}');
         const pid = Number(p.pid);
         if (!Number.isInteger(pid) || pid <= 1) return json(res, 400, { error: 'bad pid' });
+        if (pid === process.pid) {
+          // An in-process (sdk) session: the conversation key names it.
+          const key = String(p.key || '');
+          if (!key || !index[key]) return json(res, 400, { error: 'this in-process session needs a conversation key to kill' });
+          const { sessionPath } = sessionPathsFor(key);
+          await releaseHeadless(path.resolve(sessionPath), 'killed from the agents view');
+          stopAnyWarmSession(sessionPath);
+          return json(res, 200, { ok: true, pid, kind: 'pi', owner: 'web', engine: 'sdk' });
+        }
         const proc = scanAgentProcs().find(x => x.pid === pid);
         if (!proc) return json(res, 404, { error: 'pid ' + pid + ' is not a pi/claude/bridge process (already gone?)' });
-        const warm = listWarmSessions().find(w => w.pid === pid);
+        const warm = pirpc.listWarmSessions().find(w => w.pid === pid);
         if (warm) {
           await releaseHeadless(path.resolve(warm.sessionPath), 'killed from the agents view');
-          stopWarmSession(warm.sessionPath);
+          stopAnyWarmSession(warm.sessionPath);
         } else {
           process.kill(pid, p.force ? 'SIGKILL' : 'SIGTERM');
         }
@@ -7167,7 +7439,7 @@ async function shutdownGracefully() {
       }
     }
   } catch {}
-  try { stopAllWarmSessions(); } catch {}
+  try { stopAllEngineSessions(); } catch {}
   saveAgentRunsNow();
   clearTimeout(hardExit);
   process.exit(0);

@@ -767,6 +767,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.thinking summary::-webkit-details-marker { display: none; }
 .msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
 .rc-body { color: var(--text); font-size: 12.5px; }
+.rc-cv { border: 1px solid var(--accent); margin: 6px 0; }
+.rc-cv-head { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; color: var(--accent); font-size: var(--fs-micro); border-bottom: 1px solid var(--border-strong); }
+.rc-cv-close { background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 1px 7px; font: inherit; font-size: var(--fs-micro); }
+.rc-cv-screen { background: #111; color: #ccc; margin: 0; padding: 8px 10px; font-size: 12px; line-height: 1.35; max-height: 440px; overflow: auto; white-space: pre; outline: none; caret-color: transparent; cursor: default; }
+.rc-cv-screen:focus { box-shadow: inset 0 0 0 1px var(--accent); }
 .slash-pop { border: 1px solid var(--border-strong); background: var(--surface-1); max-height: 240px; overflow: auto; margin-bottom: 4px; }
 .slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 6px 8px; }
 .slash-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; cursor: pointer; }
@@ -793,6 +798,32 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 
 /* model picker */
 .mpick { position: fixed; z-index: 60; width: 360px; max-height: 420px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+
+/* launcher mode row + overlays (mode manager, mode form, context confirm) */
+.pmoderow { display: flex; gap: 6px; align-items: center; }
+.pmoderow select { flex: 1 1 auto; min-width: 0; }
+.pmodewarn { color: var(--warn, #b8860b); }
+.mode-manage, .mode-form, .ctx-confirm { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); padding: 16px; }
+.mm-card, .mf-card, .cc-card { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 8px; padding: 12px; width: min(680px, 94vw); max-height: 90vh; }
+.mm-head { display: flex; align-items: baseline; gap: 10px; }
+.mm-head b { flex: 0 0 auto; }
+.mm-head .hint, .mm-head span { flex: 1 1 auto; }
+.mm-list { overflow: auto; display: flex; flex-direction: column; gap: 2px; min-height: 120px; }
+.mm-row { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); padding: 6px 8px; }
+.mm-row .mm-info { flex: 1 1 auto; min-width: 0; }
+.mm-btns { display: flex; gap: 4px; flex: 0 0 auto; }
+.mm-foot, .cc-foot, .mf-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.mf-foot .mf-err { flex: 1 1 auto; color: var(--warn, #b8860b); }
+.mf-body { overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.mf-pair { display: flex; gap: 8px; }
+.mf-pair > * { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.mf-body textarea, .mf-body input, .cc-text { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); padding: 6px 8px; }
+.mf-sections { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; }
+.cc-meta { font-size: var(--fs-meta, 12px); }
+.cc-text { width: 100%; height: 42vh; resize: vertical; white-space: pre; overflow-wrap: normal; overflow-x: auto; font-family: ui-monospace, monospace; font-size: 12.5px; line-height: 1.45; }
+.cc-first { border-left: 3px solid var(--border-strong); padding-left: 8px; }
+.cc-foot { justify-content: space-between; }
+.cc-bigwarn { color: var(--warn, #b8860b); border: 1px solid var(--warn, #b8860b); padding: 4px 8px; }
 .mpick .mp-filter { margin: 8px; height: 28px; padding: 0 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); }
 .mpick .mp-list { overflow: auto; display: flex; flex-direction: column; padding: 0 8px 8px; gap: 1px; }
 .mpick .mp-row { display: flex; align-items: center; gap: 8px; height: auto; padding: 4px 8px; text-align: left; border-color: transparent; }
@@ -2442,7 +2473,8 @@ $('agentsPop').onclick = async e => {
     if (!confirm('Kill “' + (kill.dataset.name || 'process') + '” (pid ' + kill.dataset.pid + ')?')) return;
     kill.disabled = true;
     kill.textContent = '…';
-    const out = await postJson('/api/agents/kill', { pid: Number(kill.dataset.pid) });
+    const agRow = kill.closest('.ag-row');
+    const out = await postJson('/api/agents/kill', { pid: Number(kill.dataset.pid), key: (agRow && agRow.dataset.key) || undefined });
     if (out && out.error) errToast('kill failed: ' + out.error);
     else toast('killed pid ' + kill.dataset.pid);
     setTimeout(() => renderAgentsPop(true), 800);
@@ -6031,6 +6063,158 @@ function projectStartDefaults(d) {
   return localStorage.getItem('aiconvo.projectAgent:' + d.project) || 'pi';
 }
 
+// ---- launcher: pi prompt modes + reviewed inline context ----
+// Modes are ModeDef files owned by the modes extension (~/.pi/agent/modes).
+// The bundled context is composed here, edited by the user, and only then
+// sent — the server injects it via --append-system-prompt.
+let launcherModes = [];
+
+async function refreshLauncherModes() {
+  try {
+    const res = await fetch('/api/modes');
+    const data = await res.json();
+    launcherModes = data.modes || [];
+  } catch { launcherModes = []; }
+  return launcherModes;
+}
+
+function selectedLauncherMode() {
+  const sel = $('pMode');
+  return launcherModes.find(m => m.key === (sel && sel.value)) || null;
+}
+
+function updateModeWarn() {
+  const warn = $('pModeWarn');
+  if (!warn) return;
+  const drops = (selectedLauncherMode()?.removeSections || []).filter(s => s === 'append_prompt' || s === 'project_context');
+  if (drops.length) {
+    warn.textContent = '⚠ this mode removes "' + drops.join('", "') + '" from the system prompt — the injected memory will NOT reach the model.';
+    warn.hidden = false;
+  } else {
+    warn.hidden = true;
+  }
+}
+
+async function loadLauncherModes(d) {
+  const sel = $('pMode');
+  if (!sel) return;
+  $('pModeManage').onclick = () => openModeManager(d);
+  await refreshLauncherModes();
+  if (!launcherModes.length) {
+    sel.innerHTML = '<option value="">(no modes found)</option>';
+    return;
+  }
+  const saved = localStorage.getItem('aiconvo.projectMode:' + d.project);
+  sel.innerHTML = launcherModes.map(m =>
+    `<option value="${esc(m.key)}">${esc(m.key)} — ${esc(m.label)}${m.custom ? '' : ' · built-in'}</option>`).join('');
+  sel.value = saved && launcherModes.some(m => m.key === saved) ? saved : 'coding';
+  if (!launcherModes.some(m => m.key === sel.value)) sel.value = launcherModes[0].key;
+  sel.onchange = () => {
+    localStorage.setItem('aiconvo.projectMode:' + d.project, sel.value);
+    updateModeWarn();
+  };
+  updateModeWarn();
+}
+
+const MODE_SECTION_LABELS = {
+  available_tools: 'available tools', custom_tools_note: 'custom tools note', guidelines: 'guidelines',
+  pi_docs: 'pi docs', append_prompt: 'additional instructions (injected memory!)', project_context: 'project context files',
+  skills: 'skills', date: 'current date', cwd: 'working directory',
+};
+
+function openModeManager(d) {
+  document.querySelectorAll('.mode-manage').forEach(el => el.remove());
+  const ov = document.createElement('div');
+  ov.className = 'mode-manage';
+  ov.innerHTML = `<div class="mm-card">
+    <div class="mm-head"><b>pi prompt modes</b><span class="hint">same files as the TUI (/mode, /mode-new, /mode-edit)</span><button type="button" class="ghost mm-close">close</button></div>
+    <div class="mm-list"></div>
+    <div class="mm-foot"><button type="button" class="primary mm-new">new mode</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('.mm-close').onclick = () => { ov.remove(); loadLauncherModes(d); };
+  ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); loadLauncherModes(d); } });
+  const list = ov.querySelector('.mm-list');
+  const repaint = () => {
+    list.innerHTML = launcherModes.map((m, i) => `<div class="mm-row">
+      <div class="mm-info"><b>${esc(m.label)}</b> <span class="dim">${esc(m.key)} · ${m.custom ? 'custom' : 'built-in'}${(m.removeSections || []).length ? ' · strips ' + m.removeSections.length + ' section(s)' : ''}</span>
+        <div class="hint">${esc(String(m.opener || m.appendix || m.systemPrompt || '').replace(/\s+/g, ' ').slice(0, 110))}</div></div>
+      <div class="mm-btns"><button type="button" data-mm-edit="${i}">${m.custom ? 'edit' : 'override'}</button>
+      ${m.custom ? `<button type="button" data-mm-del="${i}">delete</button>` : ''}</div>
+    </div>`).join('');
+    list.querySelectorAll('[data-mm-edit]').forEach(b => b.onclick = () => openModeForm(d, launcherModes[Number(b.dataset.mmEdit)], async () => {
+      await refreshLauncherModes();
+      repaint();
+    }));
+    list.querySelectorAll('[data-mm-del]').forEach(b => b.onclick = async () => {
+      const m = launcherModes[Number(b.dataset.mmDel)];
+      if (!confirm(`Delete custom mode "${m.key}"?`)) return;
+      const res = await fetch('/api/modes/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: m.key }) });
+      const out = await res.json();
+      if (out.error) return errToast(out.error);
+      await refreshLauncherModes();
+      repaint();
+    });
+  };
+  ov.querySelector('.mm-new').onclick = () => openModeForm(d, null, async () => {
+    await refreshLauncherModes();
+    repaint();
+  });
+  repaint();
+}
+
+function openModeForm(d, initial, onSaved) {
+  document.querySelectorAll('.mode-form').forEach(el => el.remove());
+  const isNew = !initial;
+  const def = initial || { key: '', label: '', opener: '', appendix: '', systemPrompt: '', removeSections: [], tools: undefined };
+  const sections = Object.keys(MODE_SECTION_LABELS);
+  const ov = document.createElement('div');
+  ov.className = 'mode-form';
+  const field = (id, label, value, ta) => `<label for="mf-${id}">${label}</label>${ta
+    ? `<textarea id="mf-${id}" rows="3" spellcheck="false">${esc(value || '')}</textarea>`
+    : `<input id="mf-${id}" type="text" value="${esc(value || '')}" spellcheck="false">`}`;
+  ov.innerHTML = `<div class="mf-card">
+    <div class="mm-head"><b>${isNew ? 'new mode' : 'edit mode: ' + esc(def.key)}</b><button type="button" class="ghost mf-cancel">cancel</button></div>
+    <div class="mf-body">
+      <div class="mf-pair">
+        ${field('key', 'key (lowercase-id)', def.key)}${field('label', 'label', def.label)}
+      </div>
+      ${field('opener', 'opener — prepended guidance', def.opener, true)}
+      ${field('appendix', 'appendix — appended guidance', def.appendix, true)}
+      ${field('systemPrompt', 'systemPrompt — full replacement of pi\'s base prompt (advanced)', def.systemPrompt, true)}
+      <label>remove sections</label>
+      <div class="mf-sections">${sections.map(s => `<label><input type="checkbox" data-mf-sec="${s}"${(def.removeSections || []).includes(s) ? ' checked' : ''}> ${MODE_SECTION_LABELS[s]}</label>`).join('')}</div>
+      ${field('tools', 'tools — comma-separated allowlist (empty field = keep pi\u2019s selection)', (def.tools || []).join(', '))}
+    </div>
+    <div class="mf-foot"><span class="hint mf-err"></span>
+      <button type="button" class="ghost mf-cancel2">cancel</button>
+      <button type="button" class="primary mf-save">save mode</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const closeAll = () => { ov.remove(); };
+  ov.querySelector('.mf-cancel').onclick = closeAll;
+  ov.querySelector('.mf-cancel2').onclick = closeAll;
+  ov.querySelector('.mf-save').onclick = async () => {
+    const payload = {
+      key: $('mf-key').value.trim(),
+      label: $('mf-label').value.trim(),
+      opener: $('mf-opener').value,
+      appendix: $('mf-appendix').value,
+      systemPrompt: $('mf-systemPrompt').value,
+    };
+    payload.removeSections = [...ov.querySelectorAll('[data-mf-sec]:checked')].map(c => c.dataset.mfSec);
+    const toolsRaw = $('mf-tools').value.trim();
+    if (toolsRaw) payload.tools = toolsRaw.split(',').map(t => t.trim()).filter(Boolean);
+    const res = await fetch('/api/modes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const out = await res.json();
+    if (out.error) { ov.querySelector('.mf-err').textContent = out.error; return; }
+    toast('saved mode: ' + out.mode.key);
+    closeAll();
+    await loadLauncherModes(d);
+    if (onSaved) await onSaved();
+  };
+}
+
 // The fold picker: choose a target project, confirm one line, done. The
 // smaller project folds into the bigger one by default; flip swaps that.
 function openFoldPicker(d) {
@@ -6167,6 +6351,12 @@ async function showProjectOverview(name) {
     </section>
     <section class="psection plauncher" id="projectStart"><h3>new conversation in this project</h3>
       <label for="pAgent">agent</label><select id="pAgent"><option value="pi">pi</option><option value="claude">claude</option></select>
+      <label for="pMode">prompt mode (pi)</label>
+      <div class="pmoderow">
+        <select id="pMode"></select>
+        <button id="pModeManage" type="button" title="Create, edit, or delete pi prompt modes">manage modes</button>
+      </div>
+      <div id="pModeWarn" class="hint pmodewarn" hidden></div>
       <label for="pName">conversation name (optional)</label><input id="pName" type="text" placeholder="what will you work on next?">
       <label>memory to include</label>
       <div class="mem">
@@ -6178,7 +6368,7 @@ async function showProjectOverview(name) {
       <button id="pStart" class="primary">start</button>
       <button id="pStartTerm">in alacritty</button>
       <span id="pStartStatus" class="dim"></span>
-      <div class="hint">The included memory is AI-generated — a map, not verified truth. The briefing labels what you vouched; everything else goes in marked [unverified].</div>
+      <div class="hint">The included memory is inlined into the system prompt — you review and edit the exact text before it goes. Trust labels mark what you vouched; everything else stays [unverified]. Claude keeps the old briefing-file behavior.</div>
     </section>
   </div>`;
   $('pAgent').value = projectStartDefaults(d);
@@ -6227,14 +6417,18 @@ async function showProjectOverview(name) {
     $('pStart').hidden = claude;
     $('pStartTerm').className = claude ? 'primary' : '';
     $('pStartTerm').textContent = claude ? 'start in alacritty' : 'in alacritty';
+    // Mode + inline context are pi-only; dim them for claude.
+    $('pMode').disabled = claude;
+    $('pModeManage').disabled = claude;
   };
   $('pAgent').onchange = () => {
     localStorage.setItem('aiconvo.projectAgent:' + d.project, $('pAgent').value);
     syncStartBtns();
   };
   syncStartBtns();
-  $('pStart').onclick = () => startProjectConversation(d, recentEpicIds, 'rpc');
-  $('pStartTerm').onclick = () => startProjectConversation(d, recentEpicIds, 'alacritty');
+  loadLauncherModes(d);
+  $('pStart').onclick = () => launchProjectConversation(d, recentEpicIds, 'rpc');
+  $('pStartTerm').onclick = () => launchProjectConversation(d, recentEpicIds, 'alacritty');
   loadProjectTrust(d);
 }
 
@@ -6342,7 +6536,7 @@ async function projectRefreshEvidence(d, mode, confirmAll = false) {
   await buildEvidence(ids, mode !== 'missing');
 }
 
-async function startProjectConversation(d, epicIds, surface) {
+async function startProjectConversation(d, epicIds, surface, extra = {}) {
   const status = $('pStartStatus');
   status.textContent = ' starting…';
   const agent = $('pAgent').value;
@@ -6352,6 +6546,8 @@ async function startProjectConversation(d, epicIds, surface) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       project: d.project, agent, name: $('pName').value.trim(), surface: via,
+      mode: agent === 'pi' ? (($('pMode') && $('pMode').value) || null) : null,
+      context: extra.context || null,
       include: {
         map: $('pMemMap').checked,
         epics: $('pMemEpics').checked ? epicIds : [],
@@ -6372,6 +6568,73 @@ async function startProjectConversation(d, epicIds, surface) {
     projectOverviewName = null;
     await open(out.key, 'bottom');
   }
+}
+
+// Two-step start for pi: assemble the inline context bundle first, let the
+// user read and edit the exact text, then send. Claude skips this and keeps
+// the old one-step briefing behavior.
+async function launchProjectConversation(d, epicIds, surface) {
+  if ($('pAgent').value !== 'pi') return startProjectConversation(d, epicIds, surface);
+  const status = $('pStartStatus');
+  status.textContent = ' composing context…';
+  let bundle = null;
+  try {
+    const res = await fetch('/api/project/context', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project: d.project, name: $('pName').value.trim(),
+        include: {
+          map: $('pMemMap').checked,
+          epics: $('pMemEpics').checked ? epicIds : [],
+          notes: $('pMemNotes').checked,
+          evidenceKeys: $('pMemEvidence').checked ? [...selected] : [],
+        },
+      }),
+    });
+    bundle = await res.json();
+  } catch {}
+  status.textContent = '';
+  if (!bundle || bundle.error) return errToast('could not build context: ' + ((bundle && bundle.error) || 'network error'));
+  openContextConfirm(d, epicIds, surface, bundle);
+}
+
+function openContextConfirm(d, epicIds, surface, bundle) {
+  document.querySelectorAll('.ctx-confirm').forEach(el => el.remove());
+  const ov = document.createElement('div');
+  ov.className = 'ctx-confirm';
+  const c = bundle.counts || {};
+  const kickoff = 'Your system prompt carries this project\'s work memory.' + ($('pName').value.trim() ? ` Today's focus: "${$('pName').value.trim()}".` : '') +
+    ' Reply with at most 3 lines on where the project stands, then wait for instructions.';
+  ov.innerHTML = `<div class="cc-card">
+    <div class="cc-head"><b>review the context before it goes</b><span class="dim cc-size"></span></div>
+    <div class="cc-meta dim">${c.memoryDocs || 0} memory docs · ${c.notes || 0} notes · ${c.epics || 0} epics · ${c.evidence || 0} evidence · mode: ${esc(($('pMode') && $('pMode').value) || 'coding')} · injected into the system prompt</div>
+    <div class="cc-bigwarn" hidden>⚠ far beyond most model contexts — trim the text or fewer checkboxes, or the provider will reject the request.</div>
+    <textarea class="cc-text" spellcheck="false"></textarea>
+    <div class="hint">This exact text rides in the system prompt (--append-system-prompt). Edit freely — what you see is what the model gets.</div>
+    <div class="cc-first hint">first message: ${esc(kickoff)}</div>
+    <div class="cc-foot">
+      <button type="button" class="ghost cc-cancel">cancel</button>
+      <button type="button" class="primary cc-go">${surface === 'alacritty' ? 'start in alacritty' : 'start in app'}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const ta = ov.querySelector('.cc-text');
+  ta.value = bundle.text;
+  const sizeLine = () => {
+    const kb = (ta.value.length / 1024).toFixed(1);
+    const toks = Math.round(ta.value.length / 4);
+    ov.querySelector('.cc-size').textContent = `${kb} KB · ~${toks.toLocaleString()} tokens`;
+    ov.querySelector('.cc-bigwarn').hidden = toks <= 100000;
+  };
+  sizeLine();
+  ta.oninput = sizeLine;
+  ov.querySelector('.cc-cancel').onclick = () => ov.remove();
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector('.cc-go').onclick = async () => {
+    ov.remove();
+    await startProjectConversation(d, epicIds, surface, { context: ta.value });
+  };
+  ta.focus();
 }
 
 // ---- conversation view ----
@@ -8590,7 +8853,7 @@ function buildRunCard(r) {
   card.dataset.job = r.jobId;
   card.innerHTML = `<div class="role"><span class="rc-title"></span>` +
     `<button class="msg-copy rc-abort" title="Stop this run. The session file keeps what already landed.">abort</button></div>` +
-    `<div class="rc-status"></div><div class="rc-ui"></div><div class="rc-blocks"></div>`;
+    `<div class="rc-status"></div><div class="rc-customs"></div><div class="rc-ui"></div><div class="rc-blocks"></div>`;
   card.querySelector('.rc-abort').onclick = async e => {
     const b = e.currentTarget;
     b.disabled = true;
@@ -8598,6 +8861,121 @@ function buildRunCard(r) {
     await postJson('/api/run/abort', { jobId: r.jobId });
   };
   return card;
+}
+
+// ---- hosted TUI views (ctx.ui.custom over the sdk engine) ----
+// The server streams the component's rendered ANSI lines; keys typed on
+// the panel go back as raw terminal data. This is the full pi experience
+// for extension views — without a terminal emulator.
+function ansiToHtml(s) {
+  const P = ['#1c1c1c', '#cc4444', '#44aa44', '#aaaa33', '#4477cc', '#aa44aa', '#33aaaa', '#cccccc',
+             '#666666', '#ff6666', '#66dd66', '#eeee66', '#6699ff', '#ee66ee', '#66eeee', '#ffffff'];
+  let out = '';
+  const st = { b: false, d: false, i: false, u: false, inv: false, fg: null, bg: null };
+  const span = t => {
+    if (!t) return '';
+    const css = [];
+    let fg = st.fg, bg = st.bg;
+    if (st.inv) { const x = fg || '#cccccc'; fg = bg || '#1c1c1c'; bg = x; }
+    if (fg) css.push('color:' + fg);
+    if (bg) css.push('background:' + bg);
+    if (st.b) css.push('font-weight:bold');
+    if (st.d) css.push('opacity:.6');
+    if (st.i) css.push('font-style:italic');
+    if (st.u) css.push('text-decoration:underline');
+    return css.length ? '<span style="' + css.join(';') + '">' + esc(t) + '</span>' : esc(t);
+  };
+  // strip non-SGR escape sequences, keep SGR for parsing
+  const clean = String(s).replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '').replace(/\x1b\[(?![0-9;]*m)[0-9;?]*[a-zA-Z]/g, '');
+  const parts = clean.split(/(\x1b\[[0-9;]*m)/);
+  for (const part of parts) {
+    const m = part.match(/^\x1b\[([0-9;]*)m$/);
+    if (!m) { out += span(part); continue; }
+    const codes = (m[1] || '0').split(';').map(Number);
+    for (let i = 0; i < codes.length; i++) {
+      const c = codes[i];
+      if (c === 0) { st.b = st.d = st.i = st.u = st.inv = false; st.fg = st.bg = null; }
+      else if (c === 1) st.b = true;
+      else if (c === 2) st.d = true;
+      else if (c === 3) st.i = true;
+      else if (c === 4) st.u = true;
+      else if (c === 7) st.inv = true;
+      else if (c === 22) { st.b = st.d = false; }
+      else if (c === 23) st.i = false;
+      else if (c === 24) st.u = false;
+      else if (c === 27) st.inv = false;
+      else if (c >= 30 && c <= 37) st.fg = P[c - 30];
+      else if (c >= 90 && c <= 97) st.fg = P[c - 90 + 8];
+      else if (c >= 40 && c <= 47) st.bg = P[c - 40];
+      else if (c >= 100 && c <= 107) st.bg = P[c - 100 + 8];
+      else if (c === 39) st.fg = null;
+      else if (c === 49) st.bg = null;
+      else if (c === 38 || c === 48) {
+        const isFg = c === 38;
+        if (codes[i + 1] === 2) { const v = 'rgb(' + (codes[i + 2] || 0) + ',' + (codes[i + 3] || 0) + ',' + (codes[i + 4] || 0) + ')'; if (isFg) st.fg = v; else st.bg = v; i += 4; }
+        else if (codes[i + 1] === 5) { const v = xterm256(codes[i + 2] || 0, P); if (isFg) st.fg = v; else st.bg = v; i += 2; }
+      }
+    }
+  }
+  return out;
+}
+
+function xterm256(n, P) {
+  if (n < 16) return P[n];
+  if (n >= 232) { const g = 8 + (n - 232) * 10; return 'rgb(' + g + ',' + g + ',' + g + ')'; }
+  const c = n - 16, steps = [0, 95, 135, 175, 215, 255];
+  return 'rgb(' + steps[Math.floor(c / 36) % 6] + ',' + steps[Math.floor(c / 6) % 6] + ',' + steps[c % 6] + ')';
+}
+
+function termKeyData(e) {
+  const map = {
+    Enter: '\r', Tab: '\t', Escape: '\x1b', Backspace: '\x7f',
+    ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C', ArrowLeft: '\x1b[D',
+    Home: '\x1b[H', End: '\x1b[F', Delete: '\x1b[3~', PageUp: '\x1b[5~', PageDown: '\x1b[6~',
+  };
+  if (map[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) return map[e.key];
+  if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && /[a-z]/i.test(e.key)) {
+    return String.fromCharCode(e.key.toLowerCase().charCodeAt(0) & 31);
+  }
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) return e.key;
+  return null;
+}
+
+function buildCustomView(jobId, id) {
+  const box = document.createElement('div');
+  box.className = 'rc-cv';
+  box.dataset.cv = id;
+  box.innerHTML = `<div class="rc-cv-head"><span>▣ extension view — keys go to it while focused</span>` +
+    `<button class="rc-cv-close" title="Close this view (the extension receives a cancel).">✗</button></div>` +
+    `<pre class="rc-cv-screen" contenteditable="true" spellcheck="false"></pre>`;
+  let chain = Promise.resolve();
+  const send = data => { chain = chain.then(() => postJson('/api/run/ui-input', { jobId, id, data })).catch(() => {}); };
+  const screen = box.querySelector('.rc-cv-screen');
+  screen.addEventListener('keydown', e => {
+    const data = termKeyData(e);
+    e.preventDefault(); // contenteditable is a focus trick; never actually edit
+    e.stopPropagation();
+    if (data !== null) send(data);
+  });
+  screen.addEventListener('paste', e => e.preventDefault());
+  box.querySelector('.rc-cv-close').onclick = () => send(null);
+  return box;
+}
+
+function updateRunCustoms(card, r) {
+  const host = card.querySelector('.rc-customs');
+  if (!host) return;
+  const views = r.customViews || {};
+  for (const el of [...host.children]) if (!views[el.dataset.cv]) el.remove();
+  for (const id of Object.keys(views)) {
+    let el = host.querySelector(`[data-cv="${CSS.escape(id)}"]`);
+    const fresh = !el;
+    if (!el) { el = buildCustomView(r.jobId, id); host.appendChild(el); }
+    const screen = el.querySelector('.rc-cv-screen');
+    const html = ansiToHtml((views[id] || []).join('\n'));
+    if (screen._h !== html) { screen._h = html; screen.innerHTML = html; }
+    if (fresh) setTimeout(() => screen.focus(), 50);
+  }
 }
 
 // Extension surface on a run card: widgets, notices, and dialogs that wait
@@ -8767,6 +9145,7 @@ function renderRunCards() {
       (r.startedAt ? ' · ' + fmtElapsed(Date.now() - r.startedAt) : ''));
     setLiveText(card.querySelector('.rc-status'), (r.statusText || 'working…') + (r.extStatus ? ' · ' + r.extStatus : ''));
     updateRunUi(card, r);
+    updateRunCustoms(card, r);
     const blocksHost = card.querySelector('.rc-blocks');
     const tail = r.tail || [];
     for (const el of [...blocksHost.children]) {

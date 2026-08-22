@@ -189,7 +189,65 @@ function makeUiContext(S, loaded) {
     onTerminalInput() { return () => {}; },
     setWorkingMessage() {}, setWorkingVisible() {}, setWorkingIndicator() {},
     setHiddenThinkingLabel() {}, setFooter() {}, setHeader() {},
-    async custom() { return undefined; },
+    // TUI custom views, hosted headlessly. A pi-tui Component is only
+    // render(width) → styled lines plus handleInput(rawKeyData): run it
+    // against a virtual screen, stream the lines to the browser, and feed
+    // browser keys back. tui.requestRender is the one TUI method real
+    // extensions call (verified across modes/cell/ensemble).
+    custom(factory, _options) {
+      const id = crypto.randomUUID();
+      const VIEW_WIDTH = 100;
+      return new Promise(resolve => {
+        let component = null;
+        let closed = false;
+        let renderTimer = null;
+        const finish = result => {
+          if (closed) return;
+          closed = true;
+          clearTimeout(renderTimer);
+          try { if (component && component.dispose) component.dispose(); } catch {}
+          S.customViews.delete(id);
+          S.emit({ type: 'extension_ui_request', id, method: 'custom_end' });
+          resolve(result);
+        };
+        const pushRender = () => {
+          if (closed) return;
+          clearTimeout(renderTimer);
+          renderTimer = setTimeout(() => {
+            if (closed || !component) return;
+            let lines;
+            try { lines = component.render(VIEW_WIDTH) || []; }
+            catch (e) { lines = ['render error: ' + (e && e.message)]; }
+            S.emit({ type: 'extension_ui_request', id, method: 'custom_render', lines: lines.slice(0, 200) });
+          }, 16);
+        };
+        const fakeTui = {
+          requestRender: pushRender,
+          terminal: { columns: VIEW_WIDTH, rows: 45 },
+          width: VIEW_WIDTH,
+        };
+        const keybindingsStub = new Proxy({}, { get: () => () => undefined });
+        Promise.resolve()
+          .then(() => factory(fakeTui, loaded.theme, keybindingsStub, finish))
+          .then(c => {
+            if (closed) { try { if (c && c.dispose) c.dispose(); } catch {} return; }
+            component = c;
+            S.customViews.set(id, {
+              input: data => {
+                if (closed || !component) return;
+                try { if (component.handleInput) component.handleInput(data); } catch {}
+                pushRender();
+              },
+              cancel: () => finish(undefined),
+            });
+            pushRender();
+          })
+          .catch(e => {
+            S.emit({ type: 'extension_error', extensionPath: '(custom view)', event: 'custom', error: String(e && e.message || e) });
+            finish(undefined);
+          });
+      });
+    },
     addAutocompleteProvider() {}, setEditorComponent() {},
     getEditorComponent() { return undefined; },
     get theme() { return loaded.theme; },
@@ -268,6 +326,7 @@ async function createS(target) {
     busy: false, idleTimer: null, model: null,
     fileSig: fileSigOf(file),
     pendingUi: new Map(),
+    customViews: new Map(),
     lastEventAt: Date.now(),
     onEvent: null,
     editorText: '',
@@ -329,6 +388,13 @@ function piHeadlessRun(target, opts) {
       else p.resolve(resp || {});
       return true;
     };
+    handle.uiInput = (id, data) => {
+      const v = S.customViews.get(id);
+      if (!v) return false;
+      if (data === null) v.cancel();
+      else v.input(String(data));
+      return true;
+    };
     handle.abort = async () => { try { await S.session.abort(); } catch {} };
     let stallTimer = null;
     try {
@@ -346,6 +412,10 @@ function piHeadlessRun(target, opts) {
         images: Array.isArray(opts.images) && opts.images.length ? opts.images : undefined,
         source: 'rpc',
         preflightResult: ok => { accepted = ok; },
+      }).then(() => {
+        // Command-only prompts (extension slash commands with no LLM turn)
+        // never emit agent_settled: prompt completion is the settle.
+        settle();
       }).catch(e => {
         promptError = e;
         if (!accepted) settle(); // rejected before acceptance: fail the run now
@@ -377,10 +447,13 @@ function piHeadlessRun(target, opts) {
       for (const t of dialogTimers.values()) clearTimeout(t);
       // Unanswered dialogs must not block a (still live) extension forever.
       for (const p of [...S.pendingUi.values()]) { handle.uiAutoCancelled++; try { p.cancel(); } catch {} }
+      // A custom view left open by an aborted run must not linger.
+      for (const v of [...S.customViews.values()]) { try { v.cancel(); } catch {} }
       S.busy = false;
       S.onEvent = null;
       handle.abort = null;
       handle.respondUi = null;
+      handle.uiInput = null;
       S.fileSig = fileSigOf(key);
       if (sdkSessions.get(key) === S) armIdle(S);
     }
