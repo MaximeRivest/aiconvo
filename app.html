@@ -826,8 +826,12 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .rc-tool summary::-webkit-details-marker { display: none; }
 .rc-tool[open] { border-left-color: var(--accent); }
 .rc-tool .rc-args { color: var(--text-dim); font-size: 11px; margin: 4px 0 0; max-height: 120px; overflow: auto; }
-.rc-tool .rc-out { color: var(--text-faint); font-size: 11px; margin: 4px 0 0; max-height: 50vh; overflow: auto; }
-.rc-textblk .rc-think:not(.rc-think-min) { max-height: 50vh; overflow: auto; }
+.rc-tool .rc-out { color: var(--text-faint); font-size: 11px; margin: 4px 0 0; max-height: 40vh; overflow: auto; }
+.rc-tool .rc-args { max-height: 20vh; overflow: auto; }
+/* the streaming reply keeps ONE size: a capped box that follows its own
+   tail — the card never grows in the reader's face */
+.rc-textblk .rc-body { max-height: 40vh; overflow: auto; }
+.rc-textblk .rc-think:not(.rc-think-min) { max-height: 40vh; overflow: auto; }
 
 /* model picker */
 .mpick { position: fixed; z-index: 60; width: 360px; max-height: 420px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
@@ -7594,6 +7598,10 @@ async function headlessSendFromComposer(btn) {
   const ta = $('agentText');
   const prompt = (ta && ta.value || '').trim();
   if (!prompt) return errToast('type a prompt first');
+  // The heartbeat answers the send instantly — the reader sees life
+  // before the first run event arrives.
+  const act = $('agentActivityText');
+  if (act) act.textContent = '◌ sent — waiting for the model…';
   const key = activeRel;
   if (prompt.startsWith('/')) {
     // pi executes its own commands over RPC (extensions, skills, templates).
@@ -8896,6 +8904,19 @@ async function renderConv(scroll) {
     else if (mk) mk.scrollIntoView({ block: 'center' });
     else $('view').scrollTop = $('view').scrollHeight;
   }
+  // Screenshots load after layout: for a short window, every image load
+  // re-pins a bottom-bound view — but only while the reader is still near
+  // the bottom, so nobody who scrolled up gets grabbed.
+  if (scroll == null || scroll === 'bottom') {
+    const until = Date.now() + 2500;
+    for (const im of $('view').querySelectorAll('img')) {
+      if (im.complete) continue;
+      im.addEventListener('load', () => {
+        const v = $('view');
+        if (Date.now() < until && v.scrollHeight - v.scrollTop - v.clientHeight < v.clientHeight) v.scrollTop = v.scrollHeight;
+      }, { once: true });
+    }
+  }
   if (hitEl) {
     hitEl.classList.add('hit-flash');
     setTimeout(() => hitEl.classList.remove('hit-flash'), 1600);
@@ -9459,7 +9480,7 @@ function updateRunBlock(blocksHost, jobId, b) {
     }
     th.hidden = !th.textContent;
     const body = el.querySelector('.rc-body');
-    setLiveText(body, b.text || '');
+    setStickText(body, b.text || '');
     body.hidden = !b.text;
   }
 }
