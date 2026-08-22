@@ -884,10 +884,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose-row .ctxmeter { overflow: hidden; text-overflow: ellipsis; }
 /* reserved activity line: exactly one line, always there, never pushes
    anything — the live heartbeat streams here instead of in the transcript */
-/* The activity line floats in the white ABOVE the box (like the slash
-   palette), so it reserves no space inside the composer. */
-.agent-activity { position: absolute; left: 0; right: 0; bottom: calc(100% + 2px); min-height: 18px; max-height: 18px; overflow: hidden; font-size: 11px; color: var(--text-dim); white-space: nowrap; text-overflow: ellipsis; padding: 0 var(--sp-3); pointer-events: none; }
-.agent-activity #agentActivityText { background: var(--bg); padding: 0 6px; }
+/* The live pane: a fixed window between the transcript and the composer.
+   Thinking, streaming replies, and tool output FLOW THROUGH it — the pane
+   itself never changes size, so the page never recomposes. Finished units
+   freeze into the steps line in the transcript above. */
+.live-pane { height: 148px; display: flex; flex-direction: column; gap: 4px; background: var(--bg); border: 1px dashed var(--border); padding: 6px 10px; }
+.lp-head { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 16px; }
+.lp-out { flex: 1; margin: 0; overflow: auto; font-size: 11px; line-height: 1.5; color: var(--text-faint); white-space: pre-wrap; word-break: break-word; font-family: inherit; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
 .mchip .mname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .mchip button { height: 18px; min-width: 18px; padding: 0; border: 0; background: transparent; color: var(--text-faint); }
@@ -955,6 +958,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .toolgroup > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 14px; font-size: 11px; color: var(--text-faint); }
 .toolgroup > summary::-webkit-details-marker { display: none; }
 .toolgroup > summary:hover { color: var(--text-dim); }
+/* the run card's growing steps line: same voice as the settled toolgroup */
+.rc-steps > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 0; font-size: 11px; color: var(--text-faint); }
+.rc-steps > summary::-webkit-details-marker { display: none; }
+.rc-steps > summary:hover { color: var(--text-dim); }
 .toolgroup > .msg { padding-left: 26px; }
 .msg.tool .role { color: var(--role-tool); }
 .msg.tool .role::before { content: "$ "; }
@@ -1294,7 +1301,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   /* resting composer: one slim bar — tap it, or hold a draft, to expand */
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
-  .agent-compose.compose-min .agent-activity,
+  .agent-compose.compose-min .live-pane,
   .agent-compose.compose-min .ctxmeter, .agent-compose.compose-min #convModel,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
@@ -7577,7 +7584,7 @@ function agentComposerHtml(d) {
   // everything about the next send sits on one line.
   const lastModel = [...(d.messages || [])].reverse().find(m => m.role === 'assistant' && m.model);
   return `<div class="agent-compose" id="agentCompose">
-    <div class="agent-activity" id="agentActivity"><span id="agentActivityText">&nbsp;</span></div>
+    <div class="live-pane" id="livePane"><div class="lp-head" id="agentActivityText">&nbsp;</div><pre class="lp-out" id="lpOut"></pre></div>
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="1" placeholder="say the word…"></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
@@ -9215,7 +9222,8 @@ function buildRunCard(r) {
   card.dataset.job = r.jobId;
   card.innerHTML = `<div class="role"><span class="rc-title"></span>` +
     `<button class="msg-copy rc-abort" title="Stop this run. The session file keeps what already landed.">abort</button></div>` +
-    `<div class="rc-status"></div><div class="rc-customs"></div><div class="rc-ui"></div><div class="rc-blocks"></div>`;
+    `<div class="rc-status"></div><div class="rc-customs"></div><div class="rc-ui"></div>` +
+    `<details class="rc-steps" style="display:none"><summary><span class="rc-steps-sum"></span></summary><div class="rc-blocks"></div></details>`;
   card.querySelector('.rc-abort').onclick = async e => {
     const b = e.currentTarget;
     b.disabled = true;
@@ -9529,12 +9537,25 @@ function renderRunCards() {
     setLiveText(card.querySelector('.rc-status'), (r.statusText || 'working…') + (r.extStatus ? ' · ' + r.extStatus : ''));
     updateRunUi(card, r);
     updateRunCustoms(card, r);
+    // Only FROZEN units live in the card: the active one flows through the
+    // live pane. Each finished unit adds a chip to the one-line steps fold.
     const blocksHost = card.querySelector('.rc-blocks');
     const tail = r.tail || [];
+    const frozen = tail.filter(b => b.kind === 'tool' ? b.phase === 'done' : b.done);
     for (const el of [...blocksHost.children]) {
-      if (!tail.some(b => String(b.id) === el.dataset.blk)) el.remove();
+      if (!frozen.some(b => String(b.id) === el.dataset.blk)) el.remove();
     }
-    for (const b of tail) updateRunBlock(blocksHost, r.jobId, b);
+    for (const b of frozen) updateRunBlock(blocksHost, r.jobId, b);
+    const steps = card.querySelector('.rc-steps');
+    if (frozen.length) {
+      steps.style.display = '';
+      const labels = frozen.map(b => b.kind === 'tool'
+        ? (b.name || 'tool') + (b.error ? ' ✗' : '')
+        : (b.think && !b.text ? 'thinking' : 'reply'));
+      setLiveText(card.querySelector('.rc-steps-sum'),
+        `⚙ ${frozen.length} step${frozen.length > 1 ? 's' : ''} · ` +
+        labels.slice(-8).join(' · ') + (labels.length > 8 ? ' · …' : ''));
+    } else steps.style.display = 'none';
   }
   if (cards.length && pinned) v.scrollTop = v.scrollHeight;
   updateActivityLine();
@@ -9549,19 +9570,27 @@ function updateActivityLine() {
   if (isEink() && Date.now() - (window._actLast || 0) < 1200) return;
   window._actLast = Date.now();
   const runs = [...activeRuns.values()].filter(r => r.key === activeRel);
-  let text = '';
+  let text = '', flow = '';
   if (runs.length) {
     const r = runs[runs.length - 1];
     const tail = r.tail || [];
+    // The pane shows the ACTIVE unit: the last block that is not frozen.
     const b = tail[tail.length - 1];
-    if (b && b.kind === 'tool') {
-      const last = b.phase === 'running' && b.out ? (String(b.out).trim().split('\n').filter(x => x.trim()).pop() || '').slice(-80) : '';
-      text = '⚙ ' + (b.name || 'tool') + (b.phase === 'done' ? ' · ✓' : (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '')) + (last ? ' — ' + last : '');
-    } else if (b && b.think && !b.text) text = '◌ thinking · ' + b.think.length + ' chars';
-    else if (b && b.text) text = '✍ writing · ' + String(b.text).length + ' chars';
-    else text = (r.statusText || 'working…');
+    if (b && b.kind === 'tool' && b.phase !== 'done') {
+      text = '⚙ ' + (b.name || 'tool') + (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '')
+        + (b.phase === 'running' ? '' : ' · call streaming in');
+      flow = (b.args ? b.args + '\n' : '') + (b.out || '');
+    } else if (b && b.kind === 'text' && !b.done && b.think && !b.text) {
+      text = '◌ thinking · ' + b.think.length + ' chars';
+      flow = b.think;
+    } else if (b && b.kind === 'text' && !b.done && b.text) {
+      text = '✍ writing · ' + String(b.text).length + ' chars';
+      flow = b.text;
+    } else text = (r.statusText || 'working…');
   }
   setLiveText(el, text || '\u00a0');
+  const out = $('lpOut');
+  if (out) setStickText(out, flow);
 }
 
 // Pair tool calls with their results (by id when present, else in order).
