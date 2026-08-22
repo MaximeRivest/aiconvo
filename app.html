@@ -735,6 +735,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
    shrink-wrap to content — same trap as the composer. */
 .transcript { width: 100%; max-width: var(--read-max); margin: 0 auto; }
 .msg { padding: 12px 14px; white-space: pre-wrap; word-break: break-word; }
+/* long-message fold: one page stays visible, the rest hides under a fade */
+.msg.folded { max-height: 100vh; overflow: hidden; position: relative; padding-bottom: 34px; }
+.msg.folded::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 72px; background: linear-gradient(transparent, var(--bg)); pointer-events: none; }
+.msg.user.folded::after { background: linear-gradient(transparent, var(--surface-1)); }
+:root[data-theme="eink"] .msg.folded::after { background: #fff; height: 24px; }
+.msg .unfold { position: absolute; right: 14px; bottom: 6px; z-index: 1; height: 20px; padding: 0 6px; border: 0; background: transparent; color: var(--text-faint); font-size: 11px; cursor: pointer; }
+.msg .unfold:hover { color: var(--text); text-decoration: underline; background: transparent; }
 /* model-change bar: a quiet rule line where the serving model switches */
 .modelbar { display: flex; align-items: center; gap: 10px; margin: 4px 0; padding: 0 14px; color: var(--text-faint); font-size: var(--fs-micro); }
 .modelbar::before, .modelbar::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
@@ -6782,10 +6789,8 @@ function keepInMode(m, mode) {
 
 // Long messages collapse to an abstract-sized preview (about 5 lines).
 const COLLAPSE_LINES = 20;  // tool results
-const MSG_LINES = 8;        // collapse user/assistant beyond this...
-const MSG_CHARS = 900;      // ...or beyond this many characters
-const MSG_KEEP = 5;         // preview lines
-const MSG_KEEP_CHARS = 600; // preview character cap
+// Chat messages fold by measured height, not text length: only a message
+// taller than ~125% of the viewport folds (foldLongMessages below).
 // keepOpen: in search mode, messages containing the query stay expanded
 // so the highlight is never hidden in a collapsed part.
 // File-writing tool calls get a link into the whole-file diff view.
@@ -6831,23 +6836,34 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
     const full = `<div class="md">${mdRender(m.text, q)}</div>`;
-    if (!keepOpen) {
-      const lines = m.text.split('\n');
-      if (lines.length > MSG_LINES || m.text.length > MSG_CHARS) {
-        let cut = lines.slice(0, MSG_KEEP).join('\n');
-        if (cut.length > MSG_KEEP_CHARS) cut = cut.slice(0, MSG_KEEP_CHARS).replace(/\s\S*$/, '') + ' …';
-        // A cut inside a code fence leaves it open: close it in the preview.
-        if ((cut.match(/^```/gm) || []).length % 2 === 1) cut += '\n```';
-        const words = m.text.split(/\s+/).length;
-        const more = `… show more (${words} words)`;
-        return `<div class="msg ${m.role}"${anchor}${idxAttr}>${role}<span class="trunc"><div class="md">${mdRender(cut, q)}</div></span><span class="full" hidden>${full}</span>
-          <button class="more" data-more="${esc(more)}">${more}</button></div>`;
-      }
-    }
-    return `<div class="msg ${m.role}"${anchor}${idxAttr}>${role}${full}</div>`;
+    const words = m.text.split(/\s+/).length;
+    return `<div class="msg ${m.role}${keepOpen ? '' : ' can-fold'}" data-words="${words}"${anchor}${idxAttr}>${role}${full}</div>`;
   }
   const toolAnchor = m.role === 'tool' && m.ts ? ` data-ts="${esc(m.ts)}"` : '';
   return `<div class="msg ${m.role}"${toolAnchor}${idxAttr}>${role}${hl(m.text)}</div>`;
+}
+
+// Fold rule: a chat message folds only when it stands taller than ~125%
+// of the viewport — the same on every device. The fold keeps one page
+// visible; the quiet unfold link sits bottom-right like the file footer.
+function foldLongMessages() {
+  const limit = window.innerHeight * 1.25;
+  for (const el of $('view').querySelectorAll('.msg.can-fold')) {
+    el.classList.remove('can-fold');
+    const det = el.closest('details');
+    if (det && !det.open) continue;      // hidden branch folds measure 0
+    if (el.scrollHeight <= limit) continue;
+    el.classList.add('folded');
+    const btn = document.createElement('button');
+    btn.className = 'unfold';
+    btn.textContent = `… show more (${el.dataset.words || '?'} words)`;
+    btn.onclick = () => {
+      el.classList.remove('folded');
+      btn.remove();
+      if ($('pager')) paginateTranscript('stay', el);
+    };
+    el.appendChild(btn);
+  }
 }
 
 // ---- e-ink transcript pagination (design/11-eink-theme.md) ----
@@ -8709,6 +8725,7 @@ async function renderConv(scroll) {
   $('view').querySelectorAll('[data-pill-alt]').forEach(b => b.onclick = () => switchTraceBranch(b.dataset.eid, b.dataset.pillAlt));
   wireCompareRow();
   renderRunCards();
+  foldLongMessages();
   hintReadKey();
   wireHead();
   wireAgentComposer();
