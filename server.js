@@ -3770,6 +3770,21 @@ function decodeImagePayload(img) {
   return { mime, buf };
 }
 
+// Browser composer images → pi RPC ImageContent blocks. The browser already
+// downscaled and re-encoded; this only validates and caps.
+function rpcImagesOf(raw) {
+  const out = [];
+  for (const img of Array.isArray(raw) ? raw : []) {
+    if (!img || typeof img.data !== 'string' || !img.data) continue;
+    const mime = String(img.mime || img.mimeType || 'image/png').toLowerCase();
+    if (!mime.startsWith('image/')) continue;
+    if (img.data.length > 16 * 1024 * 1024) continue; // ~12 MB decoded
+    out.push({ type: 'image', data: img.data, mimeType: mime });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
 function pasteEchoFragment(body) {
   const line = String(body || '').split('\n').find(l => l.trim()) || '';
   return line.trim().slice(0, 16);
@@ -6611,6 +6626,30 @@ const server = http.createServer(async (req, res) => {
         if (!record) return json(res, 404, { error: 'run not found or already finished' });
         record.yielded = 'aborted by you';
         if (record.handle && record.handle.abort) await record.handle.abort();
+        json(res, 200, { ok: true });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/run/ui-response' && req.method === 'POST') {
+      // Answer an extension dialog (confirm/select/input/editor) shown on a
+      // run card. The response reaches the pi process through its stdin.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const record = [...headlessRuns.values()].find(r => r.jobId === p.jobId);
+        if (!record || !record.handle || !record.handle.respondUi) return json(res, 404, { error: 'run not found or already finished' });
+        const resp = {};
+        if (p.cancelled) resp.cancelled = true;
+        else if (typeof p.confirmed === 'boolean') resp.confirmed = p.confirmed;
+        else resp.value = String(p.value == null ? '' : p.value);
+        if (!record.handle.respondUi(String(p.id || ''), resp)) return json(res, 404, { error: 'that dialog is no longer waiting' });
+        const job = agentRunJobs.get(record.jobId);
+        if (job) {
+          job.uiRequests = (job.uiRequests || []).filter(q => q.id !== p.id);
+          job.statusText = 'answered · running';
+          jobChanged(job);
+          const t = liveRunTails.get(job.id);
+          if (t && t.push) t.push(true);
+        }
         json(res, 200, { ok: true });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/branch' && req.method === 'POST') {
