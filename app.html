@@ -835,10 +835,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .rc-textblk .rc-body { max-height: 40vh; overflow: auto; }
 .rc-textblk .rc-think:not(.rc-think-min) { max-height: 40vh; overflow: auto; }
 
-/* model picker */
-.mpick { position: fixed; z-index: 60; width: 520px; max-width: calc(100vw - 16px); max-height: 480px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
-.mp-loading, .mp-empty { padding: 18px; color: var(--text-dim); text-align: center; }
-.mp-provider { position: sticky; top: 0; z-index: 1; padding: 6px 8px 3px; background: var(--surface-1); border-bottom: 1px solid var(--border); color: var(--text-dim); font-size: var(--fs-micro); font-weight: 700; }
+
 
 /* launcher mode row + overlays (mode manager, mode form, context confirm) */
 .pmoderow { display: flex; gap: 6px; align-items: center; }
@@ -865,35 +862,44 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .cc-first { border-left: 3px solid var(--border-strong); padding-left: 8px; }
 .cc-foot { justify-content: space-between; }
 .cc-bigwarn { color: var(--warn, #b8860b); border: 1px solid var(--warn, #b8860b); padding: 4px 8px; }
-.mpick .mp-filter { margin: 8px 8px 6px; height: 30px; padding: 0 10px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); }
-.mpick .mp-list { overflow: auto; display: flex; flex-direction: column; padding: 0 6px 8px; }
-.mpick .mp-row { display: flex; align-items: center; gap: 8px; height: auto; min-height: 30px; padding: 5px 10px; text-align: left; border: 0; background: transparent; }
+/* ---- model picker: one quiet paper panel ---- */
+.mpick { position: fixed; z-index: 60; width: 460px; max-width: calc(100vw - 16px); max-height: 480px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 8px 28px rgba(0,0,0,.28); }
+.mpick > * { flex: 0 0 auto; }  /* only the list may grow or shrink */
+.mp-loading, .mp-empty { padding: 20px; color: var(--text-dim); text-align: center; }
+.mpick .mp-top { display: flex; gap: 6px; align-items: center; padding: 10px 10px 8px; }
+.mpick .mp-filter { flex: 1; margin: 0; height: 30px; padding: 0 10px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); }
+.mpick .mp-filter:focus { outline: 0; border-color: var(--accent); }
+.mpick .mp-refresh, .mpick .mp-all { flex: 0 0 auto; height: 30px; min-height: 30px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); }
+.mpick .mp-refresh { width: 30px; }
+.mpick .mp-all { padding: 0 10px; }
+.mpick .mp-all.on { background: var(--accent-strong); color: var(--accent-ink); border-color: var(--accent-strong); }
+/* provider filter: one tap scopes the list to one provider */
+.mpick .mp-provs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 0 10px 10px; border-bottom: 1px solid var(--border); }
+.mpick .mp-prov { flex: 0 0 auto; height: 22px; min-height: 22px; padding: 0 8px; font-size: var(--fs-micro); border: 1px solid transparent; background: transparent; color: var(--text-dim); }
+.mpick .mp-prov:hover { color: var(--text); background: var(--surface-2); }
+.mpick .mp-prov.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
+.mpick .mp-prov.notready { opacity: .55; }
+/* the list: quiet headers, airy rows, a check only where it means something */
+.mpick .mp-list { flex: 1 1 auto; min-height: 120px; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; padding: 2px 0 6px; }
+.mp-provider { position: sticky; top: 0; z-index: 1; padding: 8px 12px 3px; background: var(--surface-1); color: var(--text-faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.mpick .mp-row { display: flex; align-items: center; gap: 8px; height: auto; min-height: 30px; padding: 4px 12px; text-align: left; border: 0; border-radius: 0; background: transparent; }
 .mpick .mp-row:hover { background: var(--surface-2); }
 .mpick .mp-row.hi { outline: 2px solid var(--accent); outline-offset: -2px; }
-.mpick .mp-top { display: flex; gap: 6px; align-items: center; padding-right: 8px; }
-.mpick .mp-top .mp-filter { flex: 1; }
-.mpick .mp-refresh { flex: 0 0 auto; width: 30px; }
-.mpick .mp-all { flex: 0 0 auto; min-width: 38px; }
-.mpick .mp-all.on { background: var(--accent-strong); color: var(--accent-ink); }
-/* provider filter chips: one tap scopes the list to one provider */
-.mpick .mp-provs { display: flex; gap: 4px; align-items: center; padding: 0 8px 6px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); }
-.mpick .mp-prov { flex: 0 0 auto; height: 22px; min-height: 22px; padding: 0 9px; font-size: var(--fs-micro); border: 1px solid var(--border); background: transparent; color: var(--text-dim); border-radius: 11px; }
-.mpick .mp-prov:hover { color: var(--text); border-color: var(--border-strong); }
-.mpick .mp-prov.on { background: var(--accent-strong); color: var(--accent-ink); border-color: var(--accent-strong); }
-.mpick .mp-prov.notready { opacity: .55; }
-.mpick .mp-row b { font-weight: 600; }
+.mpick .mp-row b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mpick .mp-row span { color: var(--text-faint); font-size: var(--fs-micro); }
-.mpick .mp-row .mp-ctx { margin-left: auto; }
-.mpick .mp-tag { border: 1px solid var(--border); border-radius: 9px; padding: 0 6px; font-size: 10px; line-height: 15px; color: var(--text-dim); }
+.mpick .mp-check { flex: 0 0 14px; color: var(--accent); font-weight: 700; text-align: center; }
+.mpick .mp-row .mp-ctx { margin-left: auto; flex: 0 0 auto; }
+.mpick .mp-tag { border: 1px solid var(--border); padding: 0 5px; font-size: 10px; line-height: 15px; color: var(--text-dim); flex: 0 0 auto; }
 .mpick .mp-tag.free { border-color: var(--accent); color: var(--accent); font-weight: 700; }
 .mpick .mp-row.on { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
+.mpick .mp-row.on b { font-weight: 700; }
 .mpick .mp-row.notready { opacity: .5; }
-.mpick .mp-foot { padding: 8px; border-top: 1px solid var(--border); }
+.mpick .mp-foot { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--surface-1); }
 /* the one model control: shows the selection, opens the picker */
 .model-pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); background: var(--surface-1); }
 .model-pick .mname { min-width: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-pick .mmore { color: var(--text-dim); font-size: var(--fs-micro); }
-.model-pick .minherit { color: var(--text-faint); font-size: 9px; border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; }
+.model-pick .minherit { color: var(--text-faint); font-size: 9px; border: 1px solid var(--border); padding: 0 5px; }
 .model-pick.inherited { border-style: dashed; }
 .model-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 6px; }
 /* inside the compose row the strip is inline; the model chip starts the
@@ -7441,7 +7447,7 @@ async function openModelPicker(anchor, opts, onPick) {
       provider = m.provider;
       const variant = variantOf(m);
       return head + `<button class="mp-row${sel.has(m.id) ? ' on' : ''}${ready.has(m.provider) ? '' : ' notready'}" data-mp="${esc(m.id)}" title="${ready.has(m.provider) ? '' : 'provider not authenticated · '}${esc(m.id)} · ${esc(m.contextLabel || '')} context${esc(fitLabel(m))}">` +
-        `${opts && opts.multi ? `<span class="mp-check">${sel.has(m.id) ? '▣' : '□'}</span>` : ''}<b>${esc(baseNameOf(m))}</b>` +
+        `<span class="mp-check">${sel.has(m.id) ? '✓' : ''}</span><b>${esc(baseNameOf(m))}</b>` +
         `${variant ? `<span class="mp-tag${variant === 'free' ? ' free' : ''}">${esc(variant)}</span>` : ''}` +
         `<span class="mp-ctx">${esc(m.contextLabel || '')}</span></button>`;
     }).join('') || '<div class="mp-empty">no matching models</div>';
@@ -7708,7 +7714,7 @@ function agentComposerHtml(d) {
   if (!['claude', 'pi', 'pi-remote'].includes(d.source)) return '';
   return `<div class="composer-dock" id="composerDock">
     <details class="lp-steps" id="lpSteps" hidden><summary><span class="lp-steps-sum"></span><button type="button" class="lp-abort" title="Stop this run. The session file keeps what already landed." hidden>abort</button></summary><div class="lp-steps-body"><div class="rc-blocks"></div></div></details>
-    <div class="live-pane" id="livePane"><div class="lp-head" id="agentActivityText">&nbsp;</div><pre class="lp-out" id="lpOut"></pre></div>
+    <div class="live-pane" id="livePane" hidden><div class="lp-head" id="agentActivityText">&nbsp;</div><pre class="lp-out" id="lpOut"></pre></div>
   <div class="agent-compose" id="agentCompose">
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="1" placeholder="say the word…"></textarea>
@@ -7727,6 +7733,26 @@ function agentComposerHtml(d) {
     </div>
   </div>
   </div>`;
+}
+
+null
+// The live pane exists only while something streams: it appears when a send
+// leaves and folds away when the run's final event lands the settled reply.
+function clearSendPending(key) {
+  if (window._sendPendingKey !== key) return;
+  window._sendPendingKey = null;
+  updateActivityLine();
+}
+// The sent prompt lands in the transcript at once — no reload needed to see
+// your own words. The settled refresh replaces this echo with the real record.
+function echoUserPrompt(prompt) {
+  const t = $('conversationTranscript');
+  if (!t) return;
+  const html = msgBlock({ role: 'user', text: prompt, ts: new Date().toISOString() }, esc, true);
+  if (t.classList.contains('transcript')) t.insertAdjacentHTML('beforeend', html);
+  else t.outerHTML = `<div class="transcript" id="conversationTranscript">${html}</div>`;
+  const v = $('view');
+  v.scrollTop = v.scrollHeight;
 }
 
 // Headless send: the blessed path. Continues from the trace leaf when you
@@ -7759,6 +7785,10 @@ async function headlessSendFromComposer(btn) {
     : (trace && trace.leaf !== trace.fileLeaf ? trace.leaf : null);
   btn.disabled = true;
   btn.textContent = 'starting…';
+  // Show the pane now: the heartbeat is already on it.
+  window._sendPendingKey = key;
+  window._sendPendingAt = Date.now();
+  if ($('livePane')) $('livePane').hidden = false;
   const images = [];
   for (const img of (window._agentImages || [])) images.push(await shrinkAgentImage(img));
   const payload = { id: key, prompt, node, models, images };
@@ -7770,8 +7800,9 @@ async function headlessSendFromComposer(btn) {
   }
   btn.disabled = false;
   btn.textContent = agentRunLabel();
-  if (!out) return;
-  if (out.error) return errToast('send failed: ' + out.error);
+  if (!out) return clearSendPending(key);
+  if (out.error) { clearSendPending(key); return errToast('send failed: ' + out.error); }
+  if (key === activeRel && viewKind === 'conversation') echoUserPrompt(prompt);
   ta.value = '';
   autoGrowCompose();
   window._agentImages = [];
@@ -9742,6 +9773,13 @@ function updateActivityLine() {
   if (isEink() && Date.now() - (window._actLast || 0) < 1200) return;
   window._actLast = Date.now();
   const runs = [...activeRuns.values()].filter(r => r.key === activeRel);
+  // The pane shows only while something streams: an in-flight send or a
+  // live run. Otherwise it folds away and the transcript owns the screen.
+  const pending = window._sendPendingKey === activeRel
+    && Date.now() - (window._sendPendingAt || 0) < 20000;
+  const pane = $('livePane');
+  if (pane) pane.hidden = !(runs.length || pending);
+  if (!runs.length && pending) return; // the send heartbeat stays until the first run event
   let text = '', flow = null; // null = keep the previous water on screen
   if (runs.length) {
     const r = runs[runs.length - 1];
@@ -12071,6 +12109,7 @@ live.onmessage = ev => {
   }
   if (d.type === 'run-event') {
     if (d.final) {
+      if (window._sendPendingKey === d.key) window._sendPendingKey = null;
       activeRuns.delete(d.jobId);
       for (const k of [...runToolOpen.keys()]) if (k.startsWith(d.jobId + '/')) runToolOpen.delete(k);
       // The run ended: perform the one full refresh now, after all live
