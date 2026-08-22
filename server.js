@@ -2211,8 +2211,16 @@ function readyProviders() {
   } catch {}
   return [...ready];
 }
+// The catalog survives restarts: the last GOOD list serves instantly while
+// a fresh fetch runs in the background.
+const MODELS_CATALOG_FILE = path.join(CACHE_DIR, 'models-catalog.json');
 let modelsCache = { at: 0, models: [], text: '', error: null };
+try {
+  const saved = JSON.parse(fs.readFileSync(MODELS_CATALOG_FILE, 'utf8'));
+  if (saved && saved.text) modelsCache = { at: 0, models: settingsLib.parseListModels(saved.text), text: saved.text, error: null };
+} catch {}
 let modelsPending = null;
+let modelsSmallSeen = null; // row count of the last rejected small fetch
 function listPiModels(force = false) {
   if (!force && modelsCache.models.length) {
     // Serve the last good catalog at once. An expired catalog refreshes in
@@ -2224,7 +2232,8 @@ function listPiModels(force = false) {
   }
   if (modelsPending) return modelsPending;
   modelsPending = new Promise(resolve => {
-    execFile('pi', ['--list-models'], { timeout: 30000, maxBuffer: 2 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('pi', ['--list-models'], { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const parsed = err ? [] : settingsLib.parseListModels(stdout);
       if (err) {
         modelsCache = {
           at: Date.now(),
@@ -2232,8 +2241,22 @@ function listPiModels(force = false) {
           text: modelsCache.text || '',
           error: String(stderr || '').trim() || err.message,
         };
+      } else if (modelsCache.models.length >= 20 && parsed.length < modelsCache.models.length * 0.6
+                 && !(modelsSmallSeen && Math.abs(parsed.length - modelsSmallSeen) <= Math.max(3, parsed.length * 0.1))) {
+        // pi can exit 0 with a half-printed table when one provider fetch
+        // dies mid-stream. A list that lost most of the catalog is such a
+        // truncated print: keep the good list, note the failure. A real
+        // shrink (a provider signed out) repeats — two agreeing small
+        // fetches in a row are accepted.
+        modelsSmallSeen = parsed.length;
+        modelsCache = {
+          at: Date.now(), models: modelsCache.models, text: modelsCache.text,
+          error: `pi returned a partial list (${parsed.length} of ${modelsCache.models.length} models) — kept the previous catalog`,
+        };
       } else {
-        modelsCache = { at: Date.now(), models: settingsLib.parseListModels(stdout), text: stdout, error: null };
+        modelsSmallSeen = null;
+        modelsCache = { at: Date.now(), models: parsed, text: stdout, error: null };
+        fs.writeFile(MODELS_CATALOG_FILE, JSON.stringify({ at: modelsCache.at, text: stdout }), () => {});
       }
       modelsPending = null;
       resolve(modelsCache);
