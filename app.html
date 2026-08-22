@@ -960,6 +960,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .toolgroup > summary:hover { color: var(--text-dim); }
 /* the run card's growing steps line: same voice as the settled toolgroup */
 .rc-steps > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 0; font-size: 11px; color: var(--text-faint); text-align: center; }
+/* the card's status line duplicates the pane head now — keep it quiet */
+.runcard .rc-status { display: none; }
 .rc-steps > summary::-webkit-details-marker { display: none; }
 .rc-steps > summary:hover { color: var(--text-dim); }
 .toolgroup > .msg { padding-left: 26px; }
@@ -9570,27 +9572,38 @@ function updateActivityLine() {
   if (isEink() && Date.now() - (window._actLast || 0) < 1200) return;
   window._actLast = Date.now();
   const runs = [...activeRuns.values()].filter(r => r.key === activeRel);
-  let text = '', flow = '';
+  let text = '', flow = null; // null = keep the previous water on screen
   if (runs.length) {
     const r = runs[runs.length - 1];
     const tail = r.tail || [];
-    // The pane shows the ACTIVE unit: the last block that is not frozen.
-    const b = tail[tail.length - 1];
-    if (b && b.kind === 'tool' && b.phase !== 'done') {
-      text = '⚙ ' + (b.name || 'tool') + (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '')
-        + (b.phase === 'running' ? '' : ' · call streaming in');
+    // Find the ACTIVE unit: the newest block that is not frozen. The last
+    // block is often a queued call or an already-done unit; scanning
+    // backward finds the one that actually streams right now.
+    let b = null;
+    for (let i = tail.length - 1; i >= 0; i--) {
+      const x = tail[i];
+      const frozen = x.kind === 'tool' ? x.phase === 'done' : !!x.done;
+      if (!frozen) { b = x; break; }
+    }
+    if (b && b.kind === 'tool') {
+      text = '⚙ ' + (b.name || 'tool')
+        + (b.phase === 'running' ? (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '') : ' · call streaming in');
       flow = (b.args ? b.args + '\n' : '') + (b.out || '');
-    } else if (b && b.kind === 'text' && !b.done && b.think && !b.text) {
-      text = '◌ thinking · ' + b.think.length + ' chars';
-      flow = b.think;
-    } else if (b && b.kind === 'text' && !b.done && b.text) {
+    } else if (b && b.kind === 'text' && b.text) {
       text = '✍ writing · ' + String(b.text).length + ' chars';
       flow = b.text;
-    } else text = (r.statusText || 'working…');
-  }
+    } else if (b && b.kind === 'text' && b.think) {
+      text = '◌ thinking · ' + b.think.length + ' chars';
+      flow = b.think;
+    } else {
+      // The gap between units: the model composes its next move. Keep the
+      // last flow visible — water settles, it does not vanish.
+      text = (r.statusText || 'working…');
+    }
+  } else flow = ''; // no run: the pane drains
   setLiveText(el, text || '\u00a0');
   const out = $('lpOut');
-  if (out) setStickText(out, flow);
+  if (out && flow !== null) setStickText(out, flow);
 }
 
 // Pair tool calls with their results (by id when present, else in order).
