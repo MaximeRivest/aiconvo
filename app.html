@@ -889,6 +889,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
    itself never changes size, so the page never recomposes. Finished units
    freeze into the steps line in the transcript above. */
 .live-pane { height: 148px; display: flex; flex-direction: column; gap: 4px; padding: 2px 4px 8px; }
+/* the growing steps ledger: one quiet centered line above the live pane */
+.lp-steps > summary { cursor: pointer; list-style: none; user-select: none; position: relative; text-align: center; padding: 2px 0; font-size: 11px; color: var(--text-faint); }
+.lp-steps > summary::-webkit-details-marker { display: none; }
+.lp-steps > summary:hover { color: var(--text-dim); }
+.lp-steps .lp-abort { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); height: 20px; padding: 0 8px; font-size: 10px; border: 1px solid var(--border); background: transparent; color: var(--text-faint); }
+.lp-steps .lp-abort:hover { color: var(--danger); border-color: var(--danger); background: transparent; }
+.lp-steps-body { padding-left: 12px; }
 .lp-head { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 16px; }
 .lp-out { flex: 1; margin: 0; overflow: auto; font-size: 11px; line-height: 1.5; color: var(--text-faint); white-space: pre-wrap; word-break: break-word; font-family: inherit; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
@@ -959,11 +966,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .toolgroup > summary::-webkit-details-marker { display: none; }
 .toolgroup > summary:hover { color: var(--text-dim); }
 /* the run card's growing steps line: same voice as the settled toolgroup */
-.rc-steps > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 0; font-size: 11px; color: var(--text-faint); text-align: center; }
 /* the card's status line duplicates the pane head now — keep it quiet */
 .runcard .rc-status { display: none; }
-.rc-steps > summary::-webkit-details-marker { display: none; }
-.rc-steps > summary:hover { color: var(--text-dim); }
 .toolgroup > .msg { padding-left: 26px; }
 .msg.tool .role { color: var(--role-tool); }
 .msg.tool .role::before { content: "$ "; }
@@ -7592,6 +7596,7 @@ function agentComposerHtml(d) {
   // everything about the next send sits on one line.
   const lastModel = [...(d.messages || [])].reverse().find(m => m.role === 'assistant' && m.model);
   return `<div class="composer-dock" id="composerDock">
+    <details class="lp-steps" id="lpSteps" hidden><summary><span class="lp-steps-sum"></span><button type="button" class="lp-abort" title="Stop this run. The session file keeps what already landed." hidden>abort</button></summary><div class="lp-steps-body"><div class="rc-blocks"></div></div></details>
     <div class="live-pane" id="livePane"><div class="lp-head" id="agentActivityText">&nbsp;</div><pre class="lp-out" id="lpOut"></pre></div>
   <div class="agent-compose" id="agentCompose">
     <div id="slashPop" class="slash-pop" hidden></div>
@@ -9232,8 +9237,7 @@ function buildRunCard(r) {
   card.dataset.job = r.jobId;
   card.innerHTML = `<div class="role"><span class="rc-title"></span>` +
     `<button class="msg-copy rc-abort" title="Stop this run. The session file keeps what already landed.">abort</button></div>` +
-    `<div class="rc-status"></div><div class="rc-customs"></div><div class="rc-ui"></div>` +
-    `<details class="rc-steps" style="display:none"><summary><span class="rc-steps-sum"></span></summary><div class="rc-blocks"></div></details>`;
+    `<div class="rc-status"></div><div class="rc-customs"></div><div class="rc-ui"></div>`;
   card.querySelector('.rc-abort').onclick = async e => {
     const b = e.currentTarget;
     b.disabled = true;
@@ -9532,43 +9536,68 @@ function updateRunBlock(blocksHost, jobId, b) {
 
 function renderRunCards() {
   const host = $('runCards');
-  if (!host) return;
   const v = $('view');
-  const pinned = v.scrollHeight - v.scrollTop - v.clientHeight < 200;
-  const cards = [...activeRuns.values()].filter(r => r.key === activeRel);
-  for (const el of [...host.children]) {
-    if (!cards.some(r => r.jobId === el.dataset.job)) el.remove();
-  }
-  for (const r of cards) {
-    let card = host.querySelector(`[data-job="${CSS.escape(r.jobId)}"]`);
-    if (!card) { card = buildRunCard(r); host.appendChild(card); }
-    setLiveText(card.querySelector('.rc-title'), '● running · ' + (r.model || 'session model') +
-      (r.startedAt ? ' · ' + fmtElapsed(Date.now() - r.startedAt) : ''));
-    setLiveText(card.querySelector('.rc-status'), (r.statusText || 'working…') + (r.extStatus ? ' · ' + r.extStatus : ''));
-    updateRunUi(card, r);
-    updateRunCustoms(card, r);
-    // Only FROZEN units live in the card: the active one flows through the
-    // live pane. Each finished unit adds a chip to the one-line steps fold.
-    const blocksHost = card.querySelector('.rc-blocks');
-    const tail = r.tail || [];
-    const frozen = tail.filter(b => b.kind === 'tool' ? b.phase === 'done' : b.done);
-    for (const el of [...blocksHost.children]) {
-      if (!frozen.some(b => String(b.id) === el.dataset.blk)) el.remove();
+  const pinned = v && v.scrollHeight - v.scrollTop - v.clientHeight < 200;
+  const runs = [...activeRuns.values()].filter(r => r.key === activeRel);
+  // The everyday run has NO card: the dock's steps ledger and the live
+  // pane carry it. The card survives only for the rare interactive
+  // surfaces — extension questions, notices, widgets, hosted TUI views.
+  const cards = runs.filter(r => (r.uiRequests && r.uiRequests.length)
+    || (r.notices && r.notices.length) || r.widgets || r.customViews);
+  if (host) {
+    for (const el of [...host.children]) {
+      if (!cards.some(r => r.jobId === el.dataset.job)) el.remove();
     }
-    for (const b of frozen) updateRunBlock(blocksHost, r.jobId, b);
-    const steps = card.querySelector('.rc-steps');
-    if (frozen.length) {
-      steps.style.display = '';
-      const labels = frozen.map(b => b.kind === 'tool'
-        ? (b.name || 'tool') + (b.error ? ' ✗' : '')
-        : (b.think && !b.text ? 'thinking' : 'reply'));
-      setLiveText(card.querySelector('.rc-steps-sum'),
-        `${frozen.length} step${frozen.length > 1 ? 's' : ''} · ` +
-        labels.slice(-8).join(' · ') + (labels.length > 8 ? ' · …' : ''));
-    } else steps.style.display = 'none';
+    for (const r of cards) {
+      let card = host.querySelector(`[data-job="${CSS.escape(r.jobId)}"]`);
+      if (!card) { card = buildRunCard(r); host.appendChild(card); }
+      setLiveText(card.querySelector('.rc-title'), '● running · ' + (r.model || 'session model') +
+        (r.startedAt ? ' · ' + fmtElapsed(Date.now() - r.startedAt) : ''));
+      setLiveText(card.querySelector('.rc-status'), (r.statusText || 'working…') + (r.extStatus ? ' · ' + r.extStatus : ''));
+      updateRunUi(card, r);
+      updateRunCustoms(card, r);
+    }
   }
-  if (cards.length && pinned) v.scrollTop = v.scrollHeight;
+  updateDockSteps(runs);
+  if ((cards.length || runs.length) && pinned) v.scrollTop = v.scrollHeight;
   updateActivityLine();
+}
+
+// The dock's growing steps ledger: each FROZEN unit becomes a chip on one
+// centered line; open it for the boxes. Gone when no run is active — the
+// settled transcript's toolgroup lines take over.
+function updateDockSteps(runs) {
+  const el = $('lpSteps');
+  if (!el) return;
+  const abort = el.querySelector('.lp-abort');
+  if (!runs.length) { el.hidden = true; if (abort) abort.hidden = true; return; }
+  const r = runs[runs.length - 1];
+  const host = el.querySelector('.rc-blocks');
+  const frozen = (r.tail || []).filter(b => b.kind === 'tool' ? b.phase === 'done' : b.done);
+  for (const kid of [...host.children]) {
+    if (!frozen.some(b => String(b.id) === kid.dataset.blk)) kid.remove();
+  }
+  for (const b of frozen) updateRunBlock(host, r.jobId, b);
+  if (abort) {
+    abort.hidden = false;
+    abort.disabled = false;
+    abort.textContent = 'abort';
+    abort.onclick = async ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      abort.disabled = true;
+      abort.textContent = 'aborting…';
+      await postJson('/api/run/abort', { jobId: r.jobId });
+    };
+  }
+  if (frozen.length) {
+    el.hidden = false;
+    const labels = frozen.map(b => b.kind === 'tool'
+      ? (b.name || 'tool') + (b.error ? ' ✗' : '')
+      : (b.think && !b.text ? 'thinking' : 'reply'));
+    setLiveText(el.querySelector('.lp-steps-sum'),
+      `${frozen.length} step${frozen.length > 1 ? 's' : ''} · ` +
+      labels.slice(-8).join(' · ') + (labels.length > 8 ? ' · …' : ''));
+  } else el.hidden = true;
 }
 
 // The reserved one-line heartbeat over the composer: whatever is active
@@ -9601,8 +9630,10 @@ function updateActivityLine() {
       text = '✍ writing · ' + String(b.text).length + ' chars';
       flow = b.text;
     } else if (b && b.kind === 'text' && b.think) {
+      // Reasoning streams as a counter, not as water: some models reason
+      // in floods (kimi k3), and the full stream is too loud.
       text = '◌ thinking · ' + b.think.length + ' chars';
-      flow = b.think;
+      flow = '';
     } else {
       // The gap between units — or a provider that answers in one silent
       // burst (claude-code API transport): keep the last flow visible and
