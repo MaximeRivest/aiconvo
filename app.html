@@ -932,6 +932,15 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.tool > summary::-webkit-details-marker, .msg.toolresult > summary::-webkit-details-marker { display: none; }
 .msg.tool > summary:hover, .msg.toolresult > summary:hover { color: var(--text-dim); }
 .msg .tool-out { max-height: 50vh; overflow: auto; margin-top: 6px; }
+.msg.toolline { padding: 3px 14px; font-size: 11px; color: var(--text-faint); }
+.msg-file-inline { border: 0; background: transparent; color: var(--text-dim); font-size: 11px; padding: 0; height: auto; cursor: pointer; font-family: inherit; }
+.msg-file-inline:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
+.msg.tool .tstat.ok { color: var(--success); }
+.msg.tool .tstat.err { color: var(--danger); font-weight: 700; }
+.msg.tool .res-first { color: var(--text-faint); }
+.msg.tool .resfold > summary { cursor: pointer; list-style: none; user-select: none; color: var(--text-faint); font-size: 11px; margin-top: 4px; }
+.msg.tool .resfold > summary::-webkit-details-marker { display: none; }
+.msg.tool .resfold > summary:hover { color: var(--text-dim); }
 .msg.tool .role { color: var(--role-tool); }
 .msg.tool .role::before { content: "$ "; }
 .msg.toolresult .role { color: var(--role-tool); }
@@ -6827,16 +6836,27 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   // marks the assistant. Model changes render as their own bar upstream.
   const role = (m.role === 'user' || m.role === 'assistant') ? ''
     : `<div class="role"><span>${label}</span>${fileLink}</div>`;
-  // Tools fold to one line; open, their output lives in a capped scroll
-  // box (≤50vh) — the transcript twin of the run card's stream boxes.
+  // Tools take one folded line of space. Edits are just their file with
+  // ✓/✗; other tools fold their args and carry a nested result fold.
   if (m.role === 'toolresult') {
+    if (m._merged) return '';           // rides inside its call's fold
     const lines = m.text.split('\n').length;
     return `<details class="msg toolresult"${idxAttr}${keepOpen ? ' open' : ''}><summary>↳ result · ${lines} line${lines > 1 ? 's' : ''}</summary><div class="tool-out">${hl(m.text)}</div></details>`;
   }
   if (m.role === 'tool') {
     const toolAnchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
-    const hint = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
-    return `<details class="msg tool"${toolAnchor}${idxAttr}${keepOpen ? ' open' : ''}><summary>⚙ <span class="tname">${esc(m.name || '?')}</span>${hint ? ' · ' + esc(hint) : ''}${fileLink}</summary><div class="tool-out">${hl(m.text)}</div></details>`;
+    const res = m._result || null;
+    if (isFileWriteTool(m)) {
+      const mark = res ? (res.err ? '<span class="tstat err" title="the edit failed">✗</span>' : '<span class="tstat ok" title="the edit applied">✓</span>') : '';
+      return `<div class="msg tool toolline"${toolAnchor}${idxAttr}>✎ <button class="msg-file-inline" data-file-diff="${esc(m.path)}" data-file-ts="${esc(m.ts || '')}" data-file-anchor="${esc(m.ts || '')}" data-file-call="${esc(m.id || '')}" title="Open this file change">${esc(shortFilePath(m.path))}</button> ${mark}</div>`;
+    }
+    const hint = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const first = res ? String(res.text || '').trim().split('\n').find(x => x.trim()) || '' : '';
+    const resLines = res ? String(res.text || '').split('\n').length : 0;
+    const resFold = res
+      ? `<details class="resfold"><summary>↳ result · ${resLines} line${resLines > 1 ? 's' : ''}</summary><div class="tool-out">${hl(res.text)}</div></details>`
+      : '';
+    return `<details class="msg tool"${toolAnchor}${idxAttr}${keepOpen ? ' open' : ''}><summary>⚙ <span class="tname">${esc(m.name || '?')}</span>${hint ? ' · ' + esc(hint) : ''}${first ? ` <span class="res-first">→ ${esc(first.slice(0, 60))}</span>` : ''}${fileLink}</summary><div class="tool-out">${hl(m.text)}</div>${resFold}</details>`;
   }
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
@@ -8651,6 +8671,19 @@ async function renderConv(scroll) {
   const trace = mode === 'all' ? null : computeTrace(d);
   const inTrace = m => !trace || !m.eid || trace.onPath.has(m.eid);
   let msgs = d.messages.filter(m => inTrace(m) && keepInMode(m, mode));
+  // Pair tool calls with their results: the transcript shows one line per
+  // tool; the result rides inside the call's fold.
+  {
+    const openCalls = [];
+    for (const m of msgs) {
+      if (m.role === 'tool') { m._result = null; openCalls.push(m); }
+      else if (m.role === 'toolresult') {
+        m._merged = false;
+        const call = (m.tid ? openCalls.find(c => c.id === m.tid) : openCalls[0]) || null;
+        if (call) { call._result = m; m._merged = true; openCalls.splice(openCalls.indexOf(call), 1); }
+      }
+    }
+  }
   if (mode !== 'all' && mode !== 'commands') {
     // The chat view hides tool calls, but file writes must stay reachable:
     // collapse each hidden run of write/edit calls into one row of links.
@@ -9307,7 +9340,9 @@ function updateRunBlock(blocksHost, jobId, b) {
       el.dataset.blk = key;
       el.innerHTML = `<summary><span class="rc-tool-line"></span></summary><pre class="rc-args"></pre><pre class="rc-out"></pre>`;
       const saved = runToolOpen.get(jobId + '/' + key);
-      el.open = saved !== undefined ? saved : runToolDefaultOpen();
+      // Tools claim only their folded line; the line itself streams the
+      // newest output, so open is always the reader's own choice.
+      el.open = saved !== undefined ? saved : false;
       el.addEventListener('toggle', () => runToolOpen.set(jobId + '/' + key, el.open));
       blocksHost.appendChild(el);
     }
@@ -9325,10 +9360,6 @@ function updateRunBlock(blocksHost, jobId, b) {
     const out = el.querySelector('.rc-out');
     setStickText(out, b.out || '');
     out.hidden = !b.out;
-    // A finished tool folds itself — unless the user chose a state.
-    if (b.phase === 'done' && el.open && runToolOpen.get(jobId + '/' + key) === undefined) {
-      el.open = false;
-    }
   } else {
     if (!el) {
       el = document.createElement('div');
@@ -9337,13 +9368,10 @@ function updateRunBlock(blocksHost, jobId, b) {
       el.innerHTML = `<pre class="rc-think"></pre><pre class="rc-body"></pre>`;
       blocksHost.appendChild(el);
     }
-    // Everything/commands: the reasoning streams in full. Chat: a compact
-    // indicator ticks up while the model thinks, then yields to the answer.
+    // Thinking stays a compact indicator: it ticks up while the model
+    // thinks, then yields to the answer.
     const th = el.querySelector('.rc-think');
-    if (runToolDefaultOpen()) {
-      th.classList.remove('rc-think-min');
-      setStickText(th, b.think || '');
-    } else {
+    {
       th.classList.add('rc-think-min');
       setLiveText(th, b.think && !b.text ? '◌ thinking · ' + b.think.length + ' chars' : '');
     }

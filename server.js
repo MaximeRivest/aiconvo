@@ -219,7 +219,7 @@ function toolEventsOf(content, ts) {
     } else if (b.type === 'tool_result') {
       let t = textOf(b.content) || (typeof b.content === 'string' ? b.content : '');
       if (t.length > 4000) t = t.slice(0, 4000) + '\n… (truncated)';
-      if (t.trim()) out.push({ role: 'toolresult', text: t, tid: b.tool_use_id || null, ts });
+      if (t.trim()) out.push({ role: 'toolresult', text: t, tid: b.tool_use_id || null, ts, err: !!b.is_error });
     }
   }
   return out;
@@ -289,7 +289,7 @@ async function parseFile(absPath) {
         // pi tool result message
         let t = textOf(content);
         if (t.length > 4000) t = t.slice(0, 4000) + '\n… (truncated)';
-        if (t.trim()) messages.push({ role: 'toolresult', text: t, tid: d.message.toolCallId || d.message.toolCallID || null, ts: d.timestamp || null, _eid: eid });
+        if (t.trim()) messages.push({ role: 'toolresult', text: t, tid: d.message.toolCallId || d.message.toolCallID || null, ts: d.timestamp || null, err: !!(d.message.isError || d.message.is_error), _eid: eid });
         continue;
       }
       if (role !== 'user' && role !== 'assistant') continue;
