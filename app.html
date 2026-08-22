@@ -888,7 +888,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
    Thinking, streaming replies, and tool output FLOW THROUGH it — the pane
    itself never changes size, so the page never recomposes. Finished units
    freeze into the steps line in the transcript above. */
-.live-pane { height: 148px; display: flex; flex-direction: column; gap: 4px; padding: 2px 4px 8px; }
+.live-pane { height: 148px; display: flex; flex-direction: column; gap: 4px; padding: 2px 4px 8px; background: var(--bg); }
 /* the growing steps ledger: one quiet centered line above the live pane */
 .lp-steps > summary { cursor: pointer; list-style: none; user-select: none; position: relative; text-align: center; padding: 2px 0; font-size: 11px; color: var(--text-faint); }
 .lp-steps > summary::-webkit-details-marker { display: none; }
@@ -988,8 +988,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 20px 0 8px; font-size: var(--fs-body); font-weight: 700; color: var(--text); }
 .md h1, .md h2 { font-size: var(--fs-title); border-bottom: 1px solid var(--border); padding-bottom: 3px; }
 .md pre { background: var(--surface-2); border: 1px solid var(--border); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; margin: 12px 0; white-space: pre; }
-/* late-loading images must not shove the page around: cap their reach */
-.md img { max-height: 45vh; }
+/* Images live in FIXED boxes: a late decode changes nothing above or
+   below, so a bottom-bound reload can never surface old messages. */
+.md img { display: block; height: 45vh; max-width: 100%; object-fit: contain; object-position: left top; background: var(--surface-1); }
 .md pre.md-code[data-lang]::before { content: attr(data-lang); display: block; float: right; margin: -4px -4px 4px 8px; color: var(--text-faint); font-size: 10px; }
 .md pre.md-code { position: relative; }
 .md pre.md-code:has(.md-run)[data-lang]::before { display: none; }
