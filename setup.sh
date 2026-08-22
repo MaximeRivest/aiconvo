@@ -36,6 +36,12 @@ fi
 # --- 3. optional tools -------------------------------------------------------
 command -v pi >/dev/null 2>&1 \
   || echo "note: 'pi' is not installed — headless sends, notes, and memory builds stay off until it is."
+command -v alacritty >/dev/null 2>&1 \
+  || echo "note: 'alacritty' is not installed — agent terminal windows need it (sudo apt install alacritty)."
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  ldconfig -p 2>/dev/null | grep -q libxkbcommon-x11 \
+    || echo "note: on WSL, alacritty also needs: sudo apt install libxkbcommon-x11-0"
+fi
 command -v git >/dev/null 2>&1 \
   || echo "note: 'git' is not installed — repo views stay empty."
 
@@ -47,7 +53,9 @@ NODE_DIR="$(dirname "$(readlink -f "$NODE_BIN")")"
 # On WSL, agent terminals (alacritty) need the WSLg display sockets.
 DISPLAY_LINES=""
 if grep -qi microsoft /proc/version 2>/dev/null; then
-  DISPLAY_LINES=$'Environment=DISPLAY=:0\nEnvironment=WAYLAND_DISPLAY=wayland-0'
+  DISPLAY_LINES='Environment=DISPLAY=:0'
+  # Force X11: with systemd on WSL, the WSLg wayland socket is not in
+  # XDG_RUNTIME_DIR. Alacritty also needs libxkbcommon-x11-0 (apt).
 fi
 cat > "$UNIT_DIR/aiconvo.service" <<EOF
 [Unit]
