@@ -909,9 +909,12 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tts-player input[type=range] { width: 90px; height: 14px; }
 .tts-player select { height: 18px; font-size: 10px; padding: 0 4px; }
 .tts-player button { height: 18px; padding: 0 6px; font-size: 10px; }
-/* user turns carry the surface tint; assistant replies sit on the page
-   (her request: the words you read the most get the calmest ground) */
-.msg.user { background: var(--surface-1); }
+/* user turns carry the surface tint and sit a step to the right;
+   assistant replies sit on the page, a step to the left. Prose reads at
+   the reading-view size (15px/1.65), not the UI label size. */
+.msg.user { background: var(--surface-1); margin-left: 10%; }
+.msg.assistant { margin-right: 10%; }
+.msg.user, .msg.assistant { font-size: 15px; line-height: 1.65; }
 .msg.user .role { color: var(--role-user); }
 .msg.user .role::before { content: "❯ "; }
 .msg.assistant .role { color: var(--role-asst); }
@@ -924,10 +927,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg .tname { color: var(--accent); }
 .msg .msg-file { margin-left: auto; height: 18px; padding: 0 5px; border-color: transparent; background: transparent; color: var(--cyan); font-size: 10px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg .msg-file:hover { background: transparent; text-decoration: underline; }
-.msg.filetouch { background: var(--bg); padding: 4px 14px; display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; }
-.msg.filetouch .ft-label { font-size: var(--fs-micro); color: var(--text-faint); }
-.msg.filetouch button { height: 18px; padding: 0 6px; font-size: 10px; color: var(--cyan); background: transparent; border: 1px solid var(--border); max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msg.filetouch button:hover { border-color: var(--cyan); }
+/* file changes: a quiet right-aligned footer under the assistant reply */
+.msg.filetouch { background: transparent; padding: 0 14px 12px; margin: -6px 10% 0 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; justify-content: flex-end; }
+.msg.filetouch .ft-label { font-size: 10px; color: var(--text-faint); }
+.msg.filetouch button { height: 18px; padding: 0 6px; font-size: 10px; color: var(--text-faint); background: transparent; border: 0; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.filetouch button:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
 .msg .more { color: var(--cyan); cursor: pointer; background: none; border: 0; padding: 0; height: auto; font: inherit; }
 .msg .trunc, .msg .full { display: block; }
 /* rendered markdown inside messages and note panes */
@@ -8655,6 +8659,9 @@ async function renderConv(scroll) {
   if (pills.has('')) blocks.push(pills.get(''));
   if (compares.has('')) blocks.push(compares.get(''));
   let barModel = null; // the model bar marks changes, not every reply
+  // The newest on-path message always shows in full — no fold to click.
+  let lastMain = -1;
+  for (let k = msgs.length - 1; k >= 0; k--) if (trace || !msgs[k].off) { lastMain = k; break; }
   for (let i = 0; i < msgs.length;) {
     const isHit = m => !!qtest && qtest.test(m.text || '');
     if (trace || !msgs[i].off) {
@@ -8664,7 +8671,7 @@ async function renderConv(scroll) {
           if (barModel) blocks.push(`<div class="modelbar" title="${esc((m.provider ? m.provider + ' · ' : '') + m.model)}">model → ${esc(m.model)}</div>`);
           barModel = m.model;
         }
-        blocks.push(msgBlock(m, hl, isHit(m), q, msgIndexes.get(m)));
+        blocks.push(msgBlock(m, hl, isHit(m) || i === lastMain, q, msgIndexes.get(m)));
       }
       const nextEid = msgs[i + 1] && msgs[i + 1].eid;
       if (m.eid && nextEid !== m.eid) {
