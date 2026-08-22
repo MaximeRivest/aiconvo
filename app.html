@@ -997,7 +997,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .chnav button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
 
 /* ---- continue in Alacritty ---- */
-.agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
+/* width: 100% matters: inside a flex column, the auto margins otherwise
+   shrink-wrap the composer to its content (a small island on e-ink, where
+   --read-max is none). Full width, then max-width caps and centers it. */
+.agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; width: 100%; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
 .agent-compose .agent-state { display: flex; gap: var(--sp-2); align-items: center; color: var(--text-dim); font-size: var(--fs-meta); min-width: 0; }
 .agent-compose .agent-state strong { color: var(--accent); }
 .agent-compose .agent-hint { color: var(--text-faint); }
