@@ -769,19 +769,23 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .rc-body { color: var(--text); font-size: 12.5px; }
 /* extension view: a modal takeover, not a black box in the chat */
 .rc-cv { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; background: rgba(10, 10, 14, .5); }
-.rc-cv-card { width: min(720px, 94vw); max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 16px 48px rgba(0, 0, 0, .45); overflow: hidden; }
+.rc-cv-card { width: fit-content; min-width: min(420px, 94vw); max-width: 96vw; max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0, 0, 0, .35); overflow: hidden; }
 .rc-cv-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border-strong); color: var(--text-dim); font-size: var(--fs-micro); }
 .rc-cv-head strong { color: var(--accent); font-weight: 600; }
 .rc-cv-head span { flex: 1; }
-.rc-cv-close { background: none; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text-dim); cursor: pointer; padding: 2px 9px; font: inherit; font-size: var(--fs-micro); }
+.rc-cv-close { background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 2px 9px; font: inherit; font-size: var(--fs-micro); }
 .rc-cv-close:hover { color: var(--red, #f66); border-color: var(--red, #f66); }
-.rc-cv-screen { flex: 1; background: #14161c; color: #d5d9e0; margin: 0; padding: 14px 16px; font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 14px; line-height: 1.5; overflow: auto; white-space: pre; outline: none; caret-color: transparent; cursor: default; }
+/* The host renders views at 100 columns: size the panel to exactly 100ch so
+   no horizontal scrollbar appears; on narrow screens shrink the font instead
+   (min 8px, then horizontal pan is the fallback). Tight line-height keeps
+   box-drawing borders connected. */
+.rc-cv-screen { flex: 1; min-height: 0; width: 100ch; max-width: calc(96vw - 34px); background: var(--bg); color: var(--text); margin: 0; padding: 12px 16px; font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: min(14px, max(8px, calc((96vw - 44px) / 62))); line-height: 1.2; letter-spacing: 0; overflow-y: auto; overflow-x: hidden; white-space: pre; outline: none; caret-color: transparent; cursor: default; }
 .rc-cv-screen:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 /* command palette: grouped, filtered, floats above the composer */
-.slash-pop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; max-height: 340px; overflow: auto; background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 -10px 36px rgba(0, 0, 0, .28); padding: 4px; z-index: 40; }
+.slash-pop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; max-height: 340px; overflow: auto; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0, 0, 0, .35); z-index: 40; }
 .slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 8px 10px; }
 .slash-group { color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; padding: 8px 10px 2px; }
-.slash-row { display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.slash-row { display: flex; gap: 12px; align-items: baseline; padding: 5px 10px; cursor: pointer; }
 .slash-row:hover { background: var(--surface-2, rgba(127, 127, 127, .12)); }
 .slash-row.sel { background: var(--accent); }
 .slash-row.sel .slash-name, .slash-row.sel .slash-desc { color: var(--bg, #fff); }
@@ -8947,15 +8951,20 @@ function buildRunCard(r) {
 // The server streams the component's rendered ANSI lines; keys typed on
 // the panel go back as raw terminal data. This is the full pi experience
 // for extension views — without a terminal emulator.
-function ansiToHtml(s) {
+function ansiToHtml(s, clearBg) {
   const P = ['#1c1c1c', '#cc4444', '#44aa44', '#aaaa33', '#4477cc', '#aa44aa', '#33aaaa', '#cccccc',
              '#666666', '#ff6666', '#66dd66', '#eeee66', '#6699ff', '#ee66ee', '#66eeee', '#ffffff'];
   let out = '';
-  const st = { b: false, d: false, i: false, u: false, inv: false, fg: null, bg: null };
+  const st = { b: false, d: false, i: false, u: false, inv: false, fg: null, bg: null, bgKey: null };
   const span = t => {
+    // Drop control chars (APC markers a real terminal would hide) and
+    // private-use glyphs (nerd-font icons render as tofu in the browser).
+    t = t.replace(/[\x00-\x08\x0b-\x1f\x7f\uE000-\uF8FF]/g, '');
     if (!t) return '';
     const css = [];
     let fg = st.fg, bg = st.bg;
+    // The extension's panel fill becomes the modal's own background.
+    if (clearBg && st.bgKey === clearBg) bg = null;
     if (st.inv) { const x = fg || '#cccccc'; fg = bg || '#1c1c1c'; bg = x; }
     if (fg) css.push('color:' + fg);
     if (bg) css.push('background:' + bg);
@@ -8965,8 +8974,12 @@ function ansiToHtml(s) {
     if (st.u) css.push('text-decoration:underline');
     return css.length ? '<span style="' + css.join(';') + '">' + esc(t) + '</span>' : esc(t);
   };
-  // strip non-SGR escape sequences, keep SGR for parsing
-  const clean = String(s).replace(/\x1b\][^\x07]*(\x07|\x1b\\)/g, '').replace(/\x1b\[(?![0-9;]*m)[0-9;?]*[a-zA-Z]/g, '');
+  // strip non-SGR escape sequences (OSC, APC like the cursor marker, CSI),
+  // keep SGR for parsing
+  const clean = String(s)
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/\x1b_[^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[(?![0-9;]*m)[0-9;?]*[a-zA-Z]/g, '');
   const parts = clean.split(/(\x1b\[[0-9;]*m)/);
   for (const part of parts) {
     const m = part.match(/^\x1b\[([0-9;]*)m$/);
@@ -8974,7 +8987,7 @@ function ansiToHtml(s) {
     const codes = (m[1] || '0').split(';').map(Number);
     for (let i = 0; i < codes.length; i++) {
       const c = codes[i];
-      if (c === 0) { st.b = st.d = st.i = st.u = st.inv = false; st.fg = st.bg = null; }
+      if (c === 0) { st.b = st.d = st.i = st.u = st.inv = false; st.fg = st.bg = st.bgKey = null; }
       else if (c === 1) st.b = true;
       else if (c === 2) st.d = true;
       else if (c === 3) st.i = true;
@@ -8986,14 +8999,23 @@ function ansiToHtml(s) {
       else if (c === 27) st.inv = false;
       else if (c >= 30 && c <= 37) st.fg = P[c - 30];
       else if (c >= 90 && c <= 97) st.fg = P[c - 90 + 8];
-      else if (c >= 40 && c <= 47) st.bg = P[c - 40];
-      else if (c >= 100 && c <= 107) st.bg = P[c - 100 + 8];
+      else if (c >= 40 && c <= 47) { st.bg = P[c - 40]; st.bgKey = String(c); }
+      else if (c >= 100 && c <= 107) { st.bg = P[c - 100 + 8]; st.bgKey = String(c); }
       else if (c === 39) st.fg = null;
-      else if (c === 49) st.bg = null;
+      else if (c === 49) { st.bg = null; st.bgKey = null; }
       else if (c === 38 || c === 48) {
         const isFg = c === 38;
-        if (codes[i + 1] === 2) { const v = 'rgb(' + (codes[i + 2] || 0) + ',' + (codes[i + 3] || 0) + ',' + (codes[i + 4] || 0) + ')'; if (isFg) st.fg = v; else st.bg = v; i += 4; }
-        else if (codes[i + 1] === 5) { const v = xterm256(codes[i + 2] || 0, P); if (isFg) st.fg = v; else st.bg = v; i += 2; }
+        if (codes[i + 1] === 2) {
+          const key = c + ';2;' + (codes[i + 2] || 0) + ';' + (codes[i + 3] || 0) + ';' + (codes[i + 4] || 0);
+          const v = 'rgb(' + (codes[i + 2] || 0) + ',' + (codes[i + 3] || 0) + ',' + (codes[i + 4] || 0) + ')';
+          if (isFg) st.fg = v; else { st.bg = v; st.bgKey = key; }
+          i += 4;
+        } else if (codes[i + 1] === 5) {
+          const key = c + ';5;' + (codes[i + 2] || 0);
+          const v = xterm256(codes[i + 2] || 0, P);
+          if (isFg) st.fg = v; else { st.bg = v; st.bgKey = key; }
+          i += 2;
+        }
       }
     }
   }
@@ -9053,7 +9075,10 @@ function updateRunCustoms(card, r) {
     const fresh = !el;
     if (!el) { el = buildCustomView(r.jobId, id); host.appendChild(el); }
     const screen = el.querySelector('.rc-cv-screen');
-    const html = ansiToHtml((views[id] || []).join('\n'));
+    const v = views[id];
+    const lines = Array.isArray(v) ? v : (v && v.lines) || [];
+    const bg = !Array.isArray(v) && v && v.bgSgr ? v.bgSgr : null;
+    const html = ansiToHtml(lines.join('\n'), bg);
     if (screen._h !== html) { screen._h = html; screen.innerHTML = html; }
     if (fresh) setTimeout(() => screen.focus(), 50);
   }

@@ -50,8 +50,17 @@ function loadSdk() {
       try {
         const themeMod = await import(pathToFileURL(path.join(dir, 'dist', 'modes', 'interactive', 'theme', 'theme.js')).href);
         // Extensions read ctx.ui.theme and some (prompt modes) fail hard
-        // without an initialized theme. No watcher: this is a server.
-        try { themeMod.initTheme(undefined, false); } catch {}
+        // without an initialized theme. Custom views render into the light
+        // aiconvo page, so default to pi's light theme — dark-terminal
+        // colors painted navy stripes on paper. settings.json piTheme
+        // overrides. No watcher: this is a server.
+        let themeName = 'light';
+        try {
+          const s = JSON.parse(fs.readFileSync(path.join(require('os').homedir(), '.config', 'aiconvo', 'settings.json'), 'utf8'));
+          if (s && typeof s.piTheme === 'string' && s.piTheme) themeName = s.piTheme;
+        } catch {}
+        try { themeMod.initTheme(themeName, false); }
+        catch { try { themeMod.initTheme(undefined, false); } catch {} }
         theme = themeMod.theme;
       } catch {}
       if (SDK.VERSION && SDK.VERSION !== PI_TESTED_VERSION) {
@@ -139,6 +148,7 @@ function textOfContent(content) {
 // until /api/run/ui-response answers them; everything else is forwarded as
 // RPC-shaped extension_ui_request events, which server.js already renders.
 function makeUiContext(S, loaded) {
+  let panelBgSgr; // lazily resolved theme customMessageBg SGR params (undefined = not probed yet)
   const emit = req => S.emit({ type: 'extension_ui_request', id: crypto.randomUUID(), ...req });
   const dialog = (opts, defaultValue, request, parse) => {
     if (opts && opts.signal && opts.signal.aborted) return Promise.resolve(defaultValue);
@@ -196,7 +206,20 @@ function makeUiContext(S, loaded) {
     // extensions call (verified across modes/cell/ensemble).
     custom(factory, _options) {
       const id = crypto.randomUUID();
+      // The browser panel is sized to exactly 100ch (font autoscales on
+      // narrow screens), so no horizontal scrollbar appears.
       const VIEW_WIDTH = 100;
+      // The extension's panel fill (theme customMessageBg, a dark navy) looks
+      // harsh inside the web modal. Send its raw SGR params along so the
+      // browser can render that exact background as transparent.
+      if (panelBgSgr === undefined) {
+        panelBgSgr = null;
+        try {
+          const probe = loaded && loaded.theme && loaded.theme.bg ? loaded.theme.bg('customMessageBg', 'X') : '';
+          const m = /\x1b\[([0-9;]*)m/.exec(probe);
+          if (m && /^(48|10[0-7]|4[0-7])(;|$)/.test(m[1])) panelBgSgr = m[1];
+        } catch {}
+      }
       return new Promise(resolve => {
         let component = null;
         let closed = false;
@@ -218,7 +241,7 @@ function makeUiContext(S, loaded) {
             let lines;
             try { lines = component.render(VIEW_WIDTH) || []; }
             catch (e) { lines = ['render error: ' + (e && e.message)]; }
-            S.emit({ type: 'extension_ui_request', id, method: 'custom_render', lines: lines.slice(0, 200) });
+            S.emit({ type: 'extension_ui_request', id, method: 'custom_render', lines: lines.slice(0, 200), bgSgr: panelBgSgr });
           }, 16);
         };
         const fakeTui = {

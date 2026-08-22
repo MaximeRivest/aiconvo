@@ -14,6 +14,9 @@ const DEFAULT_SETTINGS = {
   // Engine for web sends: 'sdk' embeds pi in-process (fast forks, full
   // extension UI); 'rpc' spawns pi child processes (isolation fallback).
   piEngine: 'sdk',
+  // pi theme for hosted extension views (custom TUI components rendered
+  // in the browser). 'light' matches aiconvo's paper look.
+  piTheme: 'light',
 };
 
 function parseTokenCount(raw) {
@@ -111,8 +114,9 @@ function normalizeSettings(input) {
   const semanticSearch = src.semanticSearch === true;
   const semanticUrl = String(src.semanticUrl || DEFAULT_SETTINGS.semanticUrl).trim().replace(/\/$/, '');
   const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
+  const piTheme = typeof src.piTheme === 'string' && src.piTheme.trim() ? src.piTheme.trim() : DEFAULT_SETTINGS.piTheme;
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, piEngine };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, piEngine, piTheme };
   }
   return {
     usePiDefault: false,
@@ -123,6 +127,7 @@ function normalizeSettings(input) {
     semanticSearch,
     semanticUrl,
     piEngine,
+    piTheme,
   };
 }
 
