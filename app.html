@@ -7519,8 +7519,9 @@ async function headlessSendFromComposer(btn) {
   ta.value = '';
   window._agentImages = [];
   renderAgentThumbs();
-  // The reply streams in below: rest the composer so it stays visible.
-  if (phoneLayout() && !isEink()) ta.blur();
+  // The reply streams in below: rest the composer. Blur everywhere — on
+  // desktop a focused textarea would swallow the navigation shortcuts.
+  ta.blur();
   updateComposeMin();
   traceLeaves.delete(key);
   compareCache.delete(key);
@@ -11137,7 +11138,7 @@ function helpNow() {
     if ($('agentMic') && !$('agentMic').hidden) keys.push(['m', 'start / stop dictation']);
     if ($('modelStrip')) keys.push(
       ['shift+m', 'models for fan-out: add / remove / change'],
-      ['ctrl+enter', 'send from the composer — 2+ model chips fan out'],
+      ['ctrl+enter', 'send the draft — focused or not; 2+ model chips fan out'],
       ['ctrl+shift+enter', 'send in the terminal — one model only, refuses with 2+ chips']);
     keys.push(['z', 'zen — hide everything but the words'], ['c', 'copy as markdown'], ['e', 'export'], ['d', 'distill / open note'], ['p', 'project overview']);
     sections.push({ label: 'conversation', keys });
@@ -11307,6 +11308,13 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (inField) return;
+  // Ctrl+Enter sends the drafted prompt without the composer focused — the
+  // dictation flow: m to talk, m to stop, ctrl+enter to send. Focused sends
+  // are handled by the composer's own keydown.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'Enter') {
+    const run = $('agentRun'), ta = $('agentText');
+    if (run && ta && ta.value.trim()) { e.preventDefault(); headlessSendFromComposer(run); return; }
+  }
   if (e.altKey && !e.ctrlKey && !e.metaKey && /^[1-5]$/.test(e.key) && searchMode && viewKind === 'home') {
     e.preventDefault();
     setSearchScope(SEARCH_SCOPES[Number(e.key) - 1][1]);
