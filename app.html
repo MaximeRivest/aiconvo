@@ -1066,7 +1066,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose .agent-hint { color: var(--text-faint); }
 /* the composer is a quiet gray ground with a green caret: no frame, no
    placeholder — it grows with the lines and speaks the message prose */
-.agent-compose textarea { width: 100%; min-height: 46px; height: 46px; resize: none; font: 15px/1.65 var(--font); color: var(--text); background: var(--surface-1); border: 1px solid transparent; padding: 10px 14px; caret-color: var(--accent); overflow-y: auto; }
+.agent-compose textarea { width: 100%; min-height: 54px; height: 54px; resize: none; font: 15px/1.65 var(--font); color: var(--text); background: var(--surface-1); border: 1px solid transparent; padding: 14px; caret-color: var(--accent); overflow-y: auto; }
 .agent-compose textarea:focus { outline: 0; border-color: var(--border); }
 .agent-thumbs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .agent-thumbs:empty { display: none; }
@@ -8242,13 +8242,21 @@ function applyAgentSpeechText(text) {
 }
 
 // One line at rest; the box grows with its content up to 40% of the view.
+// Growth goes UP only: the icon row and the composer's bottom edge stay
+// put, and the transcript above slides away instead.
 function autoGrowCompose() {
   const ta = $('agentText');
   if (!ta) return;
   const box = $('agentCompose');
   if (box && box.classList.contains('compose-min')) { ta.style.height = ''; return; }
+  const v = $('view');
+  const before = box ? box.getBoundingClientRect().bottom : 0;
   ta.style.height = 'auto';
   ta.style.height = Math.min(ta.scrollHeight + 2, Math.round(window.innerHeight * 0.4)) + 'px';
+  if (box && v) {
+    const delta = box.getBoundingClientRect().bottom - before;
+    if (delta) v.scrollTop += delta; // pin the visual bottom edge
+  }
 }
 
 window.agentSpeechEvent = payload => {
