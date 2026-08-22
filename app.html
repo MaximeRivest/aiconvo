@@ -1132,14 +1132,16 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   input[type=text], input[type=search], select { min-height: 42px; font-size: 16px; }
 
   header { height: auto; min-height: 52px; padding: 4px 6px; gap: 3px; flex-wrap: wrap; align-content: center; }
-  #brand { height: 44px; padding: 0 7px; font-size: 14px; }
-  #winBtn { height: 44px; min-width: 44px; width: auto; padding: 0 8px; font-size: 16px; }
+  /* One row: brand + 6 compact buttons must fit 360 CSS px. */
+  #brand { height: 44px; padding: 0 5px; font-size: 13px; }
+  #winBtn { height: 44px; min-width: 40px; width: auto; padding: 0 6px; font-size: 15px; }
+  #qBtn { height: 44px; min-width: 40px; width: 40px; padding: 0; }
   #qwrap { order: 20; flex: 1 0 100%; min-width: 0; padding: 2px 0 3px; }
   #q { width: 100%; height: 44px; }
   #qclear { top: 4px; right: 3px; height: 38px; }
   body:not(.home) #qwrap { display: none; }
   #ticker, header .count { display: none !important; }
-  #activeBtn, #filtersBtn, #settingsBtn, #jobsBtn { width: 48px; min-width: 48px; height: 44px; padding: 0; }
+  #activeBtn, #filtersBtn, #settingsBtn, #jobsBtn { width: 42px; min-width: 42px; height: 44px; padding: 0; }
   #filtersBtn, #settingsBtn, #jobsBtn { font-size: 0; }
   #filtersBtn::after { content: "filter"; font: 10px var(--font); }
   #settingsBtn::after { content: "setup"; font: 10px var(--font); }
@@ -1233,9 +1235,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   #agentSend { margin-left: auto; }
 
   .project-overview, .settings-view, .diff-view { width: 100%; }
-  .phead { top: -8px; margin: -1px -2px 10px; }
-  .pactions { display: grid; grid-template-columns: 1fr 1fr; }
-  .pactions button { width: 100%; min-height: 44px; }
+  /* Phone: the project head scrolls away like the conversation head does.
+     Sticky here buried the content under title + buttons + fold chips. */
+  .phead { position: static; top: auto; margin: -1px -2px 10px; }
+  .pactions { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .pactions button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
+  .pfolds { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .pfolds .fold-chip { flex: 0 0 auto; white-space: nowrap; }
   .pfresh { grid-template-columns: 1fr 1fr; }
   .pfresh > div { border-bottom: 1px solid var(--border); }
   .plauncher { padding: 10px; }
