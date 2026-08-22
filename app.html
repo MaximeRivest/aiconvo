@@ -734,7 +734,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* width: 100%: in flex parents (e-ink paged view) auto margins otherwise
    shrink-wrap to content — same trap as the composer. */
 .transcript { width: 100%; max-width: var(--read-max); margin: 0 auto; }
-.msg { padding: 12px 14px; white-space: pre-wrap; word-break: break-word; }
+.msg { padding: 16px 14px; white-space: pre-wrap; word-break: break-word; }
 /* long-message fold: one page stays visible, the rest hides under a fade */
 .msg.folded { max-height: 100vh; overflow: hidden; position: relative; padding-bottom: 34px; }
 .msg.folded::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 72px; background: linear-gradient(transparent, var(--bg)); pointer-events: none; }
@@ -964,10 +964,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg .trunc, .msg .full { display: block; }
 /* rendered markdown inside messages and note panes */
 .md { white-space: normal; }
-.md p { margin: 6px 0; }
-.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 12px 0 5px; font-size: var(--fs-body); font-weight: 700; color: var(--text); }
+.md p { margin: 10px 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 20px 0 8px; font-size: var(--fs-body); font-weight: 700; color: var(--text); }
 .md h1, .md h2 { font-size: var(--fs-title); border-bottom: 1px solid var(--border); padding-bottom: 3px; }
-.md pre { background: var(--surface-2); border: 1px solid var(--border); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; margin: 8px 0; white-space: pre; }
+.md pre { background: var(--surface-2); border: 1px solid var(--border); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; margin: 12px 0; white-space: pre; }
 .md pre.md-code[data-lang]::before { content: attr(data-lang); display: block; float: right; margin: -4px -4px 4px 8px; color: var(--text-faint); font-size: 10px; }
 .md pre.md-code { position: relative; }
 .md pre.md-code:has(.md-run)[data-lang]::before { display: none; }
@@ -977,10 +977,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* inline code (mostly paths): no ground, just a quieter italic voice */
 .md code { background: transparent; padding: 0; font-size: 13px; font-style: italic; color: var(--text-dim); }
 .md pre code { background: none; padding: 0; }
-.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
-.md li { margin: 2px 0; }
+.md ul, .md ol { margin: 10px 0; padding-left: 22px; }
+.md li { margin: 4px 0; }
 .md blockquote { border-left: 2px solid var(--border-strong); margin: 8px 0; padding: 1px 10px; color: var(--text-dim); }
-.md hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
+.md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .md a { color: var(--cyan); }
 .md s { color: var(--text-faint); }
 .md table { border-collapse: collapse; margin: 8px 0; font-size: var(--fs-meta); }
