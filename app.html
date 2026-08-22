@@ -729,7 +729,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 #convModel .mname { display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 
 /* transcript */
-.transcript { max-width: var(--read-max); margin: 0 auto; border: 1px solid var(--border); }
+/* width: 100%: in flex parents (e-ink paged view) auto margins otherwise
+   shrink-wrap to content — same trap as the composer. */
+.transcript { width: 100%; max-width: var(--read-max); margin: 0 auto; border: 1px solid var(--border); }
 .msg { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; }
 .msg:last-child { border-bottom: 0; }
 /* Other-branch fold: dashed frame + glyph carry the meaning (no color-only state). */
@@ -758,7 +760,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .bp-alt.on { border-color: var(--accent); }
 .tracebanner { display: flex; align-items: center; gap: 10px; margin: 8px auto; max-width: var(--read-max); padding: 6px 10px; border: 1px solid var(--accent); color: var(--text-dim); font-size: var(--fs-micro); }
 /* live headless run card */
-.runcard { border: 1px dashed var(--accent) !important; }
+/* The live run is an assistant message that is still coming into being:
+   same column, same frame, same skin as the transcript — the one ephemeral
+   cue is the dashed accent edge on the left. */
+#runCards:not(:empty) { width: 100%; max-width: var(--read-max); margin: 0 auto; border: 1px solid var(--border); border-top: 0; }
+.runcard { border: 0 !important; border-left: 3px dashed var(--accent) !important; }
 .rc-status { color: var(--text-dim); font-size: var(--fs-micro); margin-bottom: 4px; }
 .rc-blocks pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: inherit; }
 .rc-textblk { margin: 6px 0; }
@@ -769,7 +775,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.thinking summary { cursor: pointer; list-style: none; color: var(--text-dim); font-size: var(--fs-micro); }
 .msg.thinking summary::-webkit-details-marker { display: none; }
 .msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
-.rc-body { color: var(--text); font-size: 12.5px; }
+.rc-body { color: var(--text); } /* message-size text, inherited — not widget-size */
 /* extension view: a modal takeover, not a black box in the chat */
 .rc-cv { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; background: rgba(10, 10, 14, .5); }
 .rc-cv-card { width: fit-content; min-width: min(420px, 94vw); max-width: 96vw; max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0, 0, 0, .35); overflow: hidden; }
@@ -1219,7 +1225,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .convhead .ch-switch { overflow-x: auto; white-space: nowrap; }
   .chnav { min-width: max-content; }
   .chnav button { height: 38px; }
-  .transcript { border-left: 0; border-right: 0; margin: 0 -2px; }
+  .transcript, #runCards:not(:empty) { border-left: 0; border-right: 0; margin: 0 -2px; }
   .msg { padding: 12px 10px; font-size: 15px; line-height: 1.55; }
   .msg.tool, .msg.toolresult { font-size: 12px; }
   .msg pre, .msg code { max-width: 100%; overflow-wrap: anywhere; }
@@ -1342,7 +1348,7 @@ body.zen:not(.home) .msg .role,
 body.zen:not(.home) .cmp-badges,
 body.zen:not(.home) .model-strip,
 body.zen:not(.home) .agent-state { display: none !important; }
-body.zen:not(.home) .transcript { border: 0; }
+body.zen:not(.home) .transcript, body.zen:not(.home) #runCards:not(:empty) { border: 0; }
 body.zen:not(.home) .msg { border-bottom: 0; padding: 14px 0; }
 body.zen:not(.home) .msg.user { border-left: 2px solid var(--border-strong); padding-left: 14px; }
 #zenExit { display: none; }
@@ -8674,8 +8680,8 @@ async function renderConv(scroll) {
   $('view').innerHTML = head +
     (msgs.length ? `<div class="transcript" id="conversationTranscript">` + blocks.join('') + `</div>`
                  : '<div class="empty" id="conversationTranscript">nothing to show in this view.</div>') +
-    (offNewest ? `<div class="tracebanner">⑂ you follow an older branch — new messages continue from its end <button id="traceReset">back to newest</button></div>` : '') +
     `<div id="runCards"></div>` +
+    (offNewest ? `<div class="tracebanner">⑂ you follow an older branch — new messages continue from its end <button id="traceReset">back to newest</button></div>` : '') +
     agentComposerHtml(d);
   if ($('traceReset')) $('traceReset').onclick = () => { traceLeaves.delete(d.key); renderConv('bottom'); };
   $('view').querySelectorAll('[data-pill-go]').forEach(b => b.onclick = () => {
@@ -8999,7 +9005,7 @@ function setStickText(node, s) {
 
 function buildRunCard(r) {
   const card = document.createElement('div');
-  card.className = 'msg runcard';
+  card.className = 'msg assistant runcard';
   card.dataset.job = r.jobId;
   card.innerHTML = `<div class="role"><span class="rc-title"></span>` +
     `<button class="msg-copy rc-abort" title="Stop this run. The session file keeps what already landed.">abort</button></div>` +
