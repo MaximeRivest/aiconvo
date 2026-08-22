@@ -3,7 +3,9 @@ package app.aiconvo
 import android.annotation.SuppressLint
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Build
@@ -18,6 +20,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -29,7 +32,12 @@ import java.net.URL
 class MainActivity : AppCompatActivity() {
     companion object {
         private const val SPEECH_PERMISSION_REQUEST = 4107
+        private const val FILE_CHOOSER_REQUEST = 4108
     }
+
+    // The pending <input type=file> callback. The WebView contract: answer
+    // exactly once, with null on cancel, or the page never opens a picker again.
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
 
     inner class InkBridge {
         @JavascriptInterface
@@ -139,7 +147,38 @@ class MainActivity : AppCompatActivity() {
         }
         web.addJavascriptInterface(InkBridge(), "AiconvoInk")
         web.addJavascriptInterface(speech, "AiconvoSpeech")
-        web.webChromeClient = WebChromeClient()
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView?,
+                callback: ValueCallback<Array<Uri>>?,
+                params: FileChooserParams?,
+            ): Boolean {
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = callback
+                val intent = try {
+                    params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                    }
+                } catch (_: Exception) {
+                    Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                    }
+                }
+                if (params?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+                return try {
+                    startActivityForResult(Intent.createChooser(intent, "Choose"), FILE_CHOOSER_REQUEST)
+                    true
+                } catch (_: Exception) {
+                    fileChooserCallback = null
+                    callback?.onReceiveValue(null)
+                    false
+                }
+            }
+        }
         web.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 view?.evaluateJavascript(deviceScript(), null)
@@ -170,6 +209,19 @@ class MainActivity : AppCompatActivity() {
 
     fun requestSpeechPermission() {
         requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), SPEECH_PERMISSION_REQUEST)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != FILE_CHOOSER_REQUEST) return
+        val cb = fileChooserCallback ?: return
+        fileChooserCallback = null
+        val uris = mutableListOf<Uri>()
+        if (resultCode == RESULT_OK && data != null) {
+            data.clipData?.let { clip -> for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri) }
+            if (uris.isEmpty()) data.data?.let { uris.add(it) }
+        }
+        cb.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
     }
 
     override fun onRequestPermissionsResult(
