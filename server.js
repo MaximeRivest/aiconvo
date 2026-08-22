@@ -1300,31 +1300,45 @@ function scanAgentProcs() {
     } catch {}
     procs.push({ pid, ppid, kind, rpc, sessionPath, ageMs });
   }
-  // Second pass: a pi under a PTY bridge inherits the bridge's --session.
+  // Second pass: a pi/claude under a PTY bridge inherits the bridge's
+  // launch arguments — pi uses --session <path>, claude uses --resume <id>.
   for (const pr of procs) {
     if (pr.sessionPath || !pr.ppid) continue;
     const parent = bridgeArgs.get(pr.ppid);
     if (!parent) continue;
     const si = parent.indexOf('--session');
     if (si >= 0 && parent[si + 1]) { pr.sessionPath = parent[si + 1]; pr.viaBridge = true; }
+    const ri = parent.indexOf('--resume');
+    if (ri >= 0 && parent[ri + 1]) { pr.resumeId = parent[ri + 1]; pr.viaBridge = true; }
   }
   return procs;
 }
 
 // Join the raw process list with what the server knows: warm RPC sessions,
 // tracked terminal windows, and the conversation index.
-function agentProcsView(runningKeys) {
+function agentProcsView(running) {
   const warmByPid = new Map(listWarmSessions().map(w => [w.pid, w]));
   const keyByBase = new Map(Object.keys(index).map(k => [path.basename(k), k]));
+  const keyBySessionId = new Map();
+  for (const [k, e] of Object.entries(index)) if (e.sessionId) keyBySessionId.set(e.sessionId, k);
+  const runningByPid = new Map((running || []).filter(a => a.pid).map(a => [a.pid, a]));
+  const runningKeys = new Set((running || []).map(a => a.key).filter(Boolean));
   const out = [];
   for (const pr of scanAgentProcs()) {
     if (pr.kind === 'bridge') continue; // its pi child row carries the meaning
     const warm = warmByPid.get(pr.pid);
-    const key = pr.sessionPath ? keyByBase.get(path.basename(pr.sessionPath)) || null
-      : warm ? keyByBase.get(path.basename(warm.sessionPath)) || null : null;
+    const tracked = runningByPid.get(pr.pid);
+    const key = (pr.sessionPath && keyByBase.get(path.basename(pr.sessionPath)))
+      || (pr.resumeId && keyBySessionId.get(pr.resumeId))
+      || (warm && keyByBase.get(path.basename(warm.sessionPath)))
+      || (tracked && tracked.key)
+      || null;
     const entry = key ? index[key] : null;
     const run = warm ? headlessOwner(path.resolve(warm.sessionPath)) : null;
-    const owner = warm ? 'web' : pr.ppid === process.pid ? 'server' : key && runningKeys.has(key) ? 'terminal' : 'untracked';
+    const owner = warm ? 'web'
+      : (tracked || (key && runningKeys.has(key))) ? 'terminal'
+      : pr.ppid === process.pid ? 'server'
+      : 'untracked';
     out.push({
       pid: pr.pid, kind: pr.kind, rpc: pr.rpc, key,
       title: entry ? (entry.timelineTitle || entry.title) : null,
@@ -1333,7 +1347,7 @@ function agentProcsView(runningKeys) {
       jobId: run ? run.jobId : undefined,
     });
   }
-  const weight = { web: 0, server: 1, terminal: 2, untracked: 3 };
+  const weight = { web: 0, terminal: 1, server: 2, untracked: 3 };
   out.sort((a, b) => (weight[a.owner] - weight[b.owner]) || ((a.ageMs || 0) - (b.ageMs || 0)));
   return out;
 }
@@ -6851,7 +6865,7 @@ const server = http.createServer(async (req, res) => {
       }
       writing.sort((a, b) => a.ageMs - b.ageMs);
       recent.sort((a, b) => a.ageMs - b.ageMs);
-      json(res, 200, { running, writing, recent: recent.slice(0, 15), procs: agentProcsView(runningKeys) });
+      json(res, 200, { running, writing, recent: recent.slice(0, 15), procs: agentProcsView(running) });
     } else if (u.pathname === '/api/agents/kill' && req.method === 'POST') {
       // Kill one agent process from the agents view. Refuses pids that are
       // not pi/claude/bridge processes. Web-owned RPC runs abort cleanly

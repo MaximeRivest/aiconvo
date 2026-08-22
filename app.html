@@ -2352,40 +2352,66 @@ async function renderAgentsPop(refetch) {
   const now = Date.now();
   const byKey = k => sessions.find(s => s.key === k);
   const secs = ms => ms < 60000 ? Math.max(1, Math.round(ms / 1000)) + 's' : ago(ms);
-  const row = (s, key, status) => `<div class="ag-row" data-key="${esc(key || '')}">` +
+  // One process per conversation row: pid, owner, and a kill button live ON
+  // the row. A separate section lists only processes with no conversation.
+  const procByKey = new Map();
+  for (const p of agentsProcs) if (p.key && !procByKey.has(p.key)) procByKey.set(p.key, p);
+  const shownPids = new Set();
+  const kill = (pid, name) => {
+    if (!pid) return '';
+    shownPids.add(pid);
+    return `<button class="ag-kill" data-pid="${pid}" data-name="${esc(name || 'process')}" title="Stop this process (pid ${pid}). Web runs abort cleanly and keep partial output.">✗</button>`;
+  };
+  const row = (s, key, status, pid) => `<div class="ag-row" data-key="${esc(key || '')}">` +
     `<span class="src ${esc((s && s.source) || 'pi')}"><i></i></span>` +
     `<span class="ag-main"><span class="ag-title">${esc((s && (s.timelineTitle || s.title)) || '(untitled)')}</span>` +
     `<span class="ag-dir">${esc(shortDir((s && s.cwd) || ''))}</span></span>` +
-    `<span class="ag-age">${esc(status)}</span></div>`;
+    `<span class="ag-age">${esc(status)}</span>` +
+    kill(pid, s && (s.timelineTitle || s.title)) + `</div>`;
   const webKeys = new Set([...activeRuns.values()].map(r => r.key));
-  const webRuns = [...activeRuns.values()].map(r => row(byKey(r.key), r.key, (r.statusText || 'working…').slice(0, 28)));
-  const termRows = [...runningKeys].map(k => ({ k, s: byKey(k) }));
+  const webRuns = [...activeRuns.values()].map(r => {
+    const p = procByKey.get(r.key);
+    const status = ((r.model || '').split('/').pop() || 'session model').slice(0, 16) + ' · ' + (r.statusText || 'working…').slice(0, 24);
+    return row(byKey(r.key), r.key, status, p && p.pid);
+  });
+  const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) }));
   const termWork = termRows.filter(t => t.s && isActive(t.s));
   const termIdle = termRows.filter(t => !t.s || !isActive(t.s));
   const termStatus = t => {
-    const pid = agentsPids.get(t.k);
+    const pid = (t.p && t.p.pid) || agentsPids.get(t.k);
     const wrote = t.s && t.s.mtimeMs ? 'wrote ' + secs(now - t.s.mtimeMs) : 'no writes yet';
     return (pid ? 'pid ' + pid + ' · ' : '') + wrote;
   };
   const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key))
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const writeStatus = s => {
+    const p = procByKey.get(s.key);
+    const wrote = 'wrote ' + secs(now - s.mtimeMs);
+    if (!p) return wrote + ' · no process';
+    return wrote + ' · pid ' + p.pid + ' · ' + p.owner + (p.busy === false ? ' idle' : '');
+  };
   const recent = sessions.filter(s => s.mtimeMs && !isActive(s) && now - s.mtimeMs < 3600000 && !runningKeys.has(s.key))
     .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 15);
-  // Every pi/claude process on the machine, killable. Owner tags say who
-  // controls it: web (this server's RPC), terminal (tracked window),
-  // server (other child), untracked (nobody — the dangerous kind).
-  const procRow = p => `<div class="ag-row" data-key="${esc(p.key || '')}">` +
+  const webSec = webRuns.join('');
+  const workSec = termWork.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
+  const idleSec = termIdle.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
+  const writeSec = writing.map(s => row(s, s.key, writeStatus(s), (procByKey.get(s.key) || {}).pid)).join('');
+  // Leftovers: processes no row above claimed — idle warm RPC sessions on
+  // other conversations, server children, and untracked strays.
+  const others = agentsProcs.filter(p => !shownPids.has(p.pid));
+  const otherSec = others.map(p => `<div class="ag-row" data-key="${esc(p.key || '')}">` +
     `<span class="src ${esc(p.kind === 'claude' ? 'claude' : 'pi')}"><i></i></span>` +
-    `<span class="ag-main"><span class="ag-title">${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no session'))}</span>` +
-    `<span class="ag-dir">pid ${p.pid} · ${esc(p.owner)}${p.busy ? ' · busy' : ''}${p.model ? ' · ' + esc(p.model) : ''}${p.ageMs != null ? ' · up ' + esc(secs(p.ageMs)) : ''}</span></span>` +
-    `<button class="ag-kill" data-pid="${p.pid}" data-name="${esc(p.title || p.kind + ' pid ' + p.pid)}" title="Stop this process. Web runs abort cleanly and keep partial output.">✗</button></div>`;
+    `<span class="ag-main"><span class="ag-title">${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span>` +
+    `<span class="ag-dir">${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(secs(p.ageMs)) : ''}</span></span>` +
+    `<span class="ag-age">pid ${p.pid}</span>` +
+    kill(p.pid, p.title || p.kind + ' pid ' + p.pid) + `</div>`).join('');
   const st = pop.scrollTop;
   pop.innerHTML =
-    (webRuns.length ? '<div class="ag-sec">● web runs — streaming now</div>' + webRuns.join('') : '') +
-    (termWork.length ? '<div class="ag-sec">● terminals — working</div>' + termWork.map(t => row(t.s, t.k, termStatus(t))).join('') : '') +
-    (termIdle.length ? '<div class="ag-sec">○ terminals — idle at the prompt</div>' + termIdle.map(t => row(t.s, t.k, termStatus(t))).join('') : '') +
-    (writing.length ? '<div class="ag-sec">✎ writing — no process found</div>' + writing.map(s => row(s, s.key, secs(now - s.mtimeMs))).join('') : '') +
-    (agentsProcs.length ? '<div class="ag-sec">⚙ processes — every pi/claude on this machine</div>' + agentsProcs.map(procRow).join('') : '') +
+    (webSec ? '<div class="ag-sec">● web runs — streaming now</div>' + webSec : '') +
+    (workSec ? '<div class="ag-sec">● terminals — working</div>' + workSec : '') +
+    (idleSec ? '<div class="ag-sec">○ terminals — idle at the prompt</div>' + idleSec : '') +
+    (writeSec ? '<div class="ag-sec">✎ writing</div>' + writeSec : '') +
+    (otherSec ? '<div class="ag-sec">⚙ other agent processes</div>' + otherSec : '') +
     (recent.length ? '<div class="ag-sec">recent — last hour</div>' + recent.map(s => row(s, s.key, ago(now - s.mtimeMs))).join('') : '') ||
     '<div class="ag-sec">nothing is running, writing, or recent.</div>';
   pop.scrollTop = st;
