@@ -1,0 +1,17 @@
+[Unit]
+Description=aiconvo semantic search (late-interaction ColBERT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=maxime
+Environment=CUDA_VISIBLE_DEVICES=1
+Environment=HF_HOME=/home/maxime/.cache/huggingface
+WorkingDirectory=/home/maxime/family-ai/aiconvo-semantic
+ExecStart=/home/maxime/family-ai/aiconvo-semantic/.venv/bin/python semantic_server.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

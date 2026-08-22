@@ -41,7 +41,7 @@ Clicking a box selects it (accent outline) and opens a compact action bar below 
   - pi: `<timestamp>_<new-uuid>.jsonl` next to the original, with a fresh session header.
   - Claude: `<new-uuid>.jsonl` in the same project folder, `sessionId` rewritten on every line.
   The original file never changes. The fork is indexed immediately, appears on the timeline,
-  and the existing composer / terminal resume path (Herdr) continues it from that point.
+  and **continue in alacritty** resumes it from that point.
 
 ## Branch vs fork
 
@@ -51,8 +51,8 @@ Two different continuations, two different actions:
   manager picks its leaf as the last entry in the file on load, and pi's own `branch()`
   writes a no-op `label` entry parented at the branch point. aiconvo appends exactly that
   one entry; the next resume continues from the chosen message, and the old path stays as
-  a dashed branch. Requires the conversation's Herdr agent to be closed (a running pi
-  keeps its leaf in memory). Verified end-to-end with `pi -p --session`.
+  a dashed branch. Refuses if a pi process still holds the session file (a running pi
+  keeps its leaf in memory). Quit that Alacritty window first. Verified end-to-end with `pi -p --session`.
 - **fork (copy)** — a NEW session file continues from the chosen message; the original
   never changes. Works for pi and Claude. For Claude it is the only option: its CLI
   reconstructs context from the last real message and ignores externally appended

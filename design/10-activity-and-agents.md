@@ -7,8 +7,7 @@ Status: implemented.
 Update toasts were removed because they covered the timeline. But then
 all live awareness was gone: no sign when a new session appears or an
 agent finishes a burst. Separately, the "N active" count was dead text —
-the user wants to see *which* agents are active, recent, or open in
-Herdr.
+the user wants to see *which* agents are running, writing, or recent.
 
 ## 1. Activity ticker
 
@@ -43,25 +42,20 @@ It opens a popover with three sections:
 
 | section | content |
 |---|---|
-| active now | sessions with file changes in the last 5 min |
-| in herdr | agents Herdr reports, with their status; matched to a conversation when possible |
+| running | a live `pi` or `claude` process, matched by `--session` / `--resume` / window title |
+| writing | sessions with file changes in the last 5 min and no live process |
 | recent | sessions from the last hour, dimmed |
 
-- Rows show source dot, title, age, and Herdr status when known.
+- Rows show source dot, title, directory, and age or pid.
 - Click a conversation row to open it.
 - The popover refreshes every 15 s while open.
-- Herdr unavailable: the section simply does not render.
 
 ## Server
 
-New endpoint `GET /api/agents/active`:
+Endpoint `GET /api/agents/active`:
 
 ```json
-{ "active": [{ "key", "source", "title", "cwd", "ageMs" }],
-  "recent": [...],
-  "herdr":  [{ "name", "agent", "status", "label", "key" }] }
+{ "running": [{ "key", "source", "title", "cwd", "pid" }],
+  "writing": [{ "key", "source", "title", "cwd", "ageMs" }],
+  "recent": [...] }
 ```
-
-Herdr agents are matched to conversations by name, session id, or
-session path. The endpoint never fails on Herdr errors — it returns an
-empty `herdr` list instead.

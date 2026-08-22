@@ -1,6 +1,6 @@
 # Screen specs
 
-The app has one window with four view states. Layout skeleton:
+The app has one window with five view states. Layout skeleton:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -64,6 +64,15 @@ When the user starts a distillation and stays to watch:
   then one card per problem leaf. Each leaf card streams text and ends with
   ✓ or ∅.
 - The Jobs button shows the running count at all times.
+
+## Screen E — Settings
+
+Triggered from the header `settings` button, key `,`, or `#settings`.
+
+- Header card shows the current memory model, context size, and thinking level.
+- Body: thinking select, **use pi default**, then a searchable Pi catalog.
+- Signed-in providers are grouped and can be expanded. Click a model row to save.
+- This view does not change live Pi or Claude agent sessions.
 
 ## Modal cases (keep minimal)
 

@@ -61,7 +61,20 @@ literal filesystem object.
 Show at most eight rows. Each row has one line. Do not show narrative prose
 here. Open questions get a count only; details live below.
 
-### Zone 3 — epics and tickets
+### Zone 3 — project memory
+
+Show the durable project layer before epics:
+
+- High-level overview.
+- Deep, implementation-independent user intent.
+- Development environment and common commands.
+- Todo, unfinished work, recent focus, and open questions.
+- Reviewable project-wide epic candidates.
+
+`build project memory` classifies every user message with its preceding assistant response as context.
+The full process is specified in `17-project-memory.md`.
+
+### Zone 4 — epics and tickets
 
 Each epic/workstream gets one card. Cards are collapsed by default except the
 most recent one.
@@ -83,7 +96,7 @@ Card controls must keep their job names:
 Tickets use the same shape. A ticket can be a short manual note or an external
 work item later. Do not invent a ticket editor in the first pass.
 
-### Zone 4 — recent and fresh evidence
+### Zone 5 — recent and fresh evidence
 
 ```text
 freshness  64 current · 21 stale · 9 missing
@@ -103,7 +116,9 @@ project summary as current context?
 - The glyph and text carry the status. Do not rely on color only.
 - Stale means the source changed after its note or evidence.
 - Missing means no note/evidence exists.
-- `refresh missing` and `refresh stale` are explicit background jobs.
+- `update all notes` distills missing notes and re-distills stale notes for the full project.
+- The batch runs two distillations at a time and appears in the Jobs drawer.
+- `refresh missing` and `refresh stale` are explicit evidence jobs.
 - `build all evidence` is available only after an explicit confirmation when
   it could launch many paid model jobs.
 
@@ -128,8 +143,9 @@ memory    [x] project map
 - The agent selector remembers the last choice per project.
 - Memory selection defaults to the project map plus the currently open
   workstream. The user can include more.
+- Selecting `read all current notes` tells the new agent to read every fresh note path in the briefing.
 - Show the estimated input size before launch.
-- The launch creates a Herdr workspace rooted at the project directory.
+- The launch opens Alacritty in the project directory and starts `pi` or `claude` with the kickoff prompt.
 - The prompt/context assembly is a server workflow concern. The UI sends only
   the chosen artifact IDs and budget. Another agent can implement the model
   workflow.

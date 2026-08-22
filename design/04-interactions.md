@@ -4,6 +4,7 @@
 
 | Key | Context | Action |
 |---|---|---|
+| `w` | anywhere | Toggle the full-screen window overview. |
 | `/` | anywhere | Focus the search input. |
 | `Esc` | search focused | Clear search, back to filter mode, blur. |
 | `Enter` | search focused | Run full-text search. |
@@ -13,6 +14,7 @@
 | `c` | conversation open | Copy this conversation as markdown. |
 | `d` | conversation open | Distill / open note. |
 | `f` | anywhere | Toggle the filter popover. Focuses the first select. |
+| `,` | anywhere | Open or close the settings view. |
 | `g` | anywhere | Cycle the Gantt layout: bottom / left / off. Saved in localStorage. |
 | `j` | anywhere | Toggle the jobs drawer. |
 | `1` `2` `3` | list pane | Switch tab: Conversations / Notes / Epics. |

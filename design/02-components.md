@@ -12,8 +12,14 @@ Three zones, left to right:
 
 1. **Brand.** `aiconvo` prefixed with a green `❯`. 700 weight, `--text`.
    Acts as home button (clears search and filters).
-2. **Search zone.** One input, flex-grows, min 240 px.
-3. **Action zone.** `filters` button, view-mode select, `jobs [N]` button,
+2. **Windows.** `⧉` button immediately after the brand. Shows `⧉ N` when more
+   than one window is open. Opens a full-screen overview: a search field, a
+   dashed `+ new window` card, then one card per window. Each card shows a
+   miniature of the last view, a title, and `❯`. The current card uses a 2 px
+   border and an inverse footer. Close uses `✗` on the card and is hidden when
+   only one window remains. E-ink uses the same shapes with no grey.
+3. **Search zone.** One input, flex-grows, min 240 px.
+4. **Action zone.** `filters` button, view-mode select, `jobs [N]` button,
    overflow `…`.
 
 Selection actions (Copy, Export, Build epic) live in the selection bar

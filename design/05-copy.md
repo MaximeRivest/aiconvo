@@ -22,6 +22,9 @@ Sentence case everywhere. Buttons are verbs.
 | Notes tab empty | "No notes yet. Open a conversation and press Distill." | "No notes yet. Open a conversation and press Distill." (keep) |
 | Epics tab empty | "No epics yet. Select conversations and press Build epic." | "No epics yet. Select two or more conversations and choose Build epic." |
 | Jobs drawer empty | "No recent jobs." | "No background work. Distill a conversation or build an epic to start a job." |
+| Settings hint | — | "Notes, evidence, epics, titles, and project memory use this Pi model." |
+| Settings default | — | "use pi default ([provider/model])" |
+| Settings empty catalog | — | "no models match. Clear the search or show all providers." |
 | Export with no selection | alert "Select at least one conversation." | Button disabled. Tooltip: "Select conversations first." |
 | Build epic with < 2 | alert "Select at least two conversations." | Button disabled. Tooltip: "Epics need at least two conversations." |
 | Distill start toast | "⏳ Distillation started. Continue browsing." | "Distillation started." |

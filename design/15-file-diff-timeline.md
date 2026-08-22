@@ -162,18 +162,24 @@ Rules:
   Gantt.
 - Use existing project filter state when the project view opened from one.
 
-## Conversation diff view
+## Conversation file Gantt
 
-The conversation `diffs` artifact shows the same extraction scoped to one
-conversation:
+The conversation `diffs` artifact uses the focused whole-file workspace from
+`design/19-whole-file-time-compare.md`, scoped to one conversation:
 
-- Summary line: `N files · M edits · +A / -B`.
-- File cards collapsed by default.
-- A small horizontal timeline above the cards when there are more than five
-  edits.
-- Each card links back to the conversation message.
+- The left repository tree contains only files touched in that conversation.
+- The selected file Gantt contains only that conversation's edit/write points.
+- The first point is the conversation start boundary, using the file state before its first recorded change.
+- The final point is the conversation end boundary, using the file state after its last recorded change.
+- The complete side-by-side file view compares any two scoped keyframes.
+- Line history includes only interval changes from that conversation.
+- Tree files changed between the two selected keyframes use a `●` marker and show `−N +N` line counts.
+- The tree header shows changed files, events, removed lines, and added lines for the selected interval.
+- **jump to latest changes** selects the latest changed file and its latest two-minute edit burst.
+- Selecting a history entry opens the conversation at that tool call.
+- Shell-only touches remain in the tree, after files with reconstructable content changes. Their interval badge reports touches instead of line counts.
 
-This is the audit view for "what did the model change here?".
+No unrelated project edit, Git commit, current-file point, or later conversation enters the selectable conversation span. Complete snapshots can still use earlier repository state as reconstruction context, with their truth label visible.
 
 ## Overwhelm controls
 
@@ -202,7 +208,7 @@ agent file touches — extracted from edit/write tool calls
 When the file still exists, add an optional action:
 
 - `current file` — open/read the current file separately.
-- `compare with git` — later extension, not v1.
+- `compare with git` — implemented by the project-level Git-weaved Gantt in `18-git-weaved-file-gantt.md`.
 
 ## Keyboard
 

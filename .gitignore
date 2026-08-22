@@ -4,3 +4,10 @@ node_modules/
 .DS_Store
 *~
 *.swp
+
+# Build artifacts. The APK rebuilds from android/ (see README).
+aiconvo.apk
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

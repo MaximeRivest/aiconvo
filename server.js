@@ -13,8 +13,10 @@ const crypto = require('crypto');
 const readline = require('readline');
 const net = require('net');
 const { execFile, execFileSync, spawn } = require('child_process');
-const { claudeForkContent } = require('./sessionfork.js');
+const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const settingsLib = require('./settings.js');
+const { openSearchIndex, SearchIndex } = require('./searchindex.js');
+const foldsLib = require('./projectfolds.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
@@ -93,6 +95,17 @@ function lanAddresses() {
 
 fs.mkdirSync(SESS_DIR, { recursive: true });
 
+// FTS5 work-memory search (searchindex.js). A derived cache: delete the
+// database and the next boot rebuilds it. Null when node:sqlite is missing;
+// /api/search then falls back to the old scan.
+const searchIdx = openSearchIndex(path.join(CACHE_DIR, 'search.db'));
+
+// Mirror of the client's projectOf(): a stable project name from a cwd,
+// after fold resolution (worktrees and manual merges collapse into one).
+function projectNameOf(cwd) {
+  return canonicalProjectName(foldsLib.rawProjectOf(cwd));
+}
+
 // index: { [relPath]: { mtimeMs, size, sessionId, cwd, gitBranch, title,
 //                       firstTs, lastTs, userCount, assistantCount } }
 let index = {};
@@ -110,7 +123,28 @@ function cachePathFor(key) {
 }
 
 // Bump when the cached message format changes; forces a re-index.
-const CACHE_VERSION = 5;
+const CACHE_VERSION = 10; // v10: assistant thinking blocks become 'thinking' rows (everything view shows reasoning)
+
+// A memory-briefing bootstrap prompt is the same for every launched session; it says
+// nothing about the actual work. Titles must come from the first real request instead.
+function isBootstrapMessage(text) {
+  const t = String(text || '').trim();
+  if (!t) return true;
+  if (/\/briefings\/\S+\.md/.test(t) && /work memory|project memory/i.test(t)) return true;
+  if (/^read\b[^\n]*\.cache\/aiconvo\//i.test(t)) return true;
+  return false;
+}
+
+// First user message that is not memory-injection boilerplate; falls back to the very first.
+function titleSourceMessage(messages) {
+  let first = null;
+  for (const m of messages) {
+    if (m.role !== 'user' || !String(m.text || '').trim()) continue;
+    if (!first) first = m;
+    if (!isBootstrapMessage(m.text)) return m;
+  }
+  return first;
+}
 
 // Make a compact label for the vertical timeline. This never exceeds 10 characters.
 function timelineTitle(text) {
@@ -264,9 +298,27 @@ async function parseFile(absPath) {
       if (!meta.firstTs) meta.firstTs = d.timestamp;
       meta.lastTs = d.timestamp;
     }
+    // Reasoning: assistant entries may carry thinking blocks (pi and Claude
+    // use the same block shape). They become their own row so the everything
+    // view can show the reasoning; chat mode filters them out by role.
+    if (role === 'assistant' && Array.isArray(content)) {
+      let think = content.filter(b => b && b.type === 'thinking' && typeof b.thinking === 'string').map(b => b.thinking).join('\n');
+      if (think.trim()) {
+        if (think.length > 8000) think = think.slice(0, 8000) + '\n… (truncated)';
+        messages.push({ role: 'thinking', text: think, ts: d.timestamp || null, _eid: eid });
+      }
+    }
     const text = textOf(content);
     if (text.trim() && !(role === 'user' && isNoise(text))) {
-      messages.push({ role, text, ts: d.timestamp || null, _eid: eid });
+      const msg = { role, text, ts: d.timestamp || null, _eid: eid };
+      // Both formats store the generating model on the assistant entry
+      // (pi also stores the provider). Kept per message: models can change
+      // mid-conversation and per branch.
+      if (role === 'assistant' && d.message) {
+        if (d.message.model) msg.model = d.message.model;
+        if (d.message.provider) msg.provider = d.message.provider;
+      }
+      messages.push(msg);
     }
     // Tool calls (assistant) and tool results (claude wraps them in user turns).
     messages.push(...toolEventsOf(content, d.timestamp || null).map(m => ({ ...m, _eid: eid })));
@@ -280,9 +332,14 @@ async function parseFile(absPath) {
   }
   for (const m of messages) {
     if (m._eid && !active.has(m._eid)) m.off = true;
+    m.eid = m._eid || null;
     delete m._eid;
   }
-  return { meta, messages };
+  // entryParents: the FULL entry tree (labels, model changes, … included),
+  // so a client can retrace any path from any leaf without the raw file.
+  // Ordered pairs, not an object: JS objects reorder all-digit keys.
+  const entryParents = [...parents.entries()];
+  return { meta, messages, entryParents };
 }
 
 // Live update push: browsers subscribe on /api/events.
@@ -292,12 +349,60 @@ function broadcast(ev) {
   for (const res of sseClients) res.write(line);
 }
 
+// ---------- shared app windows ----------
+// One window list for every device (desktop, phone, e-ink). Each device keeps
+// its own active window; the server owns the list and pushes changes over SSE.
+const WINDOWS_FILE = path.join(CACHE_DIR, 'windows.json');
+const WINDOW_PREVIEW_MAX = 200 * 1024;
+let sharedWindows = { rev: 0, list: [] };
+try {
+  const d = JSON.parse(fs.readFileSync(WINDOWS_FILE, 'utf8'));
+  if (d && Array.isArray(d.list)) sharedWindows = { rev: Number(d.rev) || 0, list: d.list };
+} catch {}
+let windowsSaveT = null;
+function saveWindows() {
+  clearTimeout(windowsSaveT);
+  windowsSaveT = setTimeout(() => {
+    fsp.writeFile(WINDOWS_FILE, JSON.stringify(sharedWindows)).catch(() => {});
+  }, 300);
+}
+function upsertSharedWindow(win, client) {
+  if (!win || !win.id) return null;
+  const clean = {
+    id: String(win.id).slice(0, 64),
+    hash: String(win.hash || '').slice(0, 2048),
+    kind: String(win.kind || 'home').slice(0, 32),
+    title: String(win.title || 'home').slice(0, 200),
+    tab: String(win.tab || 'conv').slice(0, 16),
+    draft: typeof win.draft === 'string' ? win.draft.slice(0, 20000) : '',
+    previewHTML: typeof win.previewHTML === 'string' && win.previewHTML.length <= WINDOW_PREVIEW_MAX ? win.previewHTML : '',
+    previewHome: !!win.previewHome,
+    updatedAt: Date.now(),
+  };
+  const i = sharedWindows.list.findIndex(w => w.id === clean.id);
+  if (i >= 0) sharedWindows.list[i] = clean;
+  else sharedWindows.list.push(clean);
+  sharedWindows.rev++;
+  saveWindows();
+  broadcast({ type: 'windows', rev: sharedWindows.rev, client: client || '' });
+  return clean;
+}
+function closeSharedWindow(id, client) {
+  const i = sharedWindows.list.findIndex(w => w.id === id);
+  if (i < 0) return false;
+  sharedWindows.list.splice(i, 1);
+  sharedWindows.rev++;
+  saveWindows();
+  broadcast({ type: 'windows', rev: sharedWindows.rev, client: client || '' });
+  return true;
+}
+
 async function indexFile(source, relPath, stat) {
   const key = source + ':' + relPath;
   const absPath = path.join(SOURCES[source], relPath);
   try {
-    const { meta, messages } = await parseFile(absPath);
-    const firstUser = messages.find(m => m.role === 'user');
+    const { meta, messages, entryParents } = await parseFile(absPath);
+    const firstUser = titleSourceMessage(messages);
     const fullTitle = firstUser ? firstUser.text.slice(0, 200).replace(/\s+/g, ' ').trim() : '(no user message)';
     const titleHash = crypto.createHash('sha256').update('v2\x00' + fullTitle).digest('hex').slice(0, 16);
     const memoryHash = crypto.createHash('sha256').update('v1\x00' + JSON.stringify(
@@ -305,6 +410,8 @@ async function indexFile(source, relPath, stat) {
         .map(m => [m.role, m.text || '', m.ts || null, !!m.off])
     )).digest('hex').slice(0, 24);
     const savedTimelineTitle = timelineTitles[key];
+    // A manual (or user-requested AI) title override wins over anything re-derived here.
+    const manualTitle = savedTimelineTitle && savedTimelineTitle.manual ? savedTimelineTitle : null;
     const entry = {
       v: CACHE_VERSION,
       notePath: (index[key] && index[key].notePath) || null,
@@ -317,9 +424,10 @@ async function indexFile(source, relPath, stat) {
       parentSession: meta.parentSession,
       cwd: meta.cwd,
       gitBranch: meta.gitBranch,
-      title: fullTitle,
-      timelineTitle: savedTimelineTitle && savedTimelineTitle.hash === titleHash
-        ? savedTimelineTitle.title : timelineTitle(fullTitle),
+      title: manualTitle && manualTitle.fullTitle ? manualTitle.fullTitle : fullTitle,
+      timelineTitle: manualTitle ? manualTitle.title
+        : savedTimelineTitle && savedTimelineTitle.hash === titleHash
+          ? savedTimelineTitle.title : timelineTitle(fullTitle),
       timelineTitleHash: titleHash,
       memoryHash,
       firstTs: meta.firstTs,
@@ -330,9 +438,17 @@ async function indexFile(source, relPath, stat) {
       densityAll: densityProfile(messages, meta.firstTs, meta.lastTs, true),
     };
     index[key] = entry;
-    await fsp.writeFile(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages }));
+    scheduleProjectFoldRefresh(meta.cwd);
+    await fsp.writeFile(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages, entryParents }));
     saveIndexSoon();
     broadcast({ type: 'update', key, ...entry });
+    if (searchIdx) {
+      try {
+        searchIdx.putConversation(key, { ...entry, project: projectNameOf(entry.cwd) }, messages);
+        scheduleSemanticSync(10000); // batch live edits before pushing
+      } catch (e) { console.error('search index', key, e.message); }
+    }
+    pruneLiveRunTail(key);
     scheduleTimelineTitles();
   } catch (e) {
     console.error('index error', key, e.message);
@@ -375,6 +491,7 @@ async function fullScan() {
     if (!seen.has(key)) {
       delete index[key];
       fsp.unlink(cachePathFor(key)).catch(() => {});
+      if (searchIdx) try { searchIdx.removeConversation(key); } catch {}
       saveIndexSoon();
     }
   }
@@ -400,6 +517,7 @@ function watch() {
           } catch {
             delete index[key];
             fsp.unlink(cachePathFor(key)).catch(() => {});
+            if (searchIdx) try { searchIdx.removeConversation(key); } catch {}
             saveIndexSoon();
           }
         }, 1500));
@@ -412,47 +530,215 @@ function watch() {
 }
 
 // ---------- search ----------
-async function search(q, limit = 300) {
+// The FTS index answers queries (searchindex.js). This slow scan remains
+// only as the fallback when node:sqlite is unavailable. It reshapes its
+// output to the same grouped format the client renders.
+async function legacySearch(q, limit = 100) {
   const needle = q.toLowerCase();
-  const hits = [];
+  const mark = t => {
+    const pos = t.toLowerCase().indexOf(needle);
+    if (pos < 0) return t.replace(/\s+/g, ' ');
+    const start = Math.max(0, pos - 80);
+    return (t.slice(start, pos) + '\u0001' + t.slice(pos, pos + needle.length) + '\u0002' +
+            t.slice(pos + needle.length, pos + needle.length + 120)).replace(/\s+/g, ' ');
+  };
+  const groups = [];
   for (const key of Object.keys(index)) {
     let data;
     try { data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')); } catch { continue; }
     const matches = [];
+    let matchCount = 0;
     for (let i = 0; i < data.messages.length; i++) {
       const m = data.messages[i];
-      const pos = m.text.toLowerCase().indexOf(needle);
-      if (pos >= 0) {
-        const start = Math.max(0, pos - 80);
-        matches.push({
-          i, role: m.role, ts: m.ts,
-          snippet: m.text.slice(start, pos + needle.length + 120).replace(/\s+/g, ' '),
-        });
-        if (matches.length >= 5) break;
-      }
+      if (m.text.toLowerCase().indexOf(needle) < 0) continue;
+      matchCount++;
+      if (matches.length < 3) matches.push({ i, role: m.role, ts: m.ts, off: !!m.off, snippet: mark(m.text) });
     }
-    if (matches.length) hits.push({ key, ...index[key], matches });
-    if (hits.length >= limit) break;
+    if (matches.length) {
+      const e = index[key];
+      groups.push({ kind: 'conversation', key, title: e.title, project: projectNameOf(e.cwd),
+                    source: e.source, score: 0, matchCount, matches });
+    }
+    if (groups.length >= limit) break;
   }
-  hits.sort((a, b) => (b.lastTs || '').localeCompare(a.lastTs || ''));
-  // Distilled notes are part of memory: search them too.
-  const noteHits = [];
-  let noteFiles = [];
-  try { noteFiles = (await fsp.readdir(NOTES_DIR)).filter(f => f.endsWith('.md')); } catch {}
-  for (const f of noteFiles) {
+  groups.sort((a, b) => ((index[b.key] || {}).lastTs || '').localeCompare((index[a.key] || {}).lastTs || ''));
+  for await (const rel of walk(NOTES_DIR, NOTES_DIR)) {
+    if (!rel.endsWith('.md')) continue;
     try {
-      const text = await fsp.readFile(path.join(NOTES_DIR, f), 'utf8');
-      const pos = text.toLowerCase().indexOf(needle);
-      if (pos < 0) continue;
-      const start = Math.max(0, pos - 80);
-      noteHits.push({
-        kind: 'note', file: f,
-        title: (text.match(/^# (.*)$/m) || [])[1] || f,
-        snippet: text.slice(start, pos + needle.length + 120).replace(/\s+/g, ' '),
+      const text = await fsp.readFile(path.join(NOTES_DIR, rel), 'utf8');
+      if (text.toLowerCase().indexOf(needle) < 0) continue;
+      groups.unshift({
+        kind: rel.startsWith('epics/') ? 'epic' : rel.startsWith('projects/') ? 'memory' : 'note',
+        file: rel, title: (text.match(/^# (.*)$/m) || [])[1] || rel, score: 0, matchCount: 1,
+        matches: [{ role: 'note', snippet: mark(text) }],
       });
     } catch {}
   }
-  return [...noteHits, ...hits];
+  return { total: groups.length, groupCount: groups.length, groups: groups.slice(0, limit) };
+}
+
+// Feed changed conversations and markdown memory into the FTS index.
+// Runs after boot and after every notes-tree change; each step yields the
+// event loop so indexing never blocks a request.
+let searchSyncRunning = false;
+let searchSyncAgain = false;
+async function syncSearchIndex() {
+  if (!searchIdx) return;
+  if (searchSyncRunning) { searchSyncAgain = true; return; }
+  searchSyncRunning = true;
+  const t0 = Date.now();
+  let convs = 0, docs = 0;
+  try {
+    // Conversations: the index entry's mtime+size is the signature.
+    for (const [key, entry] of Object.entries(index)) {
+      if (searchIdx.hasCurrent('conv:' + key, SearchIndex.conversationSig(entry))) continue;
+      let data;
+      try { data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')); } catch { continue; }
+      try {
+        if (searchIdx.putConversation(key, { ...entry, project: projectNameOf(entry.cwd) }, data.messages)) convs++;
+      } catch (e) { console.error('search index', key, e.message); }
+      await new Promise(r => setImmediate(r));
+    }
+    // Markdown memory: every .md under the notes tree (notes, epics, projects).
+    const seenMd = new Set();
+    for await (const rel of walk(NOTES_DIR, NOTES_DIR)) {
+      if (!rel.endsWith('.md')) continue;
+      seenMd.add(rel);
+      try {
+        const stat = await fsp.stat(path.join(NOTES_DIR, rel));
+        if (searchIdx.putMarkdown(rel, await fsp.readFile(path.join(NOTES_DIR, rel), 'utf8'), stat)) docs++;
+      } catch {}
+      await new Promise(r => setImmediate(r));
+    }
+    // Prune sources that vanished from disk.
+    for (const key of searchIdx.listSrcs('conv:').keys()) {
+      if (!index[key]) try { searchIdx.removeConversation(key); } catch {}
+    }
+    for (const rel of searchIdx.listSrcs('md:').keys()) {
+      if (!seenMd.has(rel)) try { searchIdx.removeSrc('md:' + rel); } catch {}
+    }
+  } finally {
+    searchSyncRunning = false;
+  }
+  if (convs || docs) console.log(`search index: ${convs} conversations, ${docs} documents in ${Date.now() - t0} ms`);
+  if (convs || docs) scheduleSemanticSync(3000);
+  if (searchSyncAgain) { searchSyncAgain = false; syncSearchIndex(); }
+}
+
+// The notes tree changes outside the session watcher (distills, edits,
+// project memory jobs): watch it so markdown search stays fresh.
+function watchNotes() {
+  if (!searchIdx || !fs.existsSync(NOTES_DIR)) return;
+  let t;
+  try {
+    fs.watch(NOTES_DIR, { recursive: true }, (event, filename) => {
+      if (!filename || !filename.endsWith('.md')) return;
+      clearTimeout(t);
+      t = setTimeout(syncSearchIndex, 2000);
+    });
+  } catch (e) { console.error('notes watch failed:', e.message); }
+}
+
+// ---------- semantic stage (optional late-interaction search on the GPU server) ----------
+// The laptop stays authoritative: the GPU index is a derived cache fed from
+// the FTS unit store. When the server is unreachable, search silently stays
+// lexical-only. Off by default (settings → semantic search).
+
+function semanticEnabled() {
+  return !!(searchIdx && appSettings.semanticSearch && appSettings.semanticUrl);
+}
+
+async function semFetch(route, body, ms = 20000) {
+  const r = await fetch(appSettings.semanticUrl + route, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(ms),
+  });
+  if (!r.ok) throw new Error('semantic server HTTP ' + r.status);
+  return r.json();
+}
+
+// Push changed sources to the GPU stage. The semsync ledger makes this
+// resumable: a dead server tonight is caught up tomorrow.
+let semSyncRunning = false;
+async function syncSemantic() {
+  if (!semanticEnabled() || semSyncRunning) return;
+  semSyncRunning = true;
+  const t0 = Date.now();
+  let pushed = 0, dropped = 0;
+  try {
+    for (;;) {
+      const { push, drop } = searchIdx.semanticPending(50);
+      if (!push.length && !drop.length) break;
+      for (const src of drop) {
+        await semFetch('/remove', { prefix: src + '|' });
+        searchIdx.semanticDrop(src);
+        dropped++;
+      }
+      for (const { src, sig } of push) {
+        const units = searchIdx.listUnits(src);
+        await semFetch('/remove', { prefix: src + '|' });
+        for (let i = 0; i < units.length; i += 48) {
+          await semFetch('/upsert', { units: units.slice(i, i + 48) }, 120000);
+        }
+        searchIdx.semanticMark(src, sig);
+        pushed++;
+        await new Promise(r => setImmediate(r));
+      }
+    }
+    if (pushed || dropped) console.log(`semantic push: ${pushed} sources (+${dropped} removed) in ${Date.now() - t0} ms`);
+  } catch (e) {
+    console.error('semantic push paused:', e.message); // the ledger resumes later
+  } finally {
+    semSyncRunning = false;
+  }
+}
+
+let semTimer;
+function scheduleSemanticSync(delay = 5000) {
+  if (!semanticEnabled()) return;
+  clearTimeout(semTimer);
+  semTimer = setTimeout(syncSemantic, delay);
+}
+setInterval(() => scheduleSemanticSync(1000), 5 * 60 * 1000);
+
+// Reshape GPU hits into the grouped format the client renders.
+function semanticGroups(hits) {
+  const groups = new Map();
+  for (const h of hits) {
+    const m = h.meta || {};
+    const gid = m.key ? 'c:' + m.key : 'f:' + (m.file || '?');
+    let g = groups.get(gid);
+    if (!g) {
+      g = {
+        kind: m.key ? 'conversation' : (m.kind || 'note'),
+        key: m.key || undefined, file: m.file || undefined,
+        title: m.title || null, project: m.project || null, source: m.source || null,
+        score: 0, matchCount: 0, matches: [], semantic: true,
+      };
+      groups.set(gid, g);
+    }
+    g.matchCount++;
+    g.score = Math.max(g.score, h.score || 0);
+    if (g.matches.length < 3) {
+      g.matches.push({
+        i: m.idx == null ? undefined : m.idx,
+        role: m.kind === 'title' ? 'title' : (m.role || m.kind),
+        ts: m.ts || null, off: !!m.off, title: m.title || undefined,
+        snippet: m.snip || '', semantic: true, score: h.score,
+      });
+    }
+  }
+  const list = [...groups.values()].sort((a, b) => b.score - a.score);
+  for (const g of list) {
+    if (g.key && index[g.key]) {
+      const e = index[g.key];
+      g.title = e.title; g.cwd = e.cwd; g.source = e.source;
+      g.firstTs = e.firstTs; g.lastTs = e.lastTs; g.notePath = e.notePath || null;
+    }
+  }
+  return list;
 }
 
 // ---------- markdown export ----------
@@ -594,6 +880,19 @@ function parseTreeEntries(kind, raw) {
       if (d.type === 'message' && d.message && (d.message.role === 'user' || d.message.role === 'assistant')) {
         node.role = d.message.role;
         node.text = textOf(d.message.content);
+        if (d.message.role === 'assistant' && d.message.model) {
+          node.model = d.message.model;
+          if (d.message.provider) node.provider = d.message.provider;
+        }
+        const u = d.message.role === 'assistant' && d.message.usage;
+        if (u) {
+          node.tok = u.totalTokens || ((u.input || 0) + (u.output || 0)) || 0;
+          node.cost = (u.cost && u.cost.total) || 0;
+          node.ctx = settingsLib.usageContextTokens(u, 'pi');
+        }
+      } else if (d.type === 'model_change' && d.modelId) {
+        // The model that serves the turns below this entry, until the next switch.
+        node.modelChange = { provider: d.provider || null, model: d.modelId };
       }
     } else {
       if (!d.uuid || d.isSidechain) continue;
@@ -601,6 +900,14 @@ function parseTreeEntries(kind, raw) {
       if ((d.type === 'user' || d.type === 'assistant') && !d.isMeta && d.message) {
         node.role = d.type;
         node.text = textOf(d.message.content);
+        if (d.type === 'assistant' && d.message.model) node.model = d.message.model;
+        const u = d.type === 'assistant' && d.message.usage;
+        if (u) {
+          // Cache reads and cache writes sit in the window too; without them
+          // a claude meter reads far too low.
+          node.tok = settingsLib.usageContextTokens(u, 'claude');
+          node.ctx = node.tok;
+        }
       }
     }
     node.box = !!(node.role && node.text.trim() && !(node.role === 'user' && isNoise(node.text)));
@@ -615,6 +922,12 @@ function keyForSessionPath(p) {
     if (!rel.startsWith('..') && index[source + ':' + rel]) return source + ':' + rel;
   }
   return null;
+}
+
+// Group every indexed session into its fork family in one pass. The pure
+// union-find lives in sessionfork.js (groupFamilies) with its own tests.
+function familyGroups() {
+  return groupFamilies(Object.entries(index), keyForSessionPath);
 }
 
 // A fork family: conversations that share their first entry id (forks copy
@@ -637,11 +950,11 @@ function forkFamily(key) {
   return [key, ...[...fam].filter(k => index[k]).sort((a, b) => (index[a].firstTs || '').localeCompare(index[b].firstTs || ''))];
 }
 
-async function sessionTreeFor(key) {
+// Union the whole fork family's raw entries: shared entries dedupe by id, so
+// every fork's new messages attach to the shared chain as real branches.
+async function familyEntryGraph(key) {
   const entry = index[key];
   if (!entry) throw new Error('not found');
-  // Union the whole fork family: shared entries dedupe by id, so every
-  // fork's new messages attach to the shared chain as real branches.
   const family = forkFamily(key);
   const byId = new Map();
   const all = [];
@@ -662,6 +975,11 @@ async function sessionTreeFor(key) {
       if (n.box) lastBoxOf.set(k, n);
     }
   }
+  return { entry, family, byId, all, lastBoxOf };
+}
+
+async function sessionTreeFor(key, opts = {}) {
+  const { entry, family, byId, all, lastBoxOf } = await familyEntryGraph(key);
   // Contract the entry graph to text messages: nearest box ancestor is the parent.
   const boxes = all.filter(n => n.box);
   const childCount = new Map();
@@ -701,8 +1019,12 @@ async function sessionTreeFor(key) {
       ts: first.ts, lastTs: last.ts,
       jumpTs: first.ts,                  // transcript anchor of the first message
       title: nodeTitle(g.members.length > 1 ? last.text : first.text),
+      model: [...g.members].reverse().map(m => m.model).find(Boolean) || undefined,
+      fullText: opts.withTexts ? g.members.map(m => m.text).join('\n\n') : undefined,
       count: g.members.length,
       chars: g.members.reduce((n, m) => n + m.text.length, 0),
+      tok: g.members.reduce((n, m) => n + (m.tok || 0), 0) || undefined,
+      cost: g.members.reduce((n, m) => n + (m.cost || 0), 0) || undefined,
       active: active.has(g),
       key: owner,                        // the conversation to read or fork from
       fork: owner !== key || undefined,  // lives in a forked/linked session
@@ -714,11 +1036,60 @@ async function sessionTreeFor(key) {
   };
 }
 
+// Context meter: how full is the serving model's window on the visible trace,
+// and what the conversation cost so far. Ground truth only: the provider's own
+// usage counters from the newest assistant reply on the trace, and the context
+// sizes pi reports for its models. Context is trace-scoped (siblings do not
+// share a window); cost is family-scoped (every branch spent real money).
+async function conversationContextResponse(key, leafId) {
+  const { entry, byId, all, lastBoxOf } = await familyEntryGraph(key);
+  const leaf = (leafId && byId.get(leafId)) || lastBoxOf.get(key) || null;
+  const chain = [];
+  const seen = new Set();
+  for (let n = leaf; n && !seen.has(n.id); n = n.parent ? byId.get(n.parent) : null) {
+    seen.add(n.id);
+    chain.push(n);
+  }
+  // The newest assistant usage on the trace = the tokens the next turn carries.
+  const lastUsed = chain.find(n => n.role === 'assistant' && n.ctx) || null;
+  // The model that serves the next turn: the nearest model_change entry wins,
+  // else the model of the newest assistant reply on the trace.
+  let provider = null, model = null;
+  for (const n of chain) {
+    if (n.modelChange) { provider = n.modelChange.provider; model = n.modelChange.model; break; }
+    if (n.role === 'assistant' && n.model) { provider = n.provider || null; model = n.model; break; }
+  }
+  const models = (modelsCache.models.length ? modelsCache : await listPiModels()).models || [];
+  let hit = model ? settingsLib.findModel(models, provider, model) : null;
+  if (!hit && model) hit = models.find(m => m.model === model) || null;
+  const ctxTokens = (hit && hit.context) || piContextTokens();
+  const usedTokens = lastUsed ? lastUsed.ctx : 0;
+  const money = list => Math.round(list.reduce((n, m) => n + (m.cost || 0), 0) * 1e6) / 1e6;
+  const usedModel = lastUsed ? lastUsed.model || null : null;
+  return {
+    key,
+    source: entry.source,
+    leaf: leaf ? leaf.id : null,
+    provider, model,
+    ctxTokens, usedTokens,
+    leftTokens: Math.max(0, ctxTokens - usedTokens),
+    pctLeft: ctxTokens ? Math.max(0, Math.min(100, Math.round(100 * (1 - usedTokens / ctxTokens)))) : null,
+    traceCost: money(chain),
+    familyCost: money(all),
+    usedModel,
+    usedTs: lastUsed ? lastUsed.ts : null,
+    // An estimate when no usage exists yet, when the model is not in the
+    // catalog, or when the model changed after the last counted reply
+    // (another tokenizer, another window).
+    estimate: !lastUsed || !(hit && hit.context) || !!(usedModel && model && usedModel !== model),
+  };
+}
+
 // ---------- session operations (fork / branch) ----------
 // pi session operations run through pi's own runtime (pirpc.js + the
 // aiconvo-bridge extension). Claude keeps a hand copier: no native
 // arbitrary-node fork exists (verified empirically).
-const { piForkAt, piForkBefore } = require('./pirpc.js');
+const { piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, stopWarmSession, stopAllWarmSessions, piBeginWarm } = require('./pirpc.js');
 
 function sessionPathsFor(key) {
   const entry = index[key];
@@ -763,8 +1134,9 @@ async function indexNewSessionFile(newAbs) {
 async function forkSession(key, nodeId) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   return withSessionOp(sessionPath, async () => {
+    stopWarmSession(sessionPath);
     if (entry.source !== 'claude') {
-      const forked = await piForkAt({ sessionPath, cwd }, nodeId);
+      const forked = await piForkAt({ sessionPath, cwd, env: agentEnv() }, nodeId);
       return { key: await indexNewSessionFile(forked.file), path: forked.file, sessionId: forked.sessionId };
     }
     const raw = await fsp.readFile(sessionPath, 'utf8');
@@ -786,7 +1158,7 @@ async function forkSessionForEdit(key, nodeId) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (entry.source === 'claude') throw new Error('Editing a past message needs pi. Claude conversations can only fork.');
   return withSessionOp(sessionPath, async () => {
-    const forked = await piForkBefore({ sessionPath, cwd }, nodeId);
+    const forked = await piForkBefore({ sessionPath, cwd, env: agentEnv() }, nodeId);
     return { key: await indexNewSessionFile(forked.file), path: forked.file, sessionId: forked.sessionId, text: forked.text };
   });
 }
@@ -811,6 +1183,7 @@ async function branchSession(key, nodeId) {
   }
   const absPath = absPathForKey(key);
   return withSessionOp(absPath, async () => {
+    stopWarmSession(absPath);
     const raw = await fsp.readFile(absPath, 'utf8');
     let found = false;
     for (const line of raw.split('\n')) {
@@ -828,6 +1201,479 @@ async function branchSession(key, nodeId) {
     await fsp.appendFile(absPath, JSON.stringify(anchor) + '\n');
     return { ok: true, key, node: nodeId };
   });
+}
+
+// ---------- headless agent runs (the blessed path) ----------
+// A run is a prompt on a WARM `pi --mode rpc` process bound to the session
+// file (follow-ups reuse it; idle 5 min kills it). Ownership rules:
+//  - The terminal is sovereign. Opening a terminal aborts any headless run.
+//  - A headless run refuses to start while a terminal owns the file
+//    (the client may force: stop the terminal first).
+//  - The whole run holds the per-file operation lock, so forks, branches,
+//    and edits queue behind it instead of interleaving writers.
+const headlessRuns = new Map();   // absolute session path → run record
+const agentRunJobs = new Map();   // jobId → job (shares the jobs tray)
+
+// Durable record of agent runs. A service restart kills every warm pi child
+// (systemd stops the whole cgroup), which used to erase the run silently:
+// the assistant just "stopped" with no visible reason. The snapshot on disk
+// survives the restart, so the jobs tray can say what happened and why.
+const AGENT_RUNS_FILE = path.join(CACHE_DIR, 'agent-runs.json');
+const restoredRunJobs = new Map(); // jobId → view-shaped record from a previous process
+const JOB_KEEP_MS = 60 * 60 * 1000;
+try {
+  for (const j of JSON.parse(fs.readFileSync(AGENT_RUNS_FILE, 'utf8'))) {
+    if (!j || !j.id) continue;
+    if (j.status === 'running') {
+      // The previous process ended without a clean shutdown (SIGKILL, crash).
+      j.status = 'error';
+      j.statusText = 'stopped — aiconvo restarted during this run';
+      j.error = 'server restart';
+      j.finishedAt = j.finishedAt || Date.now();
+    }
+    if ((j.finishedAt || 0) > Date.now() - JOB_KEEP_MS) restoredRunJobs.set(j.id, j);
+  }
+} catch {}
+
+function agentRunsSnapshot() {
+  const cutoff = Date.now() - JOB_KEEP_MS;
+  return [
+    ...[...restoredRunJobs.values()].filter(j => (j.finishedAt || 0) > cutoff),
+    ...[...agentRunJobs.values()].map(jobView),
+  ];
+}
+
+let agentRunsSaveTimer = null;
+function saveAgentRuns() {
+  if (agentRunsSaveTimer) return;
+  agentRunsSaveTimer = setTimeout(() => {
+    agentRunsSaveTimer = null;
+    fs.writeFile(AGENT_RUNS_FILE, JSON.stringify(agentRunsSnapshot()), () => {});
+  }, 250);
+}
+function saveAgentRunsNow() {
+  clearTimeout(agentRunsSaveTimer);
+  agentRunsSaveTimer = null;
+  try { fs.writeFileSync(AGENT_RUNS_FILE, JSON.stringify(agentRunsSnapshot())); } catch {}
+}
+
+function headlessOwner(absPath) { return headlessRuns.get(absPath) || null; }
+
+// Extension-backed providers (claude-code) exist only when their extension
+// loads inside the RPC process; `--no-extensions` would hide them.
+function piProviderExtraArgs() {
+  return fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : [];
+}
+
+// Abort the headless run on a file and wait for it to let go.
+async function releaseHeadless(absPath, reason) {
+  const run = headlessRuns.get(absPath);
+  if (run) {
+    run.yielded = reason || 'released';
+    try { if (run.handle && run.handle.abort) await run.handle.abort(); } catch {}
+    try { await Promise.race([run.handle.done, sleep(4000)]); } catch {}
+  }
+  stopWarmSession(absPath);
+  return !!(run);
+}
+
+async function lastEntryIdOf(absPath) {
+  const raw = await fsp.readFile(absPath, 'utf8');
+  let last = null;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const d = JSON.parse(line);
+      if (d.type !== 'session' && typeof (d.id || d.uuid) === 'string') last = d.id || d.uuid;
+    } catch {}
+  }
+  return last;
+}
+
+// Live streaming tail of a headless run, for the browser. The tail mirrors
+// the in-flight work as ordered blocks: the assistant message streaming in
+// (text + thinking) and tool calls with their args and streaming output.
+// Completed blocks are pruned when the session file re-indexes: from then on
+// the transcript owns that content, so card and transcript never duplicate
+// it for long. Throttle: at most one push per ~150 ms, with a trailing timer
+// so the final delta always lands.
+const liveRunTails = new Map(); // jobId → { keyOf, blocks, timer, push }
+
+function pruneLiveRunTail(key) {
+  for (const t of liveRunTails.values()) {
+    if (t.keyOf() !== key) continue;
+    const before = t.blocks.length;
+    for (let i = t.blocks.length - 1; i >= 0; i--) if (t.blocks[i].done) t.blocks.splice(i, 1);
+    if (t.blocks.length !== before) t.push(true);
+  }
+}
+
+function endLiveRunTail(jobId) {
+  const t = liveRunTails.get(jobId);
+  if (t) clearTimeout(t.timer);
+  liveRunTails.delete(jobId);
+}
+
+function toolResultTail(result) {
+  if (result == null) return '';
+  if (typeof result === 'string') return result.slice(-4000);
+  if (Array.isArray(result.content)) return textOf(result.content).slice(-4000);
+  if (typeof result.output === 'string') return result.output.slice(-4000);
+  try { return JSON.stringify(result).slice(0, 4000); } catch { return ''; }
+}
+
+// Bounded list of extension notices on a run card (errors, notify, ...).
+function addRunNotice(job, text) {
+  job.notices = job.notices || [];
+  job.notices.push(String(text).slice(0, 400));
+  if (job.notices.length > 20) job.notices.splice(0, job.notices.length - 20);
+}
+
+function runEventForwarder(job) {
+  let lastPush = 0, blockSeq = 0;
+  const blocks = [];
+  const state = { keyOf: () => job.key, blocks, timer: null, push: null };
+  liveRunTails.set(job.id, state);
+  const slim = b => b.kind === 'tool'
+    ? { id: b.id, kind: 'tool', name: b.name, args: (b.args || '').slice(0, 2000),
+        out: (b.out || '').slice(-4000), phase: b.phase, error: b.error || undefined, t0: b.t0 || undefined }
+    : { id: b.id, kind: 'text', text: (b.text || '').slice(-48000),
+        think: (b.think || '').slice(-8000), done: b.done || undefined };
+  const push = force => {
+    if (!liveRunTails.has(job.id)) return;
+    const now = Date.now();
+    if (!force && now - lastPush < 150) {
+      if (!state.timer) state.timer = setTimeout(() => { state.timer = null; push(true); }, 160);
+      return;
+    }
+    lastPush = now;
+    broadcast({ type: 'run-event', jobId: job.id, key: job.key, status: job.status,
+      statusText: job.statusText, model: job.model, startedAt: job.startedAt, tail: blocks.map(slim),
+      uiRequests: job.uiRequests || [], notices: job.notices || [],
+      extStatus: job.extStatus ? Object.values(job.extStatus).join(' · ') : '',
+      widgets: job.widgets || null });
+  };
+  state.push = push;
+  const liveText = () => { for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i].kind === 'text' && !blocks[i].done) return blocks[i]; return null; };
+  const toolBlock = callId => blocks.find(b => b.kind === 'tool' && b.callId === callId);
+  return event => {
+    try {
+      if (event.type === 'message_start' && event.message && event.message.role === 'assistant') {
+        blocks.push({ id: ++blockSeq, kind: 'text', text: '', think: '', parts: new Map(), tools: new Map() });
+        job.statusText = 'streaming';
+        push(true);
+      } else if (event.type === 'message_update' && event.assistantMessageEvent) {
+        // The RPC wire strips the cumulative message snapshot: only deltas
+        // arrive. Rebuild the streaming message per content index here.
+        const ev = event.assistantMessageEvent;
+        let cur = liveText();
+        if (!cur) { cur = { id: ++blockSeq, kind: 'text', text: '', think: '', parts: new Map(), tools: new Map() }; blocks.push(cur); }
+        const part = i => {
+          let p = cur.parts.get(i);
+          if (!p) { p = { type: '', text: '' }; cur.parts.set(i, p); }
+          return p;
+        };
+        if (ev.type === 'text_delta') { const p = part(ev.contentIndex); p.type = 'text'; p.text += ev.delta || ''; }
+        else if (ev.type === 'text_end') { const p = part(ev.contentIndex); p.type = 'text'; if (typeof ev.content === 'string') p.text = ev.content; }
+        else if (ev.type === 'thinking_delta') { const p = part(ev.contentIndex); p.type = 'thinking'; p.text += ev.delta || ''; }
+        else if (ev.type === 'thinking_end') { const p = part(ev.contentIndex); p.type = 'thinking'; if (typeof ev.content === 'string') p.text = ev.content; }
+        else if (ev.type === 'toolcall_start') {
+          const t = { id: ++blockSeq, kind: 'tool', callId: null, name: '?', args: '', out: '', phase: 'args' };
+          blocks.push(t);
+          cur.tools.set(ev.contentIndex, t);
+        } else if (ev.type === 'toolcall_delta') {
+          const t = cur.tools.get(ev.contentIndex);
+          if (t && t.phase === 'args') t.args = (t.args + (ev.delta || '')).slice(0, 4000);
+        } else if (ev.type === 'toolcall_end' && ev.toolCall) {
+          const t = cur.tools.get(ev.contentIndex);
+          if (t) {
+            t.callId = ev.toolCall.id;
+            t.name = ev.toolCall.name || t.name;
+            try { t.args = toolInputText(t.name, ev.toolCall.arguments) || t.args; } catch {}
+            t.phase = 'ready';
+          }
+        }
+        cur.text = [...cur.parts.values()].filter(p => p.type === 'text').map(p => p.text).join('\n');
+        cur.think = [...cur.parts.values()].filter(p => p.type === 'thinking').map(p => p.text).join('\n');
+        job.statusText = cur.text.length ? 'streaming · ' + cur.text.length + ' chars'
+          : cur.think.length ? 'thinking · ' + cur.think.length + ' chars' : 'streaming';
+        push(/_start$|_end$/.test(ev.type));
+      } else if (event.type === 'tool_execution_start') {
+        let t = toolBlock(event.toolCallId);
+        if (!t) { t = { id: ++blockSeq, kind: 'tool', callId: event.toolCallId, name: event.toolName || '?', args: '', out: '' }; blocks.push(t); }
+        t.name = event.toolName || t.name;
+        try { if (event.args) t.args = toolInputText(t.name, event.args) || t.args; } catch {}
+        t.phase = 'running';
+        t.t0 = Date.now(); // true execution start — the browser ticks elapsed from this
+        job.statusText = 'tool · ' + (event.toolName || '?');
+        push(true);
+      } else if (event.type === 'tool_execution_update') {
+        const t = toolBlock(event.toolCallId);
+        if (t) { t.out = toolResultTail(event.partialResult); push(false); }
+      } else if (event.type === 'tool_execution_end') {
+        const t = toolBlock(event.toolCallId);
+        if (t) { t.out = toolResultTail(event.result); t.phase = 'done'; t.error = !!event.isError; t.done = true; }
+        push(true);
+      } else if (event.type === 'message_end' && event.message && event.message.role === 'assistant') {
+        const cur = liveText();
+        if (cur) {
+          // The end event carries the authoritative message: trust it.
+          const content = Array.isArray(event.message.content) ? event.message.content : [];
+          cur.text = textOf(event.message.content) || cur.text;
+          const think = content.filter(c => c && c.type === 'thinking' && typeof c.thinking === 'string').map(c => c.thinking).join('\n');
+          if (think) cur.think = think;
+          cur.done = true;
+        }
+        if (event.message.stopReason === 'error') {
+          job.errorMessage = String(event.message.errorMessage || 'model error').split('\n')[0].slice(0, 300);
+          job.statusText = 'model error';
+        }
+        push(true);
+      } else if (event.type === 'auto_retry_start') {
+        job.statusText = 'retrying · ' + (event.reason || '');
+        push(true);
+      } else if (event.type === 'agent_end') {
+        job.statusText = 'finishing';
+        push(true);
+      } else if (event.type === 'extension_error') {
+        // Informational, exactly like the TUI: show it, never kill the run.
+        const name = path.basename(String(event.extensionPath || 'extension'));
+        addRunNotice(job, '⚠ ' + name + (event.event ? ' on ' + event.event : '') + ' — ' + String(event.error || 'error').split('\n')[0].slice(0, 200));
+        push(true);
+      } else if (event.type === 'extension_ui_request') {
+        // Dialogs land on the run card and wait for a browser answer through
+        // /api/run/ui-response. pi auto-resolves the ones with a timeout.
+        if (event.id && ['confirm', 'select', 'input', 'editor'].includes(event.method)) {
+          job.uiRequests = (job.uiRequests || []).filter(q => q.id !== event.id);
+          job.uiRequests.push({
+            id: event.id, method: event.method,
+            title: String(event.title || event.method).slice(0, 200),
+            message: event.message ? String(event.message).slice(0, 2000) : '',
+            options: Array.isArray(event.options) ? event.options.map(String).slice(0, 20) : undefined,
+            placeholder: event.placeholder ? String(event.placeholder).slice(0, 200) : '',
+            prefill: typeof event.prefill === 'string' ? event.prefill.slice(0, 20000) : '',
+            timeout: event.timeout || null, at: Date.now(),
+          });
+          job.statusText = 'waiting for you · ' + String(event.title || event.method).slice(0, 60);
+        } else if (event.method === 'notify') {
+          const mark = event.notifyType === 'error' ? '✗ ' : event.notifyType === 'warning' ? '⚠ ' : 'ℹ ';
+          addRunNotice(job, mark + String(event.message || '').slice(0, 300));
+        } else if (event.method === 'setStatus') {
+          job.extStatus = job.extStatus || {};
+          if (event.statusText) job.extStatus[event.statusKey || ''] = String(event.statusText).slice(0, 120);
+          else delete job.extStatus[event.statusKey || ''];
+        } else if (event.method === 'setWidget') {
+          job.widgets = job.widgets || {};
+          if (Array.isArray(event.widgetLines) && event.widgetLines.length) job.widgets[event.widgetKey || ''] = event.widgetLines.map(String).slice(0, 12);
+          else delete job.widgets[event.widgetKey || ''];
+        } else if (event.method === 'set_editor_text') {
+          broadcast({ type: 'editor-text', key: job.key, text: String(event.text || '').slice(0, 20000) });
+        }
+        push(true);
+      }
+      // pi resolved a timed dialog on its own: drop it from the card.
+      if (job.uiRequests && job.uiRequests.length) {
+        const now = Date.now();
+        const kept = job.uiRequests.filter(q => !q.timeout || q.at + q.timeout + 2000 > now);
+        if (kept.length !== job.uiRequests.length) { job.uiRequests = kept; push(true); }
+      }
+    } catch {}
+  };
+}
+
+// Start one headless run on a conversation. node (optional): continue from
+// that entry — an in-file pi branch anchor moves the leaf there first.
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue }) {
+  const { entry, sessionPath, cwd } = sessionPathsFor(key);
+  if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
+  if (!String(message || '').trim()) throw new Error('empty prompt');
+  const running = findRunningConversation(key);
+  if (running) {
+    if (!force) {
+      const err = new Error('A terminal owns this conversation (pid ' + running.pid + ').');
+      err.needsForce = true;
+      throw err;
+    }
+    await stopRunningAgent(running);
+    await waitFileQuiet(sessionPath);
+  }
+  if (headlessRuns.has(sessionPath)) {
+    // Composer sends queue into the running turn through pi's own runtime
+    // (followUp) instead of failing — the same behavior as typing in the TUI
+    // while the model streams. Branch-targeted sends still refuse.
+    if (allowQueue && !node) {
+      const record = headlessRuns.get(sessionPath);
+      if (await piQueuePrompt({ sessionPath }, message, null, images).catch(() => false)) {
+        const job = agentRunJobs.get(record.jobId);
+        if (job) { job.statusText = 'follow-up queued'; jobChanged(job); }
+        return { queued: true, job };
+      }
+    }
+    throw new Error('A web run is already active on this conversation. Wait or abort it.');
+  }
+  const job = {
+    id: 'run:' + crypto.randomUUID().slice(0, 8),
+    type: 'agent-run', key,
+    title: (provider && modelId ? modelId + ' · ' : '') + (images && images.length ? '[' + images.length + ' img] ' : '') + String(message).replace(/\s+/g, ' ').slice(0, 60),
+    status: 'running', statusText: 'starting', startedAt: Date.now(),
+    model: provider && modelId ? provider + '/' + modelId : null,
+  };
+  agentRunJobs.set(job.id, job);
+  jobChanged(job);
+  const record = { jobId: job.id, key, startedAt: job.startedAt, model: job.model, handle: null, yielded: null };
+  headlessRuns.set(sessionPath, record);
+  const finish = async (status, statusText, error) => {
+    headlessRuns.delete(sessionPath);
+    job.status = status;
+    job.statusText = statusText;
+    job.uiRequests = [];
+    if (error) job.error = error;
+    job.finishedAt = Date.now();
+    try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
+    endLiveRunTail(job.id);
+    jobChanged(job);
+    broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, final: true });
+  };
+  // The full run holds the file lock. Fire and forget: the caller gets the job.
+  withSessionOp(sessionPath, async () => {
+    try {
+      if (node) {
+        const leaf = await lastEntryIdOf(sessionPath);
+        if (leaf !== node) {
+          // Warm RPC still has the old leaf in memory: kill it so the next
+          // process loads the file after the branch anchor.
+          stopWarmSession(sessionPath);
+          // pi's own in-file branch anchor: one label entry, nothing rewritten.
+          const raw = await fsp.readFile(sessionPath, 'utf8');
+          let found = false;
+          for (const line of raw.split('\n')) {
+            if (!line.trim()) continue;
+            try { if (JSON.parse(line).id === node) { found = true; break; } } catch {}
+          }
+          if (!found) throw new Error('branch point not found in the session file');
+          const anchor = { type: 'label', id: crypto.randomBytes(4).toString('hex'), parentId: node, timestamp: new Date().toISOString(), targetId: node };
+          await fsp.appendFile(sessionPath, JSON.stringify(anchor) + '\n');
+        }
+      }
+      job.statusText = 'running';
+      jobChanged(job);
+      const handle = piHeadlessRun({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, { provider, modelId, message, images, onEvent: runEventForwarder(job) });
+      record.handle = handle;
+      await handle.done;
+      if (record.yielded) await finish('done', 'stopped — ' + record.yielded);
+      else if (job.errorMessage) await finish('error', job.errorMessage, job.errorMessage);
+      else if (handle.uiAutoCancelled) await finish('done', 'settled · ' + handle.uiAutoCancelled + ' unanswered dialog(s) cancelled');
+      else await finish('done', 'settled');
+    } catch (e) {
+      await finish(record.yielded ? 'done' : 'error', record.yielded ? 'stopped — ' + record.yielded : e.message, record.yielded ? null : e.message);
+    }
+  });
+  return job;
+}
+
+// Fan out one prompt to several models: one pi-native fork per model, then
+// parallel runs on the separate files. The family tree shows them as
+// sibling branches of the same node.
+async function startFanOut(key, { node, models, message, images, force }) {
+  if (!Array.isArray(models) || models.length < 2) throw new Error('fan-out needs two or more models');
+  const runs = [];
+  for (const m of models) {
+    const forked = await forkSession(key, node); // sequential: each fork locks the source briefly
+    const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force });
+    runs.push({ key: forked.key, jobId: job.id, model: m.provider + '/' + m.modelId });
+  }
+  return runs;
+}
+
+// One assistant answer per direct child of node (fan-out is usually
+// prompt → answer, so the answer sits one level down).
+function answerBranchesUnder(tree, nodeId) {
+  const byParent = new Map();
+  for (const n of tree.nodes) {
+    if (!byParent.has(n.parent)) byParent.set(n.parent, []);
+    byParent.get(n.parent).push(n);
+  }
+  const answers = [];
+  for (const child of byParent.get(nodeId) || []) {
+    const queue = [child];
+    while (queue.length) {
+      const c = queue.shift();
+      if (c.role === 'assistant' && String(c.fullText || c.title || '').trim()) { answers.push(c); break; }
+      for (const k of byParent.get(c.id) || []) queue.push(k);
+    }
+  }
+  return answers;
+}
+
+async function compareGroupsResponse(key) {
+  const tree = await sessionTreeFor(key, { withTexts: true });
+  const byNodeId = new Map(tree.nodes.map(n => [n.id, n]));
+  // Reply latency: from the user prompt above the answer to the answer's last message.
+  const secsFor = a => {
+    let p = a.parent != null ? byNodeId.get(a.parent) : null;
+    while (p && p.role !== 'user') p = p.parent != null ? byNodeId.get(p.parent) : null;
+    const start = Date.parse((p && (p.lastTs || p.ts)) || a.ts || '');
+    const end = Date.parse(a.lastTs || a.ts || '');
+    return start && end && end > start ? Math.round((end - start) / 1000) : null;
+  };
+  const groups = [];
+  for (const n of tree.nodes) {
+    const answers = answerBranchesUnder(tree, n.id);
+    if (answers.length < 2) continue;
+    groups.push({
+      node: n.id,
+      answers: answers.map(a => ({
+        id: a.id, key: a.key, model: a.model || null,
+        text: String(a.fullText || '').slice(0, 16000),
+        jumpTs: a.jumpTs, fork: !!a.fork,
+        tok: a.tok || null, cost: a.cost || null, secs: secsFor(a),
+      })),
+    });
+  }
+  return { key, groups };
+}
+
+// Aggregate: collect the answers that branch off a node, quote each with
+// its model name, and continue on the original conversation from that node.
+async function startAggregate(key, { node, provider, modelId, instruction, answers, force }) {
+  const tree = await sessionTreeFor(key, { withTexts: true });
+  let children = answerBranchesUnder(tree, node);
+  // The user may deselect replies; merge only the picked ones (all by default).
+  if (Array.isArray(answers) && answers.length) {
+    const want = new Set(answers.map(String));
+    children = children.filter(c => want.has(String(c.id)));
+  }
+  if (children.length < 2) throw new Error('pick at least two answer branches to merge');
+  // Branch ids stay in the labels: the merge keeps its provenance in the transcript.
+  const parts = children.map((c, i) =>
+    `=== reply ${i + 1} of ${children.length} · ${c.model || 'unknown model'} · branch ${c.id} ===\n${c.fullText.trim()}`);
+  const message = `${children.length} models answered my last message in parallel. Their replies:\n\n${parts.join('\n\n')}\n\n${String(instruction || '').trim() || 'You have the full conversation context. Write the single best reply to my last message. Take the strongest parts of these replies, fix their mistakes, and resolve their disagreements. Your reply replaces them: answer me directly, and do not describe the replies or this merge.'}`;
+  const job = await startAgentRun(key, { node, provider, modelId, message, force });
+  return { job, answers: children.length };
+}
+
+// Set the conversation's model durably through pi's own runtime.
+async function setConversationModel(key, provider, modelId, force) {
+  const { entry, sessionPath, cwd } = sessionPathsFor(key);
+  if (conversationKind(entry) === 'claude') throw new Error('Model switching needs pi.');
+  if (!provider || !modelId) throw new Error('missing provider or model');
+  const running = findRunningConversation(key);
+  let reopen = false;
+  if (running) {
+    if (!force) {
+      const err = new Error('A terminal owns this conversation (pid ' + running.pid + ').');
+      err.needsForce = true;
+      throw err;
+    }
+    await stopRunningAgent(running);
+    await waitFileQuiet(sessionPath);
+    reopen = true;
+  }
+  if (headlessRuns.has(sessionPath)) throw new Error('A web run is active on this conversation. Wait or abort it.');
+  await withSessionOp(sessionPath, () => piSetModel({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, provider, modelId));
+  try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
+  if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
+  return { ok: true, model: provider + '/' + modelId, reopened: reopen };
 }
 
 // ---------- distillation ----------
@@ -854,6 +1700,187 @@ let timelineTitles = {};
 try { timelineTitles = JSON.parse(fs.readFileSync(TIMELINE_TITLES_FILE, 'utf8')); } catch {}
 function saveTimelineTitles() {
   fs.writeFile(TIMELINE_TITLES_FILE, JSON.stringify(timelineTitles), () => {});
+}
+
+// ---------- project folds ----------
+// One project can live under several directories: git worktrees, renamed
+// checkouts, second clones. Folds collapse those raw names into one canonical
+// project, so memory, epics, briefings, search, and the Gantt agree.
+// Manual folds (aliases) are user data under the notes tree; automatic
+// worktree folds are a derived cache rebuilt from git. Logic: projectfolds.js.
+const PROJECT_ALIASES_FILE = path.join(NOTES_DIR, 'projects', 'aliases.json');
+const PROJECT_FOLDS_CACHE = path.join(CACHE_DIR, 'project-folds.json');
+let foldStore = { aliases: {}, dismissed: [] };
+try { foldStore = { aliases: {}, dismissed: [], ...JSON.parse(fs.readFileSync(PROJECT_ALIASES_FILE, 'utf8')) }; } catch {}
+let autoFolds = {};
+try { autoFolds = JSON.parse(fs.readFileSync(PROJECT_FOLDS_CACHE, 'utf8')).auto || {}; } catch {}
+
+function saveFoldStore() {
+  fs.mkdirSync(path.dirname(PROJECT_ALIASES_FILE), { recursive: true });
+  fs.writeFileSync(PROJECT_ALIASES_FILE, JSON.stringify(foldStore, null, 2) + '\n');
+}
+
+function canonicalProjectName(raw) {
+  return foldsLib.canonicalize(raw, foldStore.aliases, autoFolds);
+}
+
+// A linked worktree's cwd resolves to the MAIN worktree root; that is the
+// automatic fold. `--git-common-dir` points at the shared .git; for the main
+// worktree itself dirname(common) === toplevel, so nothing folds.
+const worktreeMainCache = new Map(); // cwd -> { at, main }
+async function worktreeMainRootFor(cwd) {
+  const hit = worktreeMainCache.get(cwd);
+  if (hit && Date.now() - hit.at < 5 * 60 * 1000) return hit.main;
+  let main = '';
+  try {
+    const [toplevel, common] = await Promise.all([
+      gitText(cwd, ['rev-parse', '--show-toplevel']),
+      gitText(cwd, ['rev-parse', '--git-common-dir']),
+    ]);
+    const top = path.resolve(cwd, toplevel.trim());
+    const commonDir = path.resolve(cwd, common.trim());
+    if (path.basename(commonDir) === '.git') {
+      const root = path.dirname(commonDir);
+      if (root && root !== top) main = root;
+    }
+  } catch {}
+  worktreeMainCache.set(cwd, { at: Date.now(), main });
+  return main;
+}
+
+let foldRefreshTimer = null;
+const foldCheckedCwds = new Set();
+// A newly indexed cwd may be an unseen worktree: probe soon, debounced.
+function scheduleProjectFoldRefresh(cwd) {
+  if (!cwd || foldCheckedCwds.has(cwd)) return;
+  foldCheckedCwds.add(cwd);
+  clearTimeout(foldRefreshTimer);
+  foldRefreshTimer = setTimeout(() => { refreshProjectFolds().catch(() => {}); }, 3000);
+}
+
+const sortedJson = obj => JSON.stringify(Object.entries(obj).sort((a, b) => a[0].localeCompare(b[0])));
+
+// Rebuild the automatic worktree folds from every conversation cwd.
+async function refreshProjectFolds() {
+  const cwds = [...new Set(Object.values(index).map(e => e && e.cwd).filter(Boolean))];
+  const auto = {};
+  await mapLimit(cwds, 8, async cwd => {
+    foldCheckedCwds.add(cwd);
+    const main = await worktreeMainRootFor(cwd);
+    if (!main) return;
+    const from = foldsLib.rawProjectOf(cwd);
+    const into = foldsLib.rawProjectOf(main);
+    if (from !== into) auto[from] = into;
+  });
+  if (sortedJson(auto) === sortedJson(autoFolds)) return false;
+  autoFolds = auto;
+  fsp.writeFile(PROJECT_FOLDS_CACHE, JSON.stringify({ scannedAt: Date.now(), auto })).catch(() => {});
+  applyProjectFoldChange();
+  return true;
+}
+
+// After any fold change: fix the baked project column in the search index,
+// drop caches that carry project names, and tell every client to refetch.
+function applyProjectFoldChange() {
+  if (searchIdx) {
+    for (const [key, entry] of Object.entries(index)) {
+      try { searchIdx.setProject('conv:' + key, projectNameOf(entry.cwd)); } catch {}
+    }
+  }
+  gitRepoIndexCache.at = 0;
+  foldSuggestionsCache.at = 0;
+  broadcast({ type: 'project-folds' });
+}
+
+const remoteUrlCache = new Map(); // repo root -> { at, remote }
+async function gitRemoteFor(root) {
+  const hit = remoteUrlCache.get(root);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.remote;
+  let remote = '';
+  try { remote = (await gitText(root, ['config', '--get', 'remote.origin.url'])).trim(); } catch {}
+  remoteUrlCache.set(root, { at: Date.now(), remote });
+  return remote;
+}
+
+// Fold suggestions: same git remote or a name-shape twin. Quiet evidence,
+// never an action; at least one side must have conversations on record.
+let foldSuggestionsCache = { at: 0, list: [] };
+async function projectFoldSuggestions() {
+  if (Date.now() - foldSuggestionsCache.at < 60000) return foldSuggestionsCache.list;
+  const counts = {};
+  for (const entry of Object.values(index)) {
+    if (!entry) continue;
+    const p = projectOfEntry(entry);
+    counts[p] = (counts[p] || 0) + 1;
+  }
+  const remotes = {};
+  let repos = [];
+  try { repos = await discoverGitRepos(); } catch {}
+  await mapLimit(repos, 8, async repo => {
+    const remote = foldsLib.normalizeRemote(await gitRemoteFor(repo.root));
+    if (!remote) return;
+    const p = projectNameOf(repo.root);
+    (remotes[p] = remotes[p] || new Set()).add(remote);
+  });
+  const remoteLists = Object.fromEntries(Object.entries(remotes).map(([k, v]) => [k, [...v]]));
+  const list = foldsLib.suggestPairs(counts, remoteLists, foldStore.dismissed || [])
+    .filter(s => (counts[s.from] || 0) + (counts[s.into] || 0) > 0);
+  foldSuggestionsCache = { at: Date.now(), list };
+  return list;
+}
+
+async function foldProjects(from, into) {
+  foldsLib.foldAlias(foldStore, String(from || '').trim(), String(into || '').trim());
+  saveFoldStore();
+  // Fast fold, no history: the folded project's memory dir dies here and the
+  // next memory build absorbs the merged conversation set.
+  try { fs.rmSync(projectMemoryPaths(from).dir, { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(projectMemoryPaths(from).inputs, { force: true }); } catch {}
+  applyProjectFoldChange();
+  return projectFoldsResponse();
+}
+
+async function unfoldProject(name) {
+  foldsLib.unfold(foldStore, String(name || '').trim(), autoFolds);
+  saveFoldStore();
+  applyProjectFoldChange();
+  return projectFoldsResponse();
+}
+
+async function dismissFoldSuggestion(from, into) {
+  const key = foldsLib.dismissKey(from, into);
+  foldStore.dismissed = foldStore.dismissed || [];
+  if (!foldStore.dismissed.includes(key)) foldStore.dismissed.push(key);
+  saveFoldStore();
+  foldSuggestionsCache.at = 0;
+  return projectFoldsResponse();
+}
+
+function rawProjectNames() {
+  const names = new Set();
+  for (const entry of Object.values(index)) if (entry && entry.cwd) names.add(foldsLib.rawProjectOf(entry.cwd));
+  return names;
+}
+
+async function projectFoldsResponse() {
+  return {
+    map: foldsLib.flattenMap(rawProjectNames(), foldStore.aliases, autoFolds),
+    aliases: foldStore.aliases, auto: autoFolds, dismissed: foldStore.dismissed || [],
+    suggestions: await projectFoldSuggestions(),
+  };
+}
+
+// Raw names that fold into this canonical project, with the fold kind.
+function foldedFromFor(project) {
+  const names = rawProjectNames();
+  for (const k of Object.keys(foldStore.aliases)) names.add(k);
+  for (const k of Object.keys(autoFolds)) names.add(k);
+  const out = [];
+  for (const name of names) {
+    if (name === project || canonicalProjectName(name) !== project) continue;
+    out.push({ name, kind: foldStore.aliases[name] ? 'alias' : 'auto' });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Leaf-note cache: distilled work is expensive; reuse it when a segment reappears
@@ -1023,6 +2050,7 @@ async function refreshTimelineTitles() {
   if (timelineTitleRunning) { timelineTitleAgain = true; return; }
   const pending = Object.entries(index).filter(([key, e]) => {
     const saved = timelineTitles[key];
+    if (saved && saved.manual) return false; // never overwrite a user-owned title
     return !saved || saved.hash !== e.timelineTitleHash;
   });
   if (!pending.length) return;
@@ -1065,6 +2093,57 @@ async function refreshTimelineTitles() {
     timelineTitleRunning = false;
     if (timelineTitleAgain) { timelineTitleAgain = false; scheduleTimelineTitles(); }
   }
+}
+
+// ---- per-conversation title overrides (manual edit + user-requested AI retitle) ----
+
+// Store a durable title override. It wins over re-indexing and the background labeler;
+// only another explicit override replaces it.
+async function applyTitleOverride(key, fullTitle, shortTitle) {
+  const entry = index[key];
+  timelineTitles[key] = { hash: entry.timelineTitleHash, title: shortTitle, fullTitle, manual: true };
+  entry.title = fullTitle;
+  entry.timelineTitle = shortTitle;
+  try {
+    const file = cachePathFor(key);
+    const data = JSON.parse(await fsp.readFile(file, 'utf8'));
+    data.title = fullTitle;
+    data.timelineTitle = shortTitle;
+    await fsp.writeFile(file, JSON.stringify(data));
+  } catch {}
+  saveTimelineTitles();
+  saveIndexSoon();
+  broadcast({ type: 'timeline-titles', titles: [{ key, title: shortTitle, fullTitle, manual: true }] });
+  return { key, title: fullTitle, timelineTitle: shortTitle, manual: true };
+}
+
+async function setConversationTitle(key, rawTitle) {
+  if (!index[key]) throw new Error('unknown conversation');
+  const fullTitle = String(rawTitle || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!fullTitle) throw new Error('empty title');
+  return applyTitleOverride(key, fullTitle, timelineTitle(fullTitle));
+}
+
+const RETITLE_PROMPT =
+  'The attached JSON array contains the opening user messages of one AI work conversation, in order. ' +
+  'Name the actual work. Reply with STRICT JSON only, no prose or code fence: {"title":"...","label":"..."} — ' +
+  'title: specific, at most 90 characters, no trailing period, no generic words such as conversation, session, request; ' +
+  'label: the same work in at most 10 characters, no period.';
+
+// Retitle one conversation on demand, from its first real (non-bootstrap) user messages.
+async function retitleConversation(key) {
+  if (!index[key]) throw new Error('unknown conversation');
+  const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+  const users = data.messages.filter(m => m.role === 'user' && String(m.text || '').trim());
+  const real = users.filter(m => !isBootstrapMessage(m.text));
+  const chosen = (real.length ? real : users).slice(0, 4).map(m => String(m.text).slice(0, 2000));
+  if (!chosen.length) throw new Error('no user messages to title from');
+  const raw = await runPi(JSON.stringify(chosen), RETITLE_PROMPT);
+  const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
+  const fullTitle = String(parsed.title || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!fullTitle) throw new Error('the model returned no title');
+  const shortTitle = timelineTitle(String(parsed.label || parsed.title)).slice(0, 10);
+  return applyTitleOverride(key, fullTitle, shortTitle);
 }
 
 // Every message, numbered, nothing dropped. Tool results stay (already capped at 4k).
@@ -1961,17 +3040,23 @@ function jobView(job) {
     startedAt: job.startedAt, finishedAt: job.finishedAt || null,
     result: job.result || null, error: job.error || null,
     model: job.model || null,
+    uiRequests: job.uiRequests && job.uiRequests.length ? job.uiRequests : undefined,
+    notices: job.notices && job.notices.length ? job.notices : undefined,
   };
 }
 
 function jobChanged(job) {
   job.updatedAt = Date.now();
+  if (job.type === 'agent-run') saveAgentRuns();
   broadcast({ type: 'job', job: jobView(job) });
 }
 
 function allJobs() {
-  return [...distillJobs.values(), ...projectDistillJobs.values(), ...projectMemoryJobs.values(), ...evidenceJobs.values(), ...epicJobs.values()]
-    .map(jobView).sort((a, b) => b.startedAt - a.startedAt);
+  const cutoff = Date.now() - JOB_KEEP_MS;
+  return [...distillJobs.values(), ...projectDistillJobs.values(), ...projectMemoryJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...agentRunJobs.values()]
+    .map(jobView)
+    .concat([...restoredRunJobs.values()].filter(j => (j.finishedAt || 0) > cutoff))
+    .sort((a, b) => b.startedAt - a.startedAt);
 }
 
 function startDistillJob(key, data, options = {}) {
@@ -2227,6 +3312,39 @@ function socketPathForTitle(title) {
   return path.join(CACHE_DIR, 'pty', String(title || 'unknown') + '.sock');
 }
 
+// Launched-window registry: maps a custom Alacritty title (aiconvo-project-*,
+// aiconvo-git-*) to the conversation key discovered after launch. Without it,
+// the app cannot bind a project-start terminal to its conversation, thinks no
+// live terminal exists, and a send spawns a second writer on the same session.
+const LAUNCHED_TITLES_FILE = path.join(CACHE_DIR, 'launched-windows.json');
+let launchedTitles = null; // title -> key
+
+function loadLaunchedTitles() {
+  if (launchedTitles) return launchedTitles;
+  launchedTitles = new Map();
+  try {
+    const raw = JSON.parse(fs.readFileSync(LAUNCHED_TITLES_FILE, 'utf8'));
+    for (const [title, key] of Object.entries(raw)) launchedTitles.set(title, key);
+  } catch {}
+  return launchedTitles;
+}
+
+function recordLaunchedTitle(title, key) {
+  if (!title || !key) return;
+  const map = loadLaunchedTitles();
+  map.set(title, key);
+  while (map.size > 200) map.delete(map.keys().next().value);
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(LAUNCHED_TITLES_FILE, JSON.stringify(Object.fromEntries(map)));
+  } catch {}
+}
+
+function keyForLaunchedTitle(title) {
+  if (!title) return null;
+  return loadLaunchedTitles().get(title) || null;
+}
+
 function piBin() {
   return process.env.AICONVO_PI
     || firstExisting([
@@ -2295,12 +3413,20 @@ function parseCmdline(pid) {
 function isInteractiveAgent(args) {
   if (!args || !args.length) return false;
   if (args.includes('--no-session') || args.includes('-p') || args.includes('--print')) return false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--mode' && args[i + 1] === 'rpc') return false;
+    if (args[i] === '--mode=rpc') return false;
+  }
   const names = args.map(a => path.basename(a).toLowerCase());
   return names.includes('pi') || names.includes('claude') || names.includes('alacritty');
 }
 
 function matchArgsToKey(args) {
   const title = flagValue(args, ['--title', '-t']);
+  if (title) {
+    const mapped = keyForLaunchedTitle(title);
+    if (mapped && index[mapped]) return mapped;
+  }
   if (title && title.startsWith('aiconvo-') && !title.startsWith('aiconvo-project-')) {
     for (const key of Object.keys(index)) {
       if (windowTitleFor(key) === title) return key;
@@ -2365,6 +3491,27 @@ function findRunningConversation(key) {
   return listRunningAgents().find(item => item.key === key) || null;
 }
 
+// Ambient "who is working" signal. Every 15 s, diff the set of session keys
+// that a live terminal agent owns; broadcast only when the set changes. The
+// browser pairs this with file mtimes and headless runs to paint a static
+// working/recent mark — no browser polling, no per-second churn (e-ink safe).
+function runningAgentKeys() {
+  try { return [...new Set(listRunningAgents().map(r => r.key).filter(Boolean))].sort(); }
+  catch { return []; }
+}
+// Identifies this server process. A client that reconnects and sees a new
+// boot id knows the server (and possibly the interface) was replaced — it
+// offers a reload instead of running yesterday's code against today's API.
+const BOOT_ID = crypto.randomUUID();
+let runningAgentsSig = null;
+setInterval(() => {
+  const keys = runningAgentKeys();
+  const sig = keys.join('|');
+  if (sig === runningAgentsSig) return;
+  runningAgentsSig = sig;
+  broadcast({ type: 'agents', keys });
+}, 15000).unref();
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -2415,6 +3562,23 @@ function setClipboard(kind, payload, mime) {
     timeout: 10000,
     env: agentEnv(),
   });
+}
+
+function trySetClipboard(kind, payload, mime) {
+  try { setClipboard(kind, payload, mime); return true; }
+  catch { return false; }
+}
+
+async function saveInboxImage(img, index) {
+  const dir = path.join(CACHE_DIR, 'inbox');
+  await fsp.mkdir(dir, { recursive: true });
+  const ext = (img.mime || '').includes('jpeg') || (img.mime || '').includes('jpg') ? '.jpg'
+    : (img.mime || '').includes('webp') ? '.webp'
+    : (img.mime || '').includes('gif') ? '.gif'
+    : '.png';
+  const file = path.join(dir, Date.now() + '-' + index + ext);
+  await fsp.writeFile(file, img.buf);
+  return file;
 }
 
 function sendKeys(wid, combo) {
@@ -2543,7 +3707,11 @@ async function captureConversation(key) {
   const cap = await bridgeRequest(liveTitle, { op: 'capture' });
   const text = (cap && cap.text) || '';
   const cls = classifyPane(text);
-  return { ok: true, attached: true, title: liveTitle, text, rows: cap.rows, cols: cap.cols, ...cls };
+  // raw === false means the TUI has not switched the tty to raw mode yet:
+  // pasted bytes would be line-buffered and kernel-echoed, and Enter would
+  // merge into the paste burst. Treat that as still booting.
+  if (cap && cap.raw === false) Object.assign(cls, { state: 'booting', reason: 'tty-cooked' });
+  return { ok: true, attached: true, title: liveTitle, text, html: (cap && cap.html) || '', rows: cap.rows, cols: cap.cols, ...cls };
 }
 
 async function actOnConversation(key, payload) {
@@ -2576,6 +3744,8 @@ async function openConversationInTerminal(key, opts) {
   const kind = conversationKind(entry);
   if (!kind) throw new Error('This conversation source cannot open in a terminal.');
   const title = windowTitleFor(key);
+  // The terminal is sovereign: any headless web run on this file yields now.
+  await releaseHeadless(absPathForKey(key), 'terminal opened');
   const running = findRunningConversation(key);
   if (running) {
     const focused = focus ? focusWindow(running.windowTitle || title) : false;
@@ -2600,6 +3770,72 @@ function decodeImagePayload(img) {
   return { mime, buf };
 }
 
+function pasteEchoFragment(body) {
+  const line = String(body || '').split('\n').find(l => l.trim()) || '';
+  return line.trim().slice(0, 16);
+}
+
+// Wait until the TUI enables bracketed paste (DECSET 2004). Only then does a
+// paste land as one atomic block and Enter submit instead of joining it.
+// Some programs never enable it, so the caller proceeds after the timeout.
+async function waitForPasteMode(title, ms) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    try {
+      const res = await bridgeRequest(title, { op: 'ping' }, 800);
+      if (res && res.paste) return true;
+    } catch {}
+    await sleep(150);
+  }
+  return false;
+}
+
+async function waitForPasteEcho(title, body, ms) {
+  const frag = pasteEchoFragment(body);
+  if (!frag) return false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    try {
+      const cap = await bridgeRequest(title, { op: 'capture' });
+      const text = (cap && cap.text) || '';
+      if (text.includes(frag)) return true;
+      if (/pasted text/i.test(text)) return true;
+    } catch {}
+    await sleep(150);
+  }
+  return false;
+}
+
+function composerHoldsText(text, frag) {
+  const lines = String(text || '').split('\n').map(l => l.trim());
+  const edges = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (/^[\u2500\u2501\u2504\u2508\u254c-]{10,}$/.test(lines[i])) edges.push(i);
+    else if (/^\u256d[\u2500]+\u256e$/.test(lines[i]) || /^\u2570[\u2500]+\u256f$/.test(lines[i])) edges.push(i);
+  }
+  if (edges.length < 2) return String(text || '').includes(frag);
+  const top = edges[edges.length - 2];
+  const bottom = edges[edges.length - 1];
+  return lines.slice(top + 1, bottom).join('\n').includes(frag);
+}
+
+async function confirmSubmit(title, body) {
+  const frag = pasteEchoFragment(body);
+  if (!frag) return true;
+  for (let i = 0; i < 6; i++) {
+    await sleep(500);
+    let cap;
+    try { cap = await bridgeRequest(title, { op: 'capture' }); } catch { return false; }
+    const text = (cap && cap.text) || '';
+    if (/esc to interrupt/i.test(text)) return true;
+    const cls = classifyPane(text);
+    if (cls.state === 'picker' || cls.state === 'permission') return false;
+    if (!composerHoldsText(text, frag)) return true;
+    try { await bridgeRequest(title, { op: 'enter' }); } catch { return false; }
+  }
+  return false;
+}
+
 async function sendToConversation(key, payload) {
   const text = payload && payload.text != null ? String(payload.text) : '';
   const rawImages = Array.isArray(payload && payload.images) ? payload.images : [];
@@ -2609,29 +3845,41 @@ async function sendToConversation(key, payload) {
   const title = opened.title;
   const hasBridge = await waitForBridge(title, opened.created ? 15000 : 800);
   if (hasBridge) {
-    if (opened.created) await sleep(600);
-    const pane = await captureConversation(key);
-    if (pane.state && pane.state !== 'ready') {
+    if (opened.created) await sleep(300);
+    let pane = await captureConversation(key);
+    const bootDeadline = Date.now() + (opened.created ? 20000 : 4000);
+    while (pane.state === 'booting' && Date.now() < bootDeadline) {
+      await sleep(300);
+      pane = await captureConversation(key);
+    }
+    if (pane.state === 'booting') {
+      throw new Error('The agent terminal is still starting. Try again in a moment.');
+    }
+    if (pane.state === 'picker' || pane.state === 'permission') {
       const err = new Error(pane.state === 'picker'
         ? 'The terminal is waiting for a choice. Pick one below.'
-        : pane.state === 'permission'
-          ? 'The terminal is waiting for a permission answer.'
-          : 'The terminal is not ready for a prompt yet.');
+        : 'The terminal is waiting for a permission answer.');
       err.blocked = { ...pane, opened };
       throw err;
     }
-    for (const img of images) {
-      setClipboard('image', img.buf, img.mime);
+    const files = [];
+    for (let i = 0; i < images.length; i++) {
+      files.push(await saveInboxImage(images[i], i));
+      trySetClipboard('image', images[i].buf, images[i].mime);
       await sleep(60);
-      await bridgeRequest(title, { op: 'ctrl', key: 'v' });
-      await sleep(400);
+      try { await bridgeRequest(title, { op: 'ctrl', key: 'v' }); } catch {}
+      await sleep(250);
     }
-    if (text) {
-      await bridgeRequest(title, { op: 'paste', text });
-      await sleep(120);
+    const body = [files.map(f => '@' + f).join(' '), text].filter(Boolean).join('\n');
+    if (body) {
+      await waitForPasteMode(title, opened.created ? 6000 : 1200);
+      await bridgeRequest(title, { op: 'paste', text: body });
+      await waitForPasteEcho(title, body, opened.created ? 8000 : 2000);
+      await sleep(150);
     }
     await bridgeRequest(title, { op: 'enter' });
-    return { ok: true, sent: true, via: 'bridge', images: images.length, chars: text.length, ...opened };
+    const submitted = body ? await confirmSubmit(title, body) : true;
+    return { ok: true, sent: true, submitted, via: 'bridge', images: files.length, files, chars: text.length, ...opened };
   }
   const wid = await waitForWindow(title);
   if (!wid) {
@@ -2643,20 +3891,23 @@ async function sendToConversation(key, payload) {
   }
   if (opened.created) await sleep(1800);
   else await sleep(150);
-  for (const img of images) {
-    setClipboard('image', img.buf, img.mime);
+  const files = [];
+  for (let i = 0; i < images.length; i++) {
+    files.push(await saveInboxImage(images[i], i));
+    trySetClipboard('image', images[i].buf, images[i].mime);
     await sleep(80);
-    sendKeys(wid, 'ctrl+v');
-    await sleep(450);
+    try { sendKeys(wid, 'ctrl+v'); } catch {}
+    await sleep(250);
   }
-  if (text) {
-    setClipboard('text', text);
+  const body = [files.map(f => '@' + f).join(' '), text].filter(Boolean).join('\n');
+  if (body) {
+    trySetClipboard('text', body);
     await sleep(80);
     sendKeys(wid, 'ctrl+shift+v');
-    await sleep(150);
+    await sleep(opened.created ? 600 : 150);
   }
   sendKeys(wid, 'Return');
-  return { ok: true, sent: true, via: 'xdotool', images: images.length, chars: text.length, ...opened };
+  return { ok: true, sent: true, via: 'xdotool', images: files.length, files, chars: text.length, ...opened };
 }
 
 async function sendFileFeedback(body) {
@@ -2705,9 +3956,22 @@ async function sendFileFeedback(body) {
 const DIFF_CACHE_FILE = path.join(CACHE_DIR, 'diff-cache.json');
 let diffCache = {};
 try { diffCache = JSON.parse(fs.readFileSync(DIFF_CACHE_FILE, 'utf8')); } catch {}
+const DIFF_CACHE_VERSION = 'v6:';
+
+function pruneDiffCache() {
+  for (const key of Object.keys(diffCache)) {
+    const row = diffCache[key];
+    const stale = !row || typeof row.cacheKey !== 'string' || !row.cacheKey.startsWith(DIFF_CACHE_VERSION) || !index[key];
+    if (stale) delete diffCache[key];
+  }
+}
+
 function saveDiffCacheSoon() {
   clearTimeout(saveDiffCacheSoon.t);
-  saveDiffCacheSoon.t = setTimeout(() => fs.writeFile(DIFF_CACHE_FILE, JSON.stringify(diffCache), () => {}), 500);
+  saveDiffCacheSoon.t = setTimeout(() => {
+    pruneDiffCache();
+    fs.writeFile(DIFF_CACHE_FILE, JSON.stringify(diffCache), () => {});
+  }, 500);
 }
 
 function diffEventHash(parts) {
@@ -2860,7 +4124,13 @@ function toolResultText(content) {
 async function conversationDiffs(key) {
   const entry = index[key];
   if (!entry) throw new Error('not found');
-  const cacheKey = 'v6:' + String(entry.mtimeMs || 0) + ':' + String(entry.size || 0);
+  // Use disk stats, not the index, so a missed watch event cannot serve stale diffs.
+  let mtimeMs = entry.mtimeMs || 0, size = entry.size || 0;
+  try {
+    const st = await fsp.stat(absPathForKey(key));
+    mtimeMs = st.mtimeMs; size = st.size;
+  } catch {}
+  const cacheKey = DIFF_CACHE_VERSION + String(mtimeMs) + ':' + String(size);
   const cached = diffCache[key];
   if (cached && cached.cacheKey === cacheKey) return cached.events;
   const raw = await fsp.readFile(absPathForKey(key), 'utf8');
@@ -2910,6 +4180,53 @@ async function conversationDiffs(key) {
   return events;
 }
 
+// Targeted view for ONE clicked file-change tool call. It reuses the cached
+// conversationDiffs parse (one transcript read, no snapshot reconstruction,
+// no conversation-wide grouping) and ships the current disk file so the
+// editor opens with zero further requests. The conversation-wide keyframe
+// history stays an explicit opt-in from the client.
+async function conversationFileEventResponse(key, callId, tsValue, pathValue) {
+  const entry = index[key];
+  if (!entry) throw new Error('not found');
+  const events = await conversationDiffs(key);
+  let picked = callId ? events.filter(e => e.callId === callId) : [];
+  if (!picked.length && pathValue) {
+    const same = events.filter(e => e.path === pathValue || e.relativePath === pathValue || e.path.endsWith('/' + pathValue));
+    const wantMs = Date.parse(tsValue || '');
+    if (Number.isFinite(wantMs) && same.length) {
+      let best = null, bestGap = Infinity;
+      for (const e of same) {
+        const gap = Math.abs((Date.parse(e.ts || '') || 0) - wantMs);
+        if (gap < bestGap) { best = e; bestGap = gap; }
+      }
+      picked = best && best.callId ? same.filter(e => e.callId === best.callId) : best ? [best] : [];
+    }
+    if (!picked.length) picked = same.slice(-1);
+  }
+  if (!picked.length) throw new Error('no recorded file change for this tool call');
+  const abs = picked[0].path;
+  let disk = null;
+  try {
+    const checked = await editableFilePath(abs);
+    const text = await fsp.readFile(checked, 'utf8');
+    disk = { path: checked, text, sha: sha256Hex(text), editable: true };
+  } catch (error) {
+    try {
+      const st = await fsp.stat(abs);
+      if (st.isFile() && st.size <= FILE_EDIT_MAX)
+        disk = { path: abs, text: await fsp.readFile(abs, 'utf8'), sha: null, editable: false, note: error.message };
+    } catch {}
+  }
+  return {
+    key, path: abs, relativePath: picked[0].relativePath, cwd: entry.cwd || null,
+    events: picked.map(e => ({
+      id: e.id, kind: e.kind, ts: e.ts, editIndex: e.editIndex, outcome: e.outcome,
+      resultSummary: e.resultSummary, oldText: e.oldText, newText: e.newText, command: e.command || null,
+    })),
+    disk,
+  };
+}
+
 async function projectDiffResponse(project, includeFull = false) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
@@ -2948,6 +4265,11 @@ async function projectDiffResponse(project, includeFull = false) {
 // ---------- Git-weaved project file history ----------
 const gitHistoryCache = new Map();
 const gitPatchCache = new Map();
+const gitTrackedCache = new Map();
+const cwdGitRootCache = new Map();
+const worktreeCache = new Map();
+const GIT_REPOS_FILE = path.join(CACHE_DIR, 'git-repos.json');
+const GIT_HIST_DIR = path.join(CACHE_DIR, 'git-history');
 
 function execText(file, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -2986,7 +4308,7 @@ function parseGitLog(text, root) {
     const lines = record.replace(/^\n/, '').split('\n');
     const fields = lines.shift().split('\x1f');
     if (fields.length < 7) continue;
-    const [hash, shortHash, parents, ts, author, email, subject] = fields;
+    const [hash, shortHash, parents, ts, author, email, subject, decorate] = fields;
     const files = [];
     for (const line of lines) {
       if (!line.trim()) continue;
@@ -2998,9 +4320,12 @@ function parseGitLog(text, root) {
         deletions: match[2] === '-' ? null : Number(match[2]),
       });
     }
+    const branches = String(decorate || '').split(',').map(part => part.trim())
+      .map(part => part.replace(/^HEAD -> /, '').replace(/^tag: /, ''))
+      .filter(part => part && part !== 'HEAD');
     commits.push({
       hash, shortHash, parents: parents ? parents.split(' ') : [], ts, author, email, subject,
-      repoRoot: root, branches: [], files,
+      repoRoot: root, branches: [...new Set(branches)].slice(0, 12), files,
     });
   }
   return commits;
@@ -3019,44 +4344,451 @@ function parseGitStatus(text) {
   return rows;
 }
 
+async function resolveGitDir(root) {
+  const marker = path.join(root, '.git');
+  try {
+    const st = await fsp.stat(marker);
+    if (st.isDirectory()) return marker;
+    const text = await fsp.readFile(marker, 'utf8');
+    const match = text.match(/^gitdir:\s*(.+)$/m);
+    if (match) return path.resolve(root, match[1].trim());
+  } catch {}
+  return marker;
+}
+
+async function stampPath(file) {
+  try {
+    const st = await fsp.stat(file);
+    return `${st.mtimeMs}:${st.size}`;
+  } catch { return '0'; }
+}
+
+async function walkRefStamps(dir, depth = 0) {
+  if (depth > 6) return '';
+  let ents;
+  try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { return ''; }
+  let out = '';
+  for (const ent of ents) {
+    const next = path.join(dir, ent.name);
+    out += ent.isDirectory()
+      ? ent.name + '{' + await walkRefStamps(next, depth + 1) + '}'
+      : ent.name + ':' + await stampPath(next) + ';';
+  }
+  return out;
+}
+
+async function gitHistorySignature(root) {
+  const dir = await resolveGitDir(root);
+  const parts = [await stampPath(path.join(dir, 'HEAD')), await stampPath(path.join(dir, 'packed-refs'))];
+  try {
+    const common = path.resolve(dir, (await fsp.readFile(path.join(dir, 'commondir'), 'utf8')).trim());
+    parts.push(await stampPath(path.join(common, 'packed-refs')));
+    parts.push(await walkRefStamps(path.join(common, 'refs')));
+  } catch {
+    parts.push(await walkRefStamps(path.join(dir, 'refs')));
+  }
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 24);
+}
+
+function gitHistoryDiskPath(root, histSig) {
+  const id = crypto.createHash('sha256').update(root).digest('hex').slice(0, 16);
+  return path.join(GIT_HIST_DIR, id + '-' + histSig + '.json');
+}
+
+async function readGitHistoryDisk(root, histSig) {
+  try {
+    const data = JSON.parse(await fsp.readFile(gitHistoryDiskPath(root, histSig), 'utf8'));
+    if (data && data.root === root && Array.isArray(data.commits)) return data;
+  } catch {}
+  return null;
+}
+
+function writeGitHistoryDisk(root, histSig, value) {
+  const payload = {
+    root: value.root, id: value.id, currentBranch: value.currentBranch, head: value.head,
+    refs: value.refs, commits: value.commits, truncated: value.truncated, histSig,
+  };
+  fsp.mkdir(GIT_HIST_DIR, { recursive: true }).then(() =>
+    fsp.writeFile(gitHistoryDiskPath(root, histSig), JSON.stringify(payload))).catch(() => {});
+}
+
 async function loadGitRepository(root) {
-  const refsText = await gitText(root, ['for-each-ref', '--format=%(refname:short)%09%(objectname)', 'refs/heads', 'refs/remotes']).catch(() => '');
-  const reflogText = await gitText(root, ['reflog', 'show', '--all', '--max-count=2000', '--format=%H%x09%gD']).catch(() => '');
-  const statusText = await gitText(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']).catch(() => '');
-  const signature = crypto.createHash('sha256').update(refsText + '\x00' + reflogText + '\x00' + statusText).digest('hex').slice(0, 24);
+  const [refsText, statusText, histSig] = await Promise.all([
+    gitText(root, ['for-each-ref', '--format=%(refname:short)%09%(objectname)', 'refs/heads', 'refs/remotes']).catch(() => ''),
+    gitText(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all']).catch(() => ''),
+    gitHistorySignature(root),
+  ]);
+  const workingTree = parseGitStatus(statusText);
   const cached = gitHistoryCache.get(root);
-  if (cached && cached.signature === signature) return cached.value;
+  if (cached && cached.histSig === histSig) {
+    cached.value.workingTree = workingTree;
+    return cached.value;
+  }
+  const disk = await readGitHistoryDisk(root, histSig);
+  if (disk) {
+    disk.workingTree = workingTree;
+    gitHistoryCache.set(root, { histSig, value: disk });
+    return disk;
+  }
   const logText = await gitText(root, [
-    'log', '--all', '--reflog', '--max-count=2000', '--date=iso-strict', '--find-renames', '--diff-merges=first-parent',
-    '--format=%x1e%H%x1f%h%x1f%P%x1f%cI%x1f%aN%x1f%aE%x1f%s', '--numstat',
+    'log', '--all', '--max-count=2000', '--date=iso-strict', '--find-renames', '--diff-merges=first-parent',
+    '--format=%x1e%H%x1f%h%x1f%P%x1f%cI%x1f%aN%x1f%aE%x1f%s%x1f%D', '--numstat',
   ]).catch(() => '');
   const commits = parseGitLog(logText, root);
-  const byHash = new Map(commits.map(commit => [commit.hash, commit]));
   const refs = refsText.split('\n').filter(Boolean).map(line => {
     const [name, hash] = line.split('\t'); return { name, hash };
   }).filter(ref => ref.name && ref.hash);
-  const refsByTip = new Map();
-  for (const ref of refs.slice(0, 40)) {
-    if (!refsByTip.has(ref.hash)) refsByTip.set(ref.hash, []);
-    refsByTip.get(ref.hash).push(ref.name);
-  }
-  for (const [tip, names] of refsByTip) {
-    const hashes = (await gitText(root, ['rev-list', '--max-count=2000', tip]).catch(() => '')).split('\n').filter(Boolean);
-    for (const hash of hashes) {
-      const commit = byHash.get(hash);
-      if (commit) commit.branches.push(...names);
-    }
-  }
-  for (const commit of commits) commit.branches = [...new Set(commit.branches)].slice(0, 12);
   let currentBranch = null, head = null;
   try { currentBranch = (await gitText(root, ['branch', '--show-current'])).trim() || null; } catch {}
   try { head = (await gitText(root, ['rev-parse', 'HEAD'])).trim() || null; } catch {}
   const value = {
     id: crypto.createHash('sha256').update(root).digest('hex').slice(0, 12), root,
-    currentBranch, head, refs, commits, workingTree: parseGitStatus(statusText), truncated: commits.length >= 2000,
+    currentBranch, head, refs, commits, workingTree, truncated: commits.length >= 2000,
   };
-  gitHistoryCache.set(root, { signature, value });
+  gitHistoryCache.set(root, { histSig, value });
+  writeGitHistoryDisk(root, histSig, value);
   return value;
+}
+
+const GIT_SCAN_SKIP = new Set([
+  'node_modules', 'target', 'dist', 'build', '.cache', '.local', '.nvm', '.npm', '.cargo',
+  '.rustup', '.mozilla', '.config', '.var', 'Trash', '.Trash', 'snap', '.steam', 'proc',
+]);
+let gitRepoIndexCache = { at: 0, repos: [] };
+
+async function walkGitRoots(dir, depth, maxDepth, out) {
+  if (depth > maxDepth || out.size >= 400) return;
+  let ents;
+  try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+  if (ents.some(e => e.name === '.git' && (e.isDirectory() || e.isFile()))) {
+    out.add(path.resolve(dir));
+    return;
+  }
+  for (const e of ents) {
+    if (!e.isDirectory()) continue;
+    if (GIT_SCAN_SKIP.has(e.name)) continue;
+    if (e.name.startsWith('.') && e.name !== '.pi' && e.name !== '.claude') continue;
+    await walkGitRoots(path.join(dir, e.name), depth + 1, maxDepth, out);
+  }
+}
+
+async function worktreeRoots(root) {
+  const dir = await resolveGitDir(root);
+  const stamp = (await stampPath(path.join(dir, 'worktrees'))) + '|' + (await stampPath(path.join(dir, 'HEAD')));
+  const hit = worktreeCache.get(root);
+  if (hit && hit.stamp === stamp) return hit.roots;
+  const text = await gitText(root, ['worktree', 'list', '--porcelain']).catch(() => '');
+  const roots = [];
+  for (const line of String(text).split('\n')) {
+    if (line.startsWith('worktree ')) roots.push(path.resolve(line.slice(9).trim()));
+  }
+  const value = roots.length ? roots : [path.resolve(root)];
+  worktreeCache.set(root, { stamp, roots: value });
+  return value;
+}
+
+const CWD_GIT_ROOT_TTL_MS = 5 * 60 * 1000;
+
+async function gitRootForCwd(cwd) {
+  const cached = cwdGitRootCache.get(cwd);
+  if (cached && Date.now() - cached.at < CWD_GIT_ROOT_TTL_MS) return cached.root;
+  try {
+    const root = (await gitText(cwd, ['rev-parse', '--show-toplevel'])).trim();
+    const resolved = root ? path.resolve(root) : '';
+    cwdGitRootCache.set(cwd, { at: Date.now(), root: resolved });
+    return resolved;
+  } catch {
+    cwdGitRootCache.set(cwd, { at: Date.now(), root: '' });
+    return '';
+  }
+}
+
+async function scanGitRoots() {
+  const found = new Set();
+  const home = os.homedir();
+  for (const start of [path.join(home, 'Projects'), path.join(home, 'src'), path.join(home, 'code'), home]) {
+    if (fs.existsSync(start)) await walkGitRoots(start, 0, start === home ? 3 : 5, found);
+  }
+  const cwds = [...new Set(Object.values(index).map(entry => entry && entry.cwd).filter(Boolean))];
+  await mapLimit(cwds, 8, async cwd => {
+    const root = await gitRootForCwd(cwd);
+    if (root) found.add(root);
+  });
+  return found;
+}
+
+async function refreshGitRepoCard(root, prev) {
+  let head = '';
+  try { head = (await gitText(root, ['rev-parse', 'HEAD'])).trim(); } catch { return null; }
+  if (!head) return null;
+  let branch = null;
+  try { branch = (await gitText(root, ['branch', '--show-current'])).trim() || null; } catch {}
+  if (prev && prev.head === head && prev.branch === branch && prev.lastTs) {
+    // project recomputes every pass: a fold can re-attribute a cached card.
+    return { ...prev, head, branch, project: projectNameForPath(root), hasMemory: !!projectMetaFor(projectNameForPath(root)) };
+  }
+  let lastTs = null, subject = '';
+  try {
+    const line = (await gitText(root, ['log', '-1', '--format=%cI%x1f%s'])).trim();
+    const at = line.indexOf('\x1f');
+    lastTs = at >= 0 ? line.slice(0, at) : line;
+    subject = at >= 0 ? line.slice(at + 1) : '';
+  } catch {}
+  return {
+    id: crypto.createHash('sha256').update(root).digest('hex').slice(0, 12),
+    root, name: path.basename(root), project: projectNameForPath(root), branch, head,
+    lastTs, subject, hasMemory: !!projectMetaFor(projectNameForPath(root)),
+  };
+}
+
+function projectNameForPath(dir) {
+  return projectOfEntry({ cwd: dir });
+}
+
+async function discoverGitRepos(force = false) {
+  if (!force && Date.now() - gitRepoIndexCache.at < 45000 && gitRepoIndexCache.repos.length) return gitRepoIndexCache.repos;
+  let disk = null;
+  try { disk = JSON.parse(await fsp.readFile(GIT_REPOS_FILE, 'utf8')); } catch {}
+  const now = Date.now();
+  let roots;
+  if (!force && disk && Array.isArray(disk.roots) && disk.roots.length && now - (disk.scannedAt || 0) < 10 * 60 * 1000) {
+    roots = new Set(disk.roots);
+  } else {
+    roots = await scanGitRoots();
+    disk = { ...(disk || {}), scannedAt: now, roots: [...roots] };
+  }
+  const expanded = new Set();
+  await mapLimit([...roots], 8, async root => {
+    for (const wt of await worktreeRoots(root)) expanded.add(wt);
+  });
+  const prevByRoot = new Map((disk.repos || gitRepoIndexCache.repos || []).map(repo => [repo.root, repo]));
+  const repos = (await mapLimit([...expanded], 8, root => refreshGitRepoCard(root, prevByRoot.get(root)))).filter(Boolean);
+  repos.sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || '')) || a.root.localeCompare(b.root));
+  gitRepoIndexCache = { at: now, repos };
+  fsp.writeFile(GIT_REPOS_FILE, JSON.stringify({ scannedAt: disk.scannedAt, roots: disk.roots || [...roots], repos })).catch(() => {});
+  return repos;
+}
+
+function gitRowsFromRepo(repo) {
+  const rows = new Map();
+  const rowFor = relativePath => {
+    const id = `${repo.id}:${relativePath}`;
+    let row = rows.get(id);
+    if (!row) {
+      row = {
+        id, repoId: repo.id, repoRoot: repo.root, relativePath,
+        path: path.join(repo.root, relativePath), aiEvents: [], commitEvents: [], workingTree: null, latestTs: null,
+      };
+      rows.set(id, row);
+    }
+    return row;
+  };
+  for (const commit of repo.commits) {
+    for (const file of commit.files) {
+      const row = rowFor(file.path);
+      row.commitEvents.push({
+        id: `git:${repo.id}:${commit.hash}:${file.path}`, hash: commit.hash, shortHash: commit.shortHash,
+        ts: commit.ts, subject: commit.subject, author: commit.author, parents: commit.parents,
+        branches: commit.branches, additions: file.additions, deletions: file.deletions,
+      });
+      if (!row.latestTs || String(commit.ts || '') > String(row.latestTs)) row.latestTs = commit.ts;
+    }
+  }
+  for (const working of repo.workingTree) rowFor(working.path).workingTree = working.status;
+  return [...rows.values()].sort((a, b) => String(b.latestTs || '').localeCompare(String(a.latestTs || '')) || a.relativePath.localeCompare(b.relativePath));
+}
+
+async function gitFileHistoryResponse(rootValue) {
+  const listed = await discoverGitRepos();
+  const wanted = path.resolve(rootValue || '');
+  const match = listed.find(item => item.root === wanted);
+  if (!match) throw new Error('repository not found');
+  const repo = await loadGitRepository(match.root);
+  const rowsMap = new Map(gitRowsFromRepo(repo).map(row => [row.relativePath, row]));
+  for (const relativePath of await gitTrackedPaths(match.root)) {
+    if (rowsMap.has(relativePath)) continue;
+    rowsMap.set(relativePath, {
+      id: `${repo.id}:${relativePath}`, repoId: repo.id, repoRoot: repo.root, relativePath,
+      path: path.join(repo.root, relativePath), aiEvents: [], commitEvents: [], workingTree: null, latestTs: null,
+    });
+  }
+  const rows = [...rowsMap.values()].sort((a, b) => String(b.latestTs || '').localeCompare(String(a.latestTs || '')) || a.relativePath.localeCompare(b.relativePath));
+  return {
+    scope: 'git', project: match.project, cwd: match.root,
+    repositories: [{
+      id: repo.id, root: repo.root, currentBranch: repo.currentBranch, head: repo.head,
+      refs: repo.refs.map(ref => ref.name), commitCount: repo.commits.length,
+      workingTreeFiles: repo.workingTree.length, truncated: repo.truncated, isGit: true,
+    }],
+    rows,
+    totals: {
+      files: rows.length, aiEvents: 0, failed: 0, paired: 0,
+      commits: repo.commits.length,
+      commitFileEvents: rows.reduce((n, row) => n + row.commitEvents.length, 0),
+      workingTreeFiles: repo.workingTree.length,
+    },
+  };
+}
+
+async function gitTrackedPaths(root) {
+  let head = '';
+  try { head = (await gitText(root, ['rev-parse', 'HEAD'])).trim(); } catch {}
+  const key = root + '\0' + head;
+  if (gitTrackedCache.has(key)) return gitTrackedCache.get(key);
+  const text = await gitText(root, ['ls-tree', '-r', '--name-only', 'HEAD']).catch(() => '');
+  const paths = String(text).split('\n').map(line => line.trim()).filter(Boolean);
+  gitTrackedCache.set(key, paths);
+  if (gitTrackedCache.size > 80) gitTrackedCache.delete(gitTrackedCache.keys().next().value);
+  return paths;
+}
+
+async function gitFileContext(rootValue, fileValue) {
+  const listed = await discoverGitRepos();
+  const root = path.resolve(rootValue || '');
+  if (!listed.some(item => item.root === root)) throw new Error('repository is not indexed');
+  const { fullPath, relativePath } = normalizedRepoFile(root, fileValue);
+  const repo = await loadGitRepository(root);
+  const commits = repo.commits.filter(commit => commit.files.some(file => file.path === relativePath))
+    .sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.hash.localeCompare(b.hash));
+  let current = null;
+  try { current = await fsp.readFile(fullPath, 'utf8'); } catch {}
+  const version = diffEventHash([repo.head || '', commits.map(c => c.hash), current === null ? '' : current.length]);
+  return {
+    project: projectNameForPath(root), root, relativePath, fullPath, repo,
+    events: [], commits, current, version,
+  };
+}
+
+async function gitIntervalNumstat(root, fromId, toId) {
+  const fromHash = String(fromId || '').startsWith('git:') ? String(fromId).slice(4) : '';
+  const toHash = String(toId || '').startsWith('git:') ? String(toId).slice(4) : '';
+  if (!fromHash && !toHash) return [];
+  const args = ['diff', '--numstat', '--find-renames'];
+  if (fromHash && toHash) args.push(fromHash, toHash);
+  else if (fromHash) args.push(fromHash);
+  else return [];
+  const text = await gitText(root, args).catch(() => '');
+  const files = [];
+  for (const line of String(text).split('\n')) {
+    const match = line.match(/^(-|\d+)\t(-|\d+)\t(.+)$/);
+    if (!match) continue;
+    files.push({
+      path: renamedNumstatPath(match[3]),
+      added: match[1] === '-' ? 0 : Number(match[1]),
+      removed: match[2] === '-' ? 0 : Number(match[2]),
+    });
+  }
+  return files;
+}
+
+async function gitFileCompareResponse(root, file, fromId = '', toId = '', fromAt = '', toAt = '', light = false) {
+  const ctx = await gitFileContext(root, file);
+  const points = fileHistoryPoints(ctx);
+  if (!points.length) throw new Error('this file has no Git or working-tree points');
+  let to = points.find(point => point.id === toId) || nearestFilePoint(points, toAt) || points[points.length - 1];
+  const beforeTo = points.filter(point => point.order < to.order);
+  const defaultFrom = [...beforeTo].reverse().find(point => point.kind === 'git') || beforeTo[beforeTo.length - 1] || to;
+  let from = points.find(point => point.id === fromId) || nearestFilePoint(points, fromAt) || defaultFrom;
+  if (from.order > to.order) [from, to] = [to, from];
+  const [oldSnapshot, newSnapshot] = await Promise.all([snapshotAtFilePoint(ctx, from), snapshotAtFilePoint(ctx, to)]);
+  const changes = [];
+  if (!light) {
+    for (const commit of ctx.commits) {
+      const point = points.find(item => item.hash === commit.hash);
+      if (!point || point.order <= from.order || point.order > to.order) continue;
+      const patch = await commitPatch(ctx.root, commit.hash, ctx.relativePath);
+      changes.push({
+        type: 'git', id: commit.hash, hash: commit.hash, shortHash: commit.shortHash,
+        ts: commit.ts, kind: 'commit', subject: commit.subject, ...patchChangeText(patch),
+      });
+    }
+    changes.sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
+  }
+  return {
+    scope: 'git', project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
+    points, from: from.id, to: to.id, old: oldSnapshot, new: newSnapshot, changes,
+    truth: 'Git and current-file points are exact. This view has no AI reconstructions.',
+  };
+}
+
+async function gitFileSnapshotsResponse(root, file) {
+  const ctx = await gitFileContext(root, file);
+  const points = fileHistoryPoints(ctx);
+  const snapshots = await mapLimit(points, 6, async point => snapshotAtFilePoint(ctx, point));
+  return {
+    scope: 'git', project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
+    points, snapshots,
+  };
+}
+
+async function gitCommitResponse(root, hash) {
+  const listed = await discoverGitRepos();
+  const resolved = path.resolve(root || '');
+  if (!listed.some(item => item.root === resolved)) throw new Error('repository is not indexed');
+  if (!/^[0-9a-f]{7,40}$/i.test(hash || '')) throw new Error('bad commit hash');
+  const repo = await loadGitRepository(resolved);
+  const commit = repo.commits.find(item => item.hash === hash || item.hash.startsWith(hash));
+  if (!commit) throw new Error('commit not found in indexed history');
+  const patch = await gitText(resolved, ['show', '--format=fuller', '--find-renames', '--stat', '--patch', commit.hash, '--']).catch(e => e.message);
+  return { ...commit, repoId: repo.id, patch: clipped(patch, 2 * 1024 * 1024) };
+}
+
+async function sendGitFileFeedback(body) {
+  const root = path.resolve(body.repo || body.repoRoot || '');
+  const listed = await discoverGitRepos();
+  const repo = listed.find(item => item.root === root);
+  if (!repo) throw new Error('repository not found');
+  const image = String(body.image || '');
+  const match = image.match(/^data:image\/png;base64,(.+)$/);
+  if (!match) throw new Error('image must be a PNG data URL');
+  const dir = path.join(CACHE_DIR, 'feedback');
+  await fsp.mkdir(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const pngPath = path.join(dir, stamp + '.png');
+  const mdPath = path.join(dir, stamp + '.md');
+  await fsp.writeFile(pngPath, Buffer.from(match[1], 'base64'));
+  const rel = body.relativePath || body.path || 'file';
+  const fromId = body.from || '';
+  const toId = body.to || '';
+  const md = [
+    '# Inked Git file feedback',
+    '',
+    `- Repository: ${root}`,
+    `- File: ${body.path || path.join(root, rel)}`,
+    `- Relative path: ${rel}`,
+    `- Old point: ${fromId || '?'}`,
+    `- New point: ${toId || '?'}`,
+    `- Lines: ${body.fromLine || '?'}–${body.toLine || '?'}`,
+    `- Page: ${body.page || 1}/${body.pages || 1}`,
+    `- Image: ${pngPath}`,
+    '',
+    'The red ink is the user\'s requested edit on this Git file compare.',
+    'The file may never have been edited by an AI agent. Apply the marks.',
+    '',
+  ].join('\n');
+  await fsp.writeFile(mdPath, md);
+  const project = repo.project;
+  const meta = projectMetaFor(project);
+  const cwd = root;
+  const kind = body.agent === 'claude' ? 'claude' : 'pi';
+  let briefing = null;
+  let prefix = '';
+  if (meta) {
+    briefing = await buildProjectBriefing(project, { map: true, notes: true, epics: [], evidenceKeys: [] }, 'Git ink');
+    prefix = `Read ${briefing} — it maps this project's work memory with full file paths. Read every file listed under "Project memory" first. Then read every file listed under "Fresh distilled notes". `;
+  }
+  const prompt = prefix +
+    `Read ${mdPath} and the PNG at ${pngPath}. The red ink is requested file feedback for ${rel} lines ${body.fromLine}–${body.toLine} (page ${body.page}/${body.pages}), comparing ${fromId || 'an older Git point'} to ${toId || 'a newer Git point'} in ${root}. Apply those edits.`;
+  const name = 'aiconvo-git-' + crypto.createHash('sha256').update(root + stamp).digest('hex').slice(0, 12);
+  const argv = kind === 'claude'
+    ? [claudeBin(), prompt]
+    : [piBin(), '--name', String(repo.name + ' git ink').slice(0, 80), '@' + pngPath, prompt];
+  const startedAt = Date.now();
+  const existing = new Set(Object.keys(index));
+  await spawnAlacritty(cwd, name, argv);
+  const key = await waitForNewConversation(kind, cwd, startedAt, existing).catch(() => null);
+  if (key) recordLaunchedTitle(name, key);
+  return { ok: true, launched: true, pngPath, mdPath, briefing, project, key, cwd, kind, name };
 }
 
 function repoForEvent(event, repositories) {
@@ -3161,6 +4893,38 @@ async function pairEventToCommit(event, repo, commitsForFile) {
     score: Number(best.score.toFixed(3)), contentScore: Number(best.contentScore.toFixed(3)),
     deltaMs: best.deltaMs,
   };
+}
+
+// Full project file tree for the project tree mode: every repository under
+// the project with tracked / modified / untracked / ignored paths, branches,
+// and worktrees. Lists are capped so the endpoint stays cheap.
+async function projectTreeResponse(project) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const roots = await projectGitRepositories(meta);
+  const repos = [];
+  for (const root of roots) {
+    let branch = null;
+    try { branch = (await gitText(root, ['branch', '--show-current'])).trim() || null; } catch {}
+    let refs = [];
+    try {
+      refs = String(await gitText(root, ['branch', '--format=%(refname:short)']))
+        .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 40);
+    } catch {}
+    const tracked = (await gitTrackedPaths(root).catch(() => [])).slice(0, 8000);
+    const untracked = String(await gitText(root, ['ls-files', '--others', '--exclude-standard']).catch(() => ''))
+      .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 2000);
+    const ignored = String(await gitText(root, ['ls-files', '--others', '-i', '--directory', '--exclude-standard']).catch(() => ''))
+      .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 800);
+    const modified = String(await gitText(root, ['status', '--porcelain']).catch(() => ''))
+      .split('\n').filter(Boolean)
+      .map(line => ({ status: line.slice(0, 2).trim(), path: line.slice(3).trim().replace(/^"|"$/g, '') }))
+      .filter(item => item.path).slice(0, 2000);
+    let worktrees = [];
+    try { worktrees = (await worktreeRoots(root)).filter(wt => wt !== root); } catch {}
+    repos.push({ root, name: path.basename(root), branch, refs, worktrees, tracked, untracked, ignored, modified });
+  }
+  return { project, cwd: meta.cwd, repos };
 }
 
 async function projectFileHistoryResponse(project) {
@@ -3642,6 +5406,311 @@ function matchesDiffPath(event, pathValue) {
   return event.path === pathValue || event.path.endsWith('/' + pathValue) || event.relativePath === pathValue;
 }
 
+// ---- direct file editing ----
+// The whole-file view edits the CURRENT on-disk file, never a snapshot.
+// Writes stay inside indexed Git repositories or indexed conversation
+// working directories. A base hash makes each save optimistic: the write
+// is refused when the disk changed after the read.
+const FILE_EDIT_MAX = 2 * 1024 * 1024;
+
+function expandHomePath(p) {
+  const s = String(p || '');
+  return s === '~' ? os.homedir() : s.startsWith('~/') ? path.join(os.homedir(), s.slice(2)) : s;
+}
+
+const sha256Hex = text => crypto.createHash('sha256').update(text).digest('hex');
+
+// Atomic write: temp file in the same directory, then rename.
+async function writeFileAtomic(abs, text) {
+  const tmp = path.join(path.dirname(abs), '.aiconvo-edit-' + process.pid + '-' + Date.now() + '.tmp');
+  await fsp.writeFile(tmp, text);
+  await fsp.rename(tmp, abs);
+}
+
+// In-place rewrite: truncate + write + fsync on the SAME inode. A rename
+// replacement orphans recursive fs.watch on Linux (verified empirically:
+// appends after the rename emit no events), which froze live transcript
+// updates. Transcript edits therefore write in place; the backup taken
+// before the write is the crash-recovery path.
+async function writeFileInPlace(abs, text) {
+  const fh = await fsp.open(abs, 'r+');
+  try {
+    await fh.truncate(0);
+    await fh.writeFile(text);
+    await fh.sync();
+  } finally { await fh.close(); }
+}
+
+async function editableFilePath(pathValue) {
+  const abs = path.resolve(expandHomePath(pathValue));
+  let st;
+  try { st = await fsp.stat(abs); } catch { throw new Error('file not found on disk'); }
+  if (!st.isFile()) throw new Error('not a regular file');
+  if (st.size > FILE_EDIT_MAX) throw new Error('file too large to edit here');
+  const inside = root => root && (abs === root || abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
+  // Fast path: the cached repository list and indexed conversation
+  // directories answer without spawning any git process. The full
+  // discovery below is the slow fallback for unknown paths only.
+  if ((gitRepoIndexCache.repos || []).some(repo => inside(repo.root))) return abs;
+  for (const entry of Object.values(index)) if (inside(entry.cwd)) return abs;
+  const repos = await discoverGitRepos();
+  if (repos.some(repo => inside(repo.root))) return abs;
+  throw new Error('this path is outside every indexed repository and project');
+}
+
+async function fileReadResponse(pathValue) {
+  const abs = await editableFilePath(pathValue);
+  const text = await fsp.readFile(abs, 'utf8');
+  return { path: abs, text, sha: sha256Hex(text) };
+}
+
+async function fileSaveResponse(body) {
+  const { path: p, baseSha, text } = body;
+  if (typeof text !== 'string') throw new Error('missing text');
+  const abs = await editableFilePath(p || '');
+  if (baseSha) {
+    const current = await fsp.readFile(abs, 'utf8');
+    if (sha256Hex(current) !== baseSha) throw new Error('the file changed on disk after you loaded it — reload and edit again');
+  }
+  await writeFileAtomic(abs, text);
+  return { ok: true, path: abs, sha: sha256Hex(text) };
+}
+
+// Notes, epics, and project-memory documents are markdown under NOTES_DIR.
+async function noteFileSaveResponse(body) {
+  const { path: p, text } = body;
+  if (typeof text !== 'string') throw new Error('missing text');
+  const abs = path.resolve(expandHomePath(p || ''));
+  if (!abs.endsWith('.md') || !abs.startsWith(NOTES_DIR + path.sep)) throw new Error('only markdown files under ~/notes/aiconvo are editable here');
+  await fsp.stat(abs); // the file must already exist: this edits, it does not create
+  await writeFileAtomic(abs, text);
+  return { ok: true, path: abs };
+}
+
+// ---- trust: the vouch ledger ----
+// Pure logic lives in trust.js (tested). Records are append-only JSONL under
+// ~/notes/aiconvo/vouches.jsonl, so the ledger stays a plain, durable,
+// auditable file. Trust never excludes content; it only labels it.
+const trustLib = require('./trust.js');
+const VOUCH_LEDGER = path.join(NOTES_DIR, 'vouches.jsonl');
+let vouchRecords = [];
+function loadVouches() {
+  vouchRecords = [];
+  try {
+    for (const line of fs.readFileSync(VOUCH_LEDGER, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try { vouchRecords.push(JSON.parse(line)); } catch {}
+    }
+  } catch {}
+}
+loadVouches();
+
+const activeVouches = () => trustLib.activeRecords(vouchRecords);
+const vouchStatusFor = (absPath, content) => trustLib.statusFor(vouchRecords, absPath, content);
+
+async function vouchApply(body) {
+  const action = body.action === 'dispute' ? 'dispute' : body.action === 'retract' ? 'retract' : 'vouch';
+  let record;
+  if (action === 'retract') {
+    if (!body.ref) throw new Error('retract needs the record id in "ref"');
+    record = { id: crypto.randomUUID(), ts: new Date().toISOString(), action, ref: String(body.ref) };
+  } else {
+    const abs = path.resolve(expandHomePath(String(body.path || '')));
+    if (!path.isAbsolute(abs)) throw new Error('missing path');
+    // The client sends the exact text it displayed; without it, vouch the disk file.
+    let text = typeof body.text === 'string' ? body.text : await fsp.readFile(abs, 'utf8');
+    if (text.length > 500000) throw new Error('this block is too large to vouch in one record');
+    const range = Array.isArray(body.range) && body.range.length === 2 ? [Number(body.range[0]), Number(body.range[1])] : null;
+    record = {
+      id: crypto.randomUUID(), ts: new Date().toISOString(), action, path: abs,
+      range: range || undefined, contentSha: sha256Hex(text), text,
+      note: String(body.note || '').slice(0, 2000) || undefined,
+      source: String(body.source || '').slice(0, 40) || undefined,
+    };
+  }
+  await fsp.mkdir(NOTES_DIR, { recursive: true });
+  await fsp.appendFile(VOUCH_LEDGER, JSON.stringify(record) + '\n');
+  vouchRecords.push(record);
+  broadcast({ type: 'vouch', path: record.path || null });
+  return record;
+}
+
+// One disk-state summary per vouched path: for tree badges and review lists.
+function vouchAllResponse() {
+  const paths = {};
+  for (const p of new Set(activeVouches().map(r => r.path))) {
+    let content = null;
+    try { content = fs.readFileSync(p, 'utf8'); } catch {}
+    if (content === null) { paths[p] = { state: 'missing', disputed: false, ts: null }; continue; }
+    const st = vouchStatusFor(p, content);
+    const v = st.records.filter(r => r.action === 'vouch');
+    const state = !v.length ? 'none' : v.every(r => r.state === 'fresh') ? 'fresh' : st.summary.vouched ? 'partial' : 'stale';
+    paths[p] = {
+      state, disputed: st.records.some(r => r.action === 'dispute' && r.matchedCount),
+      ts: st.summary.lastVouchTs, records: st.records.length,
+      vouchedLines: st.summary.vouched, disputedLines: st.summary.disputed, totalLines: st.summary.total,
+    };
+  }
+  return { paths };
+}
+
+// Trust label for generated-content listings (briefings). Everything stays
+// included; the label only states how much a human verified, and when.
+function trustLabel(absPath) {
+  if (!activeVouches().some(r => r.path === absPath)) return '[unverified]';
+  let content = null;
+  try { content = fs.readFileSync(absPath, 'utf8'); } catch { return '[vouched earlier · file missing]'; }
+  return trustLib.trustLabelFrom(vouchStatusFor(absPath, content));
+}
+
+// ---- transcript editing ----
+// Everything in a transcript is editable: user text, assistant text, tool
+// inputs, tool results, live or idle. Format safety is the one hard rule:
+// parse the one target JSONL line, change only the target field, and
+// re-serialize the full entry. No string surgery on raw lines. When a live
+// agent owns the session, the server stops it first and reopens it after
+// the write, so it resumes with the edited context.
+
+// Replace the text of a message content. String content stays a string.
+// In a block array the new text goes into the first text block; later text
+// blocks fold into it; non-text blocks (thinking, tool_use, …) stay.
+function editedTextContent(content, newText) {
+  if (typeof content === 'string' || content == null) return newText;
+  if (!Array.isArray(content)) return newText;
+  const out = [];
+  let placed = false;
+  for (const b of content) {
+    if (b && b.type === 'text' && typeof b.text === 'string') {
+      if (!placed) { out.push({ ...b, text: newText }); placed = true; }
+    } else out.push(b);
+  }
+  if (!placed) out.push({ type: 'text', text: newText });
+  return out;
+}
+
+// Locate the edit target for message index i: the JSONL line, the entry,
+// and — for tool calls and results — the exact content block. Blocks are
+// matched by ordinal position among same-role messages of the same entry,
+// the exact inverse of how parseFile builds the message list.
+async function transcriptTarget(key, i) {
+  const entry = index[key];
+  if (!entry) throw new Error('conversation not found');
+  const abs = absPathForKey(key);
+  if (!abs) throw new Error('no session file for this conversation');
+  const rawText = await fsp.readFile(abs, 'utf8');
+  const { messages } = await parseFile(abs);
+  const m = messages[i];
+  if (!m) throw new Error('message not found — reload the conversation');
+  if (!m.eid) throw new Error('this row has no entry in the session file');
+  let ordinal = 0;
+  for (let at = 0; at < i; at++) if (messages[at].eid === m.eid && messages[at].role === m.role) ordinal++;
+  const lines = rawText.split('\n');
+  let lineAt = -1, d = null;
+  for (let at = 0; at < lines.length; at++) {
+    if (!lines[at].trim()) continue;
+    let parsed;
+    try { parsed = JSON.parse(lines[at]); } catch { continue; }
+    if (parsed && parsed.type !== 'session' && (parsed.id || parsed.uuid) === m.eid) { lineAt = at; d = parsed; break; }
+  }
+  if (lineAt < 0) throw new Error('entry not found in the session file — reload and retry');
+  const content = d.message && d.message.content;
+  if (m.role === 'user' || m.role === 'assistant') {
+    return { abs, lines, lineAt, d, m, kind: 'text', raw: textOf(content),
+      apply(newText) { d.message.content = editedTextContent(content, newText); } };
+  }
+  if (m.role === 'tool') {
+    const blocks = (Array.isArray(content) ? content : []).filter(b => b && (b.type === 'tool_use' || b.type === 'toolCall'));
+    const b = blocks[ordinal];
+    if (!b) throw new Error('tool-call block not found in the entry');
+    const input = b.input || b.arguments || {};
+    return { abs, lines, lineAt, d, m, kind: 'json', raw: JSON.stringify(input, null, 2),
+      apply(newText) {
+        let parsed;
+        try { parsed = JSON.parse(newText); } catch { throw new Error('tool input must stay valid JSON'); }
+        if (!parsed || typeof parsed !== 'object') throw new Error('tool input must be a JSON object');
+        if (b.arguments !== undefined) b.arguments = parsed; else b.input = parsed;
+      } };
+  }
+  if (m.role === 'toolresult') {
+    if (d.type === 'message' && d.message && d.message.role === 'toolResult') {
+      // pi: the tool result is its own message entry
+      const raw = textOf(content) || (typeof content === 'string' ? content : '');
+      return { abs, lines, lineAt, d, m, kind: 'text', raw,
+        apply(newText) { d.message.content = editedTextContent(content, newText); } };
+    }
+    // claude: a tool_result block inside a user turn
+    const blocks = (Array.isArray(content) ? content : []).filter(b => b && b.type === 'tool_result');
+    const b = blocks[ordinal];
+    if (!b) throw new Error('tool-result block not found in the entry');
+    const raw = textOf(b.content) || (typeof b.content === 'string' ? b.content : '');
+    return { abs, lines, lineAt, d, m, kind: 'text', raw,
+      apply(newText) { b.content = typeof b.content === 'string' || b.content == null ? newText : editedTextContent(b.content, newText); } };
+  }
+  throw new Error('this message kind is not editable');
+}
+
+async function stopRunningAgent(running) {
+  try { process.kill(running.pid, 'SIGTERM'); } catch { return; }
+  const t0 = Date.now();
+  while (Date.now() - t0 < 6000) {
+    try { process.kill(running.pid, 0); } catch { return; } // process is gone
+    await sleep(120);
+  }
+  try { process.kill(running.pid, 'SIGKILL'); } catch {}
+  await sleep(300);
+}
+
+// Wait until the session file stops changing (the exiting agent may still flush).
+async function waitFileQuiet(abs, totalMs = 3000, quietMs = 500) {
+  let last = null, since = Date.now();
+  const t0 = Date.now();
+  while (Date.now() - t0 < totalMs) {
+    let sig = 'none';
+    try { const st = await fsp.stat(abs); sig = st.mtimeMs + ':' + st.size; } catch {}
+    if (sig !== last) { last = sig; since = Date.now(); }
+    else if (Date.now() - since >= quietMs) return;
+    await sleep(120);
+  }
+}
+
+async function transcriptRawResponse(key, i) {
+  const target = await transcriptTarget(key, i);
+  return { key, i, role: target.m.role, kind: target.kind, raw: target.raw, sha: sha256Hex(target.raw) };
+}
+
+async function transcriptEditResponse(body) {
+  const { id: key, i, baseSha, text } = body;
+  if (typeof text !== 'string') throw new Error('missing text');
+  await releaseHeadless(absPathForKey(key), 'transcript edit');
+  const running = findRunningConversation(key);
+  if (running) {
+    await stopRunningAgent(running);
+    await waitFileQuiet(absPathForKey(key));
+  }
+  // Locate the target AFTER the stop: the exiting agent may have appended.
+  const target = await transcriptTarget(key, Number(i));
+  if (baseSha && sha256Hex(target.raw) !== baseSha) throw new Error('the transcript changed after you loaded it — reload and edit again');
+  // One backup per edit, for undo by hand.
+  const backupDir = path.join(CACHE_DIR, 'edits');
+  await fsp.mkdir(backupDir, { recursive: true });
+  const backup = path.join(backupDir, path.basename(target.abs) + '.' + Date.now() + '.bak');
+  await fsp.copyFile(target.abs, backup);
+  target.apply(text);
+  target.lines[target.lineAt] = JSON.stringify(target.d);
+  await writeFileInPlace(target.abs, target.lines.join('\n'));
+  // Reindex now: the client reloads at once and must not see the stale cache.
+  try {
+    const at = key.indexOf(':');
+    await indexFile(key.slice(0, at), key.slice(at + 1), await fsp.stat(target.abs));
+  } catch {}
+  let reopened = false;
+  if (running) {
+    try { await openConversationInTerminal(key, { focus: true }); reopened = true; }
+    catch {}
+  }
+  return { ok: true, backup, stopped: !!running, reopened };
+}
+
 async function fileBlameResponse(pathValue, project = '', key = '') {
   let events = [];
   let scanned = 0;
@@ -3707,11 +5776,7 @@ async function findDiffEvent(id, project = '', key = '') {
 
 // ---------- project overview ----------
 function projectOfEntry(entry) {
-  const cwd = String(entry && entry.cwd || '?').replace(/\\/g, '/').replace(/\/$/, '');
-  const inProjects = cwd.match(/\/Projects\/([^/]+)/);
-  if (inProjects) return inProjects[1];
-  const parts = cwd.split('/').filter(Boolean);
-  return parts[parts.length - 1] || '?';
+  return projectNameOf(entry && entry.cwd);
 }
 
 function projectMetaFor(project) {
@@ -3719,8 +5784,12 @@ function projectMetaFor(project) {
     .filter(([key, entry]) => key && entry && projectOfEntry(entry) === project)
     .map(([key, entry]) => ({ key, entry }));
   if (!entries.length) return null;
+  // Prefer a cwd whose own raw name IS the canonical project (the main
+  // worktree), so folded worktree paths do not become the project root.
   const cwds = [...new Set(entries.map(({ entry }) => entry.cwd).filter(Boolean))]
-    .sort((a, b) => b.length - a.length);
+    .sort((a, b) =>
+      (foldsLib.rawProjectOf(b) === project) - (foldsLib.rawProjectOf(a) === project)
+      || b.length - a.length);
   const cwd = cwds[0] || null;
   const epicsForProject = Object.values(epics)
     .map(epic => ({
@@ -3810,7 +5879,8 @@ async function buildProjectBriefing(project, include, focusName) {
       (r.notePath ? ` · note: ${r.notePath}${r.note === 'stale' ? ' (stale: the conversation grew after distillation)' : ''}` : ''));
   }
 
-  const projectMemory = await projectMemoryInfo(project, meta);
+  const wantMap = include.map !== false;
+  const projectMemory = wantMap ? await projectMemoryInfo(project, meta) : null;
   if (projectMemory) {
     lines.push('', `## Project memory${projectMemory.stale ? ' (stale: new project activity exists)' : ''}`);
     lines.push('Read these first. They separate durable intent, project setup, and current work:');
@@ -3826,12 +5896,12 @@ async function buildProjectBriefing(project, include, focusName) {
     for (const id of wantedEpics) {
       const epic = epics[id];
       lines.push(`### ${epic.title || id}`);
-      lines.push(`- File: ${epicPathFor(id)}`);
+      lines.push(`- File: ${epicPathFor(id)} ${trustLabel(epicPathFor(id))}`);
       if (epic.abstract) lines.push(`- Abstract: ${epic.abstract}`);
     }
   } else if (info.epics.length) {
     lines.push('', '## Epics (read on demand)');
-    for (const epic of info.epics.slice(0, 6)) lines.push(`- ${epic.title} · ${epicPathFor(epic.id)}`);
+    for (const epic of info.epics.slice(0, 6)) lines.push(`- ${epic.title} · ${epicPathFor(epic.id)} ${trustLabel(epicPathFor(epic.id))}`);
   }
 
   if (include.notes) {
@@ -3866,6 +5936,38 @@ async function buildProjectBriefing(project, include, focusName) {
   return file;
 }
 
+function includeFlag(include, name) {
+  return !!(include && include[name]);
+}
+
+// Wait for the session file the just-spawned agent creates. `existing` is a
+// snapshot of index keys taken before the spawn: only a key that was not in
+// the index before counts. Without that guard, any busy conversation in the
+// same cwd has the newest mtime and gets stolen as the "new" conversation,
+// which later binds the window to the wrong session and forks it on send.
+async function waitForNewConversation(kind, cwd, sinceMs, existing, timeoutMs = 20000) {
+  const source = kind === 'claude' ? 'claude' : 'pi';
+  let want = null;
+  try { want = path.resolve(cwd); } catch { want = cwd; }
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    let best = null, bestM = 0;
+    for (const [key, e] of Object.entries(index)) {
+      if (!e || e.source !== source) continue;
+      if (existing && existing.has(key)) continue;
+      if (!e.mtimeMs || e.mtimeMs + 2000 < sinceMs) continue;
+      if (!e.cwd) continue;
+      let got = e.cwd;
+      try { got = path.resolve(e.cwd); } catch {}
+      if (got !== want) continue;
+      if (e.mtimeMs >= bestM) { best = key; bestM = e.mtimeMs; }
+    }
+    if (best) return best;
+    await sleep(400);
+  }
+  return null;
+}
+
 async function startProjectConversation(options) {
   const meta = projectMetaFor(options.project);
   if (!meta) throw new Error('project not found');
@@ -3873,23 +5975,253 @@ async function startProjectConversation(options) {
   const kind = options.agent === 'claude' ? 'claude' : 'pi';
   const label = String(options.name || 'Project: ' + options.project).slice(0, 80);
   const name = 'aiconvo-project-' + crypto.createHash('sha256').update(options.project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
-  const briefing = await buildProjectBriefing(options.project, options.include || {}, options.name || '');
-  const focus = options.name ? ` Today's focus: "${options.name}".` : '';
-  const memory = await projectMemoryInfo(options.project, meta);
-  const first = memory ? ' Read every file listed under "Project memory" first.' : '';
-  const reading = options.include && options.include.notes
-    ? ' Read every file listed under "Fresh distilled notes".'
-    : ' Read the other files you need.';
-  const text = `Read ${briefing} — it maps this project's work memory (notes, epics, evidence) with full file paths.${first}${reading}${focus}` +
-    ' Then reply with at most 3 lines on where the project stands, and wait for instructions.';
+  const include = options.include || {};
+  const wantMap = include.map !== false;
+  const wantNotes = includeFlag(include, 'notes');
+  const wantEpics = Array.isArray(include.epics) && include.epics.length;
+  const wantEvidence = Array.isArray(include.evidenceKeys) && include.evidenceKeys.length;
+  const wantBriefing = wantMap || wantNotes || wantEpics || wantEvidence;
+  let briefing = null;
+  let text = String(options.name || '').trim();
+  if (wantBriefing) {
+    briefing = await buildProjectBriefing(options.project, include, options.name || '');
+    const focus = options.name ? ` Today's focus: "${options.name}".` : '';
+    const memory = wantMap ? await projectMemoryInfo(options.project, meta) : null;
+    const first = memory ? ' Read every file listed under "Project memory" first.' : '';
+    const reading = wantNotes
+      ? ' Read every file listed under "Fresh distilled notes".'
+      : (wantMap ? ' Read the other files you need.' : '');
+    text = `Read ${briefing} — it maps this project's work memory (notes, epics, evidence) with full file paths.${first}${reading}${focus}` +
+      ' Then reply with at most 3 lines on where the project stands, and wait for instructions.';
+  }
   const argv = kind === 'claude'
-    ? [claudeBin(), text]
-    : [piBin(), '--name', label, text];
+    ? (text ? [claudeBin(), text] : [claudeBin()])
+    : (text ? [piBin(), '--name', label, text] : [piBin(), '--name', label]);
+  const useRpc = kind === 'pi' && options.surface !== 'alacritty';
+  let key = null;
+  if (useRpc) {
+    const begun = await piBeginWarm({ cwd, env: agentEnv(), extraArgs: ['--name', label, ...piProviderExtraArgs()] });
+    // Pi reports sessionFile before it writes. The first prompt creates the file.
+    const job = {
+      id: 'run:' + crypto.randomUUID().slice(0, 8),
+      type: 'agent-run', key: null,
+      title: (text || label).replace(/\s+/g, ' ').slice(0, 60),
+      status: 'running', statusText: text ? 'starting' : 'ready',
+      startedAt: Date.now(), model: null,
+    };
+    let handle = null;
+    if (text) {
+      handle = piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, {
+        message: text, onEvent: runEventForwarder(job),
+      });
+    }
+    const t0 = Date.now();
+    while (Date.now() - t0 < 20000) {
+      try { await fsp.stat(begun.file); break; } catch {}
+      await sleep(50);
+    }
+    try { await fsp.stat(begun.file); }
+    catch {
+      stopWarmSession(begun.file);
+      endLiveRunTail(job.id);
+      throw new Error('pi did not write the session file');
+    }
+    key = await indexNewSessionFile(begun.file);
+    job.key = key;
+    if (handle) {
+      agentRunJobs.set(job.id, job);
+      jobChanged(job);
+      const record = { jobId: job.id, key, startedAt: job.startedAt, model: job.model, handle, yielded: null };
+      headlessRuns.set(begun.file, record);
+      const entry = index[key];
+      handle.done.then(async result => {
+        headlessRuns.delete(begun.file);
+        job.uiRequests = [];
+        if (record.yielded) { job.status = 'done'; job.statusText = 'stopped — ' + record.yielded; }
+        else if (job.errorMessage) { job.status = 'error'; job.statusText = job.errorMessage; job.error = job.errorMessage; }
+        else if (handle.uiAutoCancelled) { job.status = 'done'; job.statusText = 'settled · ' + handle.uiAutoCancelled + ' unanswered dialog(s) cancelled'; }
+        else { job.status = 'done'; job.statusText = 'settled'; }
+        job.finishedAt = Date.now();
+        try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(begun.file)); } catch {}
+        endLiveRunTail(job.id);
+        jobChanged(job);
+        broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, final: true });
+      }).catch(async e => {
+        headlessRuns.delete(begun.file);
+        job.status = 'error'; job.statusText = e.message; job.error = e.message; job.finishedAt = Date.now();
+        endLiveRunTail(job.id);
+        jobChanged(job);
+        broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, final: true });
+      });
+    }
+    return {
+      name, kind, cwd, title: name, key, surface: 'rpc',
+      project: options.project, include, briefing, kickoff: wantBriefing,
+    };
+  }
+  const startedAt = Date.now();
+  const existing = new Set(Object.keys(index));
   await spawnAlacritty(cwd, name, argv);
+  key = await waitForNewConversation(kind, cwd, startedAt, existing);
+  if (key) recordLaunchedTitle(name, key);
   return {
-    name, kind, cwd, title: name,
-    project: options.project, include: options.include || {}, briefing, kickoff: true,
+    name, kind, cwd, title: name, key, surface: 'alacritty',
+    project: options.project, include, briefing, kickoff: wantBriefing,
   };
+}
+
+// ---------- Kokoro TTS (family server, same stack as readerd) ----------
+const TTS_DIR = path.join(CACHE_DIR, 'tts');
+const KOKORO_URL = process.env.KOKORO_URL || 'http://192.168.2.24:8880';
+const SPEECH_URL = process.env.SPEECH_URL || 'http://192.168.2.24:8078';
+const KOKORO_VOICE = process.env.KOKORO_VOICE || 'bm_george';
+const REWRITE_URL = process.env.REWRITE_URL || 'http://192.168.2.24:8000/v1/chat/completions';
+const REWRITE_MODEL = process.env.REWRITE_MODEL || 'qwen/qwen3.8-27b';
+const REWRITE_API_KEY = process.env.REWRITE_API_KEY || 'inktype-local';
+const ttsJobs = new Map();
+
+const TTS_REWRITE_PROMPT = 'You are a text-to-speech preprocessor. Rewrite the text so it sounds natural when spoken. Spell out abbreviations and numbers. Skip code syntax and URLs. Output only the spoken script.';
+
+function pcmToWav(pcm, sampleRate) {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+function httpJson(urlStr, body, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const data = Buffer.from(JSON.stringify(body));
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request({
+      hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': data.length,
+        Authorization: 'Bearer ' + REWRITE_API_KEY,
+      },
+    }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        try { resolve({ status: res.statusCode, json: JSON.parse(raw), raw }); }
+        catch { resolve({ status: res.statusCode, json: null, raw }); }
+      });
+    });
+    req.setTimeout(timeoutMs || 120000, () => { req.destroy(new Error('timeout')); });
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+function httpRaw(urlStr, body, contentType, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const data = Buffer.from(body);
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request({
+      hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'POST',
+      headers: { 'Content-Type': contentType, 'Content-Length': data.length },
+    }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, buf: Buffer.concat(chunks), headers: res.headers }));
+    });
+    req.setTimeout(timeoutMs || 180000, () => { req.destroy(new Error('timeout')); });
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+function httpPcm(urlStr, body, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const data = Buffer.from(JSON.stringify(body));
+    const lib = u.protocol === 'https:' ? https : http;
+    const req = lib.request({
+      hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+    }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, buf: Buffer.concat(chunks), headers: res.headers }));
+    });
+    req.setTimeout(timeoutMs || 180000, () => { req.destroy(new Error('timeout')); });
+    req.on('error', reject);
+    req.end(data);
+  });
+}
+
+async function rewriteForSpeech(text) {
+  const res = await httpJson(REWRITE_URL, {
+    model: REWRITE_MODEL,
+    messages: [
+      { role: 'system', content: TTS_REWRITE_PROMPT },
+      { role: 'user', content: text },
+    ],
+    max_tokens: 4096,
+    chat_template_kwargs: { enable_thinking: false },
+  }, 90000);
+  const out = res.json && res.json.choices && res.json.choices[0] && res.json.choices[0].message
+    && res.json.choices[0].message.content;
+  return String(out || '').trim();
+}
+
+async function synthesizeSpeech(text, rewrite) {
+  const src = String(text || '').trim();
+  if (!src) throw new Error('No text to read.');
+  const id = crypto.createHash('sha256').update((rewrite ? 'r1|' : 'r0|') + src).digest('hex').slice(0, 24);
+  const wavPath = path.join(TTS_DIR, id + '.wav');
+  const metaPath = path.join(TTS_DIR, id + '.json');
+  if (fs.existsSync(wavPath)) {
+    let meta = { id, cached: true };
+    try { meta = { ...JSON.parse(fs.readFileSync(metaPath, 'utf8')), cached: true }; } catch {}
+    return { ...meta, id, url: '/api/tts/audio?id=' + id };
+  }
+  if (ttsJobs.has(id)) return ttsJobs.get(id);
+  const job = (async () => {
+    await fsp.mkdir(TTS_DIR, { recursive: true });
+    let spoken = src;
+    if (rewrite) {
+      try {
+        const rewritten = await rewriteForSpeech(src.slice(0, 12000));
+        if (rewritten) spoken = rewritten;
+      } catch (e) {
+        console.log('tts rewrite failed: ' + e.message);
+      }
+    }
+    const tts = await httpPcm(KOKORO_URL.replace(/\/$/, '') + '/tts', {
+      text: spoken, voice: KOKORO_VOICE, speed: 1,
+    }, 180000);
+    if (tts.status !== 200 || !tts.buf.length) {
+      throw new Error('Kokoro TTS failed (' + tts.status + '). Is kokoro-tts running?');
+    }
+    const rate = Number(tts.headers['x-sample-rate'] || 24000);
+    const wav = pcmToWav(tts.buf, rate);
+    await fsp.writeFile(wavPath, wav);
+    const meta = {
+      id, chars: src.length, spokenChars: spoken.length, rewrite: !!rewrite,
+      sampleRate: rate, bytes: wav.length, durationMs: Math.round(tts.buf.length / 2 / rate * 1000),
+    };
+    await fsp.writeFile(metaPath, JSON.stringify(meta));
+    return { ...meta, cached: false, url: '/api/tts/audio?id=' + id };
+  })();
+  ttsJobs.set(id, job);
+  try { return await job; }
+  finally { ttsJobs.delete(id); }
 }
 
 // ---------- HTTP ----------
@@ -3943,7 +6275,12 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(await fsp.readFile(path.join(__dirname, 'app.html')));
     } else if (u.pathname === '/api/sessions') {
-      const list = Object.entries(index).map(([key, e]) => ({ key, ...e }));
+      const fam = familyGroups();
+      const list = Object.entries(index).map(([key, e]) => {
+        const f = fam.get(key);
+        // family fields appear only on multi-member families: less payload.
+        return f && f.size > 1 ? { key, ...e, family: f.primary, familySize: f.size } : { key, ...e };
+      });
       list.sort((a, b) => (b.lastTs || '').localeCompare(a.lastTs || ''));
       json(res, 200, list);
     } else if (u.pathname === '/api/session') {
@@ -3968,9 +6305,46 @@ const server = http.createServer(async (req, res) => {
         lastExchange: chat.slice(Math.max(0, lastUserIdx)),
       });
     } else if (u.pathname === '/api/search') {
-      const q = u.searchParams.get('q') || '';
-      if (q.length < 2) return json(res, 200, []);
-      json(res, 200, await search(q));
+      const q = (u.searchParams.get('q') || '').trim();
+      if (q.length < 2) return json(res, 200, { q, total: 0, groups: [] });
+      const t0 = Date.now();
+      const out = searchIdx
+        ? searchIdx.search(q, {
+            limit: Number(u.searchParams.get('limit')) || 40,
+            offset: Number(u.searchParams.get('offset')) || 0,
+            boostProject: u.searchParams.get('boost') || '',
+          })
+        : await legacySearch(q);
+      // Conversation groups carry fresh index metadata (titles can change).
+      for (const g of out.groups) {
+        if (g.key && index[g.key]) {
+          const e = index[g.key];
+          g.title = e.title; g.timelineTitle = e.timelineTitle; g.cwd = e.cwd;
+          g.source = e.source; g.firstTs = e.firstTs; g.lastTs = e.lastTs;
+          g.notePath = e.notePath || null;
+        }
+      }
+      json(res, 200, { q, tookMs: Date.now() - t0, sem: semanticEnabled(), ...out });
+    } else if (u.pathname === '/api/search/semantic') {
+      // Stage two: late-interaction hits from the GPU server. Failures are
+      // soft — the client silently keeps the lexical results.
+      const q = (u.searchParams.get('q') || '').trim();
+      if (!semanticEnabled() || q.length < 2) return json(res, 200, { q, semantic: semanticEnabled(), groups: [] });
+      const t0 = Date.now();
+      try {
+        const r = await semFetch('/search', { q, limit: 30 }, 8000);
+        json(res, 200, { q, semantic: true, tookMs: Date.now() - t0, groups: semanticGroups(r.hits || []) });
+      } catch (e) {
+        json(res, 200, { q, semantic: true, groups: [], error: 'semantic stage unreachable' });
+      }
+    } else if (u.pathname === '/api/search/semantic-status') {
+      const out = { enabled: semanticEnabled(), url: appSettings.semanticUrl || '' };
+      if (searchIdx) out.sync = searchIdx.semanticStats();
+      if (out.enabled) {
+        try { out.health = await semFetch('/health', undefined, 4000); }
+        catch (e) { out.error = e.message; }
+      }
+      json(res, 200, out);
     } else if (u.pathname === '/api/related') {
       const key = u.searchParams.get('id');
       const entry = index[key];
@@ -3988,8 +6362,18 @@ const server = http.createServer(async (req, res) => {
       });
     } else if (u.pathname === '/api/project') {
       const project = u.searchParams.get('name') || '';
-      try { json(res, 200, await projectResponse(project)); }
-      catch (e) { json(res, 404, { error: e.message }); }
+      try {
+        const data = await projectResponse(project);
+        data.foldedFrom = foldedFromFor(data.project);
+        const sugs = await projectFoldSuggestions().catch(() => []);
+        // Quiet by design: only the three strongest pairs (suggestPairs
+        // emits remote evidence before name evidence).
+        data.foldSuggestions = sugs
+          .filter(s => s.from === data.project || s.into === data.project)
+          .map(s => ({ ...s, other: s.from === data.project ? s.into : s.from }))
+          .slice(0, 3);
+        json(res, 200, data);
+      } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/diffs') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
@@ -3998,6 +6382,11 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/conversation/file-history') {
       try { json(res, 200, await conversationFileHistoryResponse(u.searchParams.get('id') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/file-event') {
+      try { json(res, 200, await conversationFileEventResponse(
+        u.searchParams.get('id') || '', u.searchParams.get('call') || '',
+        u.searchParams.get('ts') || '', u.searchParams.get('path') || ''));
+      } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/file-history/file') {
       try { json(res, 200, await conversationFileCompareResponse(
         u.searchParams.get('id') || '', u.searchParams.get('repo') || '', u.searchParams.get('path') || '',
@@ -4012,6 +6401,9 @@ const server = http.createServer(async (req, res) => {
       const project = u.searchParams.get('name') || '';
       try { json(res, 200, await projectFileHistoryResponse(project)); }
       catch (e) { json(res, e.message === 'project not found' ? 404 : 500, { error: e.message }); }
+    } else if (u.pathname === '/api/project/tree') {
+      try { json(res, 200, await projectTreeResponse(u.searchParams.get('name') || '')); }
+      catch (e) { json(res, e.message === 'project not found' ? 404 : 500, { error: e.message }); }
     } else if (u.pathname === '/api/project/file-history/commit') {
       try { json(res, 200, await projectCommitResponse(
         u.searchParams.get('name') || '', u.searchParams.get('repo') || '', u.searchParams.get('hash') || ''));
@@ -4022,11 +6414,82 @@ const server = http.createServer(async (req, res) => {
         u.searchParams.get('from') || '', u.searchParams.get('to') || '',
         u.searchParams.get('fromAt') || '', u.searchParams.get('toAt') || ''));
       } catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/git/repos') {
+      try { json(res, 200, { repos: await discoverGitRepos(u.searchParams.get('refresh') === '1') }); }
+      catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/git/file-history') {
+      try { json(res, 200, await gitFileHistoryResponse(u.searchParams.get('repo') || '')); }
+      catch (e) { json(res, e.message === 'repository not found' ? 404 : 500, { error: e.message }); }
+    } else if (u.pathname === '/api/git/file-history/commit') {
+      try { json(res, 200, await gitCommitResponse(u.searchParams.get('repo') || '', u.searchParams.get('hash') || '')); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/git/file-history/file') {
+      try { json(res, 200, await gitFileCompareResponse(
+        u.searchParams.get('repo') || '', u.searchParams.get('path') || '',
+        u.searchParams.get('from') || '', u.searchParams.get('to') || '',
+        u.searchParams.get('fromAt') || '', u.searchParams.get('toAt') || '',
+        u.searchParams.get('light') === '1'));
+      } catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/git/file-history/snapshots') {
+      try { json(res, 200, await gitFileSnapshotsResponse(u.searchParams.get('repo') || '', u.searchParams.get('path') || '')); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/git/file-history/interval') {
+      try {
+        json(res, 200, {
+          repo: path.resolve(u.searchParams.get('repo') || ''),
+          from: u.searchParams.get('from') || '',
+          to: u.searchParams.get('to') || '',
+          files: await gitIntervalNumstat(
+            u.searchParams.get('repo') || '', u.searchParams.get('from') || '', u.searchParams.get('to') || ''),
+        });
+      } catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/git/file-feedback' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await sendGitFileFeedback(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/file/blame') {
       const pathValue = u.searchParams.get('path') || '';
       if (!pathValue) return json(res, 400, { error: 'missing path' });
       try { json(res, 200, await fileBlameResponse(pathValue, u.searchParams.get('project') || '', u.searchParams.get('key') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/file/read' && req.method === 'GET') {
+      try { json(res, 200, await fileReadResponse(u.searchParams.get('path') || '')); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/file/save' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await fileSaveResponse(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/notefile/save' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await noteFileSaveResponse(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/vouch' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await vouchApply(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/vouch/status' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const parsed = JSON.parse(body || '{}');
+        const abs = path.resolve(expandHomePath(String(parsed.path || '')));
+        const content = typeof parsed.content === 'string' ? parsed.content : await fsp.readFile(abs, 'utf8');
+        json(res, 200, vouchStatusFor(abs, content));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/vouch/all' && req.method === 'GET') {
+      json(res, 200, vouchAllResponse());
+    } else if (u.pathname === '/api/transcript/raw' && req.method === 'GET') {
+      try { json(res, 200, await transcriptRawResponse(u.searchParams.get('id') || '', Number(u.searchParams.get('i')))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/transcript/edit' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await transcriptEditResponse(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/diff-event') {
       const id = u.searchParams.get('id') || '';
       const event = await findDiffEvent(id, u.searchParams.get('project') || '', u.searchParams.get('key') || '');
@@ -4058,10 +6521,98 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}');
       try { json(res, 200, await startProjectConversation(parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/project-folds') {
+      json(res, 200, await projectFoldsResponse());
+    } else if (u.pathname === '/api/project/fold' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 200, await foldProjects(parsed.from, parsed.into)); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/unfold' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 200, await unfoldProject(parsed.name)); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/fold-dismiss' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 200, await dismissFoldSuggestion(parsed.from, parsed.into)); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/tree') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
       json(res, 200, await sessionTreeFor(key));
+    } else if (u.pathname === '/api/conversation/context') {
+      const key = u.searchParams.get('id');
+      if (!key || !index[key]) return json(res, 404, { error: 'not found' });
+      try { json(res, 200, await conversationContextResponse(key, u.searchParams.get('leaf') || null)); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/compare') {
+      const key = u.searchParams.get('id');
+      if (!key || !index[key]) return json(res, 404, { error: 'not found' });
+      try { json(res, 200, await compareGroupsResponse(key)); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/title' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, await setConversationTitle(p.id, p.title));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/retitle' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, await retitleConversation(p.id));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/model' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, await setConversationModel(p.id, p.provider, p.modelId, !!p.force));
+      } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/node/send' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const models = (Array.isArray(p.models) ? p.models : []).filter(m => m && m.provider && m.modelId);
+        const images = rpcImagesOf(p.images);
+        if (models.length >= 2) {
+          json(res, 202, { ok: true, runs: await startFanOut(p.id, { node: p.node || null, models, message: p.prompt, images, force: !!p.force }) });
+        } else {
+          const out = await startAgentRun(p.id, {
+            node: p.node || null, provider: models[0] && models[0].provider, modelId: models[0] && models[0].modelId,
+            message: p.prompt, images, force: !!p.force, allowQueue: true,
+          });
+          if (out && out.queued) json(res, 202, { ok: true, queued: true, job: out.job ? jobView(out.job) : null });
+          else json(res, 202, { ok: true, job: jobView(out) });
+        }
+      } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/node/aggregate' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const out = await startAggregate(p.id, { node: p.node, provider: p.provider, modelId: p.modelId, instruction: p.instruction, answers: p.answers, force: !!p.force });
+        json(res, 202, { ok: true, job: jobView(out.job), answers: out.answers });
+      } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/run/abort' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const record = [...headlessRuns.values()].find(r => r.jobId === p.jobId);
+        if (!record) return json(res, 404, { error: 'run not found or already finished' });
+        record.yielded = 'aborted by you';
+        if (record.handle && record.handle.abort) await record.handle.abort();
+        json(res, 200, { ok: true });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/branch' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -4118,6 +6669,21 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { key, title: data.title, cwd: data.cwd, firstTs: data.firstTs, lastTs: data.lastTs, ...evidence });
     } else if (u.pathname === '/api/jobs') {
       json(res, 200, allJobs());
+    } else if (u.pathname === '/api/windows' && req.method === 'GET') {
+      json(res, 200, { rev: sharedWindows.rev, list: sharedWindows.list });
+    } else if (u.pathname === '/api/windows/upsert' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      const w = upsertSharedWindow(parsed.window, parsed.client);
+      if (!w) return json(res, 400, { error: 'bad window' });
+      json(res, 200, { ok: true, rev: sharedWindows.rev });
+    } else if (u.pathname === '/api/windows/close' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      closeSharedWindow(String(parsed.id || ''), parsed.client);
+      json(res, 200, { ok: true, rev: sharedWindows.rev });
     } else if (u.pathname === '/api/settings' && req.method === 'GET') {
       json(res, 200, settingsResponse());
     } else if (u.pathname === '/api/settings' && (req.method === 'PUT' || req.method === 'POST')) {
@@ -4129,8 +6695,10 @@ const server = http.createServer(async (req, res) => {
       if (!parsed.usePiDefault && parsed.provider && parsed.model && listed.length && !settingsLib.findModel(listed, parsed.provider, parsed.model)) {
         return json(res, 400, { error: 'unknown model: ' + parsed.provider + '/' + parsed.model });
       }
+      const wasSemantic = semanticEnabled();
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
       saveAppSettings();
+      if (!wasSemantic && semanticEnabled()) scheduleSemanticSync(500); // backfill starts now
       json(res, 200, settingsResponse());
     } else if (u.pathname === '/api/models') {
       const listed = await listPiModels(u.searchParams.get('refresh') === '1');
@@ -4194,6 +6762,59 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}');
       try { json(res, 200, await actOnConversation(parsed.id, parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/speech/transcribe' && req.method === 'POST') {
+      const max = 16000 * 2 * 600;
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > max) return json(res, 413, { error: 'Recording is longer than 10 minutes.' });
+        chunks.push(chunk);
+      }
+      if (size < 3200) return json(res, 400, { error: 'Recording was too short.' });
+      try {
+        const pcm = Buffer.concat(chunks);
+        const timeout = 60000 + Math.floor(pcm.length / 128);
+        const out = await httpRaw(
+          SPEECH_URL.replace(/\/$/, '') + '/transcribe', pcm,
+          'audio/L16;rate=16000;channels=1', timeout);
+        res.writeHead(out.status || 502, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(out.buf);
+      } catch (e) {
+        json(res, 502, { error: 'Speech service failed: ' + e.message });
+      }
+    } else if (u.pathname === '/api/tts' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 200, await synthesizeSpeech(parsed.text, parsed.rewrite !== false)); }
+      catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/tts/audio' && req.method === 'GET') {
+      const id = String(u.searchParams.get('id') || '').replace(/[^a-f0-9]/g, '');
+      const wavPath = path.join(TTS_DIR, id + '.wav');
+      if (!id || !fs.existsSync(wavPath)) return json(res, 404, { error: 'audio not found' });
+      const st = await fsp.stat(wavPath);
+      const size = st.size;
+      const range = String(req.headers.range || '');
+      const m = range.match(/^bytes=(\d*)-(\d*)$/);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Type', 'audio/wav');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      if (m) {
+        const start = m[1] ? Number(m[1]) : 0;
+        const end = m[2] ? Number(m[2]) : size - 1;
+        if (start >= size || end >= size || start > end) {
+          res.writeHead(416, { 'Content-Range': 'bytes */' + size });
+          return res.end();
+        }
+        res.writeHead(206, {
+          'Content-Range': 'bytes ' + start + '-' + end + '/' + size,
+          'Content-Length': end - start + 1,
+        });
+        return fs.createReadStream(wavPath, { start, end }).pipe(res);
+      }
+      res.writeHead(200, { 'Content-Length': size });
+      return fs.createReadStream(wavPath).pipe(res);
     } else if (u.pathname === '/api/export' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -4259,6 +6880,16 @@ const server = http.createServer(async (req, res) => {
       });
       res.write(': connected\n\n');
       sseClients.add(res);
+      // Seed the working-agent set right away: the periodic diff below only
+      // broadcasts on change, so a fresh client would otherwise start blind.
+      // boot + runs let a reconnecting client drop stale run cards and notice
+      // a server replacement.
+      try {
+        res.write('data: ' + JSON.stringify({
+          type: 'agents', keys: runningAgentKeys(), boot: BOOT_ID,
+          runs: [...agentRunJobs.values()].filter(j => j.status === 'running').map(j => j.id),
+        }) + '\n\n');
+      } catch {}
       const beat = setInterval(() => res.write(': ping\n\n'), 30000);
       req.on('close', () => { clearInterval(beat); sseClients.delete(res); });
     } else if (u.pathname === '/api/notes') {
@@ -4274,9 +6905,11 @@ const server = http.createServer(async (req, res) => {
       out.sort((a, b) => b.mtimeMs - a.mtimeMs);
       json(res, 200, out);
     } else if (u.pathname === '/api/notefile') {
-      const f = path.basename(u.searchParams.get('f') || '');
-      if (!f.endsWith('.md')) return json(res, 400, { error: 'bad name' });
-      try { json(res, 200, { file: f, text: await fsp.readFile(path.join(NOTES_DIR, f), 'utf8') }); }
+      // Accepts a path relative to the notes tree (notes, epics/…, projects/…).
+      const f = u.searchParams.get('f') || '';
+      const abs = path.resolve(NOTES_DIR, f);
+      if (!f.endsWith('.md') || !abs.startsWith(NOTES_DIR + path.sep)) return json(res, 400, { error: 'bad name' });
+      try { json(res, 200, { file: path.relative(NOTES_DIR, abs), text: await fsp.readFile(abs, 'utf8') }); }
       catch { json(res, 404, { error: 'not found' }); }
     } else if (u.pathname === '/api/distill/save' && req.method === 'POST') {
       let body = '';
@@ -4299,6 +6932,8 @@ const server = http.createServer(async (req, res) => {
       } catch { json(res, 404, { error: 'note file missing' }); }
     } else if (u.pathname === '/api/rescan' && req.method === 'POST') {
       await fullScan();
+      await refreshProjectFolds().catch(() => {});
+      syncSearchIndex();
       json(res, 200, { ok: true, count: Object.keys(index).length });
     } else {
       json(res, 404, { error: 'not found' });
@@ -4326,6 +6961,44 @@ function ensureLanTls() {
   }
   return { key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) };
 }
+// ---------- graceful shutdown ----------
+// systemd stops the whole cgroup. With KillMode=mixed only this process gets
+// the first SIGTERM: abort every active run so pi settles and saves what
+// already landed, mark each job with a visible reason, write the durable
+// snapshot, then exit. Without this, a restart killed the warm pi children
+// mid-answer and the run vanished with no trace.
+let shuttingDown = false;
+async function shutdownGracefully() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const hardExit = setTimeout(() => process.exit(0), 8000);
+  try {
+    const active = [...headlessRuns.values()];
+    for (const record of active) record.yielded = 'aiconvo restarted';
+    await Promise.race([
+      Promise.allSettled(active.map(async record => {
+        try { if (record.handle && record.handle.abort) await record.handle.abort(); } catch {}
+        try { if (record.handle && record.handle.done) await record.handle.done; } catch {}
+      })),
+      sleep(5000),
+    ]);
+    await sleep(100); // let the finish handlers mark their jobs
+    for (const job of agentRunJobs.values()) {
+      if (job.status === 'running') {
+        job.status = 'done';
+        job.statusText = 'stopped — aiconvo restarted';
+        job.finishedAt = Date.now();
+      }
+    }
+  } catch {}
+  try { stopAllWarmSessions(); } catch {}
+  saveAgentRunsNow();
+  clearTimeout(hardExit);
+  process.exit(0);
+}
+process.on('SIGTERM', () => { shutdownGracefully(); });
+process.on('SIGINT', () => { shutdownGracefully(); });
+
 server.listen(PORT, HOST, () => {
   console.log(`aiconvo → http://localhost:${PORT}`);
   if (HOST !== '127.0.0.1' && HOST !== '::1') {
@@ -4341,6 +7014,11 @@ server.listen(PORT, HOST, () => {
       console.log('aiconvo TLS skipped: ' + error.message);
     }
   }
-  fullScan().then(watch);
+  fullScan().then(() => {
+    watch(); watchNotes();
+    refreshProjectFolds().catch(() => {})
+      .then(() => syncSearchIndex())
+      .then(() => scheduleSemanticSync(2000));
+  });
   listPiModels().finally(() => setTimeout(() => listPiModels(true), 2500));
 });

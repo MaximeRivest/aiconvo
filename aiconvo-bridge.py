@@ -32,11 +32,37 @@ def winsize(fd: int) -> tuple[int, int]:
         return 24, 80
 
 
+def tty_is_raw(fd: int) -> bool:
+    """True when the PTY slave left canonical mode (the TUI reads raw input).
+
+    Before that, pasted bytes sit in the line discipline and get kernel-echoed;
+    a CR sent then merges with the paste when the TUI finally starts reading.
+    """
+    try:
+        lflag = termios.tcgetattr(fd)[3]
+        return not (lflag & termios.ICANON)
+    except (OSError, termios.error):
+        return False
+
+
 def set_winsize(fd: int, rows: int, cols: int) -> None:
     try:
         fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     except OSError:
         pass
+
+
+BLANK = (" ", "")
+
+
+def _cell(item) -> tuple[str, str]:
+    if isinstance(item, tuple) and len(item) == 2:
+        return str(item[0]), str(item[1])
+    return str(item), ""
+
+
+def _esc_html(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class Screen:
@@ -47,14 +73,25 @@ class Screen:
         self.cols = cols
         self.r = 0
         self.c = 0
-        self.grid = [[" "] * cols for _ in range(rows)]
+        self.grid = [[BLANK] * cols for _ in range(rows)]
         self.utf8 = bytearray()
         self.esc: list[int] | None = None
+        # True after the TUI sends DECSET 2004 (\x1b[?2004h). Only then may a
+        # paste carry the 200~/201~ markers; earlier the app prints them as text.
+        self.paste2004 = False
+        self.bold = False
+        self.dim = False
+        self.rev = False
+        self.fg = None
+        self.bg = None
+
+    def _blank_row(self) -> list:
+        return [BLANK] * self.cols
 
     def resize(self, rows: int, cols: int) -> None:
         rows = max(1, rows)
         cols = max(1, cols)
-        new = [[" "] * cols for _ in range(rows)]
+        new = [[BLANK] * cols for _ in range(rows)]
         for i in range(min(rows, self.rows)):
             row = self.grid[i]
             for j in range(min(cols, self.cols)):
@@ -63,9 +100,111 @@ class Screen:
         self.r = min(self.r, rows - 1)
         self.c = min(self.c, cols - 1)
 
+    def _style(self) -> str:
+        if self.rev or self._bg_marked():
+            return "sel"
+        if self._fg_accent() or self.bold:
+            return "acc"
+        if self.dim:
+            return "dim"
+        return ""
+
+    def _fg_accent(self) -> bool:
+        fg = self.fg
+        if fg in (32, 34, 36, 92, 94, 96):
+            return True
+        if isinstance(fg, int) and fg >= 1000:
+            idx = fg - 1000
+            if idx in (4, 6, 12, 14, 27, 33, 39, 45, 51):
+                return True
+            if 16 <= idx <= 231:
+                c = idx - 16
+                r, g, b = c // 36, (c // 6) % 6, c % 6
+                return b >= 4 and b > r and b >= g
+        if isinstance(fg, tuple) and len(fg) == 3:
+            r, g, b = fg
+            return b >= 140 and b > r + 20 and b >= g
+        return False
+
+    def _bg_marked(self) -> bool:
+        bg = self.bg
+        if bg is None:
+            return False
+        if bg in (40, 49):
+            return False
+        return True
+
+    def apply_sgr(self, nums: list[int]) -> None:
+        if not nums:
+            nums = [0]
+        i = 0
+        while i < len(nums):
+            n = nums[i]
+            if n == 0:
+                self.bold = self.dim = self.rev = False
+                self.fg = self.bg = None
+            elif n == 1:
+                self.bold = True
+            elif n == 2:
+                self.dim = True
+            elif n == 7:
+                self.rev = True
+            elif n == 22:
+                self.bold = self.dim = False
+            elif n == 27:
+                self.rev = False
+            elif n == 39:
+                self.fg = None
+            elif n == 49:
+                self.bg = None
+            elif 30 <= n <= 37 or 90 <= n <= 97:
+                self.fg = n
+            elif 40 <= n <= 47 or 100 <= n <= 107:
+                self.bg = n
+            elif n in (38, 48):
+                kind = n
+                if i + 1 < len(nums) and nums[i + 1] == 5:
+                    idx = nums[i + 2] if i + 2 < len(nums) else 0
+                    i += 2
+                    if kind == 38:
+                        self.fg = 1000 + idx
+                    else:
+                        self.bg = 1000 + idx
+                elif i + 1 < len(nums) and nums[i + 1] == 2:
+                    rgb = nums[i + 2 : i + 5]
+                    while len(rgb) < 3:
+                        rgb.append(0)
+                    i += 1 + len(rgb)
+                    if kind == 38:
+                        self.fg = (rgb[0], rgb[1], rgb[2])
+                    else:
+                        self.bg = (rgb[0], rgb[1], rgb[2])
+            i += 1
+
     def snapshot(self) -> str:
-        lines = ["".join(row).rstrip() for row in self.grid]
+        lines = ["".join(_cell(ch)[0] for ch in row).rstrip() for row in self.grid]
         while lines and not lines[-1]:
+            lines.pop()
+        return "\n".join(lines)
+
+    def snapshot_html(self) -> str:
+        lines = []
+        for row in self.grid:
+            parts: list[str] = []
+            i = 0
+            while i < len(row):
+                ch, st = _cell(row[i])
+                j = i + 1
+                while j < len(row) and _cell(row[j])[1] == st:
+                    j += 1
+                chunk = _esc_html("".join(_cell(row[k])[0] for k in range(i, j)))
+                if st:
+                    parts.append(f'<span class="term-{st}">{chunk}</span>')
+                else:
+                    parts.append(chunk)
+                i = j
+            lines.append("".join(parts).rstrip() or " ")
+        while lines and lines[-1].strip() in ("", "&nbsp;"):
             lines.pop()
         return "\n".join(lines)
 
@@ -75,7 +214,7 @@ class Screen:
             self.c = 0
             if self.r >= self.rows:
                 self.grid.pop(0)
-                self.grid.append([" "] * self.cols)
+                self.grid.append(self._blank_row())
                 self.r = self.rows - 1
             return
         if ch == "\r":
@@ -91,7 +230,7 @@ class Screen:
             return
         if self.c >= self.cols:
             self.put("\n")
-        self.grid[self.r][self.c] = ch
+        self.grid[self.r][self.c] = (ch, self._style())
         self.c += 1
 
     def cup(self, row: int, col: int) -> None:
@@ -102,21 +241,21 @@ class Screen:
         row = self.grid[self.r]
         if mode == 0:
             for i in range(self.c, self.cols):
-                row[i] = " "
+                row[i] = BLANK
         elif mode == 1:
             for i in range(0, self.c + 1):
-                row[i] = " "
+                row[i] = BLANK
         else:
             for i in range(self.cols):
-                row[i] = " "
+                row[i] = BLANK
 
     def ed(self, mode: int) -> None:
         if mode == 0:
             self.el(0)
             for r in range(self.r + 1, self.rows):
-                self.grid[r] = [" "] * self.cols
+                self.grid[r] = self._blank_row()
         elif mode == 2 or mode == 3:
-            self.grid = [[" "] * self.cols for _ in range(self.rows)]
+            self.grid = [self._blank_row() for _ in range(self.rows)]
             self.r = self.c = 0
 
     def csi(self, body: str) -> None:
@@ -124,6 +263,11 @@ class Screen:
             return
         final = body[-1]
         raw = body[:-1]
+        if final in "hl" and raw.startswith("?"):
+            modes = [int(p) for p in raw[1:].split(";") if p.isdigit()]
+            if 2004 in modes:
+                self.paste2004 = final == "h"
+            return
         nums = []
         for part in (raw.split(";") if raw else []):
             if part.isdigit():
@@ -149,7 +293,7 @@ class Screen:
         elif final == "K":
             self.el(nums[0] if nums else 0)
         elif final == "m":
-            return
+            self.apply_sgr(nums)
 
     def feed(self, data: bytes) -> None:
         i = 0
@@ -224,9 +368,17 @@ def reply(conn: socket.socket, obj: dict) -> None:
 def handle(msg: dict, screen: Screen, master: int) -> dict:
     op = msg.get("op")
     if op == "ping":
-        return {"ok": True, "op": "ping"}
+        return {"ok": True, "op": "ping", "raw": tty_is_raw(master), "paste": screen.paste2004}
     if op == "capture":
-        return {"ok": True, "text": screen.snapshot(), "rows": screen.rows, "cols": screen.cols}
+        return {
+            "ok": True,
+            "text": screen.snapshot(),
+            "html": screen.snapshot_html(),
+            "rows": screen.rows,
+            "cols": screen.cols,
+            "raw": tty_is_raw(master),
+            "paste": screen.paste2004,
+        }
     if op == "keys":
         data = msg.get("data", "")
         if isinstance(data, list):
@@ -237,9 +389,13 @@ def handle(msg: dict, screen: Screen, master: int) -> dict:
         return {"ok": True, "n": len(raw)}
     if op == "paste":
         text = str(msg.get("text") or "")
-        raw = b"\x1b[200~" + text.encode("utf-8") + b"\x1b[201~"
+        raw = text.encode("utf-8")
+        # Mirror a real terminal: send the bracketed-paste markers only when
+        # the application enabled mode 2004. Otherwise the TUI shows them.
+        if screen.paste2004:
+            raw = b"\x1b[200~" + raw + b"\x1b[201~"
         os.write(master, raw)
-        return {"ok": True, "n": len(raw)}
+        return {"ok": True, "n": len(raw), "bracketed": screen.paste2004}
     if op == "ctrl":
         key = str(msg.get("key") or "v").lower()[:1]
         os.write(master, bytes([ord(key) & 0x1F]))

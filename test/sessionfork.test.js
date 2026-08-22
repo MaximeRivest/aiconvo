@@ -2,7 +2,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { chainIds, claudeForkContent } = require('../sessionfork.js');
+const { chainIds, claudeForkContent, groupFamilies } = require('../sessionfork.js');
 
 function line(obj) { return JSON.stringify(obj); }
 
@@ -58,4 +58,48 @@ test('mid-node fork keeps the node itself ("through", not "before")', () => {
   const content = claudeForkContent(CLAUDE, 'b', 'x');
   const ids = content.trim().split('\n').map(l => JSON.parse(l).uuid);
   assert.deepStrictEqual(ids, ['a', 'b']);
+});
+
+// ---- groupFamilies: fork families for the session list ----
+
+test('groupFamilies links members by rootId and by parentSession', () => {
+  const entries = [
+    ['pi:a.jsonl', { rootId: 'r1', firstTs: '2026-01-01T00:00:00Z' }],
+    ['pi:b.jsonl', { rootId: 'r1', firstTs: '2026-01-02T00:00:00Z' }],          // claude-style fork: same root chain
+    ['pi:c.jsonl', { parentSession: '/s/a.jsonl', firstTs: '2026-01-03T00:00:00Z' }], // pi-style fork: parent link
+    ['pi:d.jsonl', { rootId: 'r2', firstTs: '2026-01-04T00:00:00Z' }],          // unrelated
+  ];
+  const fam = groupFamilies(entries, p => p === '/s/a.jsonl' ? 'pi:a.jsonl' : null);
+  assert.strictEqual(fam.get('pi:a.jsonl').size, 3);
+  assert.strictEqual(fam.get('pi:b.jsonl').primary, 'pi:a.jsonl');
+  assert.strictEqual(fam.get('pi:c.jsonl').primary, 'pi:a.jsonl');
+  assert.strictEqual(fam.get('pi:d.jsonl').size, 1);
+});
+
+test('groupFamilies picks the earliest member as the primary', () => {
+  const entries = [
+    ['pi:late.jsonl', { rootId: 'r', firstTs: '2026-02-02T00:00:00Z' }],
+    ['pi:early.jsonl', { rootId: 'r', firstTs: '2026-02-01T00:00:00Z' }],
+  ];
+  const fam = groupFamilies(entries, () => null);
+  assert.strictEqual(fam.get('pi:late.jsonl').primary, 'pi:early.jsonl');
+  assert.strictEqual(fam.get('pi:early.jsonl').primary, 'pi:early.jsonl');
+});
+
+test('groupFamilies chains transitive fork-of-fork links', () => {
+  const entries = [
+    ['pi:a.jsonl', { firstTs: '1' }],
+    ['pi:b.jsonl', { parentSession: '/s/a.jsonl', firstTs: '2' }],
+    ['pi:c.jsonl', { parentSession: '/s/b.jsonl', firstTs: '3' }],
+  ];
+  const resolve = p => ({ '/s/a.jsonl': 'pi:a.jsonl', '/s/b.jsonl': 'pi:b.jsonl' }[p] || null);
+  const fam = groupFamilies(entries, resolve);
+  assert.strictEqual(fam.get('pi:c.jsonl').primary, 'pi:a.jsonl');
+  assert.strictEqual(fam.get('pi:c.jsonl').size, 3);
+});
+
+test('groupFamilies ignores a parentSession that resolves to nothing', () => {
+  const entries = [['pi:a.jsonl', { parentSession: '/gone.jsonl', firstTs: '1' }]];
+  const fam = groupFamilies(entries, () => null);
+  assert.strictEqual(fam.get('pi:a.jsonl').size, 1);
 });
