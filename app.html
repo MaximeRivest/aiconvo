@@ -767,24 +767,26 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.thinking summary::-webkit-details-marker { display: none; }
 .msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
 .rc-body { color: var(--text); font-size: 12.5px; }
-.rc-cv { border: 1px dashed var(--accent); margin: 8px 0; background: var(--surface-1); }
-.rc-cv-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; color: var(--text-dim); font-size: var(--fs-micro); border-bottom: 1px solid var(--border-strong); }
+/* extension view: a modal takeover, not a black box in the chat */
+.rc-cv { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; background: rgba(10, 10, 14, .5); }
+.rc-cv-card { width: min(720px, 94vw); max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 16px 48px rgba(0, 0, 0, .45); overflow: hidden; }
+.rc-cv-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border-strong); color: var(--text-dim); font-size: var(--fs-micro); }
 .rc-cv-head strong { color: var(--accent); font-weight: 600; }
-.rc-cv-close { background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 1px 7px; font: inherit; font-size: var(--fs-micro); }
+.rc-cv-head span { flex: 1; }
+.rc-cv-close { background: none; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text-dim); cursor: pointer; padding: 2px 9px; font: inherit; font-size: var(--fs-micro); }
 .rc-cv-close:hover { color: var(--red, #f66); border-color: var(--red, #f66); }
-.rc-cv-screen { background: var(--bg); color: var(--text); margin: 0; padding: 12px 14px; font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 13px; line-height: 1.45; max-height: 440px; overflow: auto; white-space: pre; outline: none; caret-color: transparent; cursor: default; }
-.rc-cv-screen:focus { box-shadow: inset 0 0 0 1px var(--accent); }
-.slash-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.slash-chip, .slash-more { background: var(--surface-1); border: 1px solid var(--border-strong); color: var(--accent); cursor: pointer; padding: 2px 8px; height: 24px; font: inherit; font-size: 11px; }
-.slash-chip:hover, .slash-more:hover { border-color: var(--accent); background: var(--surface-2, rgba(127,127,127,.12)); }
-.slash-more { color: var(--text-dim); }
-.slash-pop { border: 1px solid var(--border-strong); background: var(--surface-1); max-height: 240px; overflow: auto; margin-bottom: 4px; }
-.slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 6px 8px; }
-.slash-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; cursor: pointer; }
-.slash-row.sel, .slash-row:hover { background: var(--surface-2, rgba(127,127,127,.15)); }
-.slash-name { color: var(--accent); font-size: var(--fs-micro); white-space: nowrap; }
+.rc-cv-screen { flex: 1; background: #14161c; color: #d5d9e0; margin: 0; padding: 14px 16px; font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 14px; line-height: 1.5; overflow: auto; white-space: pre; outline: none; caret-color: transparent; cursor: default; }
+.rc-cv-screen:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+/* command palette: grouped, filtered, floats above the composer */
+.slash-pop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; max-height: 340px; overflow: auto; background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 -10px 36px rgba(0, 0, 0, .28); padding: 4px; z-index: 40; }
+.slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 8px 10px; }
+.slash-group { color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; padding: 8px 10px 2px; }
+.slash-row { display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.slash-row:hover { background: var(--surface-2, rgba(127, 127, 127, .12)); }
+.slash-row.sel { background: var(--accent); }
+.slash-row.sel .slash-name, .slash-row.sel .slash-desc { color: var(--bg, #fff); }
+.slash-name { color: var(--accent); font-weight: 600; font-size: var(--fs-micro); white-space: nowrap; }
 .slash-desc { color: var(--text-dim); font-size: var(--fs-micro); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.slash-src { color: var(--text-faint); font-size: 10px; }
 .ag-kill { flex: none; background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 2px 7px; font: inherit; font-size: var(--fs-micro); }
 .ag-kill:hover { color: var(--red, #f66); border-color: var(--red, #f66); }
 .rc-notice { color: var(--text-dim); font-size: var(--fs-micro); margin: 2px 0; }
@@ -7361,11 +7363,12 @@ function agentComposerHtml(d) {
     <div class="agent-state"><strong>${kind}</strong><span id="agentBarHint">${d.source === 'claude' ? 'type a prompt · ctrl+enter sends · / opens slash commands' : 'enter sends · click a /cmd · or type /'}</span>
       <button type="button" class="ghost" id="agentOpenLive" title="Raw terminal view if something gets stuck">live view</button>
     </div>
-    ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div><div id="slashBar" class="slash-bar" hidden></div>' : ''}
+    ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="3" placeholder="type a prompt, or / for slash commands. paste or drop images."></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
     <div class="agent-compose-row">
+      ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
       <button id="agentAttach" type="button">attach image</button>
       <input id="agentFiles" type="file" accept="image/*" multiple hidden>
       <button class="agent-mic" id="agentMic" type="button" title="Start / stop dictation (m, or ctrl+m while typing)" aria-label="Start dictation" aria-pressed="false" hidden>
@@ -7491,6 +7494,8 @@ function ensureSlashCmds(key) {
   }
   return slashCmdCache.get(key);
 }
+// A picked command runs immediately, like the TUI. Arguments still work:
+// type "/name args" manually, the palette folds once arguments begin.
 async function sendSlashCmd(name) {
   const ta = $('agentText');
   if (!ta) return;
@@ -7502,26 +7507,8 @@ async function sendSlashCmd(name) {
   if (send) return sendToAlacritty(send);
 }
 
-async function renderSlashBar() {
-  const host = $('slashBar');
-  if (!host || !activeRel) return;
-  let cmds;
-  try { cmds = await ensureSlashCmds(activeRel); } catch { host.hidden = true; return; }
-  if (host !== $('slashBar')) return;
-  const rank = s => s === 'extension' ? 0 : s === 'skill' ? 1 : 2;
-  cmds = cmds.slice().sort((a, b) => rank(a.source) - rank(b.source) || a.name.localeCompare(b.name));
-  const showAll = !!window._slashBarAll;
-  const max = 12;
-  const list = showAll ? cmds : cmds.slice(0, max);
-  host.innerHTML = list.map(c =>
-    `<button type="button" class="slash-chip" data-cmd="${esc(c.name)}" title="${esc((c.description || '') + (c.source ? ' · ' + c.source : ''))}">/${esc(c.name)}</button>`
-  ).join('') + (cmds.length > max
-    ? `<button type="button" class="slash-more" id="slashMore">${showAll ? 'less' : '+' + (cmds.length - max)}</button>`
-    : '');
-  host.hidden = !cmds.length;
-  host.querySelectorAll('.slash-chip').forEach(b => { b.onclick = () => sendSlashCmd(b.dataset.cmd); });
-  const more = $('slashMore');
-  if (more) more.onclick = () => { window._slashBarAll = !window._slashBarAll; renderSlashBar(); };
+function slashGroupOf(source) {
+  return source === 'extension' ? 'extensions' : source === 'skill' ? 'skills' : 'prompts';
 }
 
 function hideSlashPop() {
@@ -7529,15 +7516,30 @@ function hideSlashPop() {
   if (p) p.hidden = true;
   window._slashOpen = false;
 }
-function pickSlash(i) {
-  const ta = $('agentText');
+
+// Enter/click runs it; Tab fills the composer for editing.
+function pickSlash(i, fillOnly) {
   const c = (window._slashList || [])[i];
-  if (!ta || !c) return;
-  ta.value = '/' + c.name + ' ';
+  if (!c) return;
+  if (fillOnly) {
+    const ta = $('agentText');
+    ta.value = '/' + c.name + ' ';
+    ta.focus();
+    hideSlashPop();
+    return;
+  }
+  sendSlashCmd(c.name);
+}
+
+async function openSlashPalette() {
+  const ta = $('agentText');
+  if (!ta) return;
+  ta.value = '/';
   ta.focus();
-  window._slashSel = 0;
+  ta.setSelectionRange(1, 1);
   updateSlashPop(ta);
 }
+
 async function updateSlashPop(ta) {
   const pop = $('slashPop');
   if (!pop || !ta) return;
@@ -7556,19 +7558,28 @@ async function updateSlashPop(ta) {
   if (now !== ta || ta.value !== wanted) return; // typed on while loading
   const token = ta.value.slice(1).split(/\s/)[0].toLowerCase();
   const hasArgs = /\s/.test(ta.value.trim()) || /\s$/.test(ta.value);
-  const list = cmds.filter(c => c.name.toLowerCase().startsWith(token)).slice(0, 12);
-  window._slashList = list;
-  // The palette folds once the command is chosen and arguments begin.
-  if (!list.length || (hasArgs && list.some(c => c.name.toLowerCase() === token))) return hideSlashPop();
-  window._slashSel = Math.min(window._slashSel || 0, list.length - 1);
-  pop.innerHTML = list.map((c, i) =>
-    `<div class="slash-row${i === window._slashSel ? ' sel' : ''}" data-i="${i}">` +
-    `<span class="slash-name">/${esc(c.name)}</span>` +
-    `<span class="slash-desc">${esc((c.description || '').slice(0, 70))}</span>` +
-    `<span class="slash-src">${esc(c.source || '')}</span></div>`).join('');
+  // Substring filter over name + description: palette, not just autocomplete.
+  const matched = cmds.filter(c =>
+    !token || c.name.toLowerCase().includes(token) || (c.description || '').toLowerCase().includes(token));
+  window._slashList = matched.slice(0, 14);
+  if (!matched.length || (hasArgs && matched.some(c => c.name.toLowerCase() === token))) return hideSlashPop();
+  window._slashSel = Math.min(window._slashSel || 0, window._slashList.length - 1);
+  // Group headers between rows; the flat list stays the keyboard order.
+  let html = '';
+  let lastGroup = null;
+  window._slashList.forEach((c, i) => {
+    const g = slashGroupOf(c.source);
+    if (g !== lastGroup) { html += `<div class="slash-group">${esc(g)}</div>`; lastGroup = g; }
+    html += `<div class="slash-row${i === window._slashSel ? ' sel' : ''}" data-i="${i}">` +
+      `<span class="slash-name">/${esc(c.name)}</span>` +
+      `<span class="slash-desc">${esc((c.description || '').slice(0, 60))}</span></div>`;
+  });
+  pop.innerHTML = html;
   pop.querySelectorAll('.slash-row').forEach(r => {
     r.onmousedown = e => { e.preventDefault(); pickSlash(Number(r.dataset.i)); };
   });
+  const sel = pop.querySelector('.slash-row.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
   pop.hidden = false;
   window._slashOpen = true;
 }
@@ -8318,8 +8329,9 @@ function wireAgentComposer() {
   const runBtn = $('agentRun');
   if (runBtn) runBtn.onclick = () => headlessSendFromComposer(runBtn);
   renderModelStrip();
-  if (runBtn) renderSlashBar();
   const isPi = !!runBtn; // pi composers have the web send button
+  const slashBtn = $('agentSlash');
+  if (slashBtn) slashBtn.onclick = () => openSlashPalette();
   window._slashOpen = false;
   if (send) send.onclick = () => {
     if (!isPi && ta && ta.value.startsWith('/')) {
@@ -8380,13 +8392,13 @@ function wireAgentComposer() {
           updateSlashPop(ta);
           return;
         }
-        if (e.key === 'Tab' && n) { e.preventDefault(); pickSlash(window._slashSel || 0); return; }
-        if (e.key === 'Escape') { e.preventDefault(); hideSlashPop(); return; }
+        if (e.key === 'Tab' && n) { e.preventDefault(); pickSlash(window._slashSel || 0, true); return; }
+        if (e.key === 'Escape') { e.preventDefault(); hideSlashPop(); if (ta.value === '/') ta.value = ''; return; }
         if (e.key === 'Enter' && !e.shiftKey && n) {
           const token = ta.value.slice(1).split(/\s/)[0].toLowerCase();
           if (!(window._slashList || []).some(c => c.name.toLowerCase() === token)) {
             e.preventDefault();
-            pickSlash(window._slashSel || 0);
+            pickSlash(window._slashSel || 0); // runs the command, TUI-style
             return;
           }
           hideSlashPop(); // exact command typed: fall through, enter sends it
@@ -8985,9 +8997,10 @@ function buildCustomView(jobId, id) {
   const box = document.createElement('div');
   box.className = 'rc-cv';
   box.dataset.cv = id;
-  box.innerHTML = `<div class="rc-cv-head"><strong>extension view</strong><span>↑↓ move · enter pick · esc close · click to focus</span>` +
-    `<button class="rc-cv-close" title="Close this view (the extension receives a cancel).">✗</button></div>` +
-    `<pre class="rc-cv-screen" contenteditable="true" spellcheck="false"></pre>`;
+  box.innerHTML = `<div class="rc-cv-card">` +
+    `<div class="rc-cv-head"><strong>extension view</strong><span>↑↓ move · enter pick · esc close</span>` +
+    `<button class="rc-cv-close" title="Close this view (the extension receives a cancel).">✕</button></div>` +
+    `<pre class="rc-cv-screen" contenteditable="true" spellcheck="false"></pre></div>`;
   let chain = Promise.resolve();
   const send = data => { chain = chain.then(() => postJson('/api/run/ui-input', { jobId, id, data })).catch(() => {}); };
   const screen = box.querySelector('.rc-cv-screen');
