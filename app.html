@@ -890,6 +890,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
    freeze into the steps line in the transcript above. */
 .live-pane { height: 148px; display: flex; flex-direction: column; gap: 4px; padding: 2px 4px 8px; background: var(--bg); }
 /* the growing steps ledger: one quiet centered line above the live pane */
+.lp-steps[open] { border: 1px dashed var(--border-strong); margin: 4px 0; padding: 0 6px 6px; background: var(--bg); }
+.lp-steps[open] > summary { border-bottom: 1px dashed var(--border); margin-bottom: 4px; }
 .lp-steps > summary { cursor: pointer; list-style: none; user-select: none; position: relative; text-align: center; padding: 2px 0; font-size: 11px; color: var(--text-faint); }
 .lp-steps > summary::-webkit-details-marker { display: none; }
 .lp-steps > summary:hover { color: var(--text-dim); }
@@ -962,6 +964,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.tool .resfold > summary::-webkit-details-marker { display: none; }
 .msg.tool .resfold > summary:hover { color: var(--text-dim); }
 /* accumulated tool steps: one quiet growing line, expandable */
+/* An OPEN steps fold is its own room: a dashed frame walls the tool
+   boxes off from the user/assistant prose around them. */
+.toolgroup[open] { border: 1px dashed var(--border-strong); margin: 6px 0; padding-bottom: 6px; background: var(--bg); }
+.toolgroup[open] > summary { border-bottom: 1px dashed var(--border); margin-bottom: 4px; }
 .toolgroup > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 14px; font-size: 11px; color: var(--text-faint); text-align: center; }
 .toolgroup > summary::-webkit-details-marker { display: none; }
 .toolgroup > summary:hover { color: var(--text-dim); }
