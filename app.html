@@ -724,6 +724,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .convhead .ch-row > * { max-width: 100%; }
 .convhead .ch-meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: var(--fs-meta); }
 .convhead .ch-switch { margin-top: var(--sp-2); }
+.convhead .ch-project { background: transparent; border: 0; height: auto; padding: 0; color: var(--text-dim); font-size: var(--fs-meta); font-family: inherit; cursor: pointer; }
+.convhead .ch-project:hover { color: var(--text); text-decoration: underline; background: transparent; }
 .convhead button { height: 26px; padding: 0 10px; max-width: 100%; }
 .convhead .ch-row select { max-width: 100%; }
 #convModel .mname { display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
@@ -731,9 +733,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* transcript */
 /* width: 100%: in flex parents (e-ink paged view) auto margins otherwise
    shrink-wrap to content — same trap as the composer. */
-.transcript { width: 100%; max-width: var(--read-max); margin: 0 auto; border: 1px solid var(--border); }
-.msg { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: pre-wrap; word-break: break-word; }
-.msg:last-child { border-bottom: 0; }
+.transcript { width: 100%; max-width: var(--read-max); margin: 0 auto; }
+.msg { padding: 12px 14px; white-space: pre-wrap; word-break: break-word; }
+/* model-change bar: a quiet rule line where the serving model switches */
+.modelbar { display: flex; align-items: center; gap: 10px; margin: 4px 0; padding: 0 14px; color: var(--text-faint); font-size: var(--fs-micro); }
+.modelbar::before, .modelbar::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
 /* Other-branch fold: dashed frame + glyph carry the meaning (no color-only state). */
 .branchblock { border-bottom: 1px solid var(--border); }
 .branchblock > summary { cursor: pointer; padding: 7px 14px; font-size: var(--fs-micro); color: var(--text-faint); border-left: 3px dashed var(--border-strong); list-style: none; user-select: none; }
@@ -6802,22 +6806,13 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   }
   const label = m.role === 'tool' ? `<span class="tname">${esc(m.name || '?')}</span>`
     : m.role === 'toolresult' ? 'result' : m.role;
-  const copy = copyIndex >= 0
-    ? `<button class="msg-copy" data-msg-index="${copyIndex}" title="Copy this message's original Markdown" aria-label="Copy this message's Markdown">copy md</button>`
-    : '';
-  const read = m.role === 'assistant' && copyIndex >= 0
-    ? `<button class="msg-read" data-msg-index="${copyIndex}" title="Read aloud with Kokoro. Replay uses the saved audio.">read</button>`
-    : '';
-  const edit = copyIndex >= 0 && ['user', 'assistant', 'tool', 'toolresult'].includes(m.role)
-    ? `<button class="msg-edit" data-msg-index="${copyIndex}" title="Edit this in the session file. A running agent restarts with the edited context.">edit</button>`
-    : '';
   const fileLink = isFileWriteTool(m)
     ? `<button class="msg-file" data-file-diff="${esc(m.path)}" data-file-ts="${esc(m.ts || '')}" data-file-anchor="${esc(m.ts || '')}" data-file-call="${esc(m.id || '')}" title="Open this file change\n${esc(m.path)}">▤ ${esc(shortFilePath(m.path))} · file</button>`
     : '';
-  const modelTag = m.role === 'assistant' && m.model
-    ? `<span class="mmodel" title="${esc((m.provider ? m.provider + ' · ' : '') + m.model)}">${esc(m.model)}</span>`
-    : '';
-  const role = `<div class="role"><span>${label}</span>${modelTag}${copy}${edit}${read}${fileLink}</div>`;
+  // Chat turns carry no chrome: the gray ground marks the user, the page
+  // marks the assistant. Model changes render as their own bar upstream.
+  const role = (m.role === 'user' || m.role === 'assistant') ? ''
+    : `<div class="role"><span>${label}</span>${fileLink}</div>`;
   if (m.role === 'toolresult') {
     const text = hl(m.text);
     const lines = m.text.split('\n').length;
@@ -7278,38 +7273,21 @@ async function openModelPicker(anchor, opts, onPick) {
 // Header zones (design/08-conversation-header.md):
 // row 1 identity + actions, row 2 meta + view controls, row 3 artifact switcher.
 function convHead(d, entry, related) {
-  const hasNote = d.notePath || entry.notePath;
-  const grew = hasNote && entry.mtimeMs && entry.mtimeMs > (entry.notedAt || 0);
-  const running = jobs.get('distill:' + d.key);
-  const distillBtn = running && running.status === 'running'
-    ? `<button id="distill" title="Distillation is running — open the jobs drawer">distilling…</button>`
-    : !hasNote
-      ? `<button id="distill" class="primary" title="Distill this conversation into a note. Runs in the background and saves automatically.">distill</button>`
-      : grew
-        ? `<button id="distill" title="New messages arrived since this note. Re-distill to update it. Unchanged parts reuse cached work.">↻ re-distill</button>`
-        : `<button id="distill" class="ghost" title="Note is up to date — re-distill anyway">↻</button>`;
+  // Minimal header: title + retitle, and the clickable project path under
+  // it. Everything removed keeps its keyboard path (z zen, c copy, d
+  // distill, s view modes, T tree).
   return `<div class="convhead ch-conv">
     <div class="ch-top">
       <div class="ch-title" id="chTitle" title="${esc(d.title || '(untitled)')}">${esc(d.title || '(untitled)')}</div>
       <button id="chMore" class="mobile-only ghost" title="Show the conversation details and actions" aria-expanded="false">⋯</button>
       <button id="titleEdit" class="ghost" title="Edit the title (or double-click it)">✎</button>
-      <div class="ch-actions"><button id="zenBtn" class="ghost" title="Zen — only the conversation (z)">◦ zen</button><button id="retitle" class="ghost" title="Ask the model for a fresh title and timeline label">↻ title</button><button id="copyConv" title="Copy this conversation as markdown (c)">copy</button>${distillBtn}</div>
+      <div class="ch-actions"><button id="retitle" class="ghost" title="Ask the model for a fresh title and timeline label">↻ title</button></div>
     </div>
     <div class="ch-row">
-      <span class="ch-meta"><span class="src ${esc(d.source || 'claude')}"><i></i>${esc(d.source || 'claude')}</span> · <code>${esc(shortDir(d.cwd))}</code>${d.gitBranch ? ` · <code>${esc(d.gitBranch)}</code>` : ''} · ${fmtDateShort(d.firstTs)} → ${fmtDateShort(d.lastTs)}</span>
-      ${(entry.familySize || 1) > 1 ? `<button id="famTree" class="ghost" title="${entry.family && entry.family !== d.key ? 'You read one branch of a conversation family (fan-out / fork). The list shows the family as one row. T opens the tree of all branches.' : 'This conversation has linked fork branches (fan-out / forks). T opens the tree of all branches.'}">⤑ ${entry.familySize} branches${entry.family && entry.family !== d.key ? ' · you read a branch' : ''} · tree</button>` : ''}
+      <button id="chProject" class="ch-project" title="Open the project overview">${esc(shortDir(d.cwd))}</button>
       <span id="chLive" class="ch-live" hidden></span>
       <span id="convHeadExtra"></span>
-      ${['claude', 'pi', 'pi-remote'].includes(d.source) ? `<button id="termAttach" title="Continue this conversation in Alacritty">continue in alacritty</button>` : ''}
-      <select id="mode" title="What to show and export (s cycles, shift+s cycles back)" style="height:26px">
-        <option value="chat">chat only</option>
-        <option value="commands">commands only</option>
-        <option value="all">everything</option>
-        <option value="uniqcmd">unique commands</option>
-        <option value="files">files read (latest)</option>
-      </select>
     </div>
-    ${contextNavHtml(d.key, related, 'conversation')}
   </div>`;
 }
 
@@ -7363,23 +7341,16 @@ function paintCtxMeter(el, c) {
 
 function wireHead() {
   updateLiveBadges();
-  const zb = $('zenBtn');
-  if (zb) zb.onclick = () => setZen(true);
   refreshCtxMeter(current);
-  $('mode').value = viewMode;
-  $('mode').onchange = () => { viewMode = $('mode').value; renderConv(); };
   const more = $('chMore');
   if (more) more.onclick = () => {
     const head = more.closest('.convhead');
     const open = head.classList.toggle('open');
     more.setAttribute('aria-expanded', String(open));
   };
-  $('distill').onclick = () => distillAction(activeRel);
+  const proj = $('chProject');
+  if (proj) proj.onclick = () => current && showProjectOverview(projectOf(current));
   wireTitleControls();
-  const ta = $('termAttach');
-  if (ta) ta.onclick = () => continueInAlacritty(ta);
-  const ft = $('famTree');
-  if (ft) ft.onclick = () => showTree(activeRel);
   const cm = $('convModel');
   if (cm) cm.onclick = () => openModelPicker(cm, {}, async ([m]) => {
     cm.disabled = true;
@@ -8638,8 +8609,6 @@ async function renderConv(scroll) {
   const head = convHead(d, entry, related);
   if (mode === 'uniqcmd' || mode === 'files') {
     $('view').innerHTML = head + `<div class="dprog">` + renderDerived(d, mode, hl) + `</div>` + agentComposerHtml(d);
-    // The server export adds the provenance block (paths, note, epics).
-    $('copyConv').onclick = () => copyAsMarkdown([activeRel], $('copyConv'));
     wireHead();
     wireAgentComposer();
     if (winSwitching || winPending) restoreWinPending();
@@ -8685,12 +8654,18 @@ async function renderConv(scroll) {
   const blocks = [];
   if (pills.has('')) blocks.push(pills.get(''));
   if (compares.has('')) blocks.push(compares.get(''));
+  let barModel = null; // the model bar marks changes, not every reply
   for (let i = 0; i < msgs.length;) {
     const isHit = m => !!qtest && qtest.test(m.text || '');
     if (trace || !msgs[i].off) {
       const m = msgs[i];
-      if (!(m.role === 'assistant' && skipAns.has(m.eid)))
+      if (!(m.role === 'assistant' && skipAns.has(m.eid))) {
+        if (m.role === 'assistant' && m.model && m.model !== barModel) {
+          if (barModel) blocks.push(`<div class="modelbar" title="${esc((m.provider ? m.provider + ' · ' : '') + m.model)}">model → ${esc(m.model)}</div>`);
+          barModel = m.model;
+        }
         blocks.push(msgBlock(m, hl, isHit(m), q, msgIndexes.get(m)));
+      }
       const nextEid = msgs[i + 1] && msgs[i + 1].eid;
       if (m.eid && nextEid !== m.eid) {
         if (compares.has(m.eid)) blocks.push(compares.get(m.eid));
@@ -8728,7 +8703,6 @@ async function renderConv(scroll) {
   wireCompareRow();
   renderRunCards();
   hintReadKey();
-  $('copyConv').onclick = () => copyAsMarkdown([activeRel], $('copyConv'));
   wireHead();
   wireAgentComposer();
   const newTa = $('agentText');
@@ -11510,11 +11484,13 @@ document.addEventListener('keydown', e => {
       break;
     }
     case 's': case 'S': {
-      const sel = $('mode');
-      if (!sel) break;
+      if (!current || !$('view').querySelector('.ch-conv')) break;
       e.preventDefault();
-      const opts = [...sel.options];
-      const i = opts.findIndex(o => o.value === sel.value);
+      const opts = [
+        { value: 'chat', text: 'chat only' }, { value: 'commands', text: 'commands only' },
+        { value: 'all', text: 'everything' }, { value: 'uniqcmd', text: 'unique commands' },
+        { value: 'files', text: 'files read (latest)' }];
+      const i = opts.findIndex(o => o.value === viewMode);
       const next = opts[(i + (e.key === 'S' ? opts.length - 1 : 1)) % opts.length];
       viewMode = next.value;
       renderConv();
