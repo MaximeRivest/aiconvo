@@ -2461,6 +2461,22 @@ function saveEpicEvidenceCache() {
   fs.writeFile(EPIC_EVIDENCE_FILE, JSON.stringify(epicEvidenceCache), () => {});
 }
 
+// Evidence-state memo for the project page. The state of one conversation
+// depends on exactly two files: its own cache (content hash) and the
+// evidence cache (membership). Both are captured by mtime:size signatures,
+// so the memo is exact, survives restarts, and needs no manual flushes.
+// 'note' is a marker, not a value: the note freshness is computed live.
+const EVIDENCE_STATE_FILE = path.join(CACHE_DIR, 'evidence-state-cache.json');
+let evidenceStateMemo = {};
+try { evidenceStateMemo = JSON.parse(fs.readFileSync(EVIDENCE_STATE_FILE, 'utf8')) || {}; } catch {}
+let evidenceStateSaveT = null;
+function saveEvidenceStateMemoSoon() {
+  clearTimeout(evidenceStateSaveT);
+  evidenceStateSaveT = setTimeout(() => {
+    fs.writeFile(EVIDENCE_STATE_FILE, JSON.stringify(evidenceStateMemo), () => {});
+  }, 2000);
+}
+
 const EPIC_EVIDENCE_PROMPT =
   'The attached file is one work conversation. Extract evidence for a later cross-session project narrative. ' +
   'State the goal, important actions, decisions, results, failures, and unresolved work. Keep exact commands and paths only when important. ' +
@@ -6006,30 +6022,50 @@ async function projectResponse(project) {
   let notes = 0, freshNotes = 0, evidenceCards = 0, freshEvidence = 0;
   const recent = [];
   const sorted = [...entries].sort((a, b) => Date.parse(b.entry.lastTs || '') - Date.parse(a.entry.lastTs || ''));
-  // Read the per-conversation caches in parallel: sequential awaits cost
-  // seconds on a 250-conversation project. With a note on record, only the
-  // cache file's existence matters — stat it, skip the JSON parse.
-  const cacheReads = await mapLimit(sorted, 16, async ({ key, entry }) => {
-    const p = cachePathFor(key);
-    if (entry.notePath) {
-      try { await fsp.access(p); return { exists: true, data: null }; } catch { return { exists: false, data: null }; }
+  // Parallel, memoized state per conversation. Full JSON parses happen only
+  // when a signature moved; a settled project answers from stats alone.
+  let evidSig = 'none';
+  try { const st = await fsp.stat(EPIC_EVIDENCE_FILE); evidSig = Math.round(st.mtimeMs) + ':' + st.size; } catch {}
+  let evidencedKeys = null; // lazy — built once, only when a miss needs the stale check
+  const buildEvidencedKeys = () => {
+    const set = new Set();
+    for (const c of Object.values(epicEvidenceCache)) {
+      if (c && typeof c === 'object' && c.key && typeof c.text === 'string') set.add(c.key);
     }
-    try { return { exists: true, data: JSON.parse(await fsp.readFile(p, 'utf8')) }; } catch { return { exists: false, data: null }; }
+    return set;
+  };
+  const markers = await mapLimit(sorted, 16, async ({ key, entry }) => {
+    const p = cachePathFor(key);
+    let st = null;
+    try { st = await fsp.stat(p); } catch {}
+    if (!st) return 'missing';
+    if (entry.notePath) return 'note';
+    const sig = Math.round(st.mtimeMs) + ':' + st.size + ':' + evidSig;
+    const memo = evidenceStateMemo[key];
+    if (memo && memo.sig === sig) return memo.state;
+    let data = null;
+    try { data = JSON.parse(await fsp.readFile(p, 'utf8')); } catch {}
+    let state = 'missing';
+    if (data) {
+      if (data.notePath) state = 'note';
+      else {
+        const h = epicEvidenceHash(data);
+        if (h in epicEvidenceCache) state = 'fresh';
+        else {
+          if (!evidencedKeys) evidencedKeys = buildEvidencedKeys();
+          state = evidencedKeys.has(key) ? 'stale' : 'missing';
+        }
+      }
+    }
+    evidenceStateMemo[key] = { sig, state };
+    saveEvidenceStateMemoSoon();
+    return state;
   });
   for (let si = 0; si < sorted.length; si++) {
     const { key, entry } = sorted[si];
-    const { exists, data } = cacheReads[si];
     const noteState = noteStateForEntry(entry);
     if (entry.notePath) { notes++; if (noteState === 'fresh') freshNotes++; }
-    let evidenceState = 'missing';
-    if (exists) {
-      if (entry.notePath || (data && data.notePath)) evidenceState = noteState;
-      else if (data) {
-        const h = epicEvidenceHash(data);
-        if (h in epicEvidenceCache) evidenceState = 'fresh';
-        else if (latestCachedEvidenceForKey(key)) evidenceState = 'stale';
-      }
-    }
+    const evidenceState = markers[si] === 'note' ? noteState : markers[si];
     if (evidenceState !== 'missing') { evidenceCards++; if (evidenceState === 'fresh') freshEvidence++; }
     if (recent.length < 12) {
       recent.push({
