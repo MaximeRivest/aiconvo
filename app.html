@@ -826,7 +826,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .rc-tool summary::-webkit-details-marker { display: none; }
 .rc-tool[open] { border-left-color: var(--accent); }
 .rc-tool .rc-args { color: var(--text-dim); font-size: 11px; margin: 4px 0 0; max-height: 120px; overflow: auto; }
-.rc-tool .rc-out { color: var(--text-faint); font-size: 11px; margin: 4px 0 0; max-height: 220px; overflow: auto; }
+.rc-tool .rc-out { color: var(--text-faint); font-size: 11px; margin: 4px 0 0; max-height: 50vh; overflow: auto; }
+.rc-textblk .rc-think:not(.rc-think-min) { max-height: 50vh; overflow: auto; }
 
 /* model picker */
 .mpick { position: fixed; z-index: 60; width: 360px; max-height: 420px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
@@ -926,7 +927,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.user .role::before { content: "❯ "; }
 .msg.assistant .role { color: var(--role-asst); }
 .msg.assistant .role::before { content: "❯ "; }
-.msg.tool, .msg.toolresult { background: var(--bg); color: var(--text-dim); font-size: 12px; }
+.msg.tool, .msg.toolresult { background: var(--bg); color: var(--text-dim); font-size: 12px; padding: 4px 14px; }
+.msg.tool > summary, .msg.toolresult > summary { cursor: pointer; list-style: none; user-select: none; color: var(--text-faint); font-size: 11px; }
+.msg.tool > summary::-webkit-details-marker, .msg.toolresult > summary::-webkit-details-marker { display: none; }
+.msg.tool > summary:hover, .msg.toolresult > summary:hover { color: var(--text-dim); }
+.msg .tool-out { max-height: 50vh; overflow: auto; margin-top: 6px; }
 .msg.tool .role { color: var(--role-tool); }
 .msg.tool .role::before { content: "$ "; }
 .msg.toolresult .role { color: var(--role-tool); }
@@ -1500,7 +1505,7 @@ let activeRel = null;
 let searchMode = false;
 let jobs = new Map();
 let tab = 'conv';           // conv | notes | epics
-let viewMode = 'chat';      // chat | commands | all | uniqcmd | files
+let viewMode = 'all';       // chat | commands | all | uniqcmd | files
 let notesList = [], epicsList = [];
 let gitReposCache = [];     // repo cards for home-row glyphs and crumbs
 let chromeScrollLast = -1;  // phone: last #view scrollTop for chrome auto-hide
@@ -6788,7 +6793,7 @@ function keepInMode(m, mode) {
 }
 
 // Long messages collapse to an abstract-sized preview (about 5 lines).
-const COLLAPSE_LINES = 20;  // tool results
+
 // Chat messages fold by measured height, not text length: only a message
 // taller than ~125% of the viewport folds (foldLongMessages below).
 // keepOpen: in search mode, messages containing the query stay expanded
@@ -6822,16 +6827,16 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   // marks the assistant. Model changes render as their own bar upstream.
   const role = (m.role === 'user' || m.role === 'assistant') ? ''
     : `<div class="role"><span>${label}</span>${fileLink}</div>`;
+  // Tools fold to one line; open, their output lives in a capped scroll
+  // box (≤50vh) — the transcript twin of the run card's stream boxes.
   if (m.role === 'toolresult') {
-    const text = hl(m.text);
     const lines = m.text.split('\n').length;
-    if (lines > COLLAPSE_LINES) {
-      const cut = m.text.split('\n').slice(0, COLLAPSE_LINES).join('\n');
-      const more = `… show ${lines - COLLAPSE_LINES} more lines`;
-      return `<div class="msg ${m.role}"${idxAttr}>${role}<span class="trunc">${hl(cut)}</span><span class="full" hidden>${text}</span>
-        <button class="more" data-more="${more}">${more}</button></div>`;
-    }
-    return `<div class="msg ${m.role}"${idxAttr}>${role}${text}</div>`;
+    return `<details class="msg toolresult"${idxAttr}${keepOpen ? ' open' : ''}><summary>↳ result · ${lines} line${lines > 1 ? 's' : ''}</summary><div class="tool-out">${hl(m.text)}</div></details>`;
+  }
+  if (m.role === 'tool') {
+    const toolAnchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
+    const hint = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    return `<details class="msg tool"${toolAnchor}${idxAttr}${keepOpen ? ' open' : ''}><summary>⚙ <span class="tname">${esc(m.name || '?')}</span>${hint ? ' · ' + esc(hint) : ''}${fileLink}</summary><div class="tool-out">${hl(m.text)}</div></details>`;
   }
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
@@ -6839,8 +6844,7 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
     const words = m.text.split(/\s+/).length;
     return `<div class="msg ${m.role}${keepOpen ? '' : ' can-fold'}" data-words="${words}"${anchor}${idxAttr}>${role}${full}</div>`;
   }
-  const toolAnchor = m.role === 'tool' && m.ts ? ` data-ts="${esc(m.ts)}"` : '';
-  return `<div class="msg ${m.role}"${toolAnchor}${idxAttr}>${role}${hl(m.text)}</div>`;
+  return `<div class="msg ${m.role}"${idxAttr}>${role}${hl(m.text)}</div>`;
 }
 
 // Fold rule: a chat message folds only when it stands taller than ~125%
@@ -9312,6 +9316,10 @@ function updateRunBlock(blocksHost, jobId, b) {
     const out = el.querySelector('.rc-out');
     setStickText(out, b.out || '');
     out.hidden = !b.out;
+    // A finished tool folds itself — unless the user chose a state.
+    if (b.phase === 'done' && el.open && runToolOpen.get(jobId + '/' + key) === undefined) {
+      el.open = false;
+    }
   } else {
     if (!el) {
       el = document.createElement('div');
@@ -9325,7 +9333,7 @@ function updateRunBlock(blocksHost, jobId, b) {
     const th = el.querySelector('.rc-think');
     if (runToolDefaultOpen()) {
       th.classList.remove('rc-think-min');
-      setLiveText(th, b.think || '');
+      setStickText(th, b.think || '');
     } else {
       th.classList.add('rc-think-min');
       setLiveText(th, b.think && !b.text ? '◌ thinking · ' + b.think.length + ' chars' : '');
@@ -10874,7 +10882,7 @@ $('settingsBtn').onclick = () => settingsOpen ? closeSettings() : showSettings()
 $('brand').title = 'Go home — the whole-system timeline. Shift-click also clears filters.';
 $('brand').onclick = e => {
   if (e.shiftKey) {
-    $('q').value = ''; $('src').value = ''; $('dir').value = ''; $('ganttProject').value = ''; viewMode = 'chat'; $('densityTools').checked = false;
+    $('q').value = ''; $('src').value = ''; $('dir').value = ''; $('ganttProject').value = ''; viewMode = 'all'; $('densityTools').checked = false;
     renderFiltersBtn();
     activeRel = null; current = null;
     goHome();
