@@ -1601,7 +1601,10 @@ function runEventForwarder(job) {
         } else if (event.method === 'custom_render' && event.id) {
           // A hosted TUI view (ctx.ui.custom): ANSI lines for the browser.
           job.customViews = job.customViews || {};
-          job.customViews[event.id] = Array.isArray(event.lines) ? event.lines.map(String).slice(0, 200) : [];
+          job.customViews[event.id] = {
+            lines: Array.isArray(event.lines) ? event.lines.map(String).slice(0, 200) : [],
+            bgSgr: typeof event.bgSgr === 'string' ? event.bgSgr.slice(0, 40) : null,
+          };
         } else if (event.method === 'custom_end' && event.id) {
           if (job.customViews) delete job.customViews[event.id];
         } else if (event.method === 'set_editor_text') {
@@ -6281,6 +6284,12 @@ async function startProjectConversation(options) {
   const label = String(options.name || 'Project: ' + options.project).slice(0, 80);
   const name = 'aiconvo-project-' + crypto.createHash('sha256').update(options.project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
   const mode = kind === 'pi' && typeof options.mode === 'string' && options.mode.trim() ? options.mode.trim() : null;
+  // Lead model for the kickoff run; any further models stay in the project's
+  // composer strip for later fan-out sends.
+  const launchModels = Array.isArray(options.models)
+    ? options.models.filter(m => m && m.provider && m.modelId)
+    : [];
+  const leadModel = kind === 'pi' ? (launchModels[0] || null) : null;
   const include = options.include || {};
   // Inline-context path (pi only): the user composed and approved the bundle
   // in the UI. It rides in the system prompt via --append-system-prompt, so
@@ -6325,7 +6334,9 @@ async function startProjectConversation(options) {
   ];
   const argv = kind === 'claude'
     ? (text ? [claudeBin(), text] : [claudeBin()])
-    : [piBin(), '--name', label, ...piProviderExtraArgs(), ...piCtxArgs, ...(text ? [text] : [])];
+    : [piBin(), '--name', label, ...piProviderExtraArgs(), ...piCtxArgs,
+       ...(leadModel ? ['--provider', leadModel.provider, '--model', leadModel.modelId] : []),
+       ...(text ? [text] : [])];
   const useRpc = kind === 'pi' && options.surface !== 'alacritty';
   let key = null;
   if (useRpc) {
@@ -6334,13 +6345,14 @@ async function startProjectConversation(options) {
     const job = {
       id: 'run:' + crypto.randomUUID().slice(0, 8),
       type: 'agent-run', key: null,
-      title: (text || label).replace(/\s+/g, ' ').slice(0, 60),
+      title: (leadModel ? leadModel.modelId + ' · ' : '') + (text || label).replace(/\s+/g, ' ').slice(0, 60),
       status: 'running', statusText: text ? 'starting' : 'ready',
-      startedAt: Date.now(), model: null,
+      startedAt: Date.now(), model: leadModel ? leadModel.provider + '/' + leadModel.modelId : null,
     };
     let handle = null;
     if (text) {
       handle = piEng().piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(), extraArgs: [...piProviderExtraArgs(), ...piCtxArgs] }, {
+        provider: leadModel && leadModel.provider, modelId: leadModel && leadModel.modelId,
         message: text, onEvent: runEventForwarder(job),
       });
     }
@@ -6386,7 +6398,7 @@ async function startProjectConversation(options) {
     return {
       name, kind, cwd, title: name, key, surface: 'rpc',
       project: options.project, include, briefing, kickoff: wantBriefing || !!contextFile,
-      contextFile, mode,
+      contextFile, mode, models: launchModels,
     };
   }
   const startedAt = Date.now();
@@ -6397,7 +6409,7 @@ async function startProjectConversation(options) {
   return {
     name, kind, cwd, title: name, key, surface: 'alacritty',
     project: options.project, include, briefing, kickoff: wantBriefing || !!contextFile,
-    contextFile, mode,
+    contextFile, mode, models: launchModels,
   };
 }
 

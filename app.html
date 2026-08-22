@@ -6107,6 +6107,7 @@ async function loadLauncherModes(d) {
   const sel = $('pMode');
   if (!sel) return;
   $('pModeManage').onclick = () => openModeManager(d);
+  renderLauncherModels(d);
   await refreshLauncherModes();
   if (!launcherModes.length) {
     sel.innerHTML = '<option value="">(no modes found)</option>';
@@ -6122,6 +6123,30 @@ async function loadLauncherModes(d) {
     updateModeWarn();
   };
   updateModeWarn();
+}
+
+// Launcher model strip: same localStorage key the conversation composer
+// uses ('aiconvo.fanModels:<project>'), so a new conversation opens with the
+// chips you set here, and later sends fan out to all of them.
+function launcherModelKey(project) { return 'aiconvo.fanModels:' + project; }
+function launcherModelsOf(project) {
+  try { return JSON.parse(localStorage.getItem(launcherModelKey(project)) || '[]'); } catch { return []; }
+}
+function renderLauncherModels(d) {
+  const host = $('pModelStrip');
+  if (!host) return;
+  const list = launcherModelsOf(d.project);
+  host.innerHTML = list.map((m, i) =>
+    `<span class="mchip" title="${esc(m.provider + '/' + m.modelId)}"><span class="mname">${esc(m.modelId)}</span> <button type="button" data-pmdel="${i}" title="remove this model">×</button></span>`).join('') +
+    `<button type="button" id="pModelAdd" title="Add a model. The first model runs the kickoff reply. Two or more fan out later sends.">${list.length ? '+ model' : '+ model — none set: pi default runs the kickoff'}</button>`;
+  host.querySelectorAll('[data-pmdel]').forEach(b => b.onclick = () => {
+    localStorage.setItem(launcherModelKey(d.project), JSON.stringify(list.filter((_, i) => i !== Number(b.dataset.pmdel))));
+    renderLauncherModels(d);
+  });
+  $('pModelAdd').onclick = e => openModelPicker(e.target, { multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId)) }, picked => {
+    localStorage.setItem(launcherModelKey(d.project), JSON.stringify(picked));
+    renderLauncherModels(d);
+  });
 }
 
 const MODE_SECTION_LABELS = {
@@ -6365,6 +6390,8 @@ async function showProjectOverview(name) {
         <button id="pModeManage" type="button" title="Create, edit, or delete pi prompt modes">manage modes</button>
       </div>
       <div id="pModeWarn" class="hint pmodewarn" hidden></div>
+      <label>model(s) — first runs the kickoff; two or more fan out later sends</label>
+      <div class="model-strip pmodelstrip" id="pModelStrip"></div>
       <label for="pName">conversation name (optional)</label><input id="pName" type="text" placeholder="what will you work on next?">
       <label>memory to include</label>
       <div class="mem">
@@ -6425,17 +6452,17 @@ async function showProjectOverview(name) {
     $('pStart').hidden = claude;
     $('pStartTerm').className = claude ? 'primary' : '';
     $('pStartTerm').textContent = claude ? 'start in alacritty' : 'in alacritty';
-    // Mode + inline context are pi-only; dim them for claude.
+    // Mode, models, and inline context are pi-only; dim them for claude.
     $('pMode').disabled = claude;
     $('pModeManage').disabled = claude;
+    if ($('pModelStrip')) $('pModelStrip').style.opacity = claude ? '.45' : '';
   };
   $('pAgent').onchange = () => {
     localStorage.setItem('aiconvo.projectAgent:' + d.project, $('pAgent').value);
     syncStartBtns();
   };
   syncStartBtns();
-  loadLauncherModes(d);
-  $('pStart').onclick = () => launchProjectConversation(d, recentEpicIds, 'rpc');
+  loadLauncherModes(d);  $('pStart').onclick = () => launchProjectConversation(d, recentEpicIds, 'rpc');
   $('pStartTerm').onclick = () => launchProjectConversation(d, recentEpicIds, 'alacritty');
   loadProjectTrust(d);
 }
@@ -6555,6 +6582,7 @@ async function startProjectConversation(d, epicIds, surface, extra = {}) {
     body: JSON.stringify({
       project: d.project, agent, name: $('pName').value.trim(), surface: via,
       mode: agent === 'pi' ? (($('pMode') && $('pMode').value) || null) : null,
+      models: agent === 'pi' ? launcherModelsOf(d.project) : [],
       context: extra.context || null,
       include: {
         map: $('pMemMap').checked,
@@ -6615,7 +6643,7 @@ function openContextConfirm(d, epicIds, surface, bundle) {
     ' Reply with at most 3 lines on where the project stands, then wait for instructions.';
   ov.innerHTML = `<div class="cc-card">
     <div class="cc-head"><b>review the context before it goes</b><span class="dim cc-size"></span></div>
-    <div class="cc-meta dim">${c.memoryDocs || 0} memory docs · ${c.notes || 0} notes · ${c.epics || 0} epics · ${c.evidence || 0} evidence · mode: ${esc(($('pMode') && $('pMode').value) || 'coding')} · injected into the system prompt</div>
+    <div class="cc-meta dim">${c.memoryDocs || 0} memory docs · ${c.notes || 0} notes · ${c.epics || 0} epics · ${c.evidence || 0} evidence · mode: ${esc(($('pMode') && $('pMode').value) || 'coding')} · kickoff model: ${esc((launcherModelsOf(d.project)[0] || {}).modelId || 'pi default')} · injected into the system prompt</div>
     <div class="cc-bigwarn" hidden>⚠ far beyond most model contexts — trim the text or fewer checkboxes, or the provider will reject the request.</div>
     <textarea class="cc-text" spellcheck="false"></textarea>
     <div class="hint">This exact text rides in the system prompt (--append-system-prompt). Edit freely — what you see is what the model gets.</div>
