@@ -8829,13 +8829,19 @@ async function renderConv(scroll) {
   // The newest on-path message always shows in full — no fold to click.
   let lastMain = -1;
   for (let k = msgs.length - 1; k >= 0; k--) if (trace || !msgs[k].off) { lastMain = k; break; }
-  // Consecutive tool steps accumulate into ONE quiet line ("⚙ N steps …").
+  // Some providers (notably OpenRouter kimi-k3) emit their private work
+  // plan as ordinary assistant text before a tool call, not as `thinking`.
+  // Shared entry id is the reliable signal: text + tool in one assistant
+  // turn is intermediate work, never the final answer.
+  const toolTurnEids = new Set(msgs.filter(m => m.role === 'tool' && m.eid).map(m => m.eid));
+  // Consecutive tool/reasoning steps accumulate into ONE quiet line.
   // The group keeps its open/closed choice across re-renders, so new
   // messages below never make it jump or disappear.
   let toolBuf = [];
   const flushTools = () => {
     if (!toolBuf.length) return;
-    if (toolBuf.length === 1) { blocks.push(toolBuf[0].html); toolBuf = []; return; }
+    // Even one thinking/tool unit folds: reasoning must never become the
+    // visible answer just because a provider labels it as text.
     const names = new Map();
     for (const t of toolBuf) names.set(t.name, (names.get(t.name) || 0) + 1);
     const label = [...names.entries()].map(([n, c]) => c > 1 ? `${n} ×${c}` : n).join(' · ');
@@ -8850,9 +8856,11 @@ async function renderConv(scroll) {
     if (trace || !msgs[i].off) {
       const m = msgs[i];
       if (!(m.role === 'assistant' && skipAns.has(m.eid))) {
-        if (['tool', 'toolresult', 'thinking'].includes(m.role)) {
+        const plainReasoning = m.role === 'assistant' && m.eid && toolTurnEids.has(m.eid);
+        if (plainReasoning || ['tool', 'toolresult', 'thinking'].includes(m.role)) {
           const html = msgBlock(m, hl, isHit(m), q, msgIndexes.get(m));
-          if (html) toolBuf.push({ html, name: m.role === 'thinking' ? 'thinking' : (m.name || 'tool'), gkey: m.ts || 'i' + i });
+          const name = plainReasoning || m.role === 'thinking' ? 'thinking' : (m.name || 'tool');
+          if (html) toolBuf.push({ html, name, gkey: m.ts || 'i' + i });
         } else {
           flushTools();
           if (m.role === 'assistant' && m.model && m.model !== barModel) {
