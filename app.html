@@ -971,6 +971,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .toolgroup > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 14px; font-size: 11px; color: var(--text-faint); text-align: center; }
 .toolgroup > summary::-webkit-details-marker { display: none; }
 .toolgroup > summary:hover { color: var(--text-dim); }
+/* file-edit links on the group line and in the ▤ files fold */
+.tg-file { height: 18px; padding: 0 5px; border: 0; background: transparent; color: var(--text-dim); font-size: 10px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+.tg-file:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
+.tg-files > summary { cursor: pointer; list-style: none; user-select: none; text-align: center; padding: 2px 14px; font-size: 11px; color: var(--text-dim); }
+.tg-files > summary::-webkit-details-marker { display: none; }
+.tg-files > summary:hover { color: var(--text); }
+.tg-files-list { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; padding: 4px 14px; }
 /* the run card's growing steps line: same voice as the settled toolgroup */
 /* the card's status line duplicates the pane head now — keep it quiet */
 .runcard .rc-status { display: none; }
@@ -8854,8 +8861,21 @@ async function renderConv(scroll) {
     const label = [...names.entries()].map(([n, c]) => c > 1 ? `${n} ×${c}` : n).join(' · ');
     const gkey = toolBuf[0].gkey;
     const open = toolGroupOpen.get(activeRel + '|' + gkey) ? ' open' : '';
-    blocks.push(`<details class="toolgroup" data-gkey="${esc(gkey)}"${open}><summary>${toolBuf.length} steps · ${esc(label.slice(0, 90))}</summary>` +
+    // File edits ride the group line: up to three links inline; more fold
+    // into their own ▤ details right under the line.
+    const files = [];
+    const seenFiles = new Set();
+    for (const t of toolBuf) {
+      if (t.file && !seenFiles.has(t.file.path)) { seenFiles.add(t.file.path); files.push(t.file); }
+    }
+    const fileBtn = f => `<button class="tg-file" data-file-diff="${esc(f.path)}" data-file-ts="${esc(f.ts || '')}" data-file-anchor="${esc(f.ts || '')}" data-file-call="${esc(f.call || '')}" title="Open this file change\n${esc(f.path)}">▤ ${esc(f.path.split('/').pop())}</button>`;
+    const inline = files.length && files.length <= 3 ? ' · ' + files.map(fileBtn).join(' ') : '';
+    blocks.push(`<details class="toolgroup" data-gkey="${esc(gkey)}"${open}><summary>${toolBuf.length} steps · ${esc(label.slice(0, 90))}${inline}</summary>` +
       toolBuf.map(t => t.html).join('') + `</details>`);
+    if (files.length > 3) {
+      blocks.push(`<details class="tg-files"><summary>▤ ${files.length} files changed</summary><div class="tg-files-list">` +
+        files.map(fileBtn).join(' ') + `</div></details>`);
+    }
     toolBuf = [];
   };
   for (let i = 0; i < msgs.length;) {
@@ -8867,7 +8887,10 @@ async function renderConv(scroll) {
         if (plainReasoning || ['tool', 'toolresult', 'thinking'].includes(m.role)) {
           const html = msgBlock(m, hl, isHit(m), q, msgIndexes.get(m));
           const name = plainReasoning || m.role === 'thinking' ? 'thinking' : (m.name || 'tool');
-          if (html) toolBuf.push({ html, name, gkey: m.ts || 'i' + i });
+          if (html) toolBuf.push({
+            html, name, gkey: m.ts || 'i' + i,
+            file: isFileWriteTool(m) ? { path: m.path, ts: m.ts, call: m.id } : null,
+          });
         } else {
           flushTools();
           if (m.role === 'assistant' && m.model && m.model !== barModel) {
@@ -8934,6 +8957,7 @@ async function renderConv(scroll) {
   else applyActiveWinDraft();
   $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => {
     e.stopPropagation();
+    e.preventDefault(); // a link inside a <summary> must not toggle the fold
     openToolCallFile(activeRel, b.dataset.fileDiff, b.dataset.fileTs, b.dataset.fileAnchor, b.dataset.fileCall);
   });
   $('view').querySelectorAll('.toolgroup').forEach(g =>
