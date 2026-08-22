@@ -309,7 +309,9 @@ async function createS(target) {
       extensionFlagValues: parsed.flags.size ? parsed.flags : undefined,
       resourceLoaderOptions: (parsed.extensionPaths.length || parsed.appendSystemPrompt) ? {
         additionalExtensionPaths: parsed.extensionPaths.length ? parsed.extensionPaths : undefined,
-        appendSystemPrompt: parsed.appendSystemPrompt,
+        // pi's resource loader treats appendSystemPromptSource as an array of
+        // paths/texts (each resolved through resolvePromptInput).
+        appendSystemPrompt: parsed.appendSystemPrompt ? [parsed.appendSystemPrompt] : undefined,
       } : undefined,
     });
     return {

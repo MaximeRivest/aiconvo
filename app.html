@@ -767,11 +767,17 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.thinking summary::-webkit-details-marker { display: none; }
 .msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
 .rc-body { color: var(--text); font-size: 12.5px; }
-.rc-cv { border: 1px solid var(--accent); margin: 6px 0; }
-.rc-cv-head { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; color: var(--accent); font-size: var(--fs-micro); border-bottom: 1px solid var(--border-strong); }
+.rc-cv { border: 1px dashed var(--accent); margin: 8px 0; background: var(--surface-1); }
+.rc-cv-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; color: var(--text-dim); font-size: var(--fs-micro); border-bottom: 1px solid var(--border-strong); }
+.rc-cv-head strong { color: var(--accent); font-weight: 600; }
 .rc-cv-close { background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 1px 7px; font: inherit; font-size: var(--fs-micro); }
-.rc-cv-screen { background: #111; color: #ccc; margin: 0; padding: 8px 10px; font-size: 12px; line-height: 1.35; max-height: 440px; overflow: auto; white-space: pre; outline: none; caret-color: transparent; cursor: default; }
+.rc-cv-close:hover { color: var(--red, #f66); border-color: var(--red, #f66); }
+.rc-cv-screen { background: var(--bg); color: var(--text); margin: 0; padding: 12px 14px; font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: 13px; line-height: 1.45; max-height: 440px; overflow: auto; white-space: pre; outline: none; caret-color: transparent; cursor: default; }
 .rc-cv-screen:focus { box-shadow: inset 0 0 0 1px var(--accent); }
+.slash-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.slash-chip, .slash-more { background: var(--surface-1); border: 1px solid var(--border-strong); color: var(--accent); cursor: pointer; padding: 2px 8px; height: 24px; font: inherit; font-size: 11px; }
+.slash-chip:hover, .slash-more:hover { border-color: var(--accent); background: var(--surface-2, rgba(127,127,127,.12)); }
+.slash-more { color: var(--text-dim); }
 .slash-pop { border: 1px solid var(--border-strong); background: var(--surface-1); max-height: 240px; overflow: auto; margin-bottom: 4px; }
 .slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 6px 8px; }
 .slash-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; cursor: pointer; }
@@ -7352,10 +7358,10 @@ function agentComposerHtml(d) {
   if (!['claude', 'pi', 'pi-remote'].includes(d.source)) return '';
   const kind = d.source === 'claude' ? 'Claude Code' : 'Pi';
   return `<div class="agent-compose" id="agentCompose">
-    <div class="agent-state"><strong>${kind}</strong><span id="agentBarHint">${d.source === 'claude' ? 'type a prompt · ctrl+enter sends · / opens slash commands' : 'enter sends · shift+enter new line · / opens slash commands'}</span>
+    <div class="agent-state"><strong>${kind}</strong><span id="agentBarHint">${d.source === 'claude' ? 'type a prompt · ctrl+enter sends · / opens slash commands' : 'enter sends · click a /cmd · or type /'}</span>
       <button type="button" class="ghost" id="agentOpenLive" title="Raw terminal view if something gets stuck">live view</button>
     </div>
-    ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
+    ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div><div id="slashBar" class="slash-bar" hidden></div>' : ''}
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="3" placeholder="type a prompt, or / for slash commands. paste or drop images."></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
@@ -7485,6 +7491,39 @@ function ensureSlashCmds(key) {
   }
   return slashCmdCache.get(key);
 }
+async function sendSlashCmd(name) {
+  const ta = $('agentText');
+  if (!ta) return;
+  ta.value = '/' + name;
+  hideSlashPop();
+  const run = $('agentRun');
+  if (run) return headlessSendFromComposer(run);
+  const send = $('agentSend');
+  if (send) return sendToAlacritty(send);
+}
+
+async function renderSlashBar() {
+  const host = $('slashBar');
+  if (!host || !activeRel) return;
+  let cmds;
+  try { cmds = await ensureSlashCmds(activeRel); } catch { host.hidden = true; return; }
+  if (host !== $('slashBar')) return;
+  const rank = s => s === 'extension' ? 0 : s === 'skill' ? 1 : 2;
+  cmds = cmds.slice().sort((a, b) => rank(a.source) - rank(b.source) || a.name.localeCompare(b.name));
+  const showAll = !!window._slashBarAll;
+  const max = 12;
+  const list = showAll ? cmds : cmds.slice(0, max);
+  host.innerHTML = list.map(c =>
+    `<button type="button" class="slash-chip" data-cmd="${esc(c.name)}" title="${esc((c.description || '') + (c.source ? ' · ' + c.source : ''))}">/${esc(c.name)}</button>`
+  ).join('') + (cmds.length > max
+    ? `<button type="button" class="slash-more" id="slashMore">${showAll ? 'less' : '+' + (cmds.length - max)}</button>`
+    : '');
+  host.hidden = !cmds.length;
+  host.querySelectorAll('.slash-chip').forEach(b => { b.onclick = () => sendSlashCmd(b.dataset.cmd); });
+  const more = $('slashMore');
+  if (more) more.onclick = () => { window._slashBarAll = !window._slashBarAll; renderSlashBar(); };
+}
+
 function hideSlashPop() {
   const p = $('slashPop');
   if (p) p.hidden = true;
@@ -8279,6 +8318,7 @@ function wireAgentComposer() {
   const runBtn = $('agentRun');
   if (runBtn) runBtn.onclick = () => headlessSendFromComposer(runBtn);
   renderModelStrip();
+  if (runBtn) renderSlashBar();
   const isPi = !!runBtn; // pi composers have the web send button
   window._slashOpen = false;
   if (send) send.onclick = () => {
@@ -8945,7 +8985,7 @@ function buildCustomView(jobId, id) {
   const box = document.createElement('div');
   box.className = 'rc-cv';
   box.dataset.cv = id;
-  box.innerHTML = `<div class="rc-cv-head"><span>▣ extension view — keys go to it while focused</span>` +
+  box.innerHTML = `<div class="rc-cv-head"><strong>extension view</strong><span>↑↓ move · enter pick · esc close · click to focus</span>` +
     `<button class="rc-cv-close" title="Close this view (the extension receives a cancel).">✗</button></div>` +
     `<pre class="rc-cv-screen" contenteditable="true" spellcheck="false"></pre>`;
   let chain = Promise.resolve();
