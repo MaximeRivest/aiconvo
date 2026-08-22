@@ -5003,6 +5003,20 @@ function branchMatches(eventBranch, branches) {
   return (branches || []).some(branch => branch === eventBranch || branch.endsWith('/' + eventBranch));
 }
 
+// Pairing an AI edit to a commit runs git patch inspection per candidate.
+// The inputs only change when the repo history moves (head) or the event's
+// outcome resolves — memoize on exactly that. In-memory, bounded, safe.
+const pairMemo = new Map();
+async function pairEventToCommitMemo(event, repo, commitsForFile) {
+  const headHash = repo.head && (repo.head.hash || repo.head) || 'nohead';
+  const memoKey = event.id + '\x00' + repo.id + '\x00' + headHash + '\x00' + (event.outcome || '');
+  if (pairMemo.has(memoKey)) return pairMemo.get(memoKey);
+  const value = await pairEventToCommit(event, repo, commitsForFile);
+  if (pairMemo.size > 30000) pairMemo.clear();
+  pairMemo.set(memoKey, value);
+  return value;
+}
+
 async function pairEventToCommit(event, repo, commitsForFile) {
   if (event.outcome === 'failed') return null;
   const eventMs = Date.parse(event.ts || '');
@@ -5086,6 +5100,20 @@ async function projectTreeResponse(project) {
   return { project, cwd: meta.cwd, repos };
 }
 
+// Background diff-cache warmer. Gentle concurrency, one warm per project at
+// a time; conversationDiffs itself is mtime-cached, so repeats are cheap.
+const warmingProjects = new Set();
+function warmProjectDiffs(project) {
+  if (warmingProjects.has(project)) return;
+  const meta = projectMetaFor(project);
+  if (!meta || !meta.entries || meta.entries.length < 2) return;
+  warmingProjects.add(project);
+  setTimeout(async () => {
+    try { await mapLimit([...meta.entries], 2, ({ key }) => conversationDiffs(key).catch(() => {})); }
+    catch {} finally { warmingProjects.delete(project); }
+  }, 100);
+}
+
 async function projectFileHistoryResponse(project) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
@@ -5100,9 +5128,12 @@ async function projectFileHistoryResponse(project) {
   }
   const allEvents = [];
   const conversations = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
-  for (const { key } of conversations) {
-    try { allEvents.push(...await conversationDiffs(key)); } catch {}
-  }
+  // Parallel parse: the cold path reads every session file once (the diff
+  // cache then holds). Order stays deterministic — results land by index.
+  const perConv = await mapLimit(conversations, 6, async ({ key }) => {
+    try { return await conversationDiffs(key); } catch { return []; }
+  });
+  for (const events of perConv) allEvents.push(...events);
   const fullEvents = new Map();
   for (const event of allEvents) {
     fullEvents.set(event.id, event);
@@ -5126,7 +5157,7 @@ async function projectFileHistoryResponse(project) {
   await mapLimit(allEvents.filter(event => event.repoId), 4, async event => {
     const repo = repositories.find(item => item.id === event.repoId);
     const commits = commitFilesByRepo.get(repo.id).get(event.repoRelativePath) || [];
-    event.commitPair = await pairEventToCommit(event, repo, commits);
+    event.commitPair = await pairEventToCommitMemo(event, repo, commits);
     const working = new Set(repo.workingTree.map(item => item.path));
     event.repositoryState = event.outcome === 'failed' ? 'failed' : event.commitPair ? 'committed' : working.has(event.repoRelativePath) ? 'working-tree' : 'unresolved';
     event.inferredBranch = event.branch === 'HEAD'
@@ -5975,15 +6006,25 @@ async function projectResponse(project) {
   let notes = 0, freshNotes = 0, evidenceCards = 0, freshEvidence = 0;
   const recent = [];
   const sorted = [...entries].sort((a, b) => Date.parse(b.entry.lastTs || '') - Date.parse(a.entry.lastTs || ''));
-  for (const { key, entry } of sorted) {
-    let data = null;
-    try { data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')); } catch {}
+  // Read the per-conversation caches in parallel: sequential awaits cost
+  // seconds on a 250-conversation project. With a note on record, only the
+  // cache file's existence matters — stat it, skip the JSON parse.
+  const cacheReads = await mapLimit(sorted, 16, async ({ key, entry }) => {
+    const p = cachePathFor(key);
+    if (entry.notePath) {
+      try { await fsp.access(p); return { exists: true, data: null }; } catch { return { exists: false, data: null }; }
+    }
+    try { return { exists: true, data: JSON.parse(await fsp.readFile(p, 'utf8')) }; } catch { return { exists: false, data: null }; }
+  });
+  for (let si = 0; si < sorted.length; si++) {
+    const { key, entry } = sorted[si];
+    const { exists, data } = cacheReads[si];
     const noteState = noteStateForEntry(entry);
     if (entry.notePath) { notes++; if (noteState === 'fresh') freshNotes++; }
     let evidenceState = 'missing';
-    if (data) {
-      if (data.notePath || entry.notePath) evidenceState = noteState;
-      else {
+    if (exists) {
+      if (entry.notePath || (data && data.notePath)) evidenceState = noteState;
+      else if (data) {
         const h = epicEvidenceHash(data);
         if (h in epicEvidenceCache) evidenceState = 'fresh';
         else if (latestCachedEvidenceForKey(key)) evidenceState = 'stale';
@@ -6707,6 +6748,10 @@ const server = http.createServer(async (req, res) => {
       const project = u.searchParams.get('name') || '';
       try {
         const data = await projectResponse(project);
+        // Fire-and-forget: opening a project usually precedes opening its
+        // file Gantt. Warm the diff cache now so that click is not a cold
+        // 2-minute parse of every session file.
+        warmProjectDiffs(project);
         data.foldedFrom = foldedFromFor(data.project);
         const sugs = await projectFoldSuggestions().catch(() => []);
         // Quiet by design: only the three strongest pairs (suggestPairs
