@@ -6879,6 +6879,26 @@ new MutationObserver(() => {
 // Scrolling down hides the header and crumb; scrolling up, or the top,
 // brings them back. Accumulated distance per direction, not per-event
 // deltas: high-refresh screens deliver many tiny scroll events.
+// Toggling chrome-min changes the layout height above the scroller. Without
+// compensation the content jumps by the chrome height under the finger — a
+// hard jitter on fast flings. Shift scrollTop by the same amount, so the
+// content stays put. Exception: reaching the top shows the chrome without
+// compensation — there the push-down is the natural, expected motion.
+function setChromeMin(min, compensate) {
+  if (document.body.classList.contains('chrome-min') === min) return;
+  const view = $('view');
+  const measure = () => {
+    const head = document.querySelector('header');
+    const crumb = $('crumb');
+    return (head ? head.offsetHeight : 0) + (crumb && !crumb.hidden ? crumb.offsetHeight : 0);
+  };
+  // Measure while the chrome is visible: display:none reads 0.
+  const before = min ? measure() : 0;
+  document.body.classList.toggle('chrome-min', min);
+  const h = min ? before : measure();
+  if (compensate) view.scrollTop += min ? -h : h;
+  chromeScrollLast = view.scrollTop;
+}
 $('view').addEventListener('scroll', () => {
   if (!phoneLayout() || isEink() || document.body.classList.contains('home')) return;
   const top = $('view').scrollTop;
@@ -6888,8 +6908,9 @@ $('view').addEventListener('scroll', () => {
   if (Math.abs(delta) > 400) { chromeUpAcc = chromeDownAcc = 0; return; } // programmatic jump
   if (delta > 0) { chromeDownAcc += delta; chromeUpAcc = 0; }
   else if (delta < 0) { chromeUpAcc -= delta; chromeDownAcc = 0; }
-  if (top < 48 || chromeUpAcc > 32) document.body.classList.remove('chrome-min');
-  else if (chromeDownAcc > 48 && top > 60) document.body.classList.add('chrome-min');
+  if (top < 48) setChromeMin(false, false);
+  else if (chromeUpAcc > 32) setChromeMin(false, true);
+  else if (chromeDownAcc > 48 && top > 200) setChromeMin(true, true);
 }, { passive: true });
 
 const ttsAudio = new Audio();
