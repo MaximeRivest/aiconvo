@@ -56,7 +56,7 @@ Description=aiconvo conversation browser
 [Service]
 ExecStart=$NODE_BIN $REPO/server.js
 Environment=PORT=$PORT
-Environment=PATH=$NODE_DIR:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=$HOME/.local/bin:$NODE_DIR:/usr/local/bin:/usr/bin:/bin
 $DISPLAY_LINES
 Restart=on-failure
 
