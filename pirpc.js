@@ -218,6 +218,15 @@ function getWarmSession(target) {
   return w;
 }
 
+// The agents view lists these: every warm RPC process the server owns.
+function listWarmSessions() {
+  const out = [];
+  for (const [key, w] of warmSessions) {
+    out.push({ sessionPath: key, pid: w.sess.pid, busy: !!w.busy, model: w.model, alive: !!w.sess.alive });
+  }
+  return out;
+}
+
 // Shutdown helper: kill every warm pi process (their runs were aborted first).
 function stopAllWarmSessions() {
   let n = 0;
@@ -320,9 +329,9 @@ async function piQueuePrompt(target, message, behavior, images) {
 
 // A run is "stalled" only when pi emits nothing for this long. Wall-clock
 // timeouts killed legitimate long runs; the TUI has no timeout at all.
+// There is deliberately NO absolute cap: the agents view lists every
+// process and the user kills runs there. Silence is the only failure sign.
 const RUN_STALL_MS = 15 * 60 * 1000;
-// Absolute safety cap so a runaway loop cannot burn tokens for a day.
-const RUN_MAX_MS = 6 * 60 * 60 * 1000;
 // An extension dialog with no own timeout gets cancelled after this long.
 const DIALOG_MAX_MS = 30 * 60 * 1000;
 const DIALOG_METHODS = ['confirm', 'select', 'input', 'editor'];
@@ -394,15 +403,11 @@ function piHeadlessRun(target, opts) {
       const promptCmd = { type: 'prompt', message: opts.message };
       if (Array.isArray(opts.images) && opts.images.length) promptCmd.images = opts.images;
       await w.sess.request(promptCmd);
-      const startedAt = Date.now();
       const stallMs = opts.stallMs || RUN_STALL_MS;
-      const maxMs = opts.maxMs || RUN_MAX_MS;
       const stalled = new Promise((_, rej) => {
         const check = () => {
-          const now = Date.now();
-          if (now - startedAt > maxMs) return rej(new Error('stopped — the run hit the ' + Math.round(maxMs / 3600000) + ' h safety cap.' + piVersionHint()));
           // A pending dialog is legitimate silence: someone must answer it.
-          if (!pendingUi.size && now - lastEventAt > stallMs) return rej(new Error('stalled — no pi events for ' + Math.round(stallMs / 60000) + ' minutes.' + piVersionHint()));
+          if (!pendingUi.size && Date.now() - lastEventAt > stallMs) return rej(new Error('stalled — no pi events for ' + Math.round(stallMs / 60000) + ' minutes.' + piVersionHint()));
           stallTimer = setTimeout(check, 30000);
         };
         stallTimer = setTimeout(check, 30000);
@@ -467,4 +472,4 @@ async function piBeginWarm(target) {
   return { file, sessionId, pid: sess.pid };
 }
 
-module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, stopWarmSession, stopAllWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };
+module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };

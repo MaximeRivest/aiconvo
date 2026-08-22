@@ -1089,7 +1089,7 @@ async function conversationContextResponse(key, leafId) {
 // pi session operations run through pi's own runtime (pirpc.js + the
 // aiconvo-bridge extension). Claude keeps a hand copier: no native
 // arbitrary-node fork exists (verified empirically).
-const { piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, stopWarmSession, stopAllWarmSessions, piBeginWarm } = require('./pirpc.js');
+const { piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm } = require('./pirpc.js');
 
 function sessionPathsFor(key) {
   const entry = index[key];
@@ -1258,6 +1258,85 @@ function saveAgentRunsNow() {
 }
 
 function headlessOwner(absPath) { return headlessRuns.get(absPath) || null; }
+
+// Every pi/claude/bridge process on this machine, from /proc. The agents
+// view shows them all — including untracked strays — and can kill them.
+// Caution: pi and claude rewrite their argv to a bare "pi"/"claude", which
+// hides --session and --mode. The PTY bridge parent still shows the full
+// launch command, so terminal sessions are recovered from there.
+function scanAgentProcs() {
+  const procs = [];
+  let pids = [];
+  try { pids = fs.readdirSync('/proc').filter(d => /^\d+$/.test(d)); } catch { return procs; }
+  let uptime = 0;
+  try { uptime = Number(fs.readFileSync('/proc/uptime', 'utf8').split(' ')[0]) || 0; } catch {}
+  const bridgeArgs = new Map(); // bridge pid → argv (holds the real pi command)
+  for (const pidStr of pids) {
+    const pid = Number(pidStr);
+    if (pid === process.pid) continue;
+    let raw;
+    try { raw = fs.readFileSync('/proc/' + pid + '/cmdline', 'utf8'); } catch { continue; }
+    const argv = raw.split('\0').filter(Boolean).map(a => a.trim()).filter(Boolean);
+    if (!argv.length) continue;
+    const base0 = path.basename(argv[0]);
+    const base1 = argv[1] ? path.basename(argv[1]) : '';
+    let kind = null;
+    if (base0 === 'pi' || ((base0 === 'node' || base0 === 'bun') && base1 === 'pi')) kind = 'pi';
+    else if (base0 === 'claude' || ((base0 === 'node' || base0 === 'bun') && base1 === 'claude')) kind = 'claude';
+    else if (base1 === 'aiconvo-bridge.py') kind = 'bridge';
+    if (!kind) continue;
+    if (kind === 'bridge') bridgeArgs.set(pid, argv);
+    let sessionPath = null;
+    const si = argv.indexOf('--session');
+    if (si >= 0 && argv[si + 1]) sessionPath = argv[si + 1];
+    const rpc = argv.includes('rpc') && argv.includes('--mode');
+    let ageMs = null, ppid = null;
+    try {
+      const stat = fs.readFileSync('/proc/' + pid + '/stat', 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      ppid = Number(fields[1]) || null;
+      const startTicks = Number(fields[19]);
+      if (uptime && Number.isFinite(startTicks)) ageMs = Math.max(0, Math.round((uptime - startTicks / 100) * 1000));
+    } catch {}
+    procs.push({ pid, ppid, kind, rpc, sessionPath, ageMs });
+  }
+  // Second pass: a pi under a PTY bridge inherits the bridge's --session.
+  for (const pr of procs) {
+    if (pr.sessionPath || !pr.ppid) continue;
+    const parent = bridgeArgs.get(pr.ppid);
+    if (!parent) continue;
+    const si = parent.indexOf('--session');
+    if (si >= 0 && parent[si + 1]) { pr.sessionPath = parent[si + 1]; pr.viaBridge = true; }
+  }
+  return procs;
+}
+
+// Join the raw process list with what the server knows: warm RPC sessions,
+// tracked terminal windows, and the conversation index.
+function agentProcsView(runningKeys) {
+  const warmByPid = new Map(listWarmSessions().map(w => [w.pid, w]));
+  const keyByBase = new Map(Object.keys(index).map(k => [path.basename(k), k]));
+  const out = [];
+  for (const pr of scanAgentProcs()) {
+    if (pr.kind === 'bridge') continue; // its pi child row carries the meaning
+    const warm = warmByPid.get(pr.pid);
+    const key = pr.sessionPath ? keyByBase.get(path.basename(pr.sessionPath)) || null
+      : warm ? keyByBase.get(path.basename(warm.sessionPath)) || null : null;
+    const entry = key ? index[key] : null;
+    const run = warm ? headlessOwner(path.resolve(warm.sessionPath)) : null;
+    const owner = warm ? 'web' : pr.ppid === process.pid ? 'server' : key && runningKeys.has(key) ? 'terminal' : 'untracked';
+    out.push({
+      pid: pr.pid, kind: pr.kind, rpc: pr.rpc, key,
+      title: entry ? (entry.timelineTitle || entry.title) : null,
+      cwd: entry ? entry.cwd : null, ageMs: pr.ageMs, owner,
+      busy: warm ? warm.busy : undefined, model: warm && warm.model || undefined,
+      jobId: run ? run.jobId : undefined,
+    });
+  }
+  const weight = { web: 0, server: 1, terminal: 2, untracked: 3 };
+  out.sort((a, b) => (weight[a.owner] - weight[b.owner]) || ((a.ageMs || 0) - (b.ageMs || 0)));
+  return out;
+}
 
 // Extension-backed providers (claude-code) exist only when their extension
 // loads inside the RPC process; `--no-extensions` would hide them.
@@ -6751,6 +6830,8 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/agents/active') {
       // running: a live pi/claude process. writing: file changed in 5 min.
       // recent: file changed in the last hour and not already listed.
+      // procs: EVERY pi/claude process on the machine, with owner tags and
+      // pids, so runaway or untracked agents are visible and killable.
       const nowMs = Date.now();
       const running = listRunningAgents().map(item => ({
         key: item.key, source: item.source, title: item.title, cwd: item.cwd,
@@ -6770,7 +6851,28 @@ const server = http.createServer(async (req, res) => {
       }
       writing.sort((a, b) => a.ageMs - b.ageMs);
       recent.sort((a, b) => a.ageMs - b.ageMs);
-      json(res, 200, { running, writing, recent: recent.slice(0, 15) });
+      json(res, 200, { running, writing, recent: recent.slice(0, 15), procs: agentProcsView(runningKeys) });
+    } else if (u.pathname === '/api/agents/kill' && req.method === 'POST') {
+      // Kill one agent process from the agents view. Refuses pids that are
+      // not pi/claude/bridge processes. Web-owned RPC runs abort cleanly
+      // through their own lifecycle so partial output lands in the file.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const pid = Number(p.pid);
+        if (!Number.isInteger(pid) || pid <= 1) return json(res, 400, { error: 'bad pid' });
+        const proc = scanAgentProcs().find(x => x.pid === pid);
+        if (!proc) return json(res, 404, { error: 'pid ' + pid + ' is not a pi/claude/bridge process (already gone?)' });
+        const warm = listWarmSessions().find(w => w.pid === pid);
+        if (warm) {
+          await releaseHeadless(path.resolve(warm.sessionPath), 'killed from the agents view');
+          stopWarmSession(warm.sessionPath);
+        } else {
+          process.kill(pid, p.force ? 'SIGKILL' : 'SIGTERM');
+        }
+        json(res, 200, { ok: true, pid, kind: proc.kind, owner: warm ? 'web' : 'process' });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/file-feedback' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;

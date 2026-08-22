@@ -767,6 +767,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.thinking summary::-webkit-details-marker { display: none; }
 .msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
 .rc-body { color: var(--text); font-size: 12.5px; }
+.ag-kill { flex: none; background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 2px 7px; font: inherit; font-size: var(--fs-micro); }
+.ag-kill:hover { color: var(--red, #f66); border-color: var(--red, #f66); }
 .rc-notice { color: var(--text-dim); font-size: var(--fs-micro); margin: 2px 0; }
 .rc-widget { color: var(--text-dim); font-size: 11px; margin: 4px 0; border-left: 2px solid var(--border-strong); padding-left: 8px; white-space: pre-wrap; }
 .rc-dialog { border: 1px solid var(--accent); padding: 8px; margin: 6px 0; }
@@ -1114,7 +1116,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   #filtersPop { min-width: 0; }
   #jobsTray { top: 0; width: 100%; z-index: 75; }
 
-  body.home #left { padding-bottom: calc(46px + env(safe-area-inset-bottom)); }
+  body.home #left { padding-bottom: 0; }
+  /* phone dashboard: the app opens on the chart and nothing else */
+  body.home header, body.home #tabs { display: none !important; }
+  body.home #list { touch-action: pan-x pan-y; }
+  body.home #gRecenter { display: flex; }
   /* the tab switcher floats in the corner instead of owning a full-width bar */
   #tabs { position: fixed; left: auto; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 35; width: auto; height: auto; padding: 2px; background: var(--surface-1); border: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); box-shadow: 0 2px 12px rgba(0,0,0,.3); }
   #tabs button[data-tab] { height: 34px; min-height: 34px; min-width: 0; padding: 0 8px; font-size: 11px; }
@@ -1271,6 +1277,8 @@ body.zen:not(.home) .transcript { border: 0; }
 body.zen:not(.home) .msg { border-bottom: 0; padding: 14px 0; }
 body.zen:not(.home) .msg.user { border-left: 2px solid var(--border-strong); padding-left: 14px; }
 #zenExit { display: none; }
+/* recenter on now — the one Google-Maps-style control on the phone chart */
+#gRecenter { display: none; position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 40; width: 46px; height: 46px; min-height: 46px; align-items: center; justify-content: center; border: 1px solid var(--border-strong); background: var(--surface-1); font-size: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.3); }
 body.zen:not(.home) #zenExit { display: block; position: fixed; top: 6px; right: 10px; z-index: 60; border: 0; background: transparent; color: var(--text-faint); font-size: var(--fs-micro); height: auto; padding: 2px 6px; }
 #zenExit:hover { color: var(--text); background: transparent; }
 </style>
@@ -1293,6 +1301,7 @@ body.zen:not(.home) #zenExit { display: block; position: fixed; top: 6px; right:
 </header>
 <div id="crumb" hidden></div>
 <button id="zenExit" title="Leave zen mode (z)">zen ✕</button>
+<button id="gRecenter" title="Jump to now" aria-label="Jump to now">⌖</button>
 <div id="windowsPop" hidden></div>
 <div id="agentsPop" hidden></div>
 <div id="filtersPop" hidden>
@@ -1404,10 +1413,34 @@ let viewKind = 'home';
 let currentHash = '';
 let suppressHashEvents = 0;
 
+// ---- phone orientation: the Gantt is a landscape surface ----
+// Netflix-style: phones (not tablets) lock to landscape while home shows
+// the chart. The lock needs fullscreen on the web; where either call is
+// unsupported it fails quietly and the portrait card list stays.
+function phoneDevice() {
+  const form = document.documentElement.dataset.form;
+  if (form) return form === 'phone';
+  return window.matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) <= 600;
+}
+async function lockLandscape() {
+  if (!phoneDevice()) return;
+  try {
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen)
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
+  } catch {}
+}
+function unlockLandscape() {
+  if (!phoneDevice()) return;
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch {}
+  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+}
+
 function setRouteKind(kind, crumbs) {
   viewKind = kind;
   if (kind !== 'conversation' && $('matchHud')) $('matchHud').remove();
   document.body.classList.toggle('home', kind === 'home');
+  if (kind === 'home') lockLandscape(); else unlockLandscape();
   document.body.classList.remove('chrome-min'); // navigation always shows the chrome again
   chromeScrollLast = -1;
   chromeUpAcc = chromeDownAcc = 0;
@@ -2214,6 +2247,8 @@ function setZen(on) {
 try { if (localStorage.getItem('aiconvo.zen') === '1') document.body.classList.add('zen'); } catch {}
 $('zenExit').onclick = () => setZen(false);
 
+$('gRecenter').onclick = () => jumpToNow();
+
 // Phone: the search rests as one magnifier button; tap opens the field.
 $('qBtn').onclick = () => {
   const on = document.body.classList.toggle('q-open');
@@ -2297,6 +2332,7 @@ function updateActiveBtn() {
 let agentsTimer = null;
 let agentsPopT = null;
 let agentsPids = new Map(); // key → terminal pid, from the last server fetch
+let agentsProcs = [];       // every pi/claude process, from the last server fetch
 function renderAgentsPopSoon() {
   if ($('agentsPop').hidden) return;
   clearTimeout(agentsPopT);
@@ -2309,6 +2345,7 @@ async function renderAgentsPop(refetch) {
     try {
       const d = await (await fetch('/api/agents/active')).json();
       agentsPids = new Map((d.running || []).filter(a => a.key).map(a => [a.key, a.pid]));
+      agentsProcs = d.procs || [];
     } catch {}
     if (pop.hidden) return;
   }
@@ -2334,12 +2371,21 @@ async function renderAgentsPop(refetch) {
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const recent = sessions.filter(s => s.mtimeMs && !isActive(s) && now - s.mtimeMs < 3600000 && !runningKeys.has(s.key))
     .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 15);
+  // Every pi/claude process on the machine, killable. Owner tags say who
+  // controls it: web (this server's RPC), terminal (tracked window),
+  // server (other child), untracked (nobody — the dangerous kind).
+  const procRow = p => `<div class="ag-row" data-key="${esc(p.key || '')}">` +
+    `<span class="src ${esc(p.kind === 'claude' ? 'claude' : 'pi')}"><i></i></span>` +
+    `<span class="ag-main"><span class="ag-title">${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no session'))}</span>` +
+    `<span class="ag-dir">pid ${p.pid} · ${esc(p.owner)}${p.busy ? ' · busy' : ''}${p.model ? ' · ' + esc(p.model) : ''}${p.ageMs != null ? ' · up ' + esc(secs(p.ageMs)) : ''}</span></span>` +
+    `<button class="ag-kill" data-pid="${p.pid}" data-name="${esc(p.title || p.kind + ' pid ' + p.pid)}" title="Stop this process. Web runs abort cleanly and keep partial output.">✗</button></div>`;
   const st = pop.scrollTop;
   pop.innerHTML =
     (webRuns.length ? '<div class="ag-sec">● web runs — streaming now</div>' + webRuns.join('') : '') +
     (termWork.length ? '<div class="ag-sec">● terminals — working</div>' + termWork.map(t => row(t.s, t.k, termStatus(t))).join('') : '') +
     (termIdle.length ? '<div class="ag-sec">○ terminals — idle at the prompt</div>' + termIdle.map(t => row(t.s, t.k, termStatus(t))).join('') : '') +
     (writing.length ? '<div class="ag-sec">✎ writing — no process found</div>' + writing.map(s => row(s, s.key, secs(now - s.mtimeMs))).join('') : '') +
+    (agentsProcs.length ? '<div class="ag-sec">⚙ processes — every pi/claude on this machine</div>' + agentsProcs.map(procRow).join('') : '') +
     (recent.length ? '<div class="ag-sec">recent — last hour</div>' + recent.map(s => row(s, s.key, ago(now - s.mtimeMs))).join('') : '') ||
     '<div class="ag-sec">nothing is running, writing, or recent.</div>';
   pop.scrollTop = st;
@@ -2354,7 +2400,19 @@ function toggleAgents(show) {
   }
 }
 $('activeBtn').onclick = e => { e.stopPropagation(); toggleAgents(); };
-$('agentsPop').onclick = e => {
+$('agentsPop').onclick = async e => {
+  const kill = e.target.closest('.ag-kill');
+  if (kill) {
+    e.stopPropagation();
+    if (!confirm('Kill “' + (kill.dataset.name || 'process') + '” (pid ' + kill.dataset.pid + ')?')) return;
+    kill.disabled = true;
+    kill.textContent = '…';
+    const out = await postJson('/api/agents/kill', { pid: Number(kill.dataset.pid) });
+    if (out && out.error) errToast('kill failed: ' + out.error);
+    else toast('killed pid ' + kill.dataset.pid);
+    setTimeout(() => renderAgentsPop(true), 800);
+    return;
+  }
   const row = e.target.closest('.ag-row[data-key]');
   if (!row || !row.dataset.key) return;
   toggleAgents(false);
@@ -3014,9 +3072,9 @@ function violinPath(x0, x1, cy, bins, fat = false) {
 }
 
 function renderTimeline() {
-  // Phone portrait: the card list. Phone landscape: the real Gantt chart,
-  // full screen — same renderer as the desktop, no separate code path.
-  if (phoneLayout() && !window.matchMedia('(orientation: landscape)').matches) return renderMobileConversations();
+  // Small phones: the Gantt IS the dashboard — always the real chart.
+  // Other squat layouts keep the card list in portrait.
+  if (phoneLayout() && !phoneDevice() && !window.matchMedia('(orientation: landscape)').matches) return renderMobileConversations();
   const list = $('list');
   const st = list.scrollTop, sl = list.scrollLeft;
   const noteHits = shown.filter(s => s.kind === 'note');
@@ -9733,6 +9791,33 @@ $('list').addEventListener('wheel', e => {
     $('list').scrollLeft += e.deltaY;
   }
 }, { passive: false });
+
+// Two-finger pinch zooms the chart around the pinch midpoint (phone/tablet).
+(() => {
+  const list = $('list');
+  const pts = new Map();
+  let lastD = 0;
+  list.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') { pts.set(e.pointerId, e); lastD = 0; }
+  });
+  list.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'touch' || !pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, e);
+    if (pts.size !== 2 || !list.querySelector('.timeline')) return;
+    e.preventDefault();
+    const [a, b] = [...pts.values()];
+    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (!lastD) { lastD = d; return; }
+    const f = d / lastD;
+    if (Math.abs(f - 1) > 0.05) {   // re-render is heavy; step in 5% moves
+      zoomBy(f, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+      lastD = d;
+    }
+  }, { passive: false });
+  const drop = e => { pts.delete(e.pointerId); lastD = 0; };
+  list.addEventListener('pointerup', drop);
+  list.addEventListener('pointercancel', drop);
+})();
 
 // ---- selection actions ----
 $('selShown').onclick = () => {
