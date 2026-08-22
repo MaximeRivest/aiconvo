@@ -138,7 +138,10 @@ body { margin: 0; font: var(--fs-body)/1.5 var(--font); background: var(--bg); c
   body { height: 100dvh; }
   header { padding-top: env(safe-area-inset-top); height: calc(var(--header-h) + env(safe-area-inset-top)); }
 }
-button { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r); padding: 0 12px; height: 30px; font: var(--fs-label) var(--font); cursor: pointer; transition: background var(--t), color var(--t); }
+/* Systematic: no fixed height on the base button. A label that wraps grows
+   the box instead of clipping. One-line buttons still measure exactly 30px
+   (content + padding < min-height), so aligned rows keep their geometry. */
+button { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r); padding: 4px 12px; min-height: 30px; height: auto; font: var(--fs-label) var(--font); cursor: pointer; transition: background var(--t), color var(--t); }
 button:hover { background: var(--surface-3); }
 button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
 button.primary:hover { filter: brightness(1.12); }
@@ -433,7 +436,7 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .pcard .pkind { color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; }
 .pcard .pbody { border-top: 1px solid var(--border); padding: 8px 10px; font-size: var(--fs-meta); }
 .pcard .pbody p { margin: 0 0 6px; }
-.pcard .pbuttons { display: flex; gap: var(--sp-2); margin-top: 8px; }
+.pcard .pbuttons { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: 8px; }
 .pfresh { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); border: 1px solid var(--border); margin-bottom: var(--sp-2); }
 .pfresh > div { padding: 8px 10px; border-right: 1px solid var(--border); }
 .pfresh > div:last-child { border-right: 0; }
@@ -1128,7 +1131,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
     --header-h: 52px; --read-max: none;
   }
   html, body { height: 100dvh; overflow: hidden; }
-  button { min-height: 42px; padding: 0 11px; }
+  button { min-height: 42px; padding: 4px 11px; }
   input[type=text], input[type=search], select { min-height: 42px; font-size: 16px; }
 
   header { height: auto; min-height: 52px; padding: 4px 6px; gap: 3px; flex-wrap: wrap; align-content: center; }
@@ -1642,6 +1645,23 @@ function toggleCrumbSiblings(key, ev) {
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+// Dev guard: find controls whose content clips its box. Ellipsis truncation
+// is a design choice and does not count. Run uiAudit() in any view, on any
+// device, after layout changes; it must return [].
+window.uiAudit = function uiAudit(root) {
+  const bad = [];
+  for (const el of (root || document).querySelectorAll('button, select, .fold-chip, .mchip')) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    const cs = getComputedStyle(el);
+    const ellipsis = cs.textOverflow === 'ellipsis' && cs.overflow.includes('hidden');
+    const clipX = el.scrollWidth > Math.ceil(r.width) + 1 && !ellipsis;
+    const clipY = el.scrollHeight > Math.ceil(r.height) + 1;
+    if (clipX || clipY) bad.push({ el, label: (el.id || el.textContent.trim().slice(0, 30)), box: Math.round(r.width) + 'x' + Math.round(r.height), content: el.scrollWidth + 'x' + el.scrollHeight });
+  }
+  return bad;
+};
 
 // ---- windows: extra places to work without losing the current view ----
 // One page, many independent routes. The ⧉ button next to the brand opens
