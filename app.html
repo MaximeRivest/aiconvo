@@ -1037,7 +1037,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .md code { background: transparent; padding: 0; font-size: 13px; font-style: italic; color: var(--text-dim); }
 .md pre code { background: none; padding: 0; }
 .md ul, .md ol { margin: 10px 0; padding-left: 22px; }
+/* nested lists sit tight under their parent item */
+.md li > ul, .md li > ol { margin: 2px 0; }
 .md li { margin: 4px 0; }
+.md li input[type=checkbox] { margin-right: 4px; vertical-align: -1px; }
 .md blockquote { border-left: 2px solid var(--border-strong); margin: 8px 0; padding: 1px 10px; color: var(--text-dim); }
 .md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .md a { color: var(--cyan); }
@@ -10055,9 +10058,28 @@ function mdRender(src, q = '') {
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
     .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
   const out = [];
-  let list = null, quote = [], table = [];
-  const closeBlocks = () => {
-    if (list) { out.push(`</${list}>`); list = null; }
+  // lists is a stack of open lists: nesting follows the source indentation.
+  let lists = [], quote = [], table = [];
+  const closeList = () => {
+    const l = lists.pop();
+    if (l.liOpen) out.push('</li>');
+    out.push(`</${l.tag}>`);
+  };
+  const listItem = (tag, indent, html, start) => {
+    while (lists.length && indent < lists[lists.length - 1].indent) closeList();
+    let top = lists[lists.length - 1];
+    if (top && top.indent === indent && top.tag !== tag) { closeList(); top = lists[lists.length - 1]; }
+    if (!lists.length || indent > lists[lists.length - 1].indent) {
+      out.push(tag === 'ol' && start > 1 ? `<ol start="${start}">` : `<${tag}>`);
+      lists.push({ tag, indent, liOpen: false });
+    }
+    top = lists[lists.length - 1];
+    if (top.liOpen) out.push('</li>');
+    out.push(`<li>${html}`);
+    top.liOpen = true;
+  };
+  // flushQT closes an open blockquote or table but keeps lists open.
+  const flushQT = () => {
     if (quote.length) { out.push(`<blockquote>${quote.join('')}</blockquote>`); quote = []; }
     if (table.length) {
       const cells = row => row.replace(/^\s*\||\|\s*$/g, '').split('|').map(c => c.trim());
@@ -10071,18 +10093,30 @@ function mdRender(src, q = '') {
       table = [];
     }
   };
+  const closeBlocks = () => { while (lists.length) closeList(); flushQT(); };
+  // Task boxes: "- [ ] todo" / "- [x] done" render as disabled checkboxes.
+  const liHtml = s => {
+    const t = s.match(/^\[([ xX])\]\s+(.*)$/);
+    if (t) return `<input type="checkbox" disabled${t[1] === ' ' ? '' : ' checked'}> ${inline(t[2])}`;
+    return inline(s);
+  };
+  const indentOf = s => s.replace(/\t/g, '    ').length;
   const renderText = part => {
     for (const line of part.split('\n')) {
       let m;
-      if (/^\s*\|.*\|\s*$/.test(line)) { if (list) { out.push(`</${list}>`); list = null; } if (quote.length) { out.push(`<blockquote>${quote.join('')}</blockquote>`); quote = []; } table.push(line); continue; }
-      if (table.length) closeBlocks();
+      if (/^\s*\|.*\|\s*$/.test(line)) { while (lists.length) closeList(); if (quote.length) { out.push(`<blockquote>${quote.join('')}</blockquote>`); quote = []; } table.push(line); continue; }
+      if (table.length) flushQT();
       if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { closeBlocks(); out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); continue; }
-      if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { closeBlocks(); out.push('<hr>'); continue; }
-      if ((m = line.match(/^\s*[-*] (.*)$/))) { if (quote.length || table.length) closeBlocks(); if (list !== 'ul') { closeBlocks(); out.push('<ul>'); list = 'ul'; } out.push(`<li>${inline(m[1])}</li>`); continue; }
-      if ((m = line.match(/^\s*\d+[.)] (.*)$/))) { if (quote.length || table.length) closeBlocks(); if (list !== 'ol') { closeBlocks(); out.push('<ol>'); list = 'ol'; } out.push(`<li>${inline(m[1])}</li>`); continue; }
-      if ((m = line.match(/^\s*> ?(.*)$/))) { if (list || table.length) closeBlocks(); quote.push(`<p>${inline(m[1])}</p>`); continue; }
+      if (/^\s*([-_]{3,}|\*{3,})\s*$/.test(line)) { closeBlocks(); out.push('<hr>'); continue; }
+      if ((m = line.match(/^(\s*)[-*+] +(.*)$/))) { flushQT(); listItem('ul', indentOf(m[1]), liHtml(m[2])); continue; }
+      if ((m = line.match(/^(\s*)(\d+)[.)] +(.*)$/))) { flushQT(); listItem('ol', indentOf(m[1]), inline(m[3]), Number(m[2])); continue; }
+      if ((m = line.match(/^\s*> ?(.*)$/))) { while (lists.length) closeList(); quote.push(`<p>${inline(m[1])}</p>`); continue; }
+      // Blank lines inside a list keep the list open; a later plain line closes it.
+      if (!line.trim()) { flushQT(); continue; }
+      // An indented plain line under an open item continues that item's text.
+      if (lists.length && indentOf((line.match(/^\s*/) || [''])[0]) > lists[lists.length - 1].indent) { out.push(' ' + inline(line.trim())); continue; }
       closeBlocks();
-      if (line.trim()) out.push(`<p>${inline(line)}</p>`);
+      out.push(`<p>${inline(line)}</p>`);
     }
   };
   const parts = src.split(/^(```.*)$/m);
