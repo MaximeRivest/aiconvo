@@ -42,6 +42,13 @@ command -v git >/dev/null 2>&1 \
 # --- 4. systemd user unit ----------------------------------------------------
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"
+# The service PATH must reach node's bin dir (nvm installs pi there too).
+NODE_DIR="$(dirname "$(readlink -f "$NODE_BIN")")"
+# On WSL, agent terminals (alacritty) need the WSLg display sockets.
+DISPLAY_LINES=""
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  DISPLAY_LINES=$'Environment=DISPLAY=:0\nEnvironment=WAYLAND_DISPLAY=wayland-0'
+fi
 cat > "$UNIT_DIR/aiconvo.service" <<EOF
 [Unit]
 Description=aiconvo conversation browser
@@ -49,6 +56,8 @@ Description=aiconvo conversation browser
 [Service]
 ExecStart=$NODE_BIN $REPO/server.js
 Environment=PORT=$PORT
+Environment=PATH=$NODE_DIR:/usr/local/bin:/usr/bin:/bin
+$DISPLAY_LINES
 Restart=on-failure
 
 [Install]
@@ -62,7 +71,7 @@ loginctl enable-linger "$USER" 2>/dev/null || true
 # --- 5. health check ---------------------------------------------------------
 ok=""
 for _ in $(seq 1 20); do
-  if curl -fsS -o /dev/null "http://localhost:$PORT/"; then ok=1; break; fi
+  if curl -fsS -o /dev/null "http://localhost:$PORT/" 2>/dev/null; then ok=1; break; fi
   sleep 0.5
 done
 if [ -z "$ok" ]; then
