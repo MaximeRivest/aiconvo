@@ -11,6 +11,9 @@ const DEFAULT_SETTINGS = {
   // Optional GPU-server late-interaction search stage (off by default).
   semanticSearch: false,
   semanticUrl: 'http://192.168.2.24:8090',
+  // Engine for web sends: 'sdk' embeds pi in-process (fast forks, full
+  // extension UI); 'rpc' spawns pi child processes (isolation fallback).
+  piEngine: 'sdk',
 };
 
 function parseTokenCount(raw) {
@@ -107,8 +110,9 @@ function normalizeSettings(input) {
     : DEFAULT_SETTINGS.contextTokens;
   const semanticSearch = src.semanticSearch === true;
   const semanticUrl = String(src.semanticUrl || DEFAULT_SETTINGS.semanticUrl).trim().replace(/\/$/, '');
+  const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, piEngine };
   }
   return {
     usePiDefault: false,
@@ -118,6 +122,7 @@ function normalizeSettings(input) {
     contextTokens,
     semanticSearch,
     semanticUrl,
+    piEngine,
   };
 }
 
