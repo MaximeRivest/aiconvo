@@ -860,8 +860,12 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .mpick .mp-row.notready { opacity: .5; }
 .mpick .mp-foot { padding: 8px; border-top: 1px solid var(--border); }
 .model-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 6px; }
-/* inside the compose row the strip is inline: no extra padding, push send right */
-.agent-compose-row .model-strip { padding: 0; margin-left: auto; }
+/* inside the compose row the strip is inline; the model chip starts the
+   right-hand group (model · fan chips · send), the meter floats mid-row */
+.agent-compose-row .model-strip { padding: 0; }
+.agent-compose-row #convModel { margin-left: auto; }
+.agent-compose-row #agentSend { margin-left: auto; }
+.agent-compose-row .ctxmeter { overflow: hidden; text-overflow: ellipsis; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
 .mchip .mname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .mchip button { height: 18px; min-width: 18px; padding: 0; border: 0; background: transparent; color: var(--text-faint); }
@@ -1012,8 +1016,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
    shrink-wrap the composer to its content (a small island on e-ink, where
    --read-max is none). Full width, then max-width caps and centers it. */
 .agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; width: 100%; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
-.agent-compose .agent-state { display: flex; gap: var(--sp-2); align-items: center; color: var(--text-dim); font-size: var(--fs-meta); min-width: 0; }
-.agent-compose .agent-state strong { color: var(--accent); }
+
 .agent-compose .agent-hint { color: var(--text-faint); }
 .agent-compose textarea { width: 100%; min-height: 64px; resize: vertical; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); padding: 8px 10px; }
 .agent-compose textarea:focus { outline: 0; border-color: var(--accent); }
@@ -1239,6 +1242,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   /* resting composer: one slim bar — tap it, or hold a draft, to expand */
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
+  .agent-compose.compose-min .ctxmeter, .agent-compose.compose-min #convModel,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
   .agent-compose.compose-min textarea { flex: 1 1 auto; min-width: 0; min-height: 46px; height: 46px; max-height: 46px; }
@@ -1351,6 +1355,8 @@ body.zen:not(.home) .tracebanner,
 body.zen:not(.home) .msg .role,
 body.zen:not(.home) .cmp-badges,
 body.zen:not(.home) .model-strip,
+body.zen:not(.home) .agent-compose .ctxmeter,
+body.zen:not(.home) #convModel,
 body.zen:not(.home) .agent-state { display: none !important; }
 body.zen:not(.home) .transcript, body.zen:not(.home) #runCards:not(:empty) { border: 0; }
 body.zen:not(.home) .msg { border-bottom: 0; padding: 14px 0; }
@@ -7294,11 +7300,6 @@ function convHead(d, entry, related) {
       ${(entry.familySize || 1) > 1 ? `<button id="famTree" class="ghost" title="${entry.family && entry.family !== d.key ? 'You read one branch of a conversation family (fan-out / fork). The list shows the family as one row. T opens the tree of all branches.' : 'This conversation has linked fork branches (fan-out / forks). T opens the tree of all branches.'}">⤑ ${entry.familySize} branches${entry.family && entry.family !== d.key ? ' · you read a branch' : ''} · tree</button>` : ''}
       <span id="chLive" class="ch-live" hidden></span>
       <span id="convHeadExtra"></span>
-      ${['pi', 'pi-remote'].includes(d.source) ? (() => {
-        const lastModel = [...(d.messages || [])].reverse().find(m => m.role === 'assistant' && m.model);
-        return `<button id="convModel" title="Set this conversation's model. pi writes its native model_change entry, so branches and resumes inherit it.">◇ <span class="mname">${esc(lastModel ? lastModel.model : 'model')}</span> ▾</button>`;
-      })() : ''}
-      <span id="ctxMeter" class="ctxmeter" hidden></span>
       ${['claude', 'pi', 'pi-remote'].includes(d.source) ? `<button id="termAttach" title="Continue this conversation in Alacritty">continue in alacritty</button>` : ''}
       <select id="mode" title="What to show and export (s cycles, shift+s cycles back)" style="height:26px">
         <option value="chat">chat only</option>
@@ -7491,11 +7492,10 @@ async function continueInAlacritty(btn) {
 
 function agentComposerHtml(d) {
   if (!['claude', 'pi', 'pi-remote'].includes(d.source)) return '';
-  const kind = d.source === 'claude' ? 'Claude Code' : 'Pi';
+  // The model chip and the context/cost meter live in the compose row:
+  // everything about the next send sits on one line.
+  const lastModel = [...(d.messages || [])].reverse().find(m => m.role === 'assistant' && m.model);
   return `<div class="agent-compose" id="agentCompose">
-    <div class="agent-state"><strong>${kind}</strong><span id="agentBarHint">${d.source === 'claude' ? 'type a prompt · ctrl+enter sends · / opens slash commands' : 'enter sends · click a /cmd · or type /'}</span>
-      <button type="button" class="ghost" id="agentOpenLive" title="Raw terminal view if something gets stuck">live view</button>
-    </div>
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="3" placeholder="type a prompt, or / for slash commands. paste or drop images."></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
@@ -7506,6 +7506,8 @@ function agentComposerHtml(d) {
       <button class="agent-mic" id="agentMic" type="button" title="Start / stop dictation (m, or ctrl+m while typing)" aria-label="Start dictation" aria-pressed="false" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>
       </button>
+      <span id="ctxMeter" class="ctxmeter" hidden></span>
+      ${d.source !== 'claude' ? `<button id="convModel" title="Set this conversation's model. pi writes its native model_change entry, so branches and resumes inherit it.">◇ <span class="mname">${esc(lastModel ? lastModel.model : 'model')}</span> ▾</button>` : ''}
       ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
       ${d.source === 'claude' ? '<button class="primary" id="agentSend" type="button" title="Open the terminal and send (ctrl+enter)">open &amp; send</button>' : ''}
