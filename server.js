@@ -400,6 +400,7 @@ function closeSharedWindow(id, client) {
 async function indexFile(source, relPath, stat) {
   const key = source + ':' + relPath;
   const absPath = path.join(SOURCES[source], relPath);
+  const prev = index[key];
   try {
     const { meta, messages, entryParents } = await parseFile(absPath);
     const firstUser = titleSourceMessage(messages);
@@ -433,6 +434,7 @@ async function indexFile(source, relPath, stat) {
       firstTs: meta.firstTs,
       lastTs: meta.lastTs,
       userCount: messages.filter(m => m.role === 'user').length,
+      realUserCount: messages.filter(m => m.role === 'user' && String(m.text || '').trim() && !isBootstrapMessage(m.text)).length,
       assistantCount: messages.filter(m => m.role === 'assistant').length,
       densityChat: densityProfile(messages, meta.firstTs, meta.lastTs, false),
       densityAll: densityProfile(messages, meta.firstTs, meta.lastTs, true),
@@ -449,6 +451,7 @@ async function indexFile(source, relPath, stat) {
       } catch (e) { console.error('search index', key, e.message); }
     }
     pruneLiveRunTail(key);
+    maybeAutoRetitle(key, prev, entry);
     scheduleTimelineTitles();
   } catch (e) {
     console.error('index error', key, e.message);
@@ -2174,6 +2177,7 @@ const treePathFor = key => path.join(TREES_DIR, key.replace(/[:\/\\]/g, '__') + 
 const SETTINGS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'settings.json');
 const PI_SETTINGS_FILE = path.join(os.homedir(), '.pi', 'agent', 'settings.json');
 const PI_AUTH_FILE = path.join(os.homedir(), '.pi', 'agent', 'auth.json');
+const PI_MODELS_FILE = path.join(os.homedir(), '.pi', 'agent', 'models.json');
 const CLAUDE_CODE_CRED_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_CODE_EXT = path.join(os.homedir(), '.pi', 'agent', 'extensions', 'claude-code-fable-5', 'index.ts');
 let appSettings = settingsLib.normalizeSettings(settingsLib.DEFAULT_SETTINGS);
@@ -2198,6 +2202,12 @@ function readyProviders() {
     if (settingsLib.hasClaudeCodeCredential(JSON.parse(fs.readFileSync(CLAUDE_CODE_CRED_FILE, 'utf8')))) {
       ready.add('claude-code');
     }
+  } catch {}
+  // Custom providers (models.json) carry their own baseUrl/apiKey — a
+  // homelab endpoint needs no login, so it counts as ready.
+  try {
+    const custom = JSON.parse(fs.readFileSync(PI_MODELS_FILE, 'utf8'));
+    for (const name of Object.keys(custom.providers || {})) ready.add(name);
   } catch {}
   return [...ready];
 }
@@ -2406,8 +2416,29 @@ async function setConversationTitle(key, rawTitle) {
 const RETITLE_PROMPT =
   'The attached JSON array contains the opening user messages of one AI work conversation, in order. ' +
   'Name the actual work. Reply with STRICT JSON only, no prose or code fence: {"title":"...","label":"..."} — ' +
-  'title: specific, at most 90 characters, no trailing period, no generic words such as conversation, session, request; ' +
+  'title: a short, dense noun phrase for the work, 3 to 7 words, at most 60 characters, no filler words, ' +
+  'no trailing period, no generic words such as conversation, session, request, help; ' +
   'label: the same work in at most 10 characters, no period.';
+
+// Auto retitle: fire once, when a conversation crosses from fewer than two real
+// user messages to two or more. A manual/override title always blocks this.
+const autoRetitleInFlight = new Set();
+function maybeAutoRetitle(key, prev, entry) {
+  const saved = timelineTitles[key];
+  if (saved && saved.manual) return; // a person (or an earlier retitle) owns this title
+  if (entry.realUserCount < 2) return;
+  const crossed = prev
+    ? Number(prev.realUserCount ?? NaN) < 2
+    : !!entry.firstTs && Date.now() - entry.firstTs < 10 * 60 * 1000; // brand-new file, still fresh
+  if (!crossed) return;
+  if (autoRetitleInFlight.has(key)) return;
+  autoRetitleInFlight.add(key);
+  setTimeout(() => {
+    retitleConversation(key)
+      .catch(e => console.error('auto retitle failed:', key, e.message))
+      .finally(() => autoRetitleInFlight.delete(key));
+  }, 2000);
+}
 
 // Retitle one conversation on demand, from its first real (non-bootstrap) user messages.
 async function retitleConversation(key) {

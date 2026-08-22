@@ -7436,11 +7436,13 @@ async function openModelPicker(anchor, opts, onPick) {
     if (hi >= 0) { vis[hi].classList.add('hi'); vis[hi].scrollIntoView({ block: 'nearest' }); }
   };
   const apply = () => {
-    const q = filterInput.value.trim().toLowerCase();
+    // Every word must match somewhere in the id: "ox alpha" finds
+    // openrouter/stealth/ox-alpha.
+    const terms = filterInput.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const shown = models.filter(m =>
       (showAll || ready.has(m.provider) || sel.has(m.id))
       && (!provFilter || m.provider === provFilter)
-      && (!q || m.id.toLowerCase().includes(q)));
+      && terms.every(t => m.id.toLowerCase().includes(t)));
     let provider = '';
     list.innerHTML = shown.map(m => {
       const head = !provFilter && m.provider !== provider ? `<div class="mp-provider">${esc(m.provider)}</div>` : '';
