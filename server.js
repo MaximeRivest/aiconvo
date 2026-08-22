@@ -7333,6 +7333,27 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         json(res, 502, { error: 'Speech service failed: ' + e.message });
       }
+    } else if (u.pathname === '/api/exec' && req.method === 'POST') {
+      // Run one bash block from a reply, in the conversation's cwd. Same
+      // trust surface as the terminal spawns beside it: this server already
+      // opens agent terminals and edits session files on this machine.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { cmd, cwd } = JSON.parse(body || '{}');
+      if (!cmd || typeof cmd !== 'string') return json(res, 400, { error: 'cmd required' });
+      const t0 = Date.now();
+      const result = await new Promise(resolve => {
+        const dir = cwd && typeof cwd === 'string' && fs.existsSync(cwd) ? cwd : os.homedir();
+        const child = spawn('bash', ['-lc', cmd], { cwd: dir, env: process.env });
+        let buf = '';
+        const cap = s => { buf += s; if (buf.length > 200000) { buf = buf.slice(0, 200000) + '\n… (truncated — output capped at 200 KB)'; child.kill('SIGKILL'); } };
+        child.stdout.on('data', d => cap(String(d)));
+        child.stderr.on('data', d => cap(String(d)));
+        const timer = setTimeout(() => { cap('\n… (stopped after 120 s)'); child.kill('SIGKILL'); }, 120000);
+        child.on('close', code => { clearTimeout(timer); resolve({ out: buf, code }); });
+        child.on('error', e => { clearTimeout(timer); resolve({ out: String(e.message), code: -1 }); });
+      });
+      json(res, 200, { ...result, cwd: cwd || '~', ms: Date.now() - t0 });
     } else if (u.pathname === '/api/tts' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
