@@ -1064,8 +1064,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; width: 100%; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
 
 .agent-compose .agent-hint { color: var(--text-faint); }
-.agent-compose textarea { width: 100%; min-height: 64px; resize: vertical; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); padding: 8px 10px; }
-.agent-compose textarea:focus { outline: 0; border-color: var(--accent); }
+/* the composer is a quiet gray ground with a green caret: no frame, no
+   placeholder — it grows with the lines and speaks the message prose */
+.agent-compose textarea { width: 100%; min-height: 46px; height: 46px; resize: none; font: 15px/1.65 var(--font); color: var(--text); background: var(--surface-1); border: 1px solid transparent; padding: 10px 14px; caret-color: var(--accent); overflow-y: auto; }
+.agent-compose textarea:focus { outline: 0; border-color: var(--border); }
 .agent-thumbs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .agent-thumbs:empty { display: none; }
 .agent-thumb { position: relative; width: 56px; height: 56px; border: 1px solid var(--border); background: var(--surface-2); }
@@ -1296,7 +1298,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .agent-compose.compose-min .agent-compose-row { flex: 0 0 auto; }
   .agent-compose .agent-state { min-height: 24px; white-space: nowrap; overflow: hidden; }
   #agentBarHint { overflow: hidden; text-overflow: ellipsis; }
-  .agent-compose textarea { min-height: 70px; max-height: 120px; resize: none; font-size: 16px; }
+  .agent-compose textarea { min-height: 48px; max-height: 40vh; resize: none; font-size: 16px; }
   .agent-compose-row { gap: 7px; }
   .agent-compose-row button { height: 46px; min-height: 46px; }
   .agent-mic { width: 46px; min-width: 46px; }
@@ -7573,7 +7575,7 @@ function agentComposerHtml(d) {
   return `<div class="agent-compose" id="agentCompose">
     <div class="agent-activity" id="agentActivity"><span id="agentActivityText">&nbsp;</span></div>
     <div id="slashPop" class="slash-pop" hidden></div>
-    <textarea id="agentText" rows="3" placeholder="type a prompt, or / for slash commands. paste or drop images."></textarea>
+    <textarea id="agentText" rows="1"></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
     <div class="agent-compose-row">
       ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
@@ -7635,6 +7637,7 @@ async function headlessSendFromComposer(btn) {
   if (!out) return;
   if (out.error) return errToast('send failed: ' + out.error);
   ta.value = '';
+  autoGrowCompose();
   window._agentImages = [];
   renderAgentThumbs();
   // The reply streams in below: rest the composer. Blur everywhere — on
@@ -7915,7 +7918,7 @@ async function sendToAlacritty(btn) {
       throw new Error(data.error || 'The terminal is waiting for a choice.');
     }
     if (!res.ok || data.error) throw new Error(data.error || 'Could not send to Alacritty.');
-    if ($('agentText')) $('agentText').value = '';
+    if ($('agentText')) { $('agentText').value = ''; autoGrowCompose(); }
     if ($('agentText') && phoneLayout() && !isEink()) $('agentText').blur();
     window._agentImages = [];
     renderAgentThumbs();
@@ -8233,8 +8236,19 @@ function applyAgentSpeechText(text) {
   if (ta) {
     ta.value = value;
     ta.selectionStart = ta.selectionEnd = value.length;
+    autoGrowCompose();                // dictation grows the box like typing
     ta.scrollTop = ta.scrollHeight;   // keep the newest words visible while dictating
   }
+}
+
+// One line at rest; the box grows with its content up to 40% of the view.
+function autoGrowCompose() {
+  const ta = $('agentText');
+  if (!ta) return;
+  const box = $('agentCompose');
+  if (box && box.classList.contains('compose-min')) { ta.style.height = ''; return; }
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight + 2, Math.round(window.innerHeight * 0.4)) + 'px';
 }
 
 window.agentSpeechEvent = payload => {
@@ -8541,6 +8555,7 @@ function wireAgentComposer() {
   const live = $('agentOpenLive');
   wireAgentSpeech(ta);
   wireComposeMin(ta);
+  if (ta) { ta.addEventListener('input', autoGrowCompose); autoGrowCompose(); }
   if (live) live.onclick = () => openAgentModal();
   const runBtn = $('agentRun');
   if (runBtn) runBtn.onclick = () => headlessSendFromComposer(runBtn);
