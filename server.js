@@ -1089,7 +1089,7 @@ async function conversationContextResponse(key, leafId) {
 // pi session operations run through pi's own runtime (pirpc.js + the
 // aiconvo-bridge extension). Claude keeps a hand copier: no native
 // arbitrary-node fork exists (verified empirically).
-const { piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm } = require('./pirpc.js');
+const { piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm } = require('./pirpc.js');
 
 function sessionPathsFor(key) {
   const entry = index[key];
@@ -1259,6 +1259,8 @@ function saveAgentRunsNow() {
 
 function headlessOwner(absPath) { return headlessRuns.get(absPath) || null; }
 
+const slashCommandsCache = new Map(); // cwd → { at, list } for the composer palette
+
 // Every pi/claude/bridge process on this machine, from /proc. The agents
 // view shows them all — including untracked strays — and can kill them.
 // Caution: pi and claude rewrite their argv to a bare "pi"/"claude", which
@@ -1271,6 +1273,7 @@ function scanAgentProcs() {
   let uptime = 0;
   try { uptime = Number(fs.readFileSync('/proc/uptime', 'utf8').split(' ')[0]) || 0; } catch {}
   const bridgeArgs = new Map(); // bridge pid → argv (holds the real pi command)
+  const superPids = new Set();  // remote-pi supervisord pids
   for (const pidStr of pids) {
     const pid = Number(pidStr);
     if (pid === process.pid) continue;
@@ -1280,6 +1283,7 @@ function scanAgentProcs() {
     if (!argv.length) continue;
     const base0 = path.basename(argv[0]);
     const base1 = argv[1] ? path.basename(argv[1]) : '';
+    if ((base0 === 'node' || base0 === 'bun') && argv[1] && argv[1].includes('remote-pi')) { superPids.add(pid); continue; }
     let kind = null;
     if (base0 === 'pi' || ((base0 === 'node' || base0 === 'bun') && base1 === 'pi')) kind = 'pi';
     else if (base0 === 'claude' || ((base0 === 'node' || base0 === 'bun') && base1 === 'claude')) kind = 'claude';
@@ -1311,6 +1315,7 @@ function scanAgentProcs() {
     const ri = parent.indexOf('--resume');
     if (ri >= 0 && parent[ri + 1]) { pr.resumeId = parent[ri + 1]; pr.viaBridge = true; }
   }
+  for (const pr of procs) if (pr.ppid && superPids.has(pr.ppid)) pr.remotePi = true;
   return procs;
 }
 
@@ -1337,6 +1342,7 @@ function agentProcsView(running) {
     const run = warm ? headlessOwner(path.resolve(warm.sessionPath)) : null;
     const owner = warm ? 'web'
       : (tracked || (key && runningKeys.has(key))) ? 'terminal'
+      : pr.remotePi ? 'remote-pi'
       : pr.ppid === process.pid ? 'server'
       : 'untracked';
     out.push({
@@ -1347,7 +1353,7 @@ function agentProcsView(running) {
       jobId: run ? run.jobId : undefined,
     });
   }
-  const weight = { web: 0, terminal: 1, server: 2, untracked: 3 };
+  const weight = { web: 0, terminal: 1, server: 2, 'remote-pi': 3, untracked: 4 };
   out.sort((a, b) => (weight[a.owner] - weight[b.owner]) || ((a.ageMs || 0) - (b.ageMs || 0)));
   return out;
 }
@@ -6866,6 +6872,21 @@ const server = http.createServer(async (req, res) => {
       writing.sort((a, b) => a.ageMs - b.ageMs);
       recent.sort((a, b) => a.ageMs - b.ageMs);
       json(res, 200, { running, writing, recent: recent.slice(0, 15), procs: agentProcsView(running) });
+    } else if (u.pathname === '/api/node/commands') {
+      // pi's slash commands for this conversation's cwd, for the composer
+      // palette. Cached per cwd; a --no-session probe process fills it.
+      const key = u.searchParams.get('id');
+      const entry = key && index[key];
+      if (!entry) return json(res, 404, { error: 'not found' });
+      if (conversationKind(entry) !== 'pi') return json(res, 400, { error: 'slash commands over RPC need pi' });
+      const { cwd } = sessionPathsFor(key);
+      const cached = slashCommandsCache.get(cwd);
+      if (cached && Date.now() - cached.at < 5 * 60 * 1000) return json(res, 200, { commands: cached.list, cwd, cached: true });
+      try {
+        const list = await piListCommands({ cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() });
+        slashCommandsCache.set(cwd, { at: Date.now(), list });
+        json(res, 200, { commands: list, cwd });
+      } catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/agents/kill' && req.method === 'POST') {
       // Kill one agent process from the agents view. Refuses pids that are
       // not pi/claude/bridge processes. Web-owned RPC runs abort cleanly

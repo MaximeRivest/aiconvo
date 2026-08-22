@@ -767,6 +767,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.thinking summary::-webkit-details-marker { display: none; }
 .msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
 .rc-body { color: var(--text); font-size: 12.5px; }
+.slash-pop { border: 1px solid var(--border-strong); background: var(--surface-1); max-height: 240px; overflow: auto; margin-bottom: 4px; }
+.slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 6px 8px; }
+.slash-row { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; cursor: pointer; }
+.slash-row.sel, .slash-row:hover { background: var(--surface-2, rgba(127,127,127,.15)); }
+.slash-name { color: var(--accent); font-size: var(--fs-micro); white-space: nowrap; }
+.slash-desc { color: var(--text-dim); font-size: var(--fs-micro); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slash-src { color: var(--text-faint); font-size: 10px; }
 .ag-kill { flex: none; background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 2px 7px; font: inherit; font-size: var(--fs-micro); }
 .ag-kill:hover { color: var(--red, #f66); border-color: var(--red, #f66); }
 .rc-notice { color: var(--text-dim); font-size: var(--fs-micro); margin: 2px 0; }
@@ -2382,15 +2389,17 @@ async function renderAgentsPop(refetch) {
     const wrote = t.s && t.s.mtimeMs ? 'wrote ' + secs(now - t.s.mtimeMs) : 'no writes yet';
     return (pid ? 'pid ' + pid + ' · ' : '') + wrote;
   };
-  const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key))
+  // "Writing" claims only sessions with a live process behind them. A file
+  // that was written moments ago by a process that is now gone (killed,
+  // finished, restarted) drops straight into "recent" — nothing lingers.
+  const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key) && procByKey.has(s.key))
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const writeStatus = s => {
     const p = procByKey.get(s.key);
-    const wrote = 'wrote ' + secs(now - s.mtimeMs);
-    if (!p) return wrote + ' · no process';
-    return wrote + ' · pid ' + p.pid + ' · ' + p.owner + (p.busy === false ? ' idle' : '');
+    return 'wrote ' + secs(now - s.mtimeMs) + (p ? ' · pid ' + p.pid + ' · ' + p.owner + (p.busy === false ? ' idle' : '') : '');
   };
-  const recent = sessions.filter(s => s.mtimeMs && !isActive(s) && now - s.mtimeMs < 3600000 && !runningKeys.has(s.key))
+  const claimed = new Set([...runningKeys, ...webKeys, ...writing.map(s => s.key)]);
+  const recent = sessions.filter(s => s.mtimeMs && now - s.mtimeMs < 3600000 && !claimed.has(s.key))
     .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 15);
   const webSec = webRuns.join('');
   const workSec = termWork.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
@@ -2412,7 +2421,7 @@ async function renderAgentsPop(refetch) {
     (idleSec ? '<div class="ag-sec">○ terminals — idle at the prompt</div>' + idleSec : '') +
     (writeSec ? '<div class="ag-sec">✎ writing</div>' + writeSec : '') +
     (otherSec ? '<div class="ag-sec">⚙ other agent processes</div>' + otherSec : '') +
-    (recent.length ? '<div class="ag-sec">recent — last hour</div>' + recent.map(s => row(s, s.key, ago(now - s.mtimeMs))).join('') : '') ||
+    (recent.length ? '<div class="ag-sec">recent — last hour</div>' + recent.map(s => row(s, s.key, 'wrote ' + secs(now - s.mtimeMs))).join('') : '') ||
     '<div class="ag-sec">nothing is running, writing, or recent.</div>';
   pop.scrollTop = st;
 }
@@ -7084,6 +7093,7 @@ function agentComposerHtml(d) {
       <button type="button" class="ghost" id="agentOpenLive" title="Raw terminal view if something gets stuck">live view</button>
     </div>
     ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
+    <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="3" placeholder="type a prompt, or / for slash commands. paste or drop images."></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
     <div class="agent-compose-row">
@@ -7105,8 +7115,18 @@ async function headlessSendFromComposer(btn) {
   const ta = $('agentText');
   const prompt = (ta && ta.value || '').trim();
   if (!prompt) return errToast('type a prompt first');
-  if (prompt.startsWith('/')) return errToast('slash commands need the terminal — use open & send');
   const key = activeRel;
+  if (prompt.startsWith('/')) {
+    // pi executes its own commands over RPC (extensions, skills, templates).
+    // TUI built-ins (/settings, /model, …) exist only in the terminal.
+    const name = prompt.slice(1).split(/\s+/)[0];
+    let cmds = null;
+    try { cmds = await ensureSlashCmds(key); } catch {}
+    if (!cmds || !cmds.some(c => c.name === name)) {
+      return errToast('/' + name + ' is not available over RPC — TUI-only commands need the terminal (open & send)');
+    }
+    hideSlashPop();
+  }
   const models = fanModels();
   const trace = current && computeTrace(current);
   const node = models.length >= 2
@@ -7189,6 +7209,66 @@ function renderModelStrip() {
     setFanModels(next);
   });
   $('modelAdd').onclick = e => openModelPicker(e.target, { multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId)) }, picked => setFanModels(picked));
+}
+
+// ---- slash palette: pi's own commands, autocompleting like the TUI ----
+const slashCmdCache = new Map(); // conversation key → Promise<[{name,description,source}]>
+function ensureSlashCmds(key) {
+  if (!slashCmdCache.has(key)) {
+    slashCmdCache.set(key, fetch('/api/node/commands?id=' + encodeURIComponent(key))
+      .then(r => r.json())
+      .then(d => { if (d.error) throw new Error(d.error); return d.commands || []; })
+      .catch(e => { slashCmdCache.delete(key); throw e; }));
+  }
+  return slashCmdCache.get(key);
+}
+function hideSlashPop() {
+  const p = $('slashPop');
+  if (p) p.hidden = true;
+  window._slashOpen = false;
+}
+function pickSlash(i) {
+  const ta = $('agentText');
+  const c = (window._slashList || [])[i];
+  if (!ta || !c) return;
+  ta.value = '/' + c.name + ' ';
+  ta.focus();
+  window._slashSel = 0;
+  updateSlashPop(ta);
+}
+async function updateSlashPop(ta) {
+  const pop = $('slashPop');
+  if (!pop || !ta) return;
+  if (!ta.value.startsWith('/') || ta.value.includes('\n')) return hideSlashPop();
+  const wanted = ta.value;
+  let cmds;
+  try {
+    if (!pop.childElementCount) { pop.innerHTML = '<div class="slash-hint">loading pi commands…</div>'; pop.hidden = false; }
+    cmds = await ensureSlashCmds(activeRel);
+  } catch (e) {
+    pop.innerHTML = `<div class="slash-hint">${esc(e.message || 'could not load commands')}</div>`;
+    pop.hidden = false;
+    return;
+  }
+  const now = $('agentText');
+  if (now !== ta || ta.value !== wanted) return; // typed on while loading
+  const token = ta.value.slice(1).split(/\s/)[0].toLowerCase();
+  const hasArgs = /\s/.test(ta.value.trim()) || /\s$/.test(ta.value);
+  const list = cmds.filter(c => c.name.toLowerCase().startsWith(token)).slice(0, 12);
+  window._slashList = list;
+  // The palette folds once the command is chosen and arguments begin.
+  if (!list.length || (hasArgs && list.some(c => c.name.toLowerCase() === token))) return hideSlashPop();
+  window._slashSel = Math.min(window._slashSel || 0, list.length - 1);
+  pop.innerHTML = list.map((c, i) =>
+    `<div class="slash-row${i === window._slashSel ? ' sel' : ''}" data-i="${i}">` +
+    `<span class="slash-name">/${esc(c.name)}</span>` +
+    `<span class="slash-desc">${esc((c.description || '').slice(0, 70))}</span>` +
+    `<span class="slash-src">${esc(c.source || '')}</span></div>`).join('');
+  pop.querySelectorAll('.slash-row').forEach(r => {
+    r.onmousedown = e => { e.preventDefault(); pickSlash(Number(r.dataset.i)); };
+  });
+  pop.hidden = false;
+  window._slashOpen = true;
 }
 
 function fileToImage(file) {
@@ -7936,8 +8016,10 @@ function wireAgentComposer() {
   const runBtn = $('agentRun');
   if (runBtn) runBtn.onclick = () => headlessSendFromComposer(runBtn);
   renderModelStrip();
+  const isPi = !!runBtn; // pi composers have the web send button
+  window._slashOpen = false;
   if (send) send.onclick = () => {
-    if (ta && ta.value.startsWith('/')) {
+    if (!isPi && ta && ta.value.startsWith('/')) {
       agentLiveQueue(async () => {
         await agentLiveKeys('\r');
         window._agentLiveText = '';
@@ -7955,6 +8037,14 @@ function wireAgentComposer() {
   if (ta) {
     ta.oninput = () => {
       const v = ta.value;
+      if (isPi) {
+        // pi: the palette autocompletes pi's real commands over RPC. No
+        // hidden terminal, no keystroke streaming — the TUI adapter is
+        // pi's own get_commands + prompt.
+        if (v.startsWith('/')) updateSlashPop(ta);
+        else hideSlashPop();
+        return;
+      }
       // Typing must NEVER implicitly open a terminal. Live slash keys spawn
       // the terminal bridge, and the terminal is sovereign: it aborts any
       // web run on this file. So the live path stays off while a web run
@@ -7979,7 +8069,27 @@ function wireAgentComposer() {
       }
     };
     ta.onkeydown = e => {
-      const slash = (ta.value.startsWith('/') || window._agentLiveOn) && !hasLiveRun(activeRel);
+      if (isPi && window._slashOpen) {
+        const n = (window._slashList || []).length;
+        if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
+          e.preventDefault();
+          window._slashSel = ((window._slashSel || 0) + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+          updateSlashPop(ta);
+          return;
+        }
+        if (e.key === 'Tab' && n) { e.preventDefault(); pickSlash(window._slashSel || 0); return; }
+        if (e.key === 'Escape') { e.preventDefault(); hideSlashPop(); return; }
+        if (e.key === 'Enter' && !e.shiftKey && n) {
+          const token = ta.value.slice(1).split(/\s/)[0].toLowerCase();
+          if (!(window._slashList || []).some(c => c.name.toLowerCase() === token)) {
+            e.preventDefault();
+            pickSlash(window._slashSel || 0);
+            return;
+          }
+          hideSlashPop(); // exact command typed: fall through, enter sends it
+        }
+      }
+      const slash = !isPi && (ta.value.startsWith('/') || window._agentLiveOn) && !hasLiveRun(activeRel);
       if (slash && e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         agentLiveQueue(async () => {

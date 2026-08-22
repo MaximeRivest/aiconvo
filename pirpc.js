@@ -244,6 +244,25 @@ function stopWarmSession(sessionPath) {
   return true;
 }
 
+// pi's command palette for a cwd: extension commands, prompt templates,
+// and skills, straight from pi's own runtime. A short-lived --no-session
+// process keeps this safe on conversations a terminal owns (no session
+// file is bound, nothing is written).
+async function piListCommands(target) {
+  return piRpcOperation(
+    { cwd: target.cwd, env: target.env, discoverExtensions: true, extraArgs: ['--no-session', ...(target.extraArgs || [])] },
+    async request => {
+      const r = await request({ type: 'get_commands' });
+      return ((r.data || {}).commands || []).map(c => ({
+        name: String(c.name || '').replace(/^\//, ''),
+        description: c.description || '',
+        source: c.source || '',
+      })).filter(c => c.name);
+    },
+    45000,
+  );
+}
+
 // Verify the bridge command is registered BEFORE sending it as a prompt.
 // An unregistered command would go to the model as a real prompt: it would
 // cost money and pollute the session we are operating on.
@@ -472,4 +491,4 @@ async function piBeginWarm(target) {
   return { file, sessionId, pid: sess.pid };
 }
 
-module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };
+module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };
