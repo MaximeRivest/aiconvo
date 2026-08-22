@@ -207,7 +207,7 @@ body.windows-over { overflow: hidden; }
 .win-thumb-empty { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: var(--fs-label); }
 .win-mini { position: absolute; top: 0; left: 0; width: 400%; height: 400%; transform: scale(0.25); transform-origin: top left; overflow: hidden; pointer-events: none; }
 .win-mini .agent-compose, .win-mini #pager, .win-mini #tabs, .win-mini #ganttBar, .win-mini #ganttResize, .win-mini #selShown { display: none !important; }
-.win-mini .agent-compose { position: static !important; }
+.win-mini .composer-dock { position: static !important; }
 .win-card-foot { display: flex; gap: 8px; align-items: center; padding: 8px 10px; min-height: 40px; }
 .win-mark { flex: 0 0 14px; font-weight: 700; color: var(--accent); }
 .win-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -888,7 +888,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
    Thinking, streaming replies, and tool output FLOW THROUGH it — the pane
    itself never changes size, so the page never recomposes. Finished units
    freeze into the steps line in the transcript above. */
-.live-pane { height: 148px; display: flex; flex-direction: column; gap: 4px; background: var(--bg); border: 1px dashed var(--border); padding: 6px 10px; }
+.live-pane { height: 148px; display: flex; flex-direction: column; gap: 4px; padding: 2px 4px 8px; }
 .lp-head { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 16px; }
 .lp-out { flex: 1; margin: 0; overflow: auto; font-size: 11px; line-height: 1.5; color: var(--text-faint); white-space: pre-wrap; word-break: break-word; font-family: inherit; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
@@ -984,6 +984,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 20px 0 8px; font-size: var(--fs-body); font-weight: 700; color: var(--text); }
 .md h1, .md h2 { font-size: var(--fs-title); border-bottom: 1px solid var(--border); padding-bottom: 3px; }
 .md pre { background: var(--surface-2); border: 1px solid var(--border); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; margin: 12px 0; white-space: pre; }
+/* late-loading images must not shove the page around: cap their reach */
+.md img { max-height: 45vh; }
 .md pre.md-code[data-lang]::before { content: attr(data-lang); display: block; float: right; margin: -4px -4px 4px 8px; color: var(--text-faint); font-size: 10px; }
 .md pre.md-code { position: relative; }
 .md pre.md-code:has(.md-run)[data-lang]::before { display: none; }
@@ -1073,7 +1075,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* width: 100% matters: inside a flex column, the auto margins otherwise
    shrink-wrap the composer to its content (a small island on e-ink, where
    --read-max is none). Full width, then max-width caps and centers it. */
-.agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; width: 100%; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-2) var(--sp-3) var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
+/* The dock carries the sticky position; the live pane floats in the page
+   white above the compose window, the gray box sits below it. */
+.composer-dock { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; width: 100%; max-width: var(--read-max); margin: var(--sp-3) auto 0; display: flex; flex-direction: column; }
+.agent-compose { padding: var(--sp-2) var(--sp-3) var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
 
 .agent-compose .agent-hint { color: var(--text-faint); }
 /* the composer is a quiet gray ground with a green caret: no frame, no
@@ -1299,7 +1304,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .msg pre, .msg code { max-width: 100%; overflow-wrap: anywhere; }
   .msg .msg-copy, .msg .msg-read { min-height: 28px; height: 28px; }
 
-  .agent-compose { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; width: auto; max-width: none; margin: 0; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-width: 1px 0 0; }
+  .composer-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; }
+  .agent-compose { width: auto; max-width: none; margin: 0; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-width: 1px 0 0; }
   /* resting composer: one slim bar — tap it, or hold a draft, to expand */
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
@@ -7585,8 +7591,9 @@ function agentComposerHtml(d) {
   // The model chip and the context/cost meter live in the compose row:
   // everything about the next send sits on one line.
   const lastModel = [...(d.messages || [])].reverse().find(m => m.role === 'assistant' && m.model);
-  return `<div class="agent-compose" id="agentCompose">
+  return `<div class="composer-dock" id="composerDock">
     <div class="live-pane" id="livePane"><div class="lp-head" id="agentActivityText">&nbsp;</div><pre class="lp-out" id="lpOut"></pre></div>
+  <div class="agent-compose" id="agentCompose">
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="1" placeholder="say the word…"></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
@@ -7603,6 +7610,7 @@ function agentComposerHtml(d) {
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
       ${d.source === 'claude' ? '<button class="primary" id="agentSend" type="button" title="Open the terminal and send (ctrl+enter)">open &amp; send</button>' : ''}
     </div>
+  </div>
   </div>`;
 }
 
