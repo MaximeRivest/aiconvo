@@ -865,22 +865,36 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .cc-first { border-left: 3px solid var(--border-strong); padding-left: 8px; }
 .cc-foot { justify-content: space-between; }
 .cc-bigwarn { color: var(--warn, #b8860b); border: 1px solid var(--warn, #b8860b); padding: 4px 8px; }
-.mpick .mp-filter { margin: 8px; height: 28px; padding: 0 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); }
-.mpick .mp-list { overflow: auto; display: flex; flex-direction: column; padding: 0 8px 8px; gap: 1px; }
-.mpick .mp-row { display: flex; align-items: center; gap: 8px; height: auto; padding: 4px 8px; text-align: left; border-color: transparent; }
+.mpick .mp-filter { margin: 8px 8px 6px; height: 30px; padding: 0 10px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); }
+.mpick .mp-list { overflow: auto; display: flex; flex-direction: column; padding: 0 6px 8px; }
+.mpick .mp-row { display: flex; align-items: center; gap: 8px; height: auto; min-height: 30px; padding: 5px 10px; text-align: left; border: 0; background: transparent; }
+.mpick .mp-row:hover { background: var(--surface-2); }
 .mpick .mp-row.hi { outline: 2px solid var(--accent); outline-offset: -2px; }
-.mpick .mp-top { display: flex; gap: 6px; align-items: center; }
+.mpick .mp-top { display: flex; gap: 6px; align-items: center; padding-right: 8px; }
 .mpick .mp-top .mp-filter { flex: 1; }
 .mpick .mp-refresh { flex: 0 0 auto; width: 30px; }
 .mpick .mp-all { flex: 0 0 auto; min-width: 38px; }
 .mpick .mp-all.on { background: var(--accent-strong); color: var(--accent-ink); }
-.mpick .mp-age { padding: 2px 8px 4px; color: var(--text-faint); font-size: var(--fs-micro); border-bottom: 1px solid var(--border); }
+/* provider filter chips: one tap scopes the list to one provider */
+.mpick .mp-provs { display: flex; gap: 4px; align-items: center; padding: 0 8px 6px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); }
+.mpick .mp-prov { flex: 0 0 auto; height: 22px; min-height: 22px; padding: 0 9px; font-size: var(--fs-micro); border: 1px solid var(--border); background: transparent; color: var(--text-dim); border-radius: 11px; }
+.mpick .mp-prov:hover { color: var(--text); border-color: var(--border-strong); }
+.mpick .mp-prov.on { background: var(--accent-strong); color: var(--accent-ink); border-color: var(--accent-strong); }
+.mpick .mp-prov.notready { opacity: .55; }
 .mpick .mp-row b { font-weight: 600; }
 .mpick .mp-row span { color: var(--text-faint); font-size: var(--fs-micro); }
 .mpick .mp-row .mp-ctx { margin-left: auto; }
-.mpick .mp-row.on { border-color: var(--accent); }
+.mpick .mp-tag { border: 1px solid var(--border); border-radius: 9px; padding: 0 6px; font-size: 10px; line-height: 15px; color: var(--text-dim); }
+.mpick .mp-tag.free { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.mpick .mp-row.on { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
 .mpick .mp-row.notready { opacity: .5; }
 .mpick .mp-foot { padding: 8px; border-top: 1px solid var(--border); }
+/* the one model control: shows the selection, opens the picker */
+.model-pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); background: var(--surface-1); }
+.model-pick .mname { min-width: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-pick .mmore { color: var(--text-dim); font-size: var(--fs-micro); }
+.model-pick .minherit { color: var(--text-faint); font-size: 9px; border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; }
+.model-pick.inherited { border-style: dashed; }
 .model-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 6px; }
 /* inside the compose row the strip is inline; the model chip starts the
    right-hand group (model · fan chips · send), the meter floats mid-row */
@@ -905,11 +919,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .lp-steps-body { padding-left: 12px; }
 .lp-head { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 16px; }
 .lp-out { flex: 1; margin: 0; overflow: auto; font-size: 11px; line-height: 1.5; color: var(--text-faint); white-space: pre-wrap; word-break: break-word; font-family: inherit; }
-.mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
-.mchip .mname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
-.mchip.inherited { border-style: dashed; }
-.mchip .minherit { color: var(--text-faint); font-size: 9px; }
-.mchip button { height: 18px; min-width: 18px; padding: 0; border: 0; background: transparent; color: var(--text-faint); }
+
 .cmp-row { margin: 8px 0 14px; max-width: none; }
 .cmp-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
 /* The visible reply is the branch: solid frame = active, dashed = the alternatives. */
@@ -1422,9 +1432,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   /* branch alternatives list must fit the screen */
   .bp-list { min-width: 0; max-width: min(480px, 92vw); }
   .bp-alt { min-height: 42px; white-space: normal; }
-  /* model chips and compare controls sized for touch */
-  .mchip { height: 34px; }
-  .mchip button { height: 30px; min-height: 30px; min-width: 30px; }
+  /* the model control sized for touch */
+  .model-pick { height: 40px; }
+  .mpick .mp-prov { height: 30px; min-height: 30px; border-radius: 15px; }
   .cmp-col .md { max-height: 40dvh; }
   /* streaming run cards: readable text, tappable fold lines */
   .rc-body { font-size: 14px; }
@@ -1778,7 +1788,7 @@ const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'
 // device, after layout changes; it must return [].
 window.uiAudit = function uiAudit(root) {
   const bad = [];
-  for (const el of (root || document).querySelectorAll('button, select, .fold-chip, .mchip')) {
+  for (const el of (root || document).querySelectorAll('button, select, .fold-chip, .model-pick')) {
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height) continue;
     const cs = getComputedStyle(el);
@@ -6311,20 +6321,21 @@ function renderLauncherModels(d) {
   const inherited = !Array.isArray(d.launchModels) || !d.launchModels.length;
   const inheritedLabel = d.resolvedDefaultModel && d.resolvedDefaultModel.source === 'pi' ? 'pi default' : 'project default';
   const list = launcherModelsOf(d);
-  host.innerHTML = list.map((m, i) =>
-    `<span class="mchip${inherited ? ' inherited' : ''}" title="${esc(m.provider + '/' + m.modelId)}${inherited ? ' · ' + inheritedLabel : ''}"><span class="mname">${esc(m.modelId)}</span>${inherited ? ` <span class="minherit">${inheritedLabel}</span>` : ` <button type="button" data-pmdel="${i}" title="remove this model">×</button>`}</span>`).join('') +
-    `<button type="button" id="pModelAdd" title="Pick one model for one run, or several models for parallel runs.">${list.length ? 'change models' : 'choose model'}</button>`;
-  host.querySelectorAll('[data-pmdel]').forEach(b => b.onclick = () => {
-    const next = list.filter((_, i) => i !== Number(b.dataset.pmdel));
-    d.launchModels = next.length ? next : null;
-    renderLauncherModels(d);
-  });
-  $('pModelAdd').onclick = e => openModelPicker(e.target, {
+  const label = list.length
+    ? esc(shortModelName(list[0].modelId)) + (list.length > 1 ? ` <span class="mmore">+${list.length - 1}</span>` : '')
+    : 'choose model';
+  host.innerHTML = `<button type="button" id="pModelPick" class="model-pick${inherited ? ' inherited' : ''}" title="${list.length
+    ? esc(list.map(m => m.provider + '/' + m.modelId).join('\n')) + (inherited ? '\ninherited · ' + inheritedLabel : '') + '\nClick to change for this conversation only.'
+    : 'Pick the model(s) for this conversation.'}">◇ <span class="mname">${label}</span>${inherited ? ` <span class="minherit">${inheritedLabel}</span>` : ''} ▾</button>` +
+    (inherited ? '' : `<button type="button" id="pModelReset" class="ghost" title="Drop the override and follow the ${inheritedLabel}">reset</button>`);
+  $('pModelPick').onclick = e => openModelPicker(e.currentTarget, {
     multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId))
   }, picked => {
     d.launchModels = picked;
     renderLauncherModels(d);
   });
+  const reset = $('pModelReset');
+  if (reset) reset.onclick = () => { d.launchModels = null; renderLauncherModels(d); };
 }
 
 const MODE_SECTION_LABELS = {
@@ -7366,6 +7377,7 @@ async function openModelPicker(anchor, opts, onPick) {
   let models = [...(cat.models || [])].sort((a, b) =>
     (ready.has(b.provider) - ready.has(a.provider)) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
   let showAll = false;
+  let provFilter = '';
   // The open conversation's context footprint previews the fit per model.
   const usedNow = (() => {
     const h = activeRel && ctxMeterCache.get(activeRel);
@@ -7374,21 +7386,41 @@ async function openModelPicker(anchor, opts, onPick) {
   const fitLabel = m => {
     if (!usedNow || !m.context) return '';
     return usedNow < m.context
-      ? ` · ${Math.round(100 * usedNow / m.context)}% used`
+      ? ` · ${Math.round(100 * usedNow / m.context)}% of the window used`
       : ` · over by ${fmtTokens(usedNow - m.context)}`;
   };
+  // Variant suffixes (openrouter :free, :batch, …) become quiet badges, so
+  // the special editions are visible without reading long ids.
+  const baseNameOf = m => { const cut = m.model.indexOf(':'); return cut < 0 ? m.model : m.model.slice(0, cut); };
+  const variantOf = m => { const cut = m.model.indexOf(':'); return cut < 0 ? '' : m.model.slice(cut + 1); };
   const ageLabel = () => {
     const s = Math.max(0, Math.round((Date.now() - (cat.fetchedAt || Date.now())) / 1000));
     return s < 90 ? s + 's ago' : Math.round(s / 60) + ' min ago';
   };
-  pop.innerHTML = `<div class="mp-top"><input type="search" class="mp-filter" placeholder="find a model · ↑↓ · enter ${opts && opts.multi ? 'toggle · ctrl+enter use' : 'pick'} · esc">` +
-    `<button type="button" class="mp-all" title="Show models from providers that are not signed in">all</button>` +
-    `<button type="button" class="mp-refresh" title="Fetch the model list from pi again (ctrl+r)">↻</button></div>` +
-    `<div class="mp-age"><span class="mp-scope">signed-in providers</span> · from pi <span class="mp-age-t">${ageLabel()}</span></div>` +
+  pop.innerHTML = `<div class="mp-top"><input type="search" class="mp-filter" placeholder="find a model${opts && opts.multi ? ' · enter toggles · ctrl+enter uses' : ''}">` +
+    `<button type="button" class="mp-all" title="Also show providers that are not signed in">all</button>` +
+    `<button type="button" class="mp-refresh">↻</button></div>` +
+    `<div class="mp-provs"></div>` +
     `<div class="mp-list"></div>` +
     (opts && opts.multi ? `<div class="mp-foot"><button class="primary mp-use">use <span class="mp-count">${sel.size}</span> model${sel.size === 1 ? '' : 's'}</button> <button class="mp-cancel">cancel</button></div>` : '');
   const list = pop.querySelector('.mp-list');
+  const provs = pop.querySelector('.mp-provs');
   const filterInput = pop.querySelector('.mp-filter');
+  const paintProvs = () => {
+    const seen = [];
+    const s = new Set();
+    for (const m of models) if ((showAll || ready.has(m.provider) || sel.has(m.id)) && !s.has(m.provider)) { s.add(m.provider); seen.push(m.provider); }
+    if (provFilter && !s.has(provFilter)) provFilter = '';
+    provs.innerHTML = `<button type="button" class="mp-prov${provFilter === '' ? ' on' : ''}" data-prov="">all</button>` +
+      seen.map(p => `<button type="button" class="mp-prov${provFilter === p ? ' on' : ''}${ready.has(p) ? '' : ' notready'}" data-prov="${esc(p)}">${esc(p)}</button>`).join('');
+    provs.querySelectorAll('.mp-prov').forEach(b => b.onclick = () => {
+      provFilter = provFilter === b.dataset.prov ? '' : b.dataset.prov;
+      hi = 0;
+      paintProvs();
+      apply();
+      filterInput.focus();
+    });
+  };
   let hi = -1;
   const visibleRows = () => [...list.querySelectorAll('.mp-row')];
   const setHi = i => {
@@ -7400,13 +7432,18 @@ async function openModelPicker(anchor, opts, onPick) {
   const apply = () => {
     const q = filterInput.value.trim().toLowerCase();
     const shown = models.filter(m =>
-      (showAll || ready.has(m.provider) || sel.has(m.id)) && (!q || m.id.toLowerCase().includes(q)));
+      (showAll || ready.has(m.provider) || sel.has(m.id))
+      && (!provFilter || m.provider === provFilter)
+      && (!q || m.id.toLowerCase().includes(q)));
     let provider = '';
     list.innerHTML = shown.map(m => {
-      const head = m.provider !== provider ? `<div class="mp-provider">${esc(m.provider)}</div>` : '';
+      const head = !provFilter && m.provider !== provider ? `<div class="mp-provider">${esc(m.provider)}</div>` : '';
       provider = m.provider;
+      const variant = variantOf(m);
       return head + `<button class="mp-row${sel.has(m.id) ? ' on' : ''}${ready.has(m.provider) ? '' : ' notready'}" data-mp="${esc(m.id)}" title="${ready.has(m.provider) ? '' : 'provider not authenticated · '}${esc(m.id)} · ${esc(m.contextLabel || '')} context${esc(fitLabel(m))}">` +
-        `${opts && opts.multi ? `<span class="mp-check">${sel.has(m.id) ? '▣' : '□'}</span>` : ''}<b>${esc(m.model)}</b><span class="mp-ctx">${esc(m.contextLabel || '')}${esc(fitLabel(m))}</span></button>`;
+        `${opts && opts.multi ? `<span class="mp-check">${sel.has(m.id) ? '▣' : '□'}</span>` : ''}<b>${esc(baseNameOf(m))}</b>` +
+        `${variant ? `<span class="mp-tag${variant === 'free' ? ' free' : ''}">${esc(variant)}</span>` : ''}` +
+        `<span class="mp-ctx">${esc(m.contextLabel || '')}</span></button>`;
     }).join('') || '<div class="mp-empty">no matching models</div>';
     list.querySelectorAll('.mp-row').forEach(b => b.onclick = () => {
       const id = b.dataset.mp;
@@ -7426,6 +7463,7 @@ async function openModelPicker(anchor, opts, onPick) {
     setHi(hi);
   };
   const refreshBtn = pop.querySelector('.mp-refresh');
+  refreshBtn.title = 'Reload the list from pi (ctrl+r) · fetched ' + ageLabel();
   const doRefresh = async () => {
     refreshBtn.disabled = true;
     refreshBtn.textContent = '…';
@@ -7434,7 +7472,8 @@ async function openModelPicker(anchor, opts, onPick) {
       ready = new Set(cat.readyProviders || []);
       models = [...(cat.models || [])].sort((a, b) =>
         (ready.has(b.provider) - ready.has(a.provider)) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
-      pop.querySelector('.mp-age-t').textContent = ageLabel();
+      refreshBtn.title = 'Reload the list from pi (ctrl+r) · fetched ' + ageLabel();
+      paintProvs();
       apply();
     } catch { errToast('could not refresh the model list'); }
     refreshBtn.disabled = false;
@@ -7445,7 +7484,7 @@ async function openModelPicker(anchor, opts, onPick) {
   pop.querySelector('.mp-all').onclick = () => {
     showAll = !showAll;
     pop.querySelector('.mp-all').classList.toggle('on', showAll);
-    pop.querySelector('.mp-scope').textContent = showAll ? 'all providers' : 'signed-in providers';
+    paintProvs();
     apply();
   };
   filterInput.onkeydown = e => {
@@ -7465,7 +7504,7 @@ async function openModelPicker(anchor, opts, onPick) {
     }
   };
   const close = () => { pop.remove(); document.removeEventListener('click', onDoc, true); };
-  const onDoc = e => { if (!pop.contains(e.target) && e.target !== anchor) close(); };
+  const onDoc = e => { if (!pop.contains(e.target) && !(anchor.contains ? anchor.contains(e.target) : e.target === anchor)) close(); };
   setTimeout(() => document.addEventListener('click', onDoc, true), 0);
   pop.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
   if (opts && opts.multi) {
@@ -7477,8 +7516,14 @@ async function openModelPicker(anchor, opts, onPick) {
     pop.querySelector('.mp-cancel').onclick = close;
   }
   filterInput.oninput = () => { hi = 0; apply(); };
+  paintProvs();
   apply();
   filterInput.focus();
+}
+
+// The visible model name: the last path segment, without a variant suffix.
+function shortModelName(id) {
+  return String(id || '').split(':')[0].split('/').pop();
 }
 
 // Header zones (design/08-conversation-header.md):
@@ -7778,15 +7823,14 @@ function renderModelStrip() {
       ? 'Send from the web (ctrl+enter): fans out to ' + list.length + ' models in parallel forks. The conversation model does not run.'
       : 'Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.';
   }
-  host.innerHTML = list.map((m, i) =>
-    `<span class="mchip" title="${esc(m.provider + '/' + m.modelId)}"><span class="mname">${esc(m.modelId)}</span>${list.length > 1 ? ` <button type="button" data-mdel="${i}" title="remove this model">×</button>` : ''}</span>`
-  ).join('') +
-    `<button type="button" id="modelAdd" title="One model runs once. Add more models to run in parallel.">${list.length ? '+ model' : 'choose model'}</button>`;
-  host.querySelectorAll('[data-mdel]').forEach(b => b.onclick = () => {
-    const next = fanModels().filter((_, i) => i !== Number(b.dataset.mdel));
-    setFanModels(next);
-  });
-  $('modelAdd').onclick = e => openModelPicker(e.target, { multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId)) }, picked => setFanModels(picked));
+  // ONE control: the button shows the selection and opens the picker.
+  const label = list.length
+    ? esc(shortModelName(list[0].modelId)) + (list.length > 1 ? ` <span class="mmore">+${list.length - 1}</span>` : '')
+    : 'choose model';
+  host.innerHTML = `<button type="button" id="modelPick" class="model-pick" title="${list.length
+    ? esc(list.map(m => m.provider + '/' + m.modelId).join('\n')) + '\nClick to change. One model runs once; several run in parallel.'
+    : 'Pick the model for the next reply.'}">◇ <span class="mname">${label}</span> ▾</button>`;
+  $('modelPick').onclick = e => openModelPicker(e.currentTarget, { multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId)) }, picked => setFanModels(picked));
 }
 
 // ---- slash palette: pi's own commands, autocompleting like the TUI ----
@@ -7982,7 +8026,7 @@ async function sendToAlacritty(btn) {
   // a terminal runs one model — refuse a multi-model set and point at the web run.
   const chips = $('modelStrip') ? fanModels() : [];
   if (chips.length >= 2) {
-    errToast(chips.length + ' models are set — the terminal runs one model only. Ctrl+Enter fans out on the web, or remove the extra model chips.');
+    errToast(chips.length + ' models are set — the terminal runs one model only. Ctrl+Enter runs them in parallel on the web, or pick one model.');
     return;
   }
   const text = ($('agentText') && $('agentText').value) || '';
@@ -11930,7 +11974,7 @@ document.addEventListener('keydown', e => {
     case 'z': e.preventDefault(); setZen(!document.body.classList.contains('zen')); break;
     case 'v': e.preventDefault(); setNavPin(!navPinOn); break;
     case 'M': {
-      const add = $('modelAdd');
+      const add = $('modelPick');
       if (add) { e.preventDefault(); add.click(); }
       break;
     }
