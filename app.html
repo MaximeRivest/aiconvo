@@ -9604,14 +9604,19 @@ function updateActivityLine() {
       text = '◌ thinking · ' + b.think.length + ' chars';
       flow = b.think;
     } else {
-      // The gap between units: the model composes its next move. Keep the
-      // last flow visible — water settles, it does not vanish.
-      text = (r.statusText || 'working…');
+      // The gap between units — or a provider that answers in one silent
+      // burst (claude-code API transport): keep the last flow visible and
+      // count the silence honestly, so a dead-looking pane never lies.
+      const quiet = window._lpT ? Math.round((Date.now() - window._lpT) / 1000) : 0;
+      text = '◌ ' + (r.statusText || 'waiting for the model…') + (quiet > 1 ? ' · ' + quiet + 's quiet' : '');
     }
   } else flow = ''; // no run: the pane drains
   setLiveText(el, text || '\u00a0');
   const out = $('lpOut');
   if (out && flow !== null) setStickText(out, flow);
+  // Silence clock: reset whenever the pane's content actually moves.
+  const sigNow = text + '|' + (flow || '');
+  if (sigNow !== window._lpSig) { window._lpSig = sigNow; window._lpT = Date.now(); }
 }
 
 // Pair tool calls with their results (by id when present, else in order).
