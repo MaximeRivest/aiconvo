@@ -1649,6 +1649,10 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     // while the model streams. Branch-targeted sends still refuse.
     if (allowQueue && !node) {
       const record = headlessRuns.get(sessionPath);
+      const requested = provider && modelId ? provider + '/' + modelId : null;
+      if (requested && record.model && requested !== record.model) {
+        throw new Error('A run is active on ' + record.model + '. Wait before switching to ' + requested + '.');
+      }
       const queuedOk = await pisdk.piQueuePrompt({ sessionPath }, message, null, images).catch(() => false)
         || await pirpc.piQueuePrompt({ sessionPath }, message, null, images).catch(() => false);
       if (queuedOk) {
@@ -1727,6 +1731,7 @@ async function startFanOut(key, { node, models, message, images, force }) {
   const runs = [];
   for (const m of models) {
     const forked = await forkSession(key, node); // sequential: each fork locks the source briefly
+    saveConversationModels(forked.key, [m]);
     const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force });
     runs.push({ key: forked.key, jobId: job.id, model: m.provider + '/' + m.modelId });
   }
@@ -1872,6 +1877,102 @@ function canonicalProjectName(raw) {
   return foldsLib.canonicalize(raw, foldStore.aliases, autoFolds);
 }
 
+// Model choices are user preferences, not derived cache. Keep one project
+// default and one explicit model set per conversation, shared by every UI
+// connected to this server.
+const MODEL_PREFS_FILE = path.join(NOTES_DIR, 'model-preferences.json');
+let modelPrefs = { projects: {}, conversations: {} };
+try {
+  modelPrefs = { projects: {}, conversations: {}, ...JSON.parse(fs.readFileSync(MODEL_PREFS_FILE, 'utf8')) };
+} catch {}
+function normalizePickedModel(raw) {
+  const provider = String(raw && raw.provider || '').trim();
+  const modelId = String(raw && (raw.modelId || raw.model) || '').trim();
+  return provider && modelId ? { provider, modelId } : null;
+}
+function normalizePickedModels(raw) {
+  const out = [], seen = new Set();
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const model = normalizePickedModel(item);
+    if (!model) continue;
+    const id = model.provider + '/' + model.modelId;
+    if (!seen.has(id)) { seen.add(id); out.push(model); }
+  }
+  return out.slice(0, 12);
+}
+function saveModelPrefs() {
+  fs.mkdirSync(path.dirname(MODEL_PREFS_FILE), { recursive: true });
+  const tmp = MODEL_PREFS_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(modelPrefs, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(tmp, MODEL_PREFS_FILE);
+}
+function projectDefaultModel(project) {
+  return normalizePickedModel(modelPrefs.projects[canonicalProjectName(String(project || ''))]);
+}
+function resolvedProjectDefaultModel(project) {
+  const explicit = projectDefaultModel(project);
+  if (explicit) return { ...explicit, source: 'project' };
+  const pi = readPiDefault();
+  const fallback = normalizePickedModel({ provider: pi.provider, modelId: pi.model });
+  return fallback ? { ...fallback, source: 'pi' } : null;
+}
+function setProjectDefaultModel(project, raw) {
+  const key = canonicalProjectName(String(project || ''));
+  if (!projectMetaFor(key)) throw new Error('project not found');
+  const model = normalizePickedModel(raw);
+  if (model) modelPrefs.projects[key] = model;
+  else delete modelPrefs.projects[key];
+  saveModelPrefs();
+  return { ok: true, model: projectDefaultModel(key), resolved: resolvedProjectDefaultModel(key) };
+}
+function saveConversationModels(key, raw) {
+  if (!index[key]) throw new Error('conversation not found');
+  const models = normalizePickedModels(raw);
+  if (!models.length) throw new Error('pick at least one model');
+  modelPrefs.conversations[key] = models;
+  saveModelPrefs();
+  return models;
+}
+async function inferredConversationModels(key, cached) {
+  if (conversationKind(index[key]) === 'claude') return [];
+  const stored = normalizePickedModels(modelPrefs.conversations[key]);
+  if (stored.length) return stored;
+  const remember = models => {
+    const normalized = normalizePickedModels(models);
+    if (normalized.length) {
+      modelPrefs.conversations[key] = normalized;
+      saveModelPrefs();
+    }
+    return normalized;
+  };
+  // The usual case needs no native-session parse: the cached active path
+  // already carries the provider and model on its latest assistant reply.
+  const last = [...(cached && cached.messages || [])].reverse()
+    .find(m => !m.off && m.role === 'assistant' && m.provider && m.model);
+  if (last) return remember([{ provider: last.provider, modelId: last.model }]);
+  try {
+    const { sessionPath } = sessionPathsFor(key);
+    const nodes = parseTreeEntries('pi', await fsp.readFile(sessionPath, 'utf8'));
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const seen = new Set();
+    for (let node = nodes[nodes.length - 1]; node && !seen.has(node.id); node = node.parent ? byId.get(node.parent) : null) {
+      seen.add(node.id);
+      const raw = node.modelChange
+        ? { provider: node.modelChange.provider, modelId: node.modelChange.model }
+        : node.model ? { provider: node.provider, modelId: node.model } : null;
+      const model = normalizePickedModel(raw);
+      if (model) return remember([model]);
+      if (raw && raw.modelId) {
+        const hits = (modelsCache.models || []).filter(m => m.model === raw.modelId);
+        if (hits.length === 1) return remember([{ provider: hits[0].provider, modelId: hits[0].model }]);
+      }
+    }
+  } catch {}
+  const entry = index[key];
+  const fallback = entry && resolvedProjectDefaultModel(projectOfEntry(entry));
+  return fallback ? remember([{ provider: fallback.provider, modelId: fallback.modelId }]) : [];
+}
+
 // A linked worktree's cwd resolves to the MAIN worktree root; that is the
 // automatic fold. `--git-common-dir` points at the shared .git; for the main
 // worktree itself dirname(common) === toplevel, so nothing folds.
@@ -2004,9 +2105,33 @@ async function dismissFoldSuggestion(from, into) {
   return projectFoldsResponse();
 }
 
+// ---- created projects (directory-first birth registry) ----
+// A project born in aiconvo exists on disk before any conversation. The
+// registry pins it into the project list until real conversations take over.
+// It records durable human intent, so it lives in ~/notes, not the cache.
+const CREATED_PROJECTS_FILE = path.join(NOTES_DIR, 'projects.json');
+let createdProjects = {}; // raw project name -> { cwd, createdAt, adopted? }
+try { createdProjects = JSON.parse(fs.readFileSync(CREATED_PROJECTS_FILE, 'utf8')); } catch { createdProjects = {}; }
+function saveCreatedProjects() {
+  fs.mkdirSync(NOTES_DIR, { recursive: true });
+  fs.writeFileSync(CREATED_PROJECTS_FILE, JSON.stringify(createdProjects, null, 2) + '\n');
+}
+function createdRecordFor(project) {
+  for (const [name, rec] of Object.entries(createdProjects)) {
+    if (name === project || canonicalProjectName(name) === project) return rec;
+  }
+  return null;
+}
+function createdProjectsList() {
+  return Object.entries(createdProjects).map(([name, rec]) => ({
+    name: canonicalProjectName(name), cwd: rec.cwd || '', createdAt: rec.createdAt || 0,
+  }));
+}
+
 function rawProjectNames() {
   const names = new Set();
   for (const entry of Object.values(index)) if (entry && entry.cwd) names.add(foldsLib.rawProjectOf(entry.cwd));
+  for (const name of Object.keys(createdProjects)) names.add(name);
   return names;
 }
 
@@ -2014,6 +2139,7 @@ async function projectFoldsResponse() {
   return {
     map: foldsLib.flattenMap(rawProjectNames(), foldStore.aliases, autoFolds),
     aliases: foldStore.aliases, auto: autoFolds, dismissed: foldStore.dismissed || [],
+    created: createdProjectsList(),
     suggestions: await projectFoldSuggestions(),
   };
 }
@@ -2078,7 +2204,12 @@ function readyProviders() {
 let modelsCache = { at: 0, models: [], text: '', error: null };
 let modelsPending = null;
 function listPiModels(force = false) {
-  if (!force && modelsCache.models.length && Date.now() - modelsCache.at < 5 * 60 * 1000) {
+  if (!force && modelsCache.models.length) {
+    // Serve the last good catalog at once. An expired catalog refreshes in
+    // the background, so opening a picker never waits for a Pi process.
+    if (Date.now() - modelsCache.at >= 5 * 60 * 1000 && !modelsPending) {
+      setImmediate(() => listPiModels(true).catch(() => {}));
+    }
     return Promise.resolve(modelsCache);
   }
   if (modelsPending) return modelsPending;
@@ -5994,7 +6125,12 @@ function projectMetaFor(project) {
   const entries = Object.entries(index)
     .filter(([key, entry]) => key && entry && projectOfEntry(entry) === project)
     .map(([key, entry]) => ({ key, entry }));
-  if (!entries.length) return null;
+  if (!entries.length) {
+    // A registered newborn: no conversations yet, but the folder is real.
+    const rec = createdRecordFor(project);
+    if (!rec) return null;
+    return { project, cwd: rec.cwd || null, entries: [], epics: [], latestMs: rec.createdAt || 0, created: true };
+  }
   // Prefer a cwd whose own raw name IS the canonical project (the main
   // worktree), so folded worktree paths do not become the project root.
   const cwds = [...new Set(entries.map(({ entry }) => entry.cwd).filter(Boolean))]
@@ -6081,8 +6217,12 @@ async function projectResponse(project) {
     }
   }
   const memory = await projectMemoryInfo(project, meta);
+  const explicitDefault = projectDefaultModel(project);
   return {
     project, cwd, conversations: entries.length, notes, epics: projectEpics, memory,
+    created: !!meta.created,
+    defaultModel: explicitDefault,
+    resolvedDefaultModel: resolvedProjectDefaultModel(project),
     latestTs: latestMs ? new Date(latestMs).toISOString() : null,
     freshness: {
       freshNotes, staleNotes: notes - freshNotes, missingNotes: entries.length - notes,
@@ -6091,6 +6231,64 @@ async function projectResponse(project) {
     recent,
     agents: ['pi', 'claude'],
   };
+}
+
+// "Create project" is directory-first: the folder IS the project. The
+// registry entry only keeps it visible until the first conversation lands.
+async function createProject(body) {
+  const rawName = String(body.name || '').trim();
+  if (!rawName) throw new Error('project name is required');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,80}$/.test(rawName)) throw new Error('project name: letters, digits, ". _ -" and spaces only');
+  const dirName = rawName.replace(/\s+/g, '-');
+  const parent = path.resolve(expandHomePath(String(body.parent || '').trim() || '~/Projects'));
+  const cwd = path.join(parent, dirName);
+  const raw = foldsLib.rawProjectOf(cwd);
+  const project = canonicalProjectName(raw);
+  if (projectMetaFor(project)) throw new Error(`project "${project}" already exists`);
+  const adopted = fs.existsSync(cwd);
+  await fsp.mkdir(cwd, { recursive: true });
+  if (body.git !== false && !fs.existsSync(path.join(cwd, '.git'))) {
+    try { await gitText(cwd, ['init']); } catch {} // git is optional
+  }
+  createdProjects[raw] = { cwd, createdAt: Date.now(), ...(adopted ? { adopted: true } : {}) };
+  saveCreatedProjects();
+  // Human-written intent seeds intent.md before turn one. Human origin means
+  // vouched: the trust ledger records it, so no [unverified] label.
+  const intent = String(body.intent || '').trim();
+  let intentPath = null;
+  if (intent) {
+    const paths = projectMemoryPaths(project);
+    await fsp.mkdir(paths.dir, { recursive: true });
+    const text = `# ${project} \u2014 intent\n\nWritten by the user at project creation (${new Date().toISOString().slice(0, 10)}).\n\n${intent}\n`;
+    await fsp.writeFile(paths.intent, text);
+    await vouchApply({ path: paths.intent, text, source: 'project-create', note: 'human-written intent at project creation' });
+    intentPath = paths.intent;
+  }
+  let started = null;
+  const firstPrompt = String(body.firstPrompt || '').trim();
+  if (firstPrompt) {
+    started = await startProjectConversation({
+      project, agent: body.agent === 'claude' ? 'claude' : 'pi',
+      mode: body.mode || null, models: Array.isArray(body.models) ? body.models : [],
+      surface: body.surface || 'rpc',
+      include: { map: false }, // no memory exists yet; nothing to brief
+      context: intent
+        ? `# Project: ${project}\n\n- Project root: ${cwd}\n- Born today \u2014 no conversations, no commits yet.\n\n## Intent (human-written at creation, vouched)\n\n${intent}`
+        : null,
+      kickoffText: firstPrompt, name: '',
+    });
+  }
+  return { ok: true, project, cwd, adopted, intentPath, started };
+}
+
+function unregisterProject(name) {
+  const target = String(name || '');
+  let removed = false;
+  for (const key of Object.keys(createdProjects)) {
+    if (key === target || canonicalProjectName(key) === target) { delete createdProjects[key]; removed = true; }
+  }
+  if (removed) saveCreatedProjects();
+  return { ok: true, removed }; // the folder stays; disk is truth
 }
 
 // The "memory to include" selection becomes a briefing FILE, not an inline
@@ -6368,9 +6566,11 @@ async function startProjectConversation(options) {
   const mode = kind === 'pi' && typeof options.mode === 'string' && options.mode.trim() ? options.mode.trim() : null;
   // Lead model for the kickoff run; any further models stay in the project's
   // composer strip for later fan-out sends.
-  const launchModels = Array.isArray(options.models)
-    ? options.models.filter(m => m && m.provider && m.modelId)
-    : [];
+  const requestedModels = normalizePickedModels(options.models);
+  const inheritedModel = kind === 'pi' ? resolvedProjectDefaultModel(options.project) : null;
+  const launchModels = requestedModels.length
+    ? requestedModels
+    : inheritedModel ? [{ provider: inheritedModel.provider, modelId: inheritedModel.modelId }] : [];
   const leadModel = kind === 'pi' ? (launchModels[0] || null) : null;
   const include = options.include || {};
   // Inline-context path (pi only): the user composed and approved the bundle
@@ -6389,8 +6589,12 @@ async function startProjectConversation(options) {
   const wantEvidence = Array.isArray(include.evidenceKeys) && include.evidenceKeys.length;
   const wantBriefing = !contextFile && (wantMap || wantNotes || wantEpics || wantEvidence);
   let briefing = null;
-  let text = String(options.name || '').trim();
-  if (contextFile) {
+  // A creation kickoff carries the user's real first prompt; nothing rewrites it.
+  const kickoffText = typeof options.kickoffText === 'string' ? options.kickoffText.trim() : '';
+  let text = kickoffText || String(options.name || '').trim();
+  if (kickoffText) {
+    // The seed context (if any) already rides in the system prompt.
+  } else if (contextFile) {
     // The context is already in the system prompt: the first user message
     // stays small and real, so it never pollutes the transcript.
     const focus = options.name ? ` Today's focus: "${options.name}".` : '';
@@ -6477,6 +6681,7 @@ async function startProjectConversation(options) {
         broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, final: true });
       });
     }
+    if (key && launchModels.length) saveConversationModels(key, launchModels);
     return {
       name, kind, cwd, title: name, key, surface: 'rpc',
       project: options.project, include, briefing, kickoff: wantBriefing || !!contextFile,
@@ -6487,7 +6692,10 @@ async function startProjectConversation(options) {
   const existing = new Set(Object.keys(index));
   await spawnAlacritty(cwd, name, argv);
   key = await waitForNewConversation(kind, cwd, startedAt, existing);
-  if (key) recordLaunchedTitle(name, key);
+  if (key) {
+    recordLaunchedTitle(name, key);
+    if (launchModels.length) saveConversationModels(key, launchModels);
+  }
   return {
     name, kind, cwd, title: name, key, surface: 'alacritty',
     project: options.project, include, briefing, kickoff: wantBriefing || !!contextFile,
@@ -6711,8 +6919,9 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/session') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(await fsp.readFile(cachePathFor(key)));
+      const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+      data.selectedModels = await inferredConversationModels(key, data);
+      json(res, 200, data);
     } else if (u.pathname === '/api/here') {
       // "Where was I?" — the most recent session whose cwd is (or contains) dir.
       const dir = u.searchParams.get('dir') || '';
@@ -6950,6 +7159,23 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}');
       try { json(res, 200, await startProjectConversation(parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/project/model' && req.method === 'PUT') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, setProjectDefaultModel(p.project, p.model));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/create' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await createProject(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/unregister' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, unregisterProject((JSON.parse(body || '{}')).name)); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/context' && req.method === 'POST') {
       // Assemble the inline context bundle for preview. Nothing starts; the
       // user edits/approves the text before /api/project/start sends it.
@@ -7035,14 +7261,24 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       try {
         const p = JSON.parse(body || '{}');
-        json(res, 200, await setConversationModel(p.id, p.provider, p.modelId, !!p.force));
+        const out = await setConversationModel(p.id, p.provider, p.modelId, !!p.force);
+        saveConversationModels(p.id, [{ provider: p.provider, modelId: p.modelId }]);
+        json(res, 200, out);
       } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/conversation/models' && req.method === 'PUT') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, { ok: true, models: saveConversationModels(p.id, p.models) });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/node/send' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
       try {
         const p = JSON.parse(body || '{}');
-        const models = (Array.isArray(p.models) ? p.models : []).filter(m => m && m.provider && m.modelId);
+        const models = normalizePickedModels(p.models);
+        if (models.length) saveConversationModels(p.id, models);
         const images = rpcImagesOf(p.images);
         if (models.length >= 2) {
           json(res, 202, { ok: true, runs: await startFanOut(p.id, { node: p.node || null, models, message: p.prompt, images, force: !!p.force }) });

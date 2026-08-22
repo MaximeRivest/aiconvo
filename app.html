@@ -417,6 +417,9 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .phead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; background: var(--bg); border-bottom: 1px solid var(--border); border-left: 4px solid var(--accent); padding: var(--sp-2) 0 var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); }
 .phead h2 { margin: 0 0 2px; font-size: var(--fs-title); }
 .pmeta { color: var(--text-dim); font-size: var(--fs-meta); margin-bottom: var(--sp-2); }
+.pdefault-model { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; font-size: var(--fs-meta); color: var(--text-dim); }
+.pdefault-model > span:first-child { color: var(--text-faint); }
+.pdefault-model .hint { margin-left: 2px; }
 .pactions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 /* ---- project folds: chips, suggestions, and the fold picker ---- */
 .pfolds, .pfold-suggest { margin-top: var(--sp-2); font-size: var(--fs-meta); color: var(--text-dim); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
@@ -728,7 +731,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .convhead .ch-project:hover { color: var(--text); text-decoration: underline; background: transparent; }
 .convhead button { height: 26px; padding: 0 10px; max-width: 100%; }
 .convhead .ch-row select { max-width: 100%; }
-#convModel .mname { display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 
 /* transcript */
 /* width: 100%: in flex parents (e-ink paged view) auto margins otherwise
@@ -834,7 +836,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .rc-textblk .rc-think:not(.rc-think-min) { max-height: 40vh; overflow: auto; }
 
 /* model picker */
-.mpick { position: fixed; z-index: 60; width: 360px; max-height: 420px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+.mpick { position: fixed; z-index: 60; width: 520px; max-width: calc(100vw - 16px); max-height: 480px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+.mp-loading, .mp-empty { padding: 18px; color: var(--text-dim); text-align: center; }
+.mp-provider { position: sticky; top: 0; z-index: 1; padding: 6px 8px 3px; background: var(--surface-1); border-bottom: 1px solid var(--border); color: var(--text-dim); font-size: var(--fs-micro); font-weight: 700; }
 
 /* launcher mode row + overlays (mode manager, mode form, context confirm) */
 .pmoderow { display: flex; gap: 6px; align-items: center; }
@@ -868,6 +872,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .mpick .mp-top { display: flex; gap: 6px; align-items: center; }
 .mpick .mp-top .mp-filter { flex: 1; }
 .mpick .mp-refresh { flex: 0 0 auto; width: 30px; }
+.mpick .mp-all { flex: 0 0 auto; min-width: 38px; }
+.mpick .mp-all.on { background: var(--accent-strong); color: var(--accent-ink); }
 .mpick .mp-age { padding: 2px 8px 4px; color: var(--text-faint); font-size: var(--fs-micro); border-bottom: 1px solid var(--border); }
 .mpick .mp-row b { font-weight: 600; }
 .mpick .mp-row span { color: var(--text-faint); font-size: var(--fs-micro); }
@@ -878,8 +884,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .model-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 6px; }
 /* inside the compose row the strip is inline; the model chip starts the
    right-hand group (model · fan chips · send), the meter floats mid-row */
-.agent-compose-row .model-strip { padding: 0; }
-.agent-compose-row #convModel { margin-left: auto; }
+.agent-compose-row .model-strip { padding: 0; margin-left: auto; }
 .agent-compose-row #agentSend { margin-left: auto; }
 .agent-compose-row .ctxmeter { overflow: hidden; text-overflow: ellipsis; }
 /* reserved activity line: exactly one line, always there, never pushes
@@ -902,6 +907,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .lp-out { flex: 1; margin: 0; overflow: auto; font-size: 11px; line-height: 1.5; color: var(--text-faint); white-space: pre-wrap; word-break: break-word; font-family: inherit; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
 .mchip .mname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+.mchip.inherited { border-style: dashed; }
+.mchip .minherit { color: var(--text-faint); font-size: 9px; }
 .mchip button { height: 18px; min-width: 18px; padding: 0; border: 0; background: transparent; color: var(--text-faint); }
 .cmp-row { margin: 8px 0 14px; max-width: none; }
 .cmp-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
@@ -1328,7 +1335,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
   .agent-compose.compose-min .live-pane,
-  .agent-compose.compose-min .ctxmeter, .agent-compose.compose-min #convModel,
+  .agent-compose.compose-min .ctxmeter,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
   .agent-compose.compose-min textarea { flex: 1 1 auto; min-width: 0; min-height: 46px; height: 46px; max-height: 46px; }
@@ -1442,7 +1449,6 @@ body.zen:not(.home) .msg .role,
 body.zen:not(.home) .cmp-badges,
 body.zen:not(.home) .model-strip,
 body.zen:not(.home) .agent-compose .ctxmeter,
-body.zen:not(.home) #convModel,
 body.zen:not(.home) .agent-state { display: none !important; }
 body.zen:not(.home) .transcript, body.zen:not(.home) #runCards:not(:empty) { border: 0; }
 body.zen:not(.home) .msg { border-bottom: 0; padding: 14px 0; }
@@ -6292,26 +6298,31 @@ async function loadLauncherModes(d) {
   updateModeWarn();
 }
 
-// Launcher model strip: same localStorage key the conversation composer
-// uses ('aiconvo.fanModels:<project>'), so a new conversation opens with the
-// chips you set here, and later sends fan out to all of them.
-function launcherModelKey(project) { return 'aiconvo.fanModels:' + project; }
-function launcherModelsOf(project) {
-  try { return JSON.parse(localStorage.getItem(launcherModelKey(project)) || '[]'); } catch { return []; }
+// A launcher starts by inheriting the project default. Picking models here
+// creates an override for this new conversation only.
+function launcherModelsOf(d) {
+  if (Array.isArray(d.launchModels) && d.launchModels.length) return d.launchModels;
+  const model = d.resolvedDefaultModel;
+  return model ? [{ provider: model.provider, modelId: model.modelId }] : [];
 }
 function renderLauncherModels(d) {
   const host = $('pModelStrip');
   if (!host) return;
-  const list = launcherModelsOf(d.project);
+  const inherited = !Array.isArray(d.launchModels) || !d.launchModels.length;
+  const inheritedLabel = d.resolvedDefaultModel && d.resolvedDefaultModel.source === 'pi' ? 'pi default' : 'project default';
+  const list = launcherModelsOf(d);
   host.innerHTML = list.map((m, i) =>
-    `<span class="mchip" title="${esc(m.provider + '/' + m.modelId)}"><span class="mname">${esc(m.modelId)}</span> <button type="button" data-pmdel="${i}" title="remove this model">×</button></span>`).join('') +
-    `<button type="button" id="pModelAdd" title="Add a model. The first model runs the kickoff reply. Two or more fan out later sends.">${list.length ? '+ model' : '+ model — none set: pi default runs the kickoff'}</button>`;
+    `<span class="mchip${inherited ? ' inherited' : ''}" title="${esc(m.provider + '/' + m.modelId)}${inherited ? ' · ' + inheritedLabel : ''}"><span class="mname">${esc(m.modelId)}</span>${inherited ? ` <span class="minherit">${inheritedLabel}</span>` : ` <button type="button" data-pmdel="${i}" title="remove this model">×</button>`}</span>`).join('') +
+    `<button type="button" id="pModelAdd" title="Pick one model for one run, or several models for parallel runs.">${list.length ? 'change models' : 'choose model'}</button>`;
   host.querySelectorAll('[data-pmdel]').forEach(b => b.onclick = () => {
-    localStorage.setItem(launcherModelKey(d.project), JSON.stringify(list.filter((_, i) => i !== Number(b.dataset.pmdel))));
+    const next = list.filter((_, i) => i !== Number(b.dataset.pmdel));
+    d.launchModels = next.length ? next : null;
     renderLauncherModels(d);
   });
-  $('pModelAdd').onclick = e => openModelPicker(e.target, { multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId)) }, picked => {
-    localStorage.setItem(launcherModelKey(d.project), JSON.stringify(picked));
+  $('pModelAdd').onclick = e => openModelPicker(e.target, {
+    multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId))
+  }, picked => {
+    d.launchModels = picked;
     renderLauncherModels(d);
   });
 }
@@ -6484,6 +6495,7 @@ async function showProjectOverview(name) {
     <div class="phead" style="border-left-color:${color.fill}">
       <h2>❯ ${esc(d.project)}</h2>
       <div class="pmeta"><code>${esc(shortDir(d.cwd))}</code> · ${d.conversations} conversations · ${d.notes} notes · ${d.epics.length} epics · latest ${fmtDate(d.latestTs)}</div>
+      <div class="pdefault-model"><span>default model</span><button id="pDefaultModel" type="button"></button><button id="pDefaultReset" type="button" class="ghost">use pi default</button><span class="hint">new conversations inherit this model</span></div>
       <div class="pactions">
         <button id="pTree" title="Toggle to the file tree: all files, commits, and worktrees">☷ file tree</button>
         <button id="pRefresh">refresh evidence</button>
@@ -6558,8 +6570,9 @@ async function showProjectOverview(name) {
         <button id="pModeManage" type="button" title="Create, edit, or delete pi prompt modes">manage modes</button>
       </div>
       <div id="pModeWarn" class="hint pmodewarn" hidden></div>
-      <label>model(s) — first runs the kickoff; two or more fan out later sends</label>
+      <label>models for this conversation</label>
       <div class="model-strip pmodelstrip" id="pModelStrip"></div>
+      <div class="hint">One model runs once. Two or more models run in parallel. No override uses the project default.</div>
       <label for="pName">conversation name (optional)</label><input id="pName" type="text" placeholder="what will you work on next?">
       <label>memory to include</label>
       <div class="mem">
@@ -6575,6 +6588,34 @@ async function showProjectOverview(name) {
     </section>
   </div>`;
   $('pAgent').value = projectStartDefaults(d);
+  const paintProjectDefault = () => {
+    const explicit = d.defaultModel;
+    const resolved = d.resolvedDefaultModel;
+    $('pDefaultModel').textContent = resolved ? `◇ ${resolved.modelId} ▾` : 'choose default model';
+    $('pDefaultModel').title = resolved ? resolved.provider + '/' + resolved.modelId + (resolved.source === 'pi' ? ' · follows pi default' : ' · project default') : 'Set the model inherited by new conversations';
+    $('pDefaultReset').hidden = !explicit;
+    if (!Array.isArray(d.launchModels) || !d.launchModels.length) renderLauncherModels(d);
+  };
+  $('pDefaultModel').onclick = e => {
+    const m = d.resolvedDefaultModel;
+    openModelPicker(e.currentTarget, { selected: new Set(m ? [m.provider + '/' + m.modelId] : []) }, async ([picked]) => {
+      const out = await postJsonMethod('/api/project/model', 'PUT', { project: d.project, model: picked });
+      if (out.error) return errToast('default model failed: ' + out.error);
+      d.defaultModel = out.model;
+      d.resolvedDefaultModel = out.resolved;
+      paintProjectDefault();
+      toast('project default · ' + out.resolved.modelId);
+    });
+  };
+  $('pDefaultReset').onclick = async () => {
+    const out = await postJsonMethod('/api/project/model', 'PUT', { project: d.project, model: null });
+    if (out.error) return errToast('default model failed: ' + out.error);
+    d.defaultModel = out.model;
+    d.resolvedDefaultModel = out.resolved;
+    paintProjectDefault();
+    toast('project default follows pi');
+  };
+  paintProjectDefault();
   $('pBack').onclick = () => { projectOverview = null; projectOverviewName = null; goHome(); };
   const pUnregister = $('pUnregister');
   if (pUnregister) pUnregister.onclick = async () => {
@@ -6758,7 +6799,7 @@ async function startProjectConversation(d, epicIds, surface, extra = {}) {
     body: JSON.stringify({
       project: d.project, agent, name: $('pName').value.trim(), surface: via,
       mode: agent === 'pi' ? (($('pMode') && $('pMode').value) || null) : null,
-      models: agent === 'pi' ? launcherModelsOf(d.project) : [],
+      models: agent === 'pi' ? launcherModelsOf(d) : [],
       context: extra.context || null,
       include: {
         map: $('pMemMap').checked,
@@ -6819,7 +6860,7 @@ function openContextConfirm(d, epicIds, surface, bundle) {
     ' Reply with at most 3 lines on where the project stands, then wait for instructions.';
   ov.innerHTML = `<div class="cc-card">
     <div class="cc-head"><b>review the context before it goes</b><span class="dim cc-size"></span></div>
-    <div class="cc-meta dim">${c.memoryDocs || 0} memory docs · ${c.notes || 0} notes · ${c.epics || 0} epics · ${c.evidence || 0} evidence · mode: ${esc(($('pMode') && $('pMode').value) || 'coding')} · kickoff model: ${esc((launcherModelsOf(d.project)[0] || {}).modelId || 'pi default')} · injected into the system prompt</div>
+    <div class="cc-meta dim">${c.memoryDocs || 0} memory docs · ${c.notes || 0} notes · ${c.epics || 0} epics · ${c.evidence || 0} evidence · mode: ${esc(($('pMode') && $('pMode').value) || 'coding')} · kickoff model: ${esc((launcherModelsOf(d)[0] || {}).modelId || 'pi default')} · injected into the system prompt</div>
     <div class="cc-bigwarn" hidden>⚠ far beyond most model contexts — trim the text or fewer checkboxes, or the provider will reject the request.</div>
     <textarea class="cc-text" spellcheck="false"></textarea>
     <div class="hint">This exact text rides in the system prompt (--append-system-prompt). Edit freely — what you see is what the model gets.</div>
@@ -7276,38 +7317,56 @@ async function openTranscriptEditor(btn) {
 // ---- model catalog and picker ----
 let _modelCatalog = null;
 let _modelCatalogAt = 0;
-// A short client TTL: the picker must not show yesterday's pi catalog.
+let _modelCatalogPending = null;
+// Keep the last good catalog for instant opening. Refresh stale data in the
+// background; the manual reload remains available when credentials change.
 async function modelCatalog(refresh = false) {
-  if (!refresh && _modelCatalog && Date.now() - _modelCatalogAt < 60 * 1000) return _modelCatalog;
-  const d = await (await fetch('/api/models' + (refresh ? '?refresh=1' : ''))).json();
-  _modelCatalog = d;
-  _modelCatalogAt = Date.now();
-  return d;
+  if (!refresh && _modelCatalog) {
+    if (Date.now() - _modelCatalogAt > 5 * 60 * 1000 && !_modelCatalogPending) modelCatalog(true).catch(() => {});
+    return _modelCatalog;
+  }
+  if (_modelCatalogPending) return _modelCatalogPending;
+  _modelCatalogPending = fetch('/api/models' + (refresh ? '?refresh=1' : ''))
+    .then(r => r.json()).then(d => {
+      if (!d.error || (d.models && d.models.length)) {
+        _modelCatalog = d;
+        _modelCatalogAt = Date.now();
+      }
+      return d;
+    }).finally(() => { _modelCatalogPending = null; });
+  return _modelCatalogPending;
 }
 
-async function postJson(url, body) {
+async function postJsonMethod(url, method, body) {
   try {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     return await r.json();
   } catch { return { error: 'network failure' }; }
 }
+const postJson = (url, body) => postJsonMethod(url, 'POST', body);
 
 // Floating model picker. opts: { multi, selected:Set of 'provider/model' }.
 // onPick receives [{ provider, modelId }].
 async function openModelPicker(anchor, opts, onPick) {
   document.querySelectorAll('.mpick').forEach(el => el.remove());
-  let cat = await modelCatalog();
-  let ready = new Set(cat.readyProviders || []);
-  let models = [...(cat.models || [])].sort((a, b) =>
-    (ready.has(b.provider) - ready.has(a.provider)) || a.id.localeCompare(b.id));
   const sel = new Set(opts && opts.selected ? opts.selected : []);
   const pop = document.createElement('div');
   pop.className = 'mpick';
   const rect = anchor.getBoundingClientRect();
-  pop.style.left = Math.min(rect.left, window.innerWidth - 380) + 'px';
-  pop.style.top = Math.min(rect.bottom + 4, window.innerHeight - 420) + 'px';
-  // The open conversation's context footprint previews the fit per model:
-  // switching or fanning out carries the same trace into the new window.
+  pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 548)) + 'px';
+  pop.style.top = Math.min(rect.bottom + 4, window.innerHeight - 500) + 'px';
+  pop.innerHTML = '<div class="mp-loading">loading models…</div>';
+  document.body.appendChild(pop);
+
+  let cat;
+  try { cat = await modelCatalog(); }
+  catch { pop.remove(); return errToast('could not load the model list'); }
+  if (!pop.isConnected) return;
+  let ready = new Set(cat.readyProviders || []);
+  let models = [...(cat.models || [])].sort((a, b) =>
+    (ready.has(b.provider) - ready.has(a.provider)) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
+  let showAll = false;
+  // The open conversation's context footprint previews the fit per model.
   const usedNow = (() => {
     const h = activeRel && ctxMeterCache.get(activeRel);
     return (h && h.data && h.data.usedTokens) || 0;
@@ -7318,24 +7377,20 @@ async function openModelPicker(anchor, opts, onPick) {
       ? ` · ${Math.round(100 * usedNow / m.context)}% used`
       : ` · over by ${fmtTokens(usedNow - m.context)}`;
   };
-  const rows = () => models.map(m =>
-    `<button class="mp-row${sel.has(m.id) ? ' on' : ''}${ready.has(m.provider) ? '' : ' notready'}" data-mp="${esc(m.id)}" title="${ready.has(m.provider) ? '' : 'provider not authenticated · '}${esc(m.id)} · ${esc(m.contextLabel || '')} context${esc(fitLabel(m))}">` +
-    `${opts && opts.multi ? `<span class="mp-check">${sel.has(m.id) ? '▣' : '□'}</span>` : ''}<b>${esc(m.model)}</b><span>${esc(m.provider)}</span><span class="mp-ctx">${esc(m.contextLabel || '')}${esc(fitLabel(m))}</span></button>`).join('');
   const ageLabel = () => {
     const s = Math.max(0, Math.round((Date.now() - (cat.fetchedAt || Date.now())) / 1000));
     return s < 90 ? s + 's ago' : Math.round(s / 60) + ' min ago';
   };
-  pop.innerHTML = `<div class="mp-top"><input type="search" class="mp-filter" placeholder="filter · ↑↓ · enter ${opts && opts.multi ? 'add / remove · ctrl+enter use' : 'pick'} · esc">` +
+  pop.innerHTML = `<div class="mp-top"><input type="search" class="mp-filter" placeholder="find a model · ↑↓ · enter ${opts && opts.multi ? 'toggle · ctrl+enter use' : 'pick'} · esc">` +
+    `<button type="button" class="mp-all" title="Show models from providers that are not signed in">all</button>` +
     `<button type="button" class="mp-refresh" title="Fetch the model list from pi again (ctrl+r)">↻</button></div>` +
-    `<div class="mp-age">from pi · <span class="mp-age-t">${ageLabel()}</span></div>` +
+    `<div class="mp-age"><span class="mp-scope">signed-in providers</span> · from pi <span class="mp-age-t">${ageLabel()}</span></div>` +
     `<div class="mp-list"></div>` +
     (opts && opts.multi ? `<div class="mp-foot"><button class="primary mp-use">use <span class="mp-count">${sel.size}</span> model${sel.size === 1 ? '' : 's'}</button> <button class="mp-cancel">cancel</button></div>` : '');
-  document.body.appendChild(pop);
   const list = pop.querySelector('.mp-list');
   const filterInput = pop.querySelector('.mp-filter');
-  // Keyboard: ↑ ↓ move a highlight over the visible rows, enter activates it.
   let hi = -1;
-  const visibleRows = () => [...list.querySelectorAll('.mp-row')].filter(b => b.style.display !== 'none');
+  const visibleRows = () => [...list.querySelectorAll('.mp-row')];
   const setHi = i => {
     const vis = visibleRows();
     hi = vis.length ? Math.max(0, Math.min(vis.length - 1, i)) : -1;
@@ -7344,23 +7399,30 @@ async function openModelPicker(anchor, opts, onPick) {
   };
   const apply = () => {
     const q = filterInput.value.trim().toLowerCase();
-    list.innerHTML = rows();
-    list.querySelectorAll('.mp-row').forEach(b => {
-      if (q && !b.dataset.mp.toLowerCase().includes(q)) b.style.display = 'none';
-      b.onclick = () => {
-        const id = b.dataset.mp;
-        if (opts && opts.multi) {
-          sel.has(id) ? sel.delete(id) : sel.add(id);
-          const c = pop.querySelector('.mp-count');
-          if (c) c.textContent = sel.size;
-          apply();
-        } else {
-          close();
-          const [provider, ...rest] = id.split('/');
-          onPick([{ provider, modelId: rest.join('/') }]);
-        }
-      };
+    const shown = models.filter(m =>
+      (showAll || ready.has(m.provider) || sel.has(m.id)) && (!q || m.id.toLowerCase().includes(q)));
+    let provider = '';
+    list.innerHTML = shown.map(m => {
+      const head = m.provider !== provider ? `<div class="mp-provider">${esc(m.provider)}</div>` : '';
+      provider = m.provider;
+      return head + `<button class="mp-row${sel.has(m.id) ? ' on' : ''}${ready.has(m.provider) ? '' : ' notready'}" data-mp="${esc(m.id)}" title="${ready.has(m.provider) ? '' : 'provider not authenticated · '}${esc(m.id)} · ${esc(m.contextLabel || '')} context${esc(fitLabel(m))}">` +
+        `${opts && opts.multi ? `<span class="mp-check">${sel.has(m.id) ? '▣' : '□'}</span>` : ''}<b>${esc(m.model)}</b><span class="mp-ctx">${esc(m.contextLabel || '')}${esc(fitLabel(m))}</span></button>`;
+    }).join('') || '<div class="mp-empty">no matching models</div>';
+    list.querySelectorAll('.mp-row').forEach(b => b.onclick = () => {
+      const id = b.dataset.mp;
+      if (opts && opts.multi) {
+        sel.has(id) ? sel.delete(id) : sel.add(id);
+        apply();
+      } else {
+        close();
+        const [provider, ...rest] = id.split('/');
+        onPick([{ provider, modelId: rest.join('/') }]);
+      }
     });
+    const count = pop.querySelector('.mp-count');
+    if (count) count.textContent = sel.size;
+    const use = pop.querySelector('.mp-use');
+    if (use) use.disabled = !sel.size;
     setHi(hi);
   };
   const refreshBtn = pop.querySelector('.mp-refresh');
@@ -7371,9 +7433,8 @@ async function openModelPicker(anchor, opts, onPick) {
       cat = await modelCatalog(true);
       ready = new Set(cat.readyProviders || []);
       models = [...(cat.models || [])].sort((a, b) =>
-        (ready.has(b.provider) - ready.has(a.provider)) || a.id.localeCompare(b.id));
-      const t = pop.querySelector('.mp-age-t');
-      if (t) t.textContent = ageLabel();
+        (ready.has(b.provider) - ready.has(a.provider)) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
+      pop.querySelector('.mp-age-t').textContent = ageLabel();
       apply();
     } catch { errToast('could not refresh the model list'); }
     refreshBtn.disabled = false;
@@ -7381,13 +7442,19 @@ async function openModelPicker(anchor, opts, onPick) {
     filterInput.focus();
   };
   refreshBtn.onclick = doRefresh;
+  pop.querySelector('.mp-all').onclick = () => {
+    showAll = !showAll;
+    pop.querySelector('.mp-all').classList.toggle('on', showAll);
+    pop.querySelector('.mp-scope').textContent = showAll ? 'all providers' : 'signed-in providers';
+    apply();
+  };
   filterInput.onkeydown = e => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); doRefresh(); return; }
     if (e.key === 'ArrowDown') { e.preventDefault(); setHi(hi < 0 ? 0 : hi + 1); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); setHi(hi - 1); return; }
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && opts && opts.multi) {
       e.preventDefault();
-      pop.querySelector('.mp-use').click();
+      if (sel.size) pop.querySelector('.mp-use').click();
       return;
     }
     if (e.key === 'Enter') {
@@ -7403,6 +7470,7 @@ async function openModelPicker(anchor, opts, onPick) {
   pop.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
   if (opts && opts.multi) {
     pop.querySelector('.mp-use').onclick = () => {
+      if (!sel.size) return;
       close();
       onPick([...sel].map(id => { const [provider, ...rest] = id.split('/'); return { provider, modelId: rest.join('/') }; }));
     };
@@ -7494,19 +7562,6 @@ function wireHead() {
   const proj = $('chProject');
   if (proj) proj.onclick = () => current && showProjectOverview(projectOf(current));
   wireTitleControls();
-  const cm = $('convModel');
-  if (cm) cm.onclick = () => openModelPicker(cm, {}, async ([m]) => {
-    cm.disabled = true;
-    cm.textContent = '◇ switching…';
-    let out = await postJson('/api/conversation/model', { id: activeRel, provider: m.provider, modelId: m.modelId });
-    if (out.needsForce && confirm('A terminal owns this conversation. Stop it, switch the model, and reopen?')) {
-      out = await postJson('/api/conversation/model', { id: activeRel, provider: m.provider, modelId: m.modelId, force: true });
-    }
-    if (out.error && !out.needsForce) errToast('model switch failed: ' + out.error);
-    else if (out.ok) toast('model set · ' + out.model + (out.reopened ? ' · terminal reopened' : ''));
-    ctxMeterCache.delete(activeRel); // the window size changed with the model
-    open(activeRel, 'bottom');
-  });
   wireContextNav();
 }
 
@@ -7606,9 +7661,6 @@ async function continueInAlacritty(btn) {
 
 function agentComposerHtml(d) {
   if (!['claude', 'pi', 'pi-remote'].includes(d.source)) return '';
-  // The model chip and the context/cost meter live in the compose row:
-  // everything about the next send sits on one line.
-  const lastModel = [...(d.messages || [])].reverse().find(m => m.role === 'assistant' && m.model);
   return `<div class="composer-dock" id="composerDock">
     <details class="lp-steps" id="lpSteps" hidden><summary><span class="lp-steps-sum"></span><button type="button" class="lp-abort" title="Stop this run. The session file keeps what already landed." hidden>abort</button></summary><div class="lp-steps-body"><div class="rc-blocks"></div></div></details>
     <div class="live-pane" id="livePane"><div class="lp-head" id="agentActivityText">&nbsp;</div><pre class="lp-out" id="lpOut"></pre></div>
@@ -7624,7 +7676,6 @@ function agentComposerHtml(d) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>
       </button>
       <span id="ctxMeter" class="ctxmeter" hidden></span>
-      ${d.source !== 'claude' ? `<button id="convModel" title="Set this conversation's model. pi writes its native model_change entry, so branches and resumes inherit it.">◇ <span class="mname">${esc(lastModel ? lastModel.model : 'model')}</span> ▾</button>` : ''}
       ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
       ${d.source === 'claude' ? '<button class="primary" id="agentSend" type="button" title="Open the terminal and send (ctrl+enter)">open &amp; send</button>' : ''}
@@ -7690,28 +7741,24 @@ async function headlessSendFromComposer(btn) {
   toast(out.runs ? out.runs.length + ' models running in parallel — replies appear side by side' : 'running · ' + ((out.job && out.job.model) || (models[0] && models[0].modelId) || 'session model'));
 }
 
-// The model set lives per project: a new conversation in the same project
-// starts with your usual models. The unscoped key is the fallback.
-function fanScope() {
-  try {
-    const entry = sessions.find(s => s.key === activeRel);
-    const p = entry && projectOf(entry);
-    if (p && p !== '?') return 'aiconvo.fanModels:' + p;
-  } catch {}
-  return null;
-}
+// One server-side model set owns the next reply. One entry means one run;
+// several entries mean parallel runs. It belongs to this conversation.
 function fanModels() {
-  try {
-    const scope = fanScope();
-    const scoped = scope && localStorage.getItem(scope);
-    if (scoped != null) return JSON.parse(scoped);
-    return JSON.parse(localStorage.getItem('aiconvo.fanModels') || '[]');
-  } catch { return []; }
+  return current && Array.isArray(current.selectedModels) ? current.selectedModels : [];
 }
-function setFanModels(list) {
-  const scope = fanScope();
-  if (scope) localStorage.setItem(scope, JSON.stringify(list));
-  localStorage.setItem('aiconvo.fanModels', JSON.stringify(list));
+async function setFanModels(list) {
+  if (!current || !list.length) return errToast('pick at least one model');
+  const before = fanModels();
+  current.selectedModels = list;
+  renderModelStrip();
+  const out = await postJsonMethod('/api/conversation/models', 'PUT', { id: activeRel, models: list });
+  if (out.error) {
+    current.selectedModels = before;
+    renderModelStrip();
+    return errToast('model selection failed: ' + out.error);
+  }
+  current.selectedModels = out.models;
+  ctxMeterCache.delete(activeRel);
   renderModelStrip();
 }
 // The send button says what will happen: "send ×N" = the prompt fans out to
@@ -7732,9 +7779,9 @@ function renderModelStrip() {
       : 'Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.';
   }
   host.innerHTML = list.map((m, i) =>
-    `<span class="mchip" title="${esc(m.provider + '/' + m.modelId)}"><span class="mname">${esc(m.modelId)}</span> <button type="button" data-mdel="${i}" title="remove this model">×</button></span>`
+    `<span class="mchip" title="${esc(m.provider + '/' + m.modelId)}"><span class="mname">${esc(m.modelId)}</span>${list.length > 1 ? ` <button type="button" data-mdel="${i}" title="remove this model">×</button>` : ''}</span>`
   ).join('') +
-    `<button type="button" id="modelAdd" title="Add a model. Two or more models send the next prompt to all of them in parallel.">+ model</button>`;
+    `<button type="button" id="modelAdd" title="One model runs once. Add more models to run in parallel.">${list.length ? '+ model' : 'choose model'}</button>`;
   host.querySelectorAll('[data-mdel]').forEach(b => b.onclick = () => {
     const next = fanModels().filter((_, i) => i !== Number(b.dataset.mdel));
     setFanModels(next);
@@ -7932,7 +7979,7 @@ function shrinkAgentImage(img) {
 async function sendToAlacritty(btn) {
   if (!activeRel) return;
   // One terminal runs ONE model. With two or more model chips the meaning of
-  // a terminal send is undefined — refuse it and point at the web fan-out.
+  // a terminal runs one model — refuse a multi-model set and point at the web run.
   const chips = $('modelStrip') ? fanModels() : [];
   if (chips.length >= 2) {
     errToast(chips.length + ' models are set — the terminal runs one model only. Ctrl+Enter fans out on the web, or remove the extra model chips.');
@@ -9198,7 +9245,10 @@ function wireCompareRow() {
     const mBtn = row.querySelector('[data-cmp-mmodel]');
     if (mBtn) mBtn.onclick = e => {
       e.stopPropagation();
-      openModelPicker(mBtn, { multi: false }, picked => {
+      const selected = row.dataset.mergeProvider && row.dataset.mergeModel
+        ? row.dataset.mergeProvider + '/' + row.dataset.mergeModel
+        : (fanModels()[0] ? fanModels()[0].provider + '/' + fanModels()[0].modelId : '');
+      openModelPicker(mBtn, { multi: false, selected: new Set(selected ? [selected] : []) }, picked => {
         const m = picked && picked[0];
         if (!m) return;
         row.dataset.mergeProvider = m.provider;
@@ -9749,26 +9799,35 @@ function flashCopied(btn) {
 }
 
 let progressStream = null;
+let conversationLoadSeq = 0;
 
 async function open(rel, scroll) {
-  if (window.fileInk && fileInk.teardown) fileInk.teardown();
-  markSettingsClosed();
-  if (progressStream) { progressStream.close(); progressStream = null; }
-  activeRel = rel;
-  // The live slash flag belongs to one conversation's terminal; never leak
-  // it into the next one (a leaked flag streams every keystroke to a PTY).
-  window._agentLiveOn = false;
-  window._agentLiveText = '';
-  einkPage = -1; // a fresh conversation lands on the last page
-  setRoute('conversation', encodeURIComponent(rel), convCrumbs(rel));
-  render();
-  current = await (await fetch('/api/session?id=' + encodeURIComponent(rel))).json();
-  if (current.error) {
+  const seq = ++conversationLoadSeq;
+  const navigating = viewKind !== 'conversation' || activeRel !== rel || !current || current.key !== rel;
+  if (navigating) {
+    if (window.fileInk && fileInk.teardown) fileInk.teardown();
+    markSettingsClosed();
+    if (progressStream) { progressStream.close(); progressStream = null; }
+    activeRel = rel;
+    // The live slash flag belongs to one conversation's terminal; never leak
+    // it into the next one (a leaked flag streams every keystroke to a PTY).
+    window._agentLiveOn = false;
+    window._agentLiveText = '';
+    einkPage = -1; // a fresh conversation lands on the last page
+    setRoute('conversation', encodeURIComponent(rel), convCrumbs(rel));
+    render();
+  }
+  // A file-watch refresh is not navigation. setRouteKind() resets #view to
+  // the top before this fetch. Calling it here made the old transcript flash
+  // at the top until the request finished, then jump back to the live tail.
+  const next = await (await fetch('/api/session?id=' + encodeURIComponent(rel))).json();
+  if (seq !== conversationLoadSeq || rel !== activeRel) return;
+  if (next.error) {
     $('view').innerHTML = `<div class="empty">this conversation is no longer available.<div class="hint">it may have been removed from disk.</div></div>`;
     current = null;
     return;
   }
-  if (rel !== activeRel) return;
+  current = next;
   await renderConv(scroll);
 }
 
@@ -10327,8 +10386,8 @@ function modelChipsHtml(models) {
 
 function openNodeSendDialog(key, n) {
   closeTreeActions();
-  // The project's fan-out chips prefill the dialog: with many models set,
-  // a node send fans out to them — it never falls back to the session model.
+  // The conversation's model set prefills this dialog. One model makes one
+  // branch; several models make parallel branches.
   let models = fanModels();
   const { overlay, close } = nodeDialog('send from here',
     `<div class="dim" style="margin-bottom:8px">continues after: “${esc(n.title)}”</div>
@@ -10364,8 +10423,7 @@ function openNodeSendDialog(key, n) {
 
 function openAggregateDialog(key, n) {
   closeTreeActions();
-  // With fan-out chips set, the first chip is the default aggregator — the
-  // session model runs only when no chips are set (single-model workflow).
+  // The first conversation model is the default aggregator.
   let models = fanModels().slice(0, 1);
   const { overlay, close } = nodeDialog('aggregate the replies',
     `<div class="dim" style="margin-bottom:8px">quotes every answer branch under “${esc(n.title)}” with its model name, then asks one model to synthesize.</div>
@@ -10373,7 +10431,9 @@ function openAggregateDialog(key, n) {
      <div style="margin:10px 0"><button id="agModel" type="button">aggregator model…</button> <span id="agChips">${models[0] ? `<code>${esc(models[0].modelId)}</code>` : '<span class="dim">session model</span>'}</span></div>
      <div><button class="primary" id="agSend">aggregate</button> <button id="agCancel">cancel</button></div>`);
   overlay.querySelector('#agCancel').onclick = close;
-  overlay.querySelector('#agModel').onclick = e => openModelPicker(e.target, {}, picked => {
+  overlay.querySelector('#agModel').onclick = e => openModelPicker(e.target, {
+    selected: new Set(models[0] ? [models[0].provider + '/' + models[0].modelId] : [])
+  }, picked => {
     models = picked;
     overlay.querySelector('#agChips').innerHTML = `<code>${esc(picked[0].modelId)}</code>`;
   });
@@ -11136,8 +11196,8 @@ async function loadSettings() {
 async function loadModels(refresh = false) {
   if (refresh) modelsState = null;
   if (settingsOpen) renderSettings();
-  const res = await fetch('/api/models' + (refresh ? '?refresh=1' : ''));
-  modelsState = await res.json();
+  try { modelsState = await modelCatalog(refresh); }
+  catch { modelsState = { models: [], error: 'could not load pi models' }; }
   if (settingsOpen) renderSettings();
 }
 
@@ -11566,7 +11626,7 @@ function helpNow() {
     keys.push(['T', 'tree — walk branches, forks, and parallel replies']);
     if ($('agentMic') && !$('agentMic').hidden) keys.push(['m', 'start / stop dictation']);
     if ($('modelStrip')) keys.push(
-      ['shift+m', 'models for fan-out: add / remove / change'],
+      ['shift+m', 'models for the next reply: one run or parallel runs'],
       ['ctrl+enter', 'send the draft — focused or not; 2+ model chips fan out'],
       ['ctrl+shift+enter', 'send in the terminal — one model only, refuses with 2+ chips']);
     keys.push(['z', 'zen — hide everything but the words'], ['c', 'copy as markdown'], ['e', 'export'], ['d', 'distill / open note'], ['p', 'project overview']);
@@ -11969,11 +12029,9 @@ live.onmessage = ev => {
     if (d.final) {
       activeRuns.delete(d.jobId);
       for (const k of [...runToolOpen.keys()]) if (k.startsWith(d.jobId + '/')) runToolOpen.delete(k);
-      // The run ended: flush the debounced reload now so the transcript
-      // shows the settled result at once.
+      // The run ended: perform the one full refresh now, after all live
+      // thinking and tool changes stayed inside the fixed pane.
       if (d.key === activeRel && viewKind === 'conversation' && current) {
-        clearTimeout(liveTailTimer);
-        liveTailTimer = null;
         const v = $('view');
         if (v.scrollHeight - v.scrollTop - v.clientHeight < 200) open(activeRel, 'bottom');
       }
@@ -12080,14 +12138,10 @@ live.onmessage = ev => {
     const v = $('view');
     const pinned = v.scrollHeight - v.scrollTop - v.clientHeight < 80;
     if (pinned) {
-      // Live tail: user is at the bottom, keep them there. While a web run
-      // streams, the full reload is DEBOUNCED: on a large conversation the
-      // refetch + re-render takes seconds and would swallow the token
-      // stream between file writes. The run card carries the live content;
-      // the transcript catches up at most every few seconds and once more
-      // when the run ends.
-      if (hasLiveRun(activeRel)) scheduleLiveTailReload();
-      else open(activeRel, 'bottom');
+      // Run events patch the fixed live pane in place. Do not rebuild the
+      // scroll tree between thinking and tool calls. The final run event
+      // performs one settled transcript refresh.
+      if (!hasLiveRun(activeRel)) open(activeRel, 'bottom');
     } else if ($('convHeadExtra') && !$('convReload')) {
       const b = document.createElement('button');
       b.id = 'convReload';
@@ -12107,20 +12161,6 @@ setInterval(() => {
   renderRunCards();
 }, 1000);
 
-// Debounced transcript reload during active runs (≤1 per 5 s, only pinned).
-let liveTailLast = 0, liveTailTimer = null;
-function scheduleLiveTailReload() {
-  if (liveTailTimer) return;
-  const wait = Math.max(400, 5000 - (Date.now() - liveTailLast));
-  liveTailTimer = setTimeout(() => {
-    liveTailTimer = null;
-    liveTailLast = Date.now();
-    if (viewKind !== 'conversation' || !current) return;
-    const v = $('view');
-    if (v.scrollHeight - v.scrollTop - v.clientHeight < 80) open(activeRel, 'bottom');
-  }, wait);
-}
-
 // refresh the █ markers and working/recent marks as sessions go quiet
 setInterval(() => {
   updateLiveBadges();
@@ -12134,6 +12174,8 @@ updateScaleSeg();
 applyGanttMode();
 loadJobs();
 loadSettings();
+// Pay the catalog cost during normal startup, not after the user opens a picker.
+modelCatalog().catch(() => {});
 // Repo cards power the home-row ⌂ glyphs.
 fetch('/api/git/repos').then(r => r.json()).then(d => {
   gitReposCache = (d && d.repos) || [];
