@@ -6852,11 +6852,15 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
 // visible; the quiet unfold link sits bottom-right like the file footer.
 function foldLongMessages() {
   const limit = window.innerHeight * 1.25;
-  for (const el of $('view').querySelectorAll('.msg.can-fold')) {
+  // Read pass first, write pass second: interleaving reads (scrollHeight)
+  // with class writes forces one full reflow per message — seconds of
+  // main-thread block on a long transcript.
+  const items = [...$('view').querySelectorAll('.msg.can-fold')]
+    .map(el => ({ el, h: el.scrollHeight, det: el.closest('details') }));
+  for (const { el, h, det } of items) {
     el.classList.remove('can-fold');
-    const det = el.closest('details');
     if (det && !det.open) continue;      // hidden branch folds measure 0
-    if (el.scrollHeight <= limit) continue;
+    if (h <= limit) continue;
     el.classList.add('folded');
     const btn = document.createElement('button');
     btn.className = 'unfold';
@@ -8717,6 +8721,10 @@ async function renderConv(scroll) {
     `<div id="runCards"></div>` +
     (offNewest ? `<div class="tracebanner">⑂ you follow an older branch — new messages continue from its end <button id="traceReset">back to newest</button></div>` : '') +
     agentComposerHtml(d);
+  // Land provisionally NOW: if any wiring below throws, or the browser
+  // squeezes in a paint, a bottom-bound reader never sees the top flash.
+  if (scroll == null || scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
+  try {
   if ($('traceReset')) $('traceReset').onclick = () => { traceLeaves.delete(d.key); renderConv('bottom'); };
   $('view').querySelectorAll('[data-pill-go]').forEach(b => b.onclick = () => {
     const tr = computeTrace(current);
@@ -8745,6 +8753,7 @@ async function renderConv(scroll) {
     e.stopPropagation();
     openToolCallFile(activeRel, b.dataset.fileDiff, b.dataset.fileTs, b.dataset.fileAnchor, b.dataset.fileCall);
   });
+  } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.
   // On e-ink the transcript is paginated instead of scrolled.
