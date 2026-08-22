@@ -955,11 +955,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.tool .resfold > summary::-webkit-details-marker { display: none; }
 .msg.tool .resfold > summary:hover { color: var(--text-dim); }
 /* accumulated tool steps: one quiet growing line, expandable */
-.toolgroup > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 14px; font-size: 11px; color: var(--text-faint); }
+.toolgroup > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 14px; font-size: 11px; color: var(--text-faint); text-align: center; }
 .toolgroup > summary::-webkit-details-marker { display: none; }
 .toolgroup > summary:hover { color: var(--text-dim); }
 /* the run card's growing steps line: same voice as the settled toolgroup */
-.rc-steps > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 0; font-size: 11px; color: var(--text-faint); }
+.rc-steps > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 0; font-size: 11px; color: var(--text-faint); text-align: center; }
 .rc-steps > summary::-webkit-details-marker { display: none; }
 .rc-steps > summary:hover { color: var(--text-dim); }
 .toolgroup > .msg { padding-left: 26px; }
@@ -8826,7 +8826,7 @@ async function renderConv(scroll) {
     const label = [...names.entries()].map(([n, c]) => c > 1 ? `${n} ×${c}` : n).join(' · ');
     const gkey = toolBuf[0].gkey;
     const open = toolGroupOpen.get(activeRel + '|' + gkey) ? ' open' : '';
-    blocks.push(`<details class="toolgroup" data-gkey="${esc(gkey)}"${open}><summary>⚙ ${toolBuf.length} steps · ${esc(label.slice(0, 90))}</summary>` +
+    blocks.push(`<details class="toolgroup" data-gkey="${esc(gkey)}"${open}><summary>${toolBuf.length} steps · ${esc(label.slice(0, 90))}</summary>` +
       toolBuf.map(t => t.html).join('') + `</details>`);
     toolBuf = [];
   };
@@ -9553,7 +9553,7 @@ function renderRunCards() {
         ? (b.name || 'tool') + (b.error ? ' ✗' : '')
         : (b.think && !b.text ? 'thinking' : 'reply'));
       setLiveText(card.querySelector('.rc-steps-sum'),
-        `⚙ ${frozen.length} step${frozen.length > 1 ? 's' : ''} · ` +
+        `${frozen.length} step${frozen.length > 1 ? 's' : ''} · ` +
         labels.slice(-8).join(' · ') + (labels.length > 8 ? ' · …' : ''));
     } else steps.style.display = 'none';
   }
