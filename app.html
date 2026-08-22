@@ -878,6 +878,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose-row #convModel { margin-left: auto; }
 .agent-compose-row #agentSend { margin-left: auto; }
 .agent-compose-row .ctxmeter { overflow: hidden; text-overflow: ellipsis; }
+/* reserved activity line: exactly one line, always there, never pushes
+   anything — the live heartbeat streams here instead of in the transcript */
+.agent-activity { min-height: 18px; max-height: 18px; overflow: hidden; font-size: 11px; color: var(--text-dim); white-space: nowrap; text-overflow: ellipsis; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
 .mchip .mname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .mchip button { height: 18px; min-width: 18px; padding: 0; border: 0; background: transparent; color: var(--text-faint); }
@@ -941,6 +944,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.tool .resfold > summary { cursor: pointer; list-style: none; user-select: none; color: var(--text-faint); font-size: 11px; margin-top: 4px; }
 .msg.tool .resfold > summary::-webkit-details-marker { display: none; }
 .msg.tool .resfold > summary:hover { color: var(--text-dim); }
+/* accumulated tool steps: one quiet growing line, expandable */
+.toolgroup > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 14px; font-size: 11px; color: var(--text-faint); }
+.toolgroup > summary::-webkit-details-marker { display: none; }
+.toolgroup > summary:hover { color: var(--text-dim); }
+.toolgroup > .msg { padding-left: 26px; }
 .msg.tool .role { color: var(--role-tool); }
 .msg.tool .role::before { content: "$ "; }
 .msg.toolresult .role { color: var(--role-tool); }
@@ -1276,6 +1284,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   /* resting composer: one slim bar — tap it, or hold a draft, to expand */
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
+  .agent-compose.compose-min .agent-activity,
   .agent-compose.compose-min .ctxmeter, .agent-compose.compose-min #convModel,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
@@ -7558,6 +7567,7 @@ function agentComposerHtml(d) {
   // everything about the next send sits on one line.
   const lastModel = [...(d.messages || [])].reverse().find(m => m.role === 'assistant' && m.model);
   return `<div class="agent-compose" id="agentCompose">
+    <div class="agent-activity" id="agentActivity"><span id="agentActivityText">&nbsp;</span></div>
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="3" placeholder="type a prompt, or / for slash commands. paste or drop images."></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
@@ -8762,25 +8772,48 @@ async function renderConv(scroll) {
   // The newest on-path message always shows in full — no fold to click.
   let lastMain = -1;
   for (let k = msgs.length - 1; k >= 0; k--) if (trace || !msgs[k].off) { lastMain = k; break; }
+  // Consecutive tool steps accumulate into ONE quiet line ("⚙ N steps …").
+  // The group keeps its open/closed choice across re-renders, so new
+  // messages below never make it jump or disappear.
+  let toolBuf = [];
+  const flushTools = () => {
+    if (!toolBuf.length) return;
+    if (toolBuf.length === 1) { blocks.push(toolBuf[0].html); toolBuf = []; return; }
+    const names = new Map();
+    for (const t of toolBuf) names.set(t.name, (names.get(t.name) || 0) + 1);
+    const label = [...names.entries()].map(([n, c]) => c > 1 ? `${n} ×${c}` : n).join(' · ');
+    const gkey = toolBuf[0].gkey;
+    const open = toolGroupOpen.get(activeRel + '|' + gkey) ? ' open' : '';
+    blocks.push(`<details class="toolgroup" data-gkey="${esc(gkey)}"${open}><summary>⚙ ${toolBuf.length} steps · ${esc(label.slice(0, 90))}</summary>` +
+      toolBuf.map(t => t.html).join('') + `</details>`);
+    toolBuf = [];
+  };
   for (let i = 0; i < msgs.length;) {
     const isHit = m => !!qtest && qtest.test(m.text || '');
     if (trace || !msgs[i].off) {
       const m = msgs[i];
       if (!(m.role === 'assistant' && skipAns.has(m.eid))) {
-        if (m.role === 'assistant' && m.model && m.model !== barModel) {
-          if (barModel) blocks.push(`<div class="modelbar" title="${esc((m.provider ? m.provider + ' · ' : '') + m.model)}">model → ${esc(m.model)}</div>`);
-          barModel = m.model;
+        if (['tool', 'toolresult', 'thinking'].includes(m.role)) {
+          const html = msgBlock(m, hl, isHit(m), q, msgIndexes.get(m));
+          if (html) toolBuf.push({ html, name: m.role === 'thinking' ? 'thinking' : (m.name || 'tool'), gkey: m.ts || 'i' + i });
+        } else {
+          flushTools();
+          if (m.role === 'assistant' && m.model && m.model !== barModel) {
+            if (barModel) blocks.push(`<div class="modelbar" title="${esc((m.provider ? m.provider + ' · ' : '') + m.model)}">model → ${esc(m.model)}</div>`);
+            barModel = m.model;
+          }
+          blocks.push(msgBlock(m, hl, isHit(m) || i === lastMain, q, msgIndexes.get(m)));
         }
-        blocks.push(msgBlock(m, hl, isHit(m) || i === lastMain, q, msgIndexes.get(m)));
       }
       const nextEid = msgs[i + 1] && msgs[i + 1].eid;
       if (m.eid && nextEid !== m.eid) {
-        if (compares.has(m.eid)) blocks.push(compares.get(m.eid));
-        else if (pills.has(m.eid)) blocks.push(pills.get(m.eid));
+        if (compares.has(m.eid)) { flushTools(); blocks.push(compares.get(m.eid)); }
+        else if (pills.has(m.eid)) { flushTools(); blocks.push(pills.get(m.eid)); }
       }
       i++;
       continue;
     }
+    flushTools();
     let j = i;
     while (j < msgs.length && msgs[j].off) j++;
     const group = msgs.slice(i, j);
@@ -8790,6 +8823,7 @@ async function renderConv(scroll) {
       group.map(m => msgBlock(m, hl, isHit(m), q, msgIndexes.get(m))).join('') + `</details>`);
     i = j;
   }
+  flushTools();
   const offNewest = trace && trace.leaf !== trace.fileLeaf;
   $('view').innerHTML = head +
     (msgs.length ? `<div class="transcript" id="conversationTranscript">` + blocks.join('') + `</div>`
@@ -8830,6 +8864,9 @@ async function renderConv(scroll) {
     e.stopPropagation();
     openToolCallFile(activeRel, b.dataset.fileDiff, b.dataset.fileTs, b.dataset.fileAnchor, b.dataset.fileCall);
   });
+  $('view').querySelectorAll('.toolgroup').forEach(g =>
+    g.addEventListener('toggle', () => toolGroupOpen.set(activeRel + '|' + g.dataset.gkey, g.open)));
+  updateActivityLine();
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.
@@ -9098,6 +9135,7 @@ async function mergeCompareGroup(row, btn) {
 // and only follows the bottom when the user is already pinned there.
 const activeRuns = new Map();   // jobId → latest run-event (with tail blocks)
 const runToolOpen = new Map();  // jobId + '/' + blockId → the user's fold choice
+const toolGroupOpen = new Map(); // conversation + group key → fold choice survives re-renders
 
 // chat only → tool calls fold to one line; everything/commands → open, streaming.
 function runToolDefaultOpen() { return viewMode === 'all' || viewMode === 'commands'; }
@@ -9451,6 +9489,31 @@ function renderRunCards() {
     for (const b of tail) updateRunBlock(blocksHost, r.jobId, b);
   }
   if (cards.length && pinned) v.scrollTop = v.scrollHeight;
+  updateActivityLine();
+}
+
+// The reserved one-line heartbeat over the composer: whatever is active
+// right now — tool, thinking, writing — streams here. On e-ink it steps
+// about once a second instead of flickering.
+function updateActivityLine() {
+  const el = $('agentActivityText');
+  if (!el) return;
+  if (isEink() && Date.now() - (window._actLast || 0) < 1200) return;
+  window._actLast = Date.now();
+  const runs = [...activeRuns.values()].filter(r => r.key === activeRel);
+  let text = '';
+  if (runs.length) {
+    const r = runs[runs.length - 1];
+    const tail = r.tail || [];
+    const b = tail[tail.length - 1];
+    if (b && b.kind === 'tool') {
+      const last = b.phase === 'running' && b.out ? (String(b.out).trim().split('\n').filter(x => x.trim()).pop() || '').slice(-80) : '';
+      text = '⚙ ' + (b.name || 'tool') + (b.phase === 'done' ? ' · ✓' : (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '')) + (last ? ' — ' + last : '');
+    } else if (b && b.think && !b.text) text = '◌ thinking · ' + b.think.length + ' chars';
+    else if (b && b.text) text = '✍ writing · ' + String(b.text).length + ' chars';
+    else text = (r.statusText || 'working…');
+  }
+  setLiveText(el, text || '\u00a0');
 }
 
 // Pair tool calls with their results (by id when present, else in order).
@@ -11599,10 +11662,7 @@ document.addEventListener('keydown', e => {
     case 's': case 'S': {
       if (!current || !$('view').querySelector('.ch-conv')) break;
       e.preventDefault();
-      const opts = [
-        { value: 'chat', text: 'chat only' }, { value: 'commands', text: 'commands only' },
-        { value: 'all', text: 'everything' }, { value: 'uniqcmd', text: 'unique commands' },
-        { value: 'files', text: 'files read (latest)' }];
+      const opts = [{ value: 'chat', text: 'chat only' }, { value: 'all', text: 'everything' }];
       const i = opts.findIndex(o => o.value === viewMode);
       const next = opts[(i + (e.key === 'S' ? opts.length - 1 : 1)) % opts.length];
       viewMode = next.value;
