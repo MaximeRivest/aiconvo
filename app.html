@@ -747,6 +747,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* model-change bar: a quiet rule line where the serving model switches */
 .modelbar { display: flex; align-items: center; gap: 10px; margin: 4px 0; padding: 0 14px; color: var(--text-faint); font-size: var(--fs-micro); }
 .modelbar::before, .modelbar::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+/* Abort/interrupt marker: same quiet bar shape, dashed to read as a cut. */
+.abortbar { display: flex; align-items: center; gap: 10px; margin: 4px 0; padding: 0 14px; color: var(--text-faint); font-size: var(--fs-micro); }
+.abortbar::before, .abortbar::after { content: ""; flex: 1; border-top: 1px dashed var(--border-strong); }
 /* Other-branch fold: dashed frame + glyph carry the meaning (no color-only state). */
 .branchblock { border-bottom: 1px solid var(--border); }
 .branchblock > summary { cursor: pointer; padding: 7px 14px; font-size: var(--fs-micro); color: var(--text-faint); border-left: 3px dashed var(--border-strong); list-style: none; user-select: none; }
@@ -6916,7 +6919,7 @@ let current = null;
 function keepInMode(m, mode) {
   if (mode === 'commands') return m.role === 'tool';
   if (mode === 'all') return true;
-  return m.role === 'user' || m.role === 'assistant';
+  return m.role === 'user' || m.role === 'assistant' || m.role === 'abort';
 }
 
 // Long messages collapse to an abstract-sized preview (about 5 lines).
@@ -6940,6 +6943,11 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   // data-i: the message's index in the cached array — the anchor a search
   // hit lands on (renderConv scroll 'hit:N').
   const idxAttr = copyIndex >= 0 ? ` data-i="${copyIndex}"` : '';
+  if (m.role === 'abort') {
+    // Marker row: the turn stopped here (browser abort, TUI escape, ^C).
+    const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
+    return `<div class="abortbar"${anchor}${idxAttr}>⏹ ${esc(m.text || 'aborted')}</div>`;
+  }
   if (m.role === 'thinking') {
     // Reasoning row (everything view): folded to one line, expand to read.
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
@@ -9758,15 +9766,18 @@ function updateDockSteps(runs) {
       await postJson('/api/run/abort', { jobId: r.jobId });
     };
   }
+  // The bar stays visible for the WHOLE run — it carries the abort button.
+  el.hidden = false;
   if (frozen.length) {
-    el.hidden = false;
     const labels = frozen.map(b => b.kind === 'tool'
       ? (b.name || 'tool') + (b.error ? ' ✗' : '')
       : (b.think && !b.text ? 'thinking' : 'reply'));
     setLiveText(el.querySelector('.lp-steps-sum'),
       `${frozen.length} step${frozen.length > 1 ? 's' : ''} · ` +
       labels.slice(-8).join(' · ') + (labels.length > 8 ? ' · …' : ''));
-  } else el.hidden = true;
+  } else {
+    setLiveText(el.querySelector('.lp-steps-sum'), '● ' + (r.statusText || 'working…'));
+  }
 }
 
 // The reserved one-line heartbeat over the composer: whatever is active

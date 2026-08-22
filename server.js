@@ -123,7 +123,7 @@ function cachePathFor(key) {
 }
 
 // Bump when the cached message format changes; forces a re-index.
-const CACHE_VERSION = 10; // v10: assistant thinking blocks become 'thinking' rows (everything view shows reasoning)
+const CACHE_VERSION = 11; // v11: aborted/interrupted turns become 'abort' marker rows
 
 // A memory-briefing bootstrap prompt is the same for every launched session; it says
 // nothing about the actual work. Titles must come from the first real request instead.
@@ -309,6 +309,14 @@ async function parseFile(absPath) {
       }
     }
     const text = textOf(content);
+    // Interruptions become their own marker row, not a chat bubble.
+    // Claude Code records the user's interrupt as a user message; pi
+    // records the aborted assistant turn with stopReason 'aborted'.
+    if (role === 'user' && /^\[Request interrupted by user/.test(text.trim())) {
+      messages.push(...toolEventsOf(content, d.timestamp || null).map(m => ({ ...m, _eid: eid })));
+      messages.push({ role: 'abort', text: 'interrupted by you', ts: d.timestamp || null, _eid: eid });
+      continue;
+    }
     if (text.trim() && !(role === 'user' && isNoise(text))) {
       const msg = { role, text, ts: d.timestamp || null, _eid: eid };
       // Both formats store the generating model on the assistant entry
@@ -322,6 +330,9 @@ async function parseFile(absPath) {
     }
     // Tool calls (assistant) and tool results (claude wraps them in user turns).
     messages.push(...toolEventsOf(content, d.timestamp || null).map(m => ({ ...m, _eid: eid })));
+    if (role === 'assistant' && d.message && d.message.stopReason === 'aborted') {
+      messages.push({ role: 'abort', text: 'aborted', ts: d.timestamp || null, _eid: eid });
+    }
   }
   // Mark messages that are NOT on the active path. The flag is additive:
   // search, copy, and export keep the complete file-order record.
