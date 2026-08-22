@@ -19,12 +19,12 @@ try { const t = localStorage.getItem('aiconvo.theme'); if (t) document.documentE
 <style>
 /* ---- design tokens (design/tokens.css — keep in sync) ---- */
 :root {
-  --bg: #0a0d0a; --surface-1: #101411; --surface-2: #161b17; --surface-3: #1d2327;
-  --border: #292e2a; --border-strong: #3d433e;
-  --text: #c8d0c9; --text-dim: #808982; --text-faint: #474e48;
-  --green: #6cc581; --cyan: #33beeb; --yellow: #c8ad3f; --red: #f58c81; --magenta: #d292e1;
+  --bg: #101412; --surface-1: #171c19; --surface-2: #1f2521; --surface-3: #272e2a;
+  --border: #343c36; --border-strong: #4d564f;
+  --text: #dce3dd; --text-dim: #98a29a; --text-faint: #5f6a61;
+  --green: #7dd492; --cyan: #53c8f1; --yellow: #d3ba54; --red: #f79d94; --magenta: #dc9fe9;
   --accent: var(--green);
-  --accent-strong: #6cc581; --accent-ink: #071009;
+  --accent-strong: #7dd492; --accent-ink: #0a130c;
   --live: var(--green); --success: var(--green); --warn: var(--yellow); --danger: var(--red);
   --src-claude: var(--yellow); --src-pi: var(--green); --src-pi-remote: var(--magenta);
   --role-user: var(--green); --role-asst: var(--cyan); --role-tool: var(--text-faint);
@@ -860,6 +860,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .mpick .mp-row.notready { opacity: .5; }
 .mpick .mp-foot { padding: 8px; border-top: 1px solid var(--border); }
 .model-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 6px; }
+/* inside the compose row the strip is inline: no extra padding, push send right */
+.agent-compose-row .model-strip { padding: 0; margin-left: auto; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
 .mchip .mname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .mchip button { height: 18px; min-width: 18px; padding: 0; border: 0; background: transparent; color: var(--text-faint); }
@@ -899,9 +901,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tts-player input[type=range] { width: 90px; height: 14px; }
 .tts-player select { height: 18px; font-size: 10px; padding: 0 4px; }
 .tts-player button { height: 18px; padding: 0 6px; font-size: 10px; }
+/* user turns carry the surface tint; assistant replies sit on the page
+   (her request: the words you read the most get the calmest ground) */
+.msg.user { background: var(--surface-1); }
 .msg.user .role { color: var(--role-user); }
 .msg.user .role::before { content: "❯ "; }
-.msg.assistant { background: var(--surface-1); }
 .msg.assistant .role { color: var(--role-asst); }
 .msg.assistant .role::before { content: "❯ "; }
 .msg.tool, .msg.toolresult { background: var(--bg); color: var(--text-dim); font-size: 12px; }
@@ -1411,6 +1415,7 @@ body.zen:not(.home) #zenExit { display: block; position: fixed; top: 6px; right:
       <span class="gsep"></span>
       <button id="ganttGroup" title="Toggle project rows or compact lanes">rows: project</button>
       <select id="ganttProject" title="Filter the timeline by project or repository"><option value="">all projects</option></select>
+      <button id="newProject" title="Create a new project: a folder, a git repository, and a vouched intent seed">+ project</button>
       <input id="ganttDate" type="date" title="Jump to a date (t)">
     </div>
     <div id="list"></div>
@@ -2574,7 +2579,8 @@ async function load() {
   $('dir').innerHTML = '<option value="">all directories</option>' +
     dirs.map(d => `<option>${esc(d)}</option>`).join('');
   $('dir').value = keepDir;
-  const projects = [...new Set(sessions.map(projectOf))].filter(p => p && p !== '?').sort((a, b) => a.localeCompare(b));
+  const projects = [...new Set([...sessions.map(projectOf), ...((projectFolds.created || []).map(c => c.name))])]
+    .filter(p => p && p !== '?').sort((a, b) => a.localeCompare(b));
   $('ganttProject').innerHTML = '<option value="">all projects</option>' +
     projects.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
   $('ganttProject').value = projects.includes(keepProject) ? keepProject : '';
@@ -3027,6 +3033,15 @@ function timelineProjectLanes(items) {
     row.count += item.members ? item.members.length : 1;
     row.items.push(item);
   }
+  // Registered newborn projects (no conversations yet) get an empty lane, so
+  // a project born a minute ago is already on the home Gantt.
+  const projectFilter = $('ganttProject').value;
+  for (const c of (projectFolds.created || [])) {
+    if (!c.name || byProject.has(c.name)) continue;
+    if (projectFilter && projectFilter !== c.name) continue;
+    if (sessions.some(s => projectOf(s) === c.name)) continue; // real lanes exist
+    byProject.set(c.name, { project: c.name, latest: c.createdAt || Date.now(), count: 0, items: [], born: c.createdAt || 0 });
+  }
   const projects = [...byProject.values()].sort((a, b) => b.latest - a.latest || a.project.localeCompare(b.project));
   // Keep a small visual gap between adjacent marks. This also separates spans
   // that nearly overlap after time is converted to pixels.
@@ -3066,7 +3081,9 @@ function projectLabelsHtml(pos) {
     const tracks = row.laneCount > 1 ? ` · ${row.laneCount} tracks` : '';
     const activityLabel = row.mode === 'opened' ? 'opened' : 'message';
     const main = row.mode ? row.title : row.project;
-    const detail = row.mode ? `${row.project} · ${activityLabel} ${fmtDate(row.latest)}` : `${row.count} conversations${tracks} · ${fmtDate(row.latest)}`;
+    const detail = row.mode ? `${row.project} · ${activityLabel} ${fmtDate(row.latest)}`
+      : row.count ? `${row.count} conversations${tracks} · ${fmtDate(row.latest)}`
+      : `new · born ${fmtDate(row.born || row.latest)}`;
     const repo = !row.mode && gitReposCache.find(r => r.project === row.project);
     const repoLink = repo ? `<span class="rowrepo" data-git-repo="${esc(repo.root)}" title="Git history · ${esc(repo.root)}">⌂ ${esc(repo.branch || 'repo')}</span>` : '';
     // A quiet fold hint: this row looks like another project (same remote /
@@ -3168,10 +3185,14 @@ function renderMobileConversations() {
     if (isActive(s)) item.live++;
     projectMap.set(name, item);
   }
+  for (const c of (projectFolds.created || [])) {
+    if (!c.name || projectMap.has(c.name)) continue;
+    projectMap.set(c.name, { name: c.name, count: 0, latest: c.createdAt || 0, live: 0, cwd: c.cwd || '' });
+  }
   const projects = [...projectMap.values()].sort((a, b) => b.latest - a.latest);
   const projectCard = p => `<div class="item mobile-project" data-project="${esc(p.name)}"><div class="mobile-project-main">
       <div class="title">${p.live ? '<span class="mobile-live">●</span> ' : ''}${esc(p.name)}</div>
-      <div class="meta">${p.count} conversation${p.count === 1 ? '' : 's'} · ${mobileDate(p.latest)}</div>
+      <div class="meta">${p.count ? `${p.count} conversation${p.count === 1 ? '' : 's'} · ${mobileDate(p.latest)}` : `new project · born ${mobileDate(p.latest)}`}</div>
       <div class="snip">${esc(shortDir(p.cwd))}</div></div><span class="mobile-open">›</span></div>`;
   const visibleProjects = projects.slice(0, searchMode ? 10 : 4).map(projectCard).join('');
   const moreProjects = !searchMode && projects.length > 4
@@ -6377,6 +6398,7 @@ async function showProjectOverview(name) {
         <button id="pDiffs">file Gantt</button>
         <button id="pFold" class="ghost" title="This is really another project? Fold both into one">⇄ fold into…</button>
         <button id="pLatest" class="ghost">latest conversation</button>
+        ${d.created && !d.conversations ? '<button id="pUnregister" class="ghost" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
         <button id="pBack" class="ghost">back</button>
       </div>
       ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
@@ -6462,6 +6484,14 @@ async function showProjectOverview(name) {
   </div>`;
   $('pAgent').value = projectStartDefaults(d);
   $('pBack').onclick = () => { projectOverview = null; projectOverviewName = null; goHome(); };
+  const pUnregister = $('pUnregister');
+  if (pUnregister) pUnregister.onclick = async () => {
+    if (!confirm(`Remove “${d.project}” from the project list? The folder stays on disk.`)) return;
+    await fetch('/api/project/unregister', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: d.project }) });
+    toast('✓ unregistered · ' + d.project + ' · folder kept');
+    projectOverview = null; projectOverviewName = null;
+    await load(); goHome();
+  };
   $('pLatest').onclick = () => d.recent[0] && open(d.recent[0].key);
   $('pFold').onclick = () => openFoldPicker(d);
   $('view').querySelectorAll('[data-p-unfold]').forEach(b => b.onclick = async () => {
@@ -7466,7 +7496,6 @@ function agentComposerHtml(d) {
     <div class="agent-state"><strong>${kind}</strong><span id="agentBarHint">${d.source === 'claude' ? 'type a prompt · ctrl+enter sends · / opens slash commands' : 'enter sends · click a /cmd · or type /'}</span>
       <button type="button" class="ghost" id="agentOpenLive" title="Raw terminal view if something gets stuck">live view</button>
     </div>
-    ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="3" placeholder="type a prompt, or / for slash commands. paste or drop images."></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
@@ -7477,8 +7506,9 @@ function agentComposerHtml(d) {
       <button class="agent-mic" id="agentMic" type="button" title="Start / stop dictation (m, or ctrl+m while typing)" aria-label="Start dictation" aria-pressed="false" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>
       </button>
+      ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
-      <button${d.source === 'claude' ? ' class="primary"' : ''} id="agentSend" type="button" title="Open the terminal and send (${d.source === 'claude' ? 'ctrl+enter' : 'ctrl+shift+enter'})">open &amp; send</button>
+      ${d.source === 'claude' ? '<button class="primary" id="agentSend" type="button" title="Open the terminal and send (ctrl+enter)">open &amp; send</button>' : ''}
     </div>
   </div>`;
 }
@@ -7498,7 +7528,7 @@ async function headlessSendFromComposer(btn) {
     let cmds = null;
     try { cmds = await ensureSlashCmds(key); } catch {}
     if (!cmds || !cmds.some(c => c.name === name)) {
-      return errToast('/' + name + ' is not available over RPC — TUI-only commands need the terminal (open & send)');
+      return errToast('/' + name + ' is not available over RPC — TUI-only commands need the terminal (continue in alacritty)');
     }
     hideSlashPop();
   }
@@ -7579,7 +7609,7 @@ function renderModelStrip() {
   host.innerHTML = list.map((m, i) =>
     `<span class="mchip" title="${esc(m.provider + '/' + m.modelId)}"><span class="mname">${esc(m.modelId)}</span> <button type="button" data-mdel="${i}" title="remove this model">×</button></span>`
   ).join('') +
-    `<button type="button" id="modelAdd" title="Add a model. Two or more models send the next prompt to all of them in parallel.">${list.length ? '+ model' : '+ model — add two or more to fan out'}</button>`;
+    `<button type="button" id="modelAdd" title="Add a model. Two or more models send the next prompt to all of them in parallel.">+ model</button>`;
   host.querySelectorAll('[data-mdel]').forEach(b => b.onclick = () => {
     const next = fanModels().filter((_, i) => i !== Number(b.dataset.mdel));
     setFanModels(next);
@@ -10432,6 +10462,70 @@ $('ganttGroup').onclick = () => {
   delete $('list').dataset.initScroll;
   renderTabList();
 };
+
+// ---- new project (directory-first birth) ----
+// One form, one verb: folder + git init + vouched intent seed, and an
+// optional first prompt that starts the first conversation right away.
+function openNewProjectForm() {
+  document.querySelectorAll('.ctx-confirm').forEach(el => el.remove());
+  const ov = document.createElement('div');
+  ov.className = 'ctx-confirm';
+  const lastParent = localStorage.getItem('aiconvo.newProjectParent') || '~/Projects';
+  ov.innerHTML = `<div class="cc-card">
+    <div class="cc-head"><b>new project</b><span class="dim">a folder is born — no conversations, no commits yet</span></div>
+    <div class="mf-body">
+      <div class="mf-pair">
+        <label>name<input class="np-name" type="text" placeholder="my-new-thing" autocomplete="off"></label>
+        <label>inside<input class="np-parent" type="text" value="${esc(lastParent)}" autocomplete="off"></label>
+      </div>
+      <label><input class="np-git" type="checkbox" checked> git init</label>
+      <label>intent — what is this project? (human-written; becomes the vouched intent.md seed)
+        <textarea class="np-intent" rows="4" placeholder="Why does this project exist? What should it become?"></textarea></label>
+      <label>first prompt (optional — starts the first conversation now, with your intent in the system prompt)
+        <textarea class="np-first" rows="3" placeholder="leave empty to create the project only"></textarea></label>
+    </div>
+    <div class="cc-foot">
+      <span class="mf-err np-err"></span>
+      <button type="button" class="ghost np-cancel">cancel</button>
+      <button type="button" class="primary np-go">create</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const q = sel => ov.querySelector(sel);
+  const paintGo = () => { q('.np-go').textContent = q('.np-first').value.trim() ? 'create + start' : 'create'; };
+  q('.np-first').oninput = paintGo;
+  q('.np-cancel').onclick = () => ov.remove();
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  q('.np-go').onclick = async () => {
+    const name = q('.np-name').value.trim();
+    if (!name) { q('.np-err').textContent = 'give the project a name.'; return; }
+    q('.np-go').disabled = true;
+    q('.np-err').textContent = 'creating…';
+    let out = null;
+    try {
+      out = await (await fetch('/api/project/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name, parent: q('.np-parent').value.trim(), git: q('.np-git').checked,
+          intent: q('.np-intent').value.trim(), firstPrompt: q('.np-first').value.trim(),
+        }),
+      })).json();
+    } catch (e) { out = { error: e.message }; }
+    if (!out || out.error) {
+      q('.np-go').disabled = false;
+      q('.np-err').textContent = (out && out.error) || 'network error';
+      return;
+    }
+    localStorage.setItem('aiconvo.newProjectParent', q('.np-parent').value.trim() || '~/Projects');
+    ov.remove();
+    toast('✓ project born · ' + out.project + (out.adopted ? ' (existing folder adopted)' : '') + (out.started ? ' · first conversation started' : ''));
+    await load();
+    if (out.started && out.started.key) await open(out.started.key, 'bottom');
+    else showProjectOverview(out.project);
+  };
+  q('.np-name').focus();
+}
+$('newProject').onclick = openNewProjectForm;
 
 // Drag the top edge of the bottom tray. Store a viewport-independent ratio.
 let trayResize = null;

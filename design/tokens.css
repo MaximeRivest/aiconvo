@@ -10,30 +10,32 @@
 
 /* ---- dark (default) ---- */
 :root {
-  /* surfaces: near-black, tinted toward the accent hue (150) */
-  --bg: #0a0d0a;
-  --surface-1: #101411;
-  --surface-2: #161b17;
-  --surface-3: #1e231f;
-  --border: #292e2a;
-  --border-strong: #3d433e;
+  /* surfaces: dark gray, tinted toward the accent hue (150).
+     Lifted from near-black: pitch-black grounds crush the surface steps
+     and strain the eyes — the ramp now starts at L ~0.18. */
+  --bg: #101412;
+  --surface-1: #171c19;
+  --surface-2: #1f2521;
+  --surface-3: #272e2a;
+  --border: #343c36;
+  --border-strong: #4d564f;
 
-  /* text */
-  --text: #c8d0c9;
-  --text-dim: #808982;
-  --text-faint: #474e48;
+  /* text — brighter than before; faint text stays readable (AA on bg) */
+  --text: #dce3dd;
+  --text-dim: #98a29a;
+  --text-faint: #5f6a61;
 
-  /* ANSI set, L .75 C .13 */
-  --green: #6cc581;
-  --cyan: #33beeb;
-  --yellow: #c8ad3f;
-  --red: #f58c81;
-  --magenta: #d292e1;
+  /* ANSI set, L .78 C .13 */
+  --green: #7dd492;
+  --cyan: #53c8f1;
+  --yellow: #d3ba54;
+  --red: #f79d94;
+  --magenta: #dc9fe9;
 
   /* semantic aliases */
   --accent: var(--green);
-  --accent-strong: #6cc581;     /* fills: inverse video, primary buttons */
-  --accent-ink: #071009;        /* text on accent fills */
+  --accent-strong: #7dd492;     /* fills: inverse video, primary buttons */
+  --accent-ink: #0a130c;        /* text on accent fills */
   --live: var(--green);
   --success: var(--green);
   --warn: var(--yellow);
