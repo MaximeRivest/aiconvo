@@ -884,7 +884,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose-row .ctxmeter { overflow: hidden; text-overflow: ellipsis; }
 /* reserved activity line: exactly one line, always there, never pushes
    anything — the live heartbeat streams here instead of in the transcript */
-.agent-activity { min-height: 18px; max-height: 18px; overflow: hidden; font-size: 11px; color: var(--text-dim); white-space: nowrap; text-overflow: ellipsis; }
+/* The activity line floats in the white ABOVE the box (like the slash
+   palette), so it reserves no space inside the composer. */
+.agent-activity { position: absolute; left: 0; right: 0; bottom: calc(100% + 2px); min-height: 18px; max-height: 18px; overflow: hidden; font-size: 11px; color: var(--text-dim); white-space: nowrap; text-overflow: ellipsis; padding: 0 var(--sp-3); pointer-events: none; }
+.agent-activity #agentActivityText { background: var(--bg); padding: 0 6px; }
 .mchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-strong); padding: 0 6px; height: 24px; font-size: 11px; background: var(--surface-1); max-width: 100%; }
 .mchip .mname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 .mchip button { height: 18px; min-width: 18px; padding: 0; border: 0; background: transparent; color: var(--text-faint); }
@@ -1061,13 +1064,14 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* width: 100% matters: inside a flex column, the auto margins otherwise
    shrink-wrap the composer to its content (a small island on e-ink, where
    --read-max is none). Full width, then max-width caps and centers it. */
-.agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; width: 100%; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
+.agent-compose { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 9; width: 100%; max-width: var(--read-max); margin: var(--sp-3) auto 0; padding: var(--sp-2) var(--sp-3) var(--sp-3); border: 1px solid var(--border-strong); background: var(--surface-1); display: flex; flex-direction: column; gap: var(--sp-2); }
 
 .agent-compose .agent-hint { color: var(--text-faint); }
 /* the composer is a quiet gray ground with a green caret: no frame, no
    placeholder — it grows with the lines and speaks the message prose */
 .agent-compose textarea { width: 100%; min-height: 54px; height: 54px; resize: none; font: 15px/1.65 var(--font); color: var(--text); background: var(--surface-1); border: 1px solid transparent; padding: 14px; caret-color: var(--accent); overflow-y: auto; }
 .agent-compose textarea:focus { outline: 0; border-color: var(--border); }
+.agent-compose textarea::placeholder { color: var(--text-faint); opacity: 1; }
 .agent-thumbs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .agent-thumbs:empty { display: none; }
 .agent-thumb { position: relative; width: 56px; height: 56px; border: 1px solid var(--border); background: var(--surface-2); }
@@ -7575,7 +7579,7 @@ function agentComposerHtml(d) {
   return `<div class="agent-compose" id="agentCompose">
     <div class="agent-activity" id="agentActivity"><span id="agentActivityText">&nbsp;</span></div>
     <div id="slashPop" class="slash-pop" hidden></div>
-    <textarea id="agentText" rows="1"></textarea>
+    <textarea id="agentText" rows="1" placeholder="say the word…"></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
     <div class="agent-compose-row">
       ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
