@@ -957,8 +957,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .nhead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; border: 1px solid var(--border); background: var(--surface-1); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3); }
 .nhead h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-title); }
 .nhead .abstract { color: var(--text); margin: 0 0 var(--sp-2); }
-.nhead .nmeta { color: var(--text-dim); font-size: var(--fs-meta); }
-.nhead button { height: 26px; padding: 0 10px; }
+.nhead .nmeta { color: var(--text-dim); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.nhead .nactions { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; margin-top: var(--sp-2); }
+.nhead button { min-height: 26px; padding: 2px 10px; }
 .nbody { display: flex; gap: var(--sp-3); align-items: flex-start; }
 .ntree { width: 320px; flex-shrink: 0; border: 1px solid var(--border); background: var(--surface-1); padding: var(--sp-2); font-size: var(--fs-body); position: sticky; top: 0; max-height: 80vh; overflow-y: auto; }
 .ntree ul { list-style: none; margin: 0; padding-left: 14px; }
@@ -1254,6 +1255,12 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .plauncher input[type=text], .plauncher select { max-width: none; }
   .plauncher .mem { flex-direction: column; gap: 10px; }
   .pcard > summary { min-height: 48px; align-items: center; }
+  /* Note/memory reader: stack the section tree above the content. Side by
+     side, a 320px tree leaves ~50px of text on a phone. */
+  .nhead { position: static; padding: 10px; }
+  .nbody { flex-direction: column; }
+  .ntree { position: static; width: 100%; max-height: 38dvh; }
+  .npane { width: 100%; padding: 10px 12px; }
   .settings-tools input[type=search] { min-width: 0; width: 100%; flex-basis: 100%; }
   .model-list { max-height: none; }
 
@@ -9587,8 +9594,10 @@ function noteViewer(text, pathLabel, context = null) {
     `<div class="nhead"><h2>${esc(n.title)}</h2>` +
     (n.abstract ? `<p class="abstract">${esc(n.abstract)}</p>` : '') +
     `<div class="nmeta">${n.meta.map(m => m.replace(/\*\*/g, '')).map(esc).join(' · ')}` +
-    (pathLabel ? ` · <code>${esc(pathLabel)}</code>` : '') +
-    ` <button id="noteCopy">copy .md</button>${savePath ? ' <button id="noteEdit" title="Edit the whole markdown file">edit file</button> <button id="noteVouch" title="Vouch: you read this whole file and it is correct">✓ vouch file</button><button id="noteDispute" title="Dispute: mark this file as wrong — it stays visible, labeled">✗ dispute</button> <span class="trust-sum" id="noteTrust"></span>' : ''}<span id="noteHeadBtns"></span>` +
+    (pathLabel ? ` · <code>${esc(pathLabel)}</code>` : '') + `</div>` +
+    // Buttons live on their own row. Inline with the meta text they wrap
+    // through it and the head becomes an unreadable soup.
+    `<div class="nactions"><button id="noteCopy">copy .md</button>${savePath ? '<button id="noteEdit" title="Edit the whole markdown file">edit file</button><button id="noteVouch" title="Vouch: you read this whole file and it is correct">✓ vouch file</button><button id="noteDispute" title="Dispute: mark this file as wrong — it stays visible, labeled">✗ dispute</button><span class="trust-sum" id="noteTrust"></span>' : ''}<span id="noteHeadBtns"></span>` +
     (context ? contextNavHtml(context.key, context.related, context.kind, context.epicId) : '') + `</div></div>` +
     `<div class="nbody"><div class="ntree">${treeHtml(n.tree)}</div>` +
     `<div class="npane" id="npane"><p style="color:var(--text-dim)">select a section in the tree.</p></div></div></div>`;
@@ -9618,6 +9627,10 @@ function noteViewer(text, pathLabel, context = null) {
       };
     };
   });
+  // Open the first section right away: an empty "select a section" pane
+  // wastes the screen, worst on e-ink and phones.
+  const firstRow = $('view').querySelector('.ntree .nrow');
+  if (firstRow) firstRow.onclick ? firstRow.onclick() : firstRow.click();
   $('noteCopy').onclick = async () => {
     await navigator.clipboard.writeText(text);
     flashCopied($('noteCopy'));
