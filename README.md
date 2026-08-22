@@ -16,6 +16,33 @@ node server.js
 
 Then open <http://localhost:7433>.
 
+## Install on a new machine (Ubuntu or Windows + WSL2)
+
+On Windows, do everything below inside WSL2 (Ubuntu). Enable systemd in
+WSL first if needed: add `[boot]\nsystemd=true` to `/etc/wsl.conf`, then
+run `wsl --shutdown` and start WSL again.
+
+```bash
+git clone https://github.com/MaximeRivest/aiconvo.git
+cd aiconvo
+./setup.sh
+```
+
+The script checks Node 22+, installs a systemd user service, starts it,
+and prints the next steps. There are no npm dependencies.
+
+Then, on Windows, open <http://localhost:7433> in Chrome or Edge (WSL2
+forwards localhost) and use the browser menu → **Install aiconvo**. The
+PWA gets its own window, own icon, and a Start-menu entry — the same
+app-like feel as the Chromium `--app` window on Ubuntu.
+
+Shared GPU services (optional): in settings → semantic search, enable
+the stage and point the URL at the GPU server. Keep the **namespace**
+unique per user — it defaults to your username. Voice endpoints
+(`KOKORO_URL`, `SPEECH_URL`, `REWRITE_URL`) default to the family GPU
+server and can be overridden with environment variables in the service
+unit.
+
 To use it from a tablet on the same local network, set `AICONVO_LAN=1` (the user service already does). The laptop still opens terminals and agent windows. The tablet only needs the printed LAN URL with `?token=…`. The token is stored in `~/.cache/aiconvo/lan-token`. After the first open, a cookie keeps the tablet signed in. On the e-paper tablet, pick the **e-ink** theme.
 
 Install the Android APK from `android/app/build/outputs/apk/debug/app-debug.apk`. It detects iFLYTEK hardware and keeps the wide binary e-ink UI. Phones use a separate touch layout: project cards and recent work replace the home Gantt, tabs move to the bottom, conversations use a fixed compose dock, and file diffs switch between full-screen file tree and stacked comparison. The native microphone writes live and final Parakeet transcripts directly into the compose box without opening the keyboard. On first launch, enter the laptop address and token `4148`. Terminals still start on the laptop. Rebuild with `cd android && ./gradlew assembleDebug`. See `design/23-phone-layout.md`.
