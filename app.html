@@ -1099,6 +1099,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tnode.sel { outline: 2px solid var(--accent); }
 .tnode.kb { outline: 2px dashed var(--accent); outline-offset: 2px; }
 .tnode.kb.sel { outline-style: solid; }
+.tnode.here { border-color: var(--accent); border-width: 2px; padding: 3px 7px; }
+.tnode .herechip { color: var(--accent); font-weight: 700; white-space: nowrap; }
 .tacts { position: absolute; z-index: 6; display: flex; gap: 6px; align-items: center; background: var(--surface-2); border: 1px solid var(--border-strong); padding: 6px; }
 .tacts .tmeta2 { color: var(--text-dim); font-size: var(--fs-meta); padding: 0 4px; }
 .msg.jump { outline: 2px solid var(--accent); }
@@ -11077,9 +11079,12 @@ async function showTree(key) {
     const f = (t.family || []).find(x => x.key === n.key);
     return f ? f.title : 'a forked session';
   };
+  // The "here" marker: the newest box on the active path. The next send
+  // continues from this box; read never moves it.
+  const hereNode = [...rows].reverse().find(n => n.active) || null;
   const boxes = nodes.map(n =>
-    `<div class="tnode ${n.role}${n.active ? '' : ' inactive'}${n.fork ? ' fork' : ''}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc(n.fork ? 'in fork: ' + forkTitle(n) : n.title)}">
-      <div class="tm"><b>${n.role === 'user' ? 'user' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role === 'assistant' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} msgs</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}</div>
+    `<div class="tnode ${n.role}${n.active ? '' : ' inactive'}${n.fork ? ' fork' : ''}${n === hereNode ? ' here' : ''}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc(n.fork ? 'in fork: ' + forkTitle(n) : n.title)}">
+      <div class="tm"><b>${n.role === 'user' ? 'user' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role === 'assistant' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} msgs</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
       <div class="tt">${esc(n.title)}</div></div>`).join('');
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
@@ -11087,7 +11092,7 @@ async function showTree(key) {
     </div></div></div>`;
   const wrap = $('treewrap');
   // Keyboard navigation state: T opens the tree, arrows walk it.
-  const leaf = [...rows].reverse().find(n => n.active) || rows[rows.length - 1] || null;
+  const leaf = hereNode || rows[rows.length - 1] || null;
   treeNav = { key, byId, children, roots, wrap, source: t.source, sel: leaf ? leaf.id : null };
   wrap.querySelectorAll('.tnode').forEach(el => el.onclick = ev => {
     ev.stopPropagation();
@@ -11202,9 +11207,13 @@ function selectTreeNode(key, n, el, wrap, source) {
   //  - continue = branch the SAME conversation after this message.
   //  - edit = fork BEFORE this user message; its text lands in the composer.
   const isPi = source === 'pi' || source === 'pi-remote';
+  // Label by shape: at a leaf the path only goes on (continue); inside the
+  // tree a new sibling path starts (branch). Same action underneath.
+  const isLeaf = !((treeNav && treeNav.children.get(n.id)) || []).length;
+  const growLabel = isLeaf ? 'continue' : 'branch';
   acts.innerHTML =
-    `<button class="primary" data-act="read" title="Open the transcript at this message">read</button>` +
-    (isPi ? `<button data-act="branch" title="Continue this conversation after this message: the tree grows a new branch here, no copy is made. Then send from the composer as usual.">continue</button>` : '') +
+    `<button class="primary" data-act="read" title="Open the transcript at this box. The ● here marker does not move.">read</button>` +
+    (isPi ? `<button data-act="branch" title="${isLeaf ? 'Move the ● here marker to this box and continue the path from it.' : 'Start a new branch after this box: the ● here marker moves to it, no copy is made.'} Then send from the composer as usual.">${growLabel}</button>` : '') +
     (isPi && n.role === 'user' ? `<button data-act="edit" title="Fork into a NEW session that stops just before this message. Open the new conversation to edit and resend it. The original does not change.">edit</button>` : '') +
     (isPi && n.aKids >= 2 ? `<button data-act="agg" title="Collect the answer branches under this node, quote each with its model name, and ask one model to synthesize them.">aggregate…</button>` : '') +
     `<button data-act="fork" title="Copy the path from the start to this message into a NEW session file and continue there. The original does not change. For Claude this is the only option: its CLI always continues at the file end.">fork</button>` +
@@ -11270,17 +11279,18 @@ function openAggregateDialog(key, n) {
 }
 
 async function branchFrom(key, n, btn) {
+  const old = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'branching…';
+  btn.textContent = 'moving…';
   try {
     const res = await fetch('/api/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
     const d = await res.json();
     if (d.error) throw new Error(d.error);
-    toast('branched — continue in Alacritty to resume from this point');
+    toast('the ● here marker moved — the next send continues from this box');
     openAtTs(key, n.jumpTs);
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = 'continue';
+    btn.textContent = old;
     errToast(e.message || 'the branch failed');
   }
 }
@@ -12540,7 +12550,7 @@ function helpNow() {
       ['↑ ↓', 'parent / child (follows the active path)'],
       ['← →', 'sibling branches and forks'],
       ['enter', 'actions for the selected box'],
-      ['r / b / e / f', 'read / continue / edit / fork'],
+      ['r / b / e / f', 'read / continue·branch / edit / fork'],
       ['a', 'aggregate the replies under this box'],
       ['T / esc', 'back to the transcript'],
     ] });

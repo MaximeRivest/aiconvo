@@ -1282,13 +1282,25 @@ async function indexNewSessionFile(newAbs) {
 //  - Claude: no native arbitrary-node fork exists (verified empirically), so
 //    copy the root→node chain (sessionfork.js) with a temp file + atomic
 //    rename, then resume with `claude --resume <uuid>`.
+// A fork is a copy: its title gets a ⤔ mark so the two are easy to tell
+// apart in every list. The mark is a manual override, so the background
+// labeler never overwrites it back to the source's title.
+async function markForkTitle(newKey, srcEntry) {
+  try {
+    const base = String(srcEntry.title || '').replace(/^⤔\s*/, '').trim();
+    if (base) await setConversationTitle(newKey, '⤔ ' + base);
+  } catch (e) { console.error('fork title failed:', newKey, e.message); }
+}
+
 async function forkSession(key, nodeId) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   return withSessionOp(sessionPath, async () => {
     stopAnyWarmSession(sessionPath);
     if (entry.source !== 'claude') {
       const forked = await piEng().piForkAt({ sessionPath, cwd, env: agentEnv() }, nodeId);
-      return { key: await indexNewSessionFile(forked.file), path: forked.file, sessionId: forked.sessionId };
+      const newKey = await indexNewSessionFile(forked.file);
+      await markForkTitle(newKey, entry);
+      return { key: newKey, path: forked.file, sessionId: forked.sessionId };
     }
     const raw = await fsp.readFile(sessionPath, 'utf8');
     const newId = crypto.randomUUID();
@@ -1299,7 +1311,9 @@ async function forkSession(key, nodeId) {
     await fsp.rename(tmp, newAbs);
     const relPath = path.relative(SOURCES[entry.source], newAbs);
     await indexFile(entry.source, relPath, await fsp.stat(newAbs));
-    return { key: entry.source + ':' + relPath, path: newAbs, sessionId: newId };
+    const newKey = entry.source + ':' + relPath;
+    await markForkTitle(newKey, entry);
+    return { key: newKey, path: newAbs, sessionId: newId };
   });
 }
 
@@ -1310,7 +1324,9 @@ async function forkSessionForEdit(key, nodeId) {
   if (entry.source === 'claude') throw new Error('Editing a past message needs pi. Claude conversations can only fork.');
   return withSessionOp(sessionPath, async () => {
     const forked = await piEng().piForkBefore({ sessionPath, cwd, env: agentEnv() }, nodeId);
-    return { key: await indexNewSessionFile(forked.file), path: forked.file, sessionId: forked.sessionId, text: forked.text };
+    const newKey = await indexNewSessionFile(forked.file);
+    await markForkTitle(newKey, entry);
+    return { key: newKey, path: forked.file, sessionId: forked.sessionId, text: forked.text };
   });
 }
 
