@@ -2278,6 +2278,93 @@ function createdProjectsList() {
   }));
 }
 
+// ---- project display titles (auto + manual + AI retitle) ----
+// The big human-facing headline on the project panel. It is durable human/AI
+// intent, so it lives in ~/notes next to the created-project registry.
+const PROJECT_TITLES_FILE = path.join(NOTES_DIR, 'project-titles.json');
+let projectTitles = {}; // canonical project name -> { title, manual, at }
+try { projectTitles = JSON.parse(fs.readFileSync(PROJECT_TITLES_FILE, 'utf8')); } catch { projectTitles = {}; }
+function saveProjectTitles() {
+  fs.mkdirSync(NOTES_DIR, { recursive: true });
+  fs.writeFileSync(PROJECT_TITLES_FILE, JSON.stringify(projectTitles, null, 2) + '\n');
+}
+
+function setProjectTitle(project, rawTitle, manual = true) {
+  const title = String(rawTitle || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!title) throw new Error('empty title');
+  projectTitles[project] = { title, manual, at: Date.now() };
+  saveProjectTitles();
+  broadcast({ type: 'project-title', project, title, manual });
+  return { project, title, manual };
+}
+
+const PROJECT_RETITLE_PROMPT =
+  'The attached JSON describes one work project: its folder name, path, overview (when one exists), and recent conversation titles. ' +
+  'Write the display title for this project on a personal dashboard. Reply with STRICT JSON only, no prose or code fence: {"title":"..."} — ' +
+  'a short, dense, honest title, 2 to 6 words, at most 48 characters, no trailing period, ' +
+  'no filler words such as project, repo, tool, app unless they are the essence of the work.';
+
+// Retitle one project on demand, from its memory overview and recent work.
+async function retitleProject(project, manual = true) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const memory = await projectMemoryInfo(project, meta).catch(() => null);
+  const o = (memory && memory.overview) || {};
+  const recent = [...meta.entries]
+    .sort((a, b) => Date.parse(b.entry.lastTs || '') - Date.parse(a.entry.lastTs || ''))
+    .slice(0, 12)
+    .map(({ entry }) => entry.title || entry.timelineTitle || '')
+    .filter(Boolean);
+  const payload = {
+    folderName: project, path: meta.cwd || '',
+    identity: o.identity || '', overview: o.summary || '',
+    recentConversationTitles: recent,
+  };
+  const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT);
+  const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
+  return setProjectTitle(project, parsed.title, manual);
+}
+
+// Epic titles: an epic is a recursive project, so it renames the same way.
+function setEpicTitle(id, rawTitle) {
+  const epic = epics[id];
+  if (!epic) throw new Error('unknown epic');
+  const title = String(rawTitle || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (!title) throw new Error('empty title');
+  epic.title = title;
+  saveEpics();
+  return { id, title };
+}
+
+async function retitleEpic(id) {
+  const epic = epics[id];
+  if (!epic) throw new Error('unknown epic');
+  const payload = {
+    folderName: epic.title || 'epic', path: '',
+    identity: '', overview: epic.abstract || '',
+    recentConversationTitles: (epic.sessionIds || [])
+      .map(k => (index[k] && (index[k].title || index[k].timelineTitle)) || '')
+      .filter(Boolean).slice(0, 20),
+  };
+  const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT);
+  const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
+  return setEpicTitle(id, parsed.title);
+}
+
+// Auto title: a titleless project names itself the first time its panel opens.
+// A manual (or earlier AI) title always blocks this.
+const projectTitleInFlight = new Set();
+function maybeAutoProjectTitle(project) {
+  if (projectTitles[project]) return;
+  if (projectTitleInFlight.has(project)) return;
+  projectTitleInFlight.add(project);
+  setTimeout(() => {
+    retitleProject(project, false)
+      .catch(e => console.error('auto project title failed:', project, e.message))
+      .finally(() => projectTitleInFlight.delete(project));
+  }, 500);
+}
+
 function rawProjectNames() {
   const names = new Set();
   for (const entry of Object.values(index)) if (entry && entry.cwd) names.add(foldsLib.rawProjectOf(entry.cwd));
@@ -6966,6 +7053,7 @@ async function projectResponse(project) {
   const explicitDefault = projectDefaultModel(project);
   return {
     project, cwd, conversations: entries.length, notes, epics: projectEpics, memory,
+    title: (projectTitles[project] && projectTitles[project].title) || null,
     created: !!meta.created,
     defaultModel: explicitDefault,
     resolvedDefaultModel: resolvedProjectDefaultModel(project),
@@ -7833,6 +7921,8 @@ const server = http.createServer(async (req, res) => {
         // file Gantt. Warm the diff cache now so that click is not a cold
         // 2-minute parse of every session file.
         warmProjectDiffs(project);
+        if (data.conversations) maybeAutoProjectTitle(data.project); // names itself once, in the background
+
         data.foldedFrom = foldedFromFor(data.project);
         const sugs = await projectFoldSuggestions().catch(() => []);
         // Quiet by design: only the three strongest pairs (suggestPairs
@@ -8115,6 +8205,35 @@ const server = http.createServer(async (req, res) => {
       try {
         const p = JSON.parse(body || '{}');
         json(res, 200, await retitleConversation(p.id));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/title' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        if (!projectMetaFor(String(p.name || ''))) throw new Error('project not found');
+        json(res, 200, setProjectTitle(String(p.name), p.title));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/retitle' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, await retitleProject(String(p.name || '')));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/epic/title' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, setEpicTitle(String(p.id || ''), p.title));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/epic/retitle' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, await retitleEpic(String(p.id || '')));
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/model' && req.method === 'POST') {
       let body = '';

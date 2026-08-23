@@ -353,6 +353,14 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .project-row-label.hl strong { color: var(--accent); }
 .project-row-label.hl > span:first-of-type { font-size: 0; }
 .project-row-label.hl > span:first-of-type::after { content: "double click to open"; color: var(--text-dim); font: 9px var(--font); letter-spacing: .01em; }
+/* Phones: thin gutter, project names stand vertical (read bottom → top). */
+.project-labels.narrow, .project-labels.narrow::after { width: 34px; }
+.project-labels.narrow .project-row-label { width: 34px; padding: 3px 2px; }
+.project-labels.narrow .project-row-label strong {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  width: 100%; height: 100%; max-height: 100%;
+  font-size: 10px; letter-spacing: .02em;
+}
 .tmark.rowhl .violin { stroke: var(--text) !important; stroke-width: 1.5; }
 .tmark.rowhl .duration { stroke: var(--text) !important; opacity: 1; }
 .project-row-bg { fill: transparent; pointer-events: none; }
@@ -416,10 +424,53 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .mgantt { margin: 0 0 var(--sp-3); border-bottom: 1px solid var(--border); line-height: 0; }
 .mgantt .tmark { cursor: pointer; outline: none; }
 /* redesigned project/epic panel */
-.pdesc .pidentity { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 4px; }
-.pdesc .psummary { margin: 0 0 var(--sp-3); max-width: 78ch; }
-.pdocbtns { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2); margin: 0 0 var(--sp-2); }
-.pdocbtns button { height: 34px; text-align: left; padding: 0 10px; }
+.ptitle { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-3) 0 var(--sp-2); }
+.ptitle h1 { flex: 1; min-width: 12ch; margin: 0; font-size: calc(var(--fs-title) * 1.7); line-height: 1.2; font-weight: 700; cursor: text; overflow-wrap: anywhere; }
+.ptitle .pnewbtn { flex: 0 0 auto; }
+.ptitle h1:hover { text-decoration: underline dotted; text-underline-offset: 5px; }
+.ptitle h1 input { font: inherit; font-weight: inherit; width: 100%; box-sizing: border-box; padding: 0 6px; background: var(--bg); color: inherit; border: 1px solid currentColor; }
+.pdesc .pidentity { color: var(--text-dim); font-size: var(--fs-meta); text-transform: lowercase; letter-spacing: 0.04em; margin: 0 0 6px; }
+.pdesc .psummary { margin: 0 0 var(--sp-4); max-width: none; font-size: calc(var(--fs-body) * 1.06); line-height: 1.7; }
+/* The project page reads like programming documentation: a sticky table of
+   contents on the left, the document with big headings on the right. */
+.pdoclayout { display: flex; gap: var(--sp-4); align-items: flex-start; }
+.pdocmain { flex: 1; min-width: 0; }
+.ptoc { flex: 0 0 26ch; position: sticky; top: 0; max-height: calc(100dvh - 90px); overflow-y: auto; scrollbar-width: thin; padding-bottom: var(--sp-3); }
+.ptoc-label { font-size: var(--fs-label); color: var(--text-faint); border-bottom: 1px solid var(--border); padding-bottom: 4px; margin: 0 0 8px; }
+.ptoc-group { margin: 0 0 var(--sp-1, 4px); }
+.ptoc-row { display: flex; align-items: baseline; gap: 4px; }
+.ptoc-row > a { flex: 1; min-width: 0; }
+.ptoc .twist { flex: 0 0 1ch; color: var(--text-faint); cursor: pointer; font-size: var(--fs-meta); user-select: none; }
+.ptoc a { display: block; color: var(--text-dim); text-decoration: none; padding: 2px 0; font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.ptoc a:hover { color: var(--accent); }
+.ptoc a.on { color: var(--accent); }
+.ptoc-subs { padding-left: calc(1ch + 4px); }
+.ptoc a.sub { padding-left: 2ch; }
+.ptoc-group.closed .ptoc-subs { display: none; }
+.pdocsec { margin: 0 0 var(--sp-5, 28px); scroll-margin-top: var(--sp-2); }
+.pdochead { display: flex; align-items: baseline; gap: 10px; margin: 0 0 var(--sp-3); font-size: calc(var(--fs-title) * 1.3); line-height: 1.25; border-bottom: 1px solid var(--border); padding-bottom: 6px; cursor: pointer; user-select: none; }
+.pdochead .twist { flex: 0 0 auto; color: var(--text-faint); font-size: var(--fs-meta); }
+.pdocsec.closed .pdocbody { display: none; }
+.pdocsec.annex .pdochead { color: var(--text-dim); font-size: var(--fs-title); }
+.annextag { font-size: var(--fs-micro); color: var(--text-faint); border: 1px solid var(--border); padding: 0 6px; margin-left: 4px; align-self: center; }
+.ptoc a.annexlink { color: var(--text-faint); }
+.pdsub { scroll-margin-top: var(--sp-2); }
+.pdsub > h2 { display: flex; align-items: baseline; gap: 8px; cursor: pointer; user-select: none; }
+.pdsub > h2 .twist { flex: 0 0 auto; color: var(--text-faint); font-size: var(--fs-meta); }
+.pdsub.closed .pdsub-body { display: none; }
+.pdocbody { line-height: 1.6; }
+.pepicstrip { display: flex; flex-wrap: wrap; gap: 4px var(--sp-3); align-items: baseline; margin: var(--sp-2) 0 0; font-size: var(--fs-meta); }
+.pepicstrip .pes-label { color: var(--text-faint); font-size: var(--fs-label); }
+.pepicstrip a { color: var(--text-dim); text-decoration: none; }
+.pepicstrip a:hover { color: var(--accent); }
+.pepicstrip .pes-n { color: var(--text-faint); font-size: var(--fs-micro); margin-left: 4px; }
+.pdocbody > :first-child { margin-top: 0; }
+.pdocbody h1, .pdocbody h2 { font-size: calc(var(--fs-body) * 1.15); font-weight: 700; margin: var(--sp-4) 0 8px; scroll-margin-top: var(--sp-2); }
+.pdocbody h3, .pdocbody h4 { font-size: var(--fs-body); margin: var(--sp-3) 0 6px; }
+.pdocbody pre { background: var(--surface-2); border: 1px solid var(--border); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; }
+.pdocbody code { background: var(--surface-2); padding: 1px 5px; font-size: 12.5px; }
+.pdocbody pre code { background: none; padding: 0; }
+.pfoot { border-top: 1px solid var(--border); padding-top: var(--sp-2); margin: var(--sp-4) 0 var(--sp-3); }
 .pmemline { font-size: var(--fs-micro); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pmemline button { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); }
 .pnewrow { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-4) 0; }
@@ -1342,6 +1393,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   /* Phone: the project head scrolls away like the conversation head does.
      Sticky here buried the content under title + buttons + fold chips. */
   .phead { position: static; top: auto; margin: -1px -2px 10px; }
+  .pdoclayout { flex-direction: column; }
+  .pdoclayout .ptoc { position: static; flex: none; width: 100%; max-height: none; overflow: visible; }
   .pactions { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .pactions button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
   .pfolds { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
@@ -3193,6 +3246,8 @@ const nearPreset = () => Object.entries(ZOOM_PRESETS).find(([, z]) => Math.abs(M
 const LANE_H = 26;    // vertical pixels per lane
 const PROJECT_LANE_H = 32;
 const PROJECT_GUTTER = 168;
+const PROJECT_GUTTER_PHONE = 34; // phones: thin strip, vertical names
+const projectGutterW = () => phoneDevice() ? PROJECT_GUTTER_PHONE : PROJECT_GUTTER;
 const LABEL_H = 18;   // top gutter for day labels
 const MARGIN_L = 8;
 const MARGIN_R = 60;  // room past "now" for labels
@@ -3383,19 +3438,22 @@ function visibleTimelineRows(rows, pos, chartW, list) {
 
 function projectLabelsHtml(pos) {
   if (pos.type !== 'project') return '';
-  return `<div class="project-labels">${pos.projects.map(row => {
+  const phone = phoneDevice();
+  return `<div class="project-labels${phone ? ' narrow' : ''}">${pos.projects.map(row => {
     const top = LABEL_H + row.baseLane * PROJECT_LANE_H;
     const height = row.laneCount * PROJECT_LANE_H;
     const main = row.mode ? row.title : row.project;
     const detail = `${row.count || 0} conversations`;
-    const repo = !row.mode && gitReposCache.find(r => r.project === row.project);
+    const repo = !phone && !row.mode && gitReposCache.find(r => r.project === row.project);
     const repoLink = repo ? `<span class="rowrepo" data-git-repo="${esc(repo.root)}" title="Git history · ${esc(repo.root)}">⌂ ${esc(repo.branch || 'repo')}</span>` : '';
     // A quiet fold hint: this row looks like another project (same remote /
     // name twin). One click folds; dismiss lives on the project overview.
-    const sug = !row.mode && (projectFolds.suggestions || []).find(x => x.from === row.project);
+    const sug = !phone && !row.mode && (projectFolds.suggestions || []).find(x => x.from === row.project);
     const foldChip = sug ? `<span class="rowfold" data-fold-from="${esc(sug.from)}" data-fold-into="${esc(sug.into)}" title="${esc(sug.reason)} · fold ${esc(sug.from)} into ${esc(sug.into)}">⇄ ${esc(sug.into)}?</span>` : '';
+    const body = phone ? `<strong>${esc(main)}</strong>`
+      : `<strong>${esc(main)}</strong><span>${esc(detail)}</span>${repoLink}${foldChip}`;
     return `<div class="project-row-label item" data-project="${esc(main)}" style="top:${top}px;height:${height}px" title="${esc(main)} · ${esc(detail)} · click to select the row · double click for the project overview">
-      <strong>${esc(main)}</strong><span>${esc(detail)}</span>${repoLink}${foldChip}</div>`;
+      ${body}</div>`;
   }).join('')}</div>`;
 }
 
@@ -3744,7 +3802,7 @@ function timelineGrid(list, rows) {
     return { chartH, chartW, pos: { type: 'v', yFor, pd: scale, nowT: now }, daysSvg: tickSvg(chartH, 0, chartW, 'v'), nowLine };
   }
   const spanPx = (now - oldest) / DAY_MS * scale;
-  const gutter = projects ? PROJECT_GUTTER : MARGIN_L;
+  const gutter = projects ? projectGutterW() : MARGIN_L;
   const chartW = Math.max(list.clientWidth, gutter + spanPx + MARGIN_R);
   const laneH = projects ? PROJECT_LANE_H : LANE_H;
   const chartH = Math.max(list.clientHeight, LABEL_H + laneCount * laneH + 10);
@@ -6770,39 +6828,36 @@ function renderProjectPanel(d) {
   const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
   const heroRows = sessions.filter(s => projectOf(s) === d.project)
     .map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
-  const docBtn = (kind, glyph, label) => `<button data-p-memory="${kind}" ${memory ? '' : 'disabled'} title="Open the ${label} document">${glyph} ${label}</button>`;
+  const displayTitle = d.title || d.project;
   $('view').innerHTML = `<div class="project-overview">
     ${miniGanttHtml(heroRows)}
-    <div class="phead" style="border-left-color:${color.fill}">
-      <h2>❯ ${esc(d.project)}</h2>
-      <div class="pmeta"><code>${esc(shortDir(d.cwd))}</code> · ${d.conversations} conversations · ${d.epics.length} epics · latest ${fmtDate(d.latestTs)}<button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}</div>
-      ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
-      ${(d.foldSuggestions || []).map((x, i) => `<div class="pfold-suggest">same project as <b>${esc(x.other)}</b>? <span class="dim">${esc(x.reason)}</span><button data-p-fold-accept="${i}" title="Fold ${esc(x.from)} into ${esc(x.into)}">⇄ fold</button><button class="ghost" data-p-fold-dismiss="${i}" title="Not the same project · stop suggesting this pair">✕</button></div>`).join('')}
-      <div id="pFoldPanel" hidden></div>
-    </div>
+    <div class="ptitle"><h1 id="pTitleBig" title="${esc(pTitleHint(displayTitle))}">${esc(displayTitle)}</h1><button id="pNew" class="primary pnewbtn" title="Start a new conversation in ${esc(d.project)} — you review the context before it goes">+ new in ${esc(d.project)}</button></div>
     <section class="psection pdesc">
       ${memory
         ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(o.summary || '(no overview summary yet)')}</p>`
         : '<p class="psummary dim">No project memory yet. Build the memory leaves once — after that, the documents stay current automatically.</p>'}
-      <div class="pdocbtns">
-        ${docBtn('overview', '⌂', 'overview')}
-        ${docBtn('intent', '✦', 'deep intent')}
-        ${docBtn('environment', '⚙', 'environment')}
-        ${docBtn('status', '☑', 'todo / focus')}
-      </div>
+      ${d.epics.length ? `<div class="pepicstrip"><span class="pes-label">epics</span>${d.epics.map(e => `<a href="#" data-p-epic-open="${esc(e.id)}" title="Open the epic · ${e.sessionIds.length} conversations · updated ${fmtDate(e.updatedAt)}">▸ ${esc(e.title)}<span class="pes-n">${e.sessionIds.length}</span></a>`).join('')}</div>` : ''}
+    </section>
+    <div class="pdoclayout">
+    <nav id="pToc" class="ptoc" hidden></nav>
+    <div class="pdocmain">
+    <div id="pDocBody">${memory ? '<div class="dim">reading the project documents…</div>' : ''}</div>
+    <footer class="pfoot">
       <div class="pmemline dim">
         ${memory ? `memory ${fmtDate(memory.builtAt)} · ${pyramid.docs && pyramid.docs.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}
         ${pyramid.backfillRunning ? '<span><span class="spin">░</span> extracting leaves…</span>' : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : ''}
         ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : ''}
+        <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
       </div>
-    </section>
-    <section class="psection"><h3>epics</h3>
-      ${d.epics.length ? d.epics.map(e => `<div class="item" data-p-epic-open="${esc(e.id)}"><div style="min-width:0;flex:1"><div class="title">▸ ${esc(e.title)}</div><div class="meta">${e.sessionIds.length} conversations · ${fmtDate(e.updatedAt)}</div></div></div>`).join('') : '<div class="hint">no epics yet — candidates appear here after the memory regenerates.</div>'}
-      ${(memory && memory.candidates || []).length ? '<h3 style="margin-top:var(--sp-3)">discovered candidates</h3>' + memory.candidates.map(c => `<div class="item"><div style="min-width:0;flex:1"><div class="title">${esc(c.title)}</div><div class="meta">${c.sessionIds.length} conversations · ${esc(c.abstract || c.reason || '')}</div></div><button data-p-candidate="${esc(c.id)}">build epic</button></div>`).join('') : ''}
-    </section>
-    <div class="pnewrow"><button id="pNew" class="primary">+ new conversation</button><span class="hint">you review the context before it goes</span></div>
+      ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
+      ${(d.foldSuggestions || []).map((x, i) => `<div class="pfold-suggest">same project as <b>${esc(x.other)}</b>? <span class="dim">${esc(x.reason)}</span><button data-p-fold-accept="${i}" title="Fold ${esc(x.from)} into ${esc(x.into)}">⇄ fold</button><button class="ghost" data-p-fold-dismiss="${i}" title="Not the same project · stop suggesting this pair">✕</button></div>`).join('')}
+      <div id="pFoldPanel" hidden></div>
+    </footer>
+    </div>
+    </div>
   </div>`;
   wireMiniGantt($('view'), heroRows, color);
+  $('pTitleBig').ondblclick = e => { e.preventDefault(); startProjectTitleEdit(d.project); };
   $('pFold').onclick = () => openFoldPicker(d);
   const pUnregister = $('pUnregister');
   if (pUnregister) pUnregister.onclick = async () => {
@@ -6829,9 +6884,8 @@ function renderProjectPanel(d) {
     await foldApi('/api/project/fold-dismiss', { from: x.from, into: x.into });
     showProjectOverview(d.project);
   });
-  $('view').querySelectorAll('[data-p-memory]').forEach(b => b.onclick = () => showProjectMemoryDoc(d.project, b.dataset.pMemory));
-  $('view').querySelectorAll('[data-p-epic-open]').forEach(b => b.onclick = () => showEpic(b.dataset.pEpicOpen));
-  $('view').querySelectorAll('[data-p-candidate]').forEach(b => b.onclick = () => buildDiscoveredEpic(d, b.dataset.pCandidate));
+  if (memory) renderProjectDocs(d);
+  $('view').querySelectorAll('[data-p-epic-open]').forEach(b => b.onclick = e => { e.preventDefault(); showEpic(b.dataset.pEpicOpen); });
   const pLeafBackfill = $('pLeafBackfill');
   if (pLeafBackfill) pLeafBackfill.onclick = async () => {
     if (needLeaves > 20 && !confirm(`Extract ${needLeaves} memory leaves? Each costs roughly one small model call. The backfill runs in the background; finished leaves are kept.`)) return;
@@ -6857,7 +6911,7 @@ async function showProjectOverview(name) {
   markSettingsClosed();
   projectOverviewName = name;
   setRoute('project', 'project=' + encodeURIComponent(name), [crumbHome(), { label: name, title: 'Project overview · ' + name }]);
-  $('view').innerHTML = `<div class="project-overview"><div class="phead"><h2>${esc(name)}</h2><div class="pmeta">loading project overview…</div></div></div>`;
+  $('view').innerHTML = `<div class="project-overview"><div class="ptitle"><h1>${esc(name)}</h1></div><div class="pmeta">loading project overview…</div></div>`;
   const d = await (await fetch('/api/project?name=' + encodeURIComponent(name))).json();
   if (d.error) {
     $('view').innerHTML = `<div class="empty">could not open ${esc(name)}.<div class="hint">${esc(d.error)}</div></div>`;
@@ -6867,17 +6921,177 @@ async function showProjectOverview(name) {
   return renderProjectPanel(d);
 }
 
-// The trust section is a review queue: disputed and stale vouches first, so a
-// short session of re-reading keeps the vouched surface honest.
-async function showProjectMemoryDoc(project, kind) {
-  const res = await fetch('/api/project/memory/file?name=' + encodeURIComponent(project) + '&kind=' + encodeURIComponent(kind));
-  const data = await res.json();
-  if (data.error) return errToast(data.error);
-  projectOverviewName = project;
-  setRouteKind('memory-doc', [crumbHome(), crumbProject(project), { label: kind, title: 'Project memory · ' + kind }]);
-  noteViewer(data.text, data.path);
-  $('noteHeadBtns').innerHTML = '<button id="projectMemoryBack">back to project</button>';
-  $('projectMemoryBack').onclick = () => showProjectOverview(project);
+// ---- the shared document body (project page and epic page) ----
+// An epic is a recursive project: the same pipeline runs over it and may find
+// further epics inside. So both pages share one renderer: a sticky TOC tree on
+// the left, the document with big headings on the right. Both levels of the
+// text fold; annex chapters (evidence, story, candidates) start folded and
+// read like appendices. Navigation JUMPS — no smooth scrolling; e-ink hates it.
+const P_DOC_KINDS = [['overview', 'overview'], ['intent', 'deep intent'], ['environment', 'environment'], ['status', 'todo / focus']];
+const pDocFold = {}; // ownerKey -> Map(foldId -> folded?) · session-only memory
+
+// Strip the parts the page already shows or nobody reads inline:
+// the H1 title, the generation-meta bullets, and the duplicated abstract.
+function cleanProjectDoc(text) {
+  return String(text || '')
+    .replace(/^# .*\n+/, '')
+    .replace(/^\*\*Abstract\.\*\* .*\n+/m, '')
+    .replace(/^- \*\*(Project|Epic|Generated|Source snapshot):\*\*.*\n?/gm, '')
+    .trim();
+}
+
+// Wrap every "## " block of a rendered chapter into a foldable subsection.
+function wrapSubsections(sec, fold) {
+  const bodyEl = sec.querySelector('.pdocbody');
+  if (!bodyEl || !bodyEl.querySelector('h2')) return;
+  const frag = document.createDocumentFragment();
+  let wrap = null, idx = -1;
+  for (const node of [...bodyEl.childNodes]) {
+    if (node.nodeType === 1 && node.tagName === 'H2') {
+      idx++;
+      const subId = sec.id + '-' + idx;
+      const shut = fold.has('sub:' + subId) ? fold.get('sub:' + subId) : false;
+      wrap = document.createElement('div');
+      wrap.className = 'pdsub' + (shut ? ' closed' : '');
+      wrap.id = subId;
+      const tw = document.createElement('span');
+      tw.className = 'twist';
+      tw.textContent = shut ? '▸' : '▾';
+      node.prepend(tw);
+      node.title = 'Fold this subsection';
+      const inner = document.createElement('div');
+      inner.className = 'pdsub-body';
+      wrap.append(node, inner);
+      frag.append(wrap);
+      const w = wrap;
+      node.onclick = () => {
+        const s = w.classList.toggle('closed');
+        tw.textContent = s ? '▸' : '▾';
+        fold.set('sub:' + w.id, s);
+      };
+    } else if (wrap) wrap.lastChild.append(node);
+    else frag.append(node);
+  }
+  bodyEl.textContent = '';
+  bodyEl.append(frag);
+}
+
+// chapters: [{ id, label, md? , html?, load? (async -> html), subsAfterLoad?, wire?, annex? }]
+function renderDocChapters(ownerKey, chapters) {
+  const body = $('pDocBody'), toc = $('pToc'), view = $('view');
+  if (!body || !toc) return;
+  const fold = pDocFold[ownerKey] || (pDocFold[ownerKey] = new Map());
+  const shutOf = (fid, dflt) => fold.has(fid) ? fold.get(fid) : dflt;
+  const chById = new Map(chapters.map(ch => [ch.id, ch]));
+  const secs = [], groups = [];
+  chapters.forEach((ch, i) => {
+    const n = i + 1;
+    const subs = ch.md ? [...ch.md.matchAll(/^## (.+)$/gm)].map(m => m[1]) : [];
+    const secShut = shutOf('sec:' + ch.id, !!ch.annex);
+    const tocShut = shutOf('toc:' + ch.id, !!ch.annex);
+    groups.push(`<div class="ptoc-group${tocShut ? ' closed' : ''}">` +
+      `<div class="ptoc-row"><span class="twist" data-toc-twist="${ch.id}" ${subs.length ? 'title="Fold this branch"' : ''}>${subs.length ? (tocShut ? '▸' : '▾') : ''}</span>` +
+      `<a href="#" data-toc="${ch.id}"${ch.annex ? ' class="annexlink"' : ''}>${n}&ensp;${esc(ch.label)}</a></div>` +
+      `<div class="ptoc-subs">${subs.map((t, j) => `<a href="#" class="sub" data-toc="${ch.id}-${j}">${n}.${j + 1}&ensp;${esc(t)}</a>`).join('')}</div></div>`);
+    secs.push(`<section class="pdocsec${ch.annex ? ' annex' : ''}${secShut ? ' closed' : ''}" id="${ch.id}">` +
+      `<h2 class="pdochead" title="Fold this chapter"><span class="twist">${secShut ? '▸' : '▾'}</span><span>${n}&ensp;${esc(ch.label)}</span>${ch.annex ? '<span class="annextag">annex</span>' : ''}</h2>` +
+      `<div class="pdocbody">${ch.md ? mdRender(ch.md) : ch.html || '<div class="dim">open to read…</div>'}</div></section>`);
+  });
+  body.innerHTML = secs.join('');
+  toc.innerHTML = '<div class="ptoc-label">contents</div>' + groups.join('');
+  toc.hidden = false;
+  body.querySelectorAll('.pdocsec').forEach(sec => {
+    const ch = chById.get(sec.id);
+    if (ch && ch.md) wrapSubsections(sec, fold);
+    if (ch && ch.wire && !ch.load) ch.wire(sec.querySelector('.pdocbody'));
+  });
+  // First level folds on its heading. Lazy chapters read their content on first open.
+  const openLazy = sec => {
+    const ch = chById.get(sec.id);
+    if (!ch || !ch.load || ch.loaded) return;
+    ch.loaded = true;
+    const bodyEl = sec.querySelector('.pdocbody');
+    bodyEl.innerHTML = '<div class="dim">reading…</div>';
+    Promise.resolve(ch.load()).then(html => {
+      if (!bodyEl.isConnected) { ch.loaded = false; return; }
+      bodyEl.innerHTML = html;
+      if (ch.subsAfterLoad) wrapSubsections(sec, fold);
+      if (ch.wire) ch.wire(bodyEl);
+    }).catch(e => { bodyEl.innerHTML = `<div class="dim">${esc(e.message)}</div>`; ch.loaded = false; });
+  };
+  body.querySelectorAll('.pdochead').forEach(head => head.onclick = () => {
+    const sec = head.closest('.pdocsec');
+    const shut = sec.classList.toggle('closed');
+    head.querySelector('.twist').textContent = shut ? '▸' : '▾';
+    fold.set('sec:' + sec.id, shut);
+    if (!shut) openLazy(sec);
+  });
+  // The TOC twist folds the TOC branch only; the text keeps its own folds.
+  toc.querySelectorAll('[data-toc-twist]').forEach(t => t.onclick = () => {
+    if (!t.textContent) return;
+    const g = t.closest('.ptoc-group');
+    const shut = g.classList.toggle('closed');
+    t.textContent = shut ? '▸' : '▾';
+    fold.set('toc:' + t.dataset.tocTwist, shut);
+  });
+  // A TOC link unfolds its target and JUMPS to it — instant, e-ink friendly.
+  toc.querySelectorAll('[data-toc]').forEach(a => a.onclick = e => {
+    e.preventDefault();
+    const el = document.getElementById(a.dataset.toc);
+    if (!el) return;
+    const sec = el.closest('.pdocsec');
+    if (sec && sec.classList.contains('closed')) sec.querySelector('.pdochead').click();
+    if (el.classList.contains('pdsub') && el.classList.contains('closed')) el.querySelector('h2').click();
+    el.scrollIntoView({ block: 'start' });
+  });
+  // Scroll-spy: the TOC entry of the section under the reading line lights up.
+  let spyRaf = 0;
+  const spy = () => {
+    const line = view.getBoundingClientRect().top + 80; // the reading line
+    let cur = null;
+    for (const el of body.querySelectorAll('.pdocsec, .pdsub')) {
+      if (el.classList.contains('pdsub') && el.closest('.pdocsec.closed')) continue;
+      if (el.getBoundingClientRect().top <= line) cur = el; else break;
+    }
+    const id = cur && cur.id;
+    toc.querySelectorAll('[data-toc]').forEach(a => a.classList.toggle('on', a.dataset.toc === id));
+  };
+  const onScroll = () => {
+    if (!toc.isConnected) { view.removeEventListener('scroll', onScroll); return; }
+    cancelAnimationFrame(spyRaf);
+    spyRaf = requestAnimationFrame(spy);
+  };
+  view.addEventListener('scroll', onScroll, { passive: true });
+  spy();
+}
+
+async function renderProjectDocs(d) {
+  const project = d.project;
+  const cache = projectOverview && projectOverview.project === project
+    ? (projectOverview._docs = projectOverview._docs || {}) : {};
+  const texts = await Promise.all(P_DOC_KINDS.map(async ([kind]) => {
+    if (cache[kind] !== undefined) return cache[kind];
+    try {
+      const data = await (await fetch('/api/project/memory/file?name=' + encodeURIComponent(project) + '&kind=' + encodeURIComponent(kind))).json();
+      return (cache[kind] = data.error ? '' : cleanProjectDoc(data.text));
+    } catch { return ''; }
+  }));
+  // The reader may have moved on while the files were read.
+  if (projectOverviewName !== project || viewKind !== 'project') return;
+  const chapters = [];
+  P_DOC_KINDS.forEach(([kind, label], i) => {
+    if (texts[i]) chapters.push({ id: 'pdoc-' + kind, label, md: texts[i] });
+  });
+  const candidates = (d.memory && d.memory.candidates) || [];
+  if (candidates.length) chapters.push({
+    id: 'pdoc-candidates', label: 'discovered epics', annex: true,
+    html: candidates.map(c => `<div class="item"><div style="min-width:0;flex:1"><div class="title">${esc(c.title)}</div><div class="meta">${c.sessionIds.length} conversations · ${esc(c.abstract || c.reason || '')}</div></div><button data-p-candidate="${esc(c.id)}">build epic</button></div>`).join(''),
+    wire: el => el.querySelectorAll('[data-p-candidate]').forEach(b => b.onclick = () => buildDiscoveredEpic(d, b.dataset.pCandidate)),
+  });
+  const body = $('pDocBody'), toc = $('pToc');
+  if (!body || !toc) return;
+  if (!chapters.length) { toc.hidden = true; body.innerHTML = ''; return; }
+  renderDocChapters('project:' + project, chapters);
 }
 
 function buildDiscoveredEpic(d, candidateId) {
@@ -7927,6 +8141,115 @@ async function aiRetitle(key) {
 function wireTitleControls() {
   const el = $('chTitle');
   if (el) el.ondblclick = e => { e.preventDefault(); startTitleEdit(); };
+}
+
+// ---- project titles: the same manual edit + AI retitle, on the panel's big headline ----
+const pTitleHint = t => 'Double-click to rename · ' + t;
+
+function applyProjectTitleUpdate(project, title) {
+  if (!title) return;
+  if (projectOverview && projectOverview.project === project) projectOverview.title = title;
+  const el = $('pTitleBig');
+  // Patch the visible headline in place; never re-render or navigate from here.
+  if (el && projectOverviewName === project && viewKind === 'project' && !el.querySelector('input')) {
+    el.textContent = title;
+    el.title = pTitleHint(title);
+  }
+}
+
+// One editor for every big headline (project, epic — an epic is a recursive project).
+function startBigTitleEdit({ save, ai }) {
+  const el = $('pTitleBig');
+  if (!el || el.querySelector('input')) return;
+  const old = el.textContent;
+  const input = document.createElement('input');
+  input.value = old;
+  input.maxLength = 120;
+  el.textContent = '';
+  el.appendChild(input);
+  // While editing, one extra choice appears: let the model write it.
+  const aiBtn = document.createElement('button');
+  aiBtn.className = 'ghost';
+  aiBtn.textContent = '↻ ai title';
+  aiBtn.title = 'Ask the model for a fresh title';
+  aiBtn.onmousedown = e => e.preventDefault(); // keep the input focus; blur cancels
+  el.after(aiBtn);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = doSave => {
+    if (done) return;
+    done = true;
+    aiBtn.remove();
+    const next = input.value.replace(/\s+/g, ' ').trim();
+    el.textContent = old;
+    el.title = pTitleHint(old);
+    if (!doSave || !next || next === old) return;
+    el.textContent = next;
+    el.title = pTitleHint(next);
+    save(next, old);
+  };
+  aiBtn.onclick = () => { finish(false); ai(); };
+  input.onkeydown = e => {
+    e.stopPropagation(); // app shortcuts must never fire while typing a title
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  };
+  input.onblur = () => finish(false);
+}
+
+function startProjectTitleEdit(project) {
+  startBigTitleEdit({
+    save: (next, old) => postJson('/api/project/title', { name: project, title: next }).then(out => {
+      if (out.error) { errToast('rename failed: ' + out.error); applyProjectTitleUpdate(project, old); return; }
+      applyProjectTitleUpdate(project, out.title);
+      toast('title saved');
+    }),
+    ai: () => aiProjectRetitle(project),
+  });
+}
+
+async function aiProjectRetitle(project) {
+  const el = $('pTitleBig');
+  const old = el ? el.textContent : '';
+  if (el && projectOverviewName === project) el.textContent = '↻ titling…';
+  const out = await postJson('/api/project/retitle', { name: project });
+  if (out.error) {
+    if (el && projectOverviewName === project) { el.textContent = old; el.title = pTitleHint(old); }
+    return errToast('retitle failed: ' + out.error);
+  }
+  applyProjectTitleUpdate(project, out.title);
+  toast('title · ' + out.title);
+}
+
+function applyEpicTitleUpdate(id, title) {
+  if (!title) return;
+  const el = $('pTitleBig');
+  if (el && viewKind === 'epic' && currentHash === 'epic=' + encodeURIComponent(id) && !el.querySelector('input')) {
+    el.textContent = title;
+    el.title = pTitleHint(title);
+  }
+}
+
+function startEpicTitleEdit(id) {
+  startBigTitleEdit({
+    save: (next, old) => postJson('/api/epic/title', { id, title: next }).then(out => {
+      if (out.error) { errToast('rename failed: ' + out.error); applyEpicTitleUpdate(id, old); return; }
+      applyEpicTitleUpdate(id, out.title);
+      toast('title saved');
+    }),
+    ai: () => aiEpicRetitle(id),
+  });
+}
+
+async function aiEpicRetitle(id) {
+  const el = $('pTitleBig');
+  const old = el ? el.textContent : '';
+  if (el && viewKind === 'epic') el.textContent = '↻ titling…';
+  const out = await postJson('/api/epic/retitle', { id });
+  if (out.error) { applyEpicTitleUpdate(id, old); return errToast('retitle failed: ' + out.error); }
+  applyEpicTitleUpdate(id, out.title);
+  toast('title · ' + out.title);
 }
 
 // The distill button controls the job only. Opening the note is the switcher's job.
@@ -11024,8 +11347,10 @@ async function forkFrom(key, n, btn) {
 }
 
 // ---- epics ----
-// The epic panel mirrors the project panel: an epic is a recursive project
-// with its own hero gantt, four memory documents, and a reviewed start.
+// The epic page IS the project page: an epic is a recursive project. Same hero
+// gantt, same big editable title, same abstract, same TOC + chapter document.
+// Its raw story and evidence read as annexes. When the memory pipeline runs
+// over an epic it may discover further epics inside — the layout is ready.
 async function showEpic(id, focusKey = activeRel) {
   markSettingsClosed();
   const d = await (await fetch('/api/epic?id=' + encodeURIComponent(id))).json();
@@ -11040,36 +11365,34 @@ async function showEpic(id, focusKey = activeRel) {
   const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
   const heroRows = d.sessions.map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
   const epicColor = d.project && d.project !== '?' ? projectColor(d.project) : { fill: 'var(--accent)', stroke: 'var(--accent)' };
-  const docBtn = (kind, glyph, label) => `<button data-e-memory="${kind}" ${memory ? '' : 'disabled'} title="Open the epic ${label} document">${glyph} ${label}</button>`;
+  const title = d.title || 'epic';
   $('view').innerHTML = `<div class="project-overview">
     ${miniGanttHtml(heroRows)}
-    <div class="phead" style="border-left-color:${d.project && d.project !== '?' ? projectColor(d.project).fill : 'var(--accent)'}">
-      <h2>▸ ${esc(d.title || 'epic')}</h2>
-      <div class="pmeta">epic in <b>${esc(d.project || '?')}</b> · ${d.sessions.length} conversations · updated ${fmtDate(d.updatedAt)}<button id="eStory" class="ghost pfoldbtn" title="The narrative story built for this epic">story</button><button id="eEvidence" class="ghost pfoldbtn" title="Every note and evidence card used to build this epic">evidence</button><button id="eRebuild" class="ghost pfoldbtn" title="Keep current conversations and add any selected conversations">${selected.size ? `add ${selected.size} selected + rebuild` : 'rebuild story'}</button></div>
-    </div>
+    <div class="ptitle"><h1 id="pTitleBig" title="${esc(pTitleHint(title))}">${esc(title)}</h1><button id="eNew" class="primary pnewbtn" title="Start a new conversation from this epic's memory — you review the context before it goes">+ new from this epic</button></div>
     <section class="psection pdesc">
-      ${memory
-        ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(o.summary || d.abstract || '')}</p>`
-        : `<p class="psummary">${esc(d.abstract || '(no abstract)')}</p>`}
-      <div class="pdocbtns">
-        ${docBtn('overview', '⌂', 'overview')}
-        ${docBtn('intent', '✦', 'deep intent')}
-        ${docBtn('environment', '⚙', 'environment')}
-        ${docBtn('status', '☑', 'todo / focus')}
-      </div>
+      ${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}
+      <p class="psummary">${esc(o.summary || d.abstract || '(no abstract yet)')}</p>
+    </section>
+    <div class="pdoclayout">
+    <nav id="pToc" class="ptoc" hidden></nav>
+    <div class="pdocmain">
+    <div id="pDocBody"><div class="dim">reading the epic documents…</div></div>
+    <footer class="pfoot">
       <div class="pmemline dim">
-        ${memory ? `epic memory ${fmtDate(memory.builtAt)} · ${memory.stale ? '⚠ stale' : '✓ current'}` : 'no epic memory yet'}
+        epic in <b>${esc(d.project || '?')}</b> · ${d.sessions.length} conversations · updated ${fmtDate(d.updatedAt)}
+        · ${memory ? `epic memory ${fmtDate(memory.builtAt)} · ${memory.stale ? '⚠ stale' : '✓ current'}` : 'no epic memory yet'}
         ${d.docsRunning ? '<span><span class="spin">░</span> regenerating…</span>' : `<button id="eDocsRegen" class="ghost">${memory ? 'regenerate epic memory' : 'build epic memory'}</button>`}
+        <button id="eRebuild" class="ghost pfoldbtn" title="Keep current conversations and add any selected conversations">${selected.size ? `add ${selected.size} selected + rebuild` : 'rebuild story'}</button>
         ${needLeaves ? `<span class="warn">${needLeaves} leaves not fresh — build them from the project panel</span>` : ''}
       </div>
-    </section>
-    <div class="pnewrow"><button id="eNew" class="primary">+ new conversation from this epic</button><span class="hint">project map + epic memory · you review the context first</span></div>
+    </footer>
+    </div>
+    </div>
   </div>`;
   wireMiniGantt($('view'), heroRows, epicColor);
-  $('eStory').onclick = () => showEpicStory(id, d, key);
-  $('eEvidence').onclick = () => showEpicEvidence(id, key);
+  $('pTitleBig').ondblclick = e => { e.preventDefault(); startEpicTitleEdit(id); };
+  $('eNew').onclick = () => startReviewedConversation(d.project, { epicId: id });
   $('eRebuild').onclick = () => buildEpic(id);
-  $('view').querySelectorAll('[data-e-memory]').forEach(b => b.onclick = () => showEpicMemoryDoc(id, b.dataset.eMemory, d.title));
   const regen = $('eDocsRegen');
   if (regen) regen.onclick = async () => {
     const out = await postJson('/api/epic/memory/regenerate', { id });
@@ -11079,24 +11402,45 @@ async function showEpic(id, focusKey = activeRel) {
     regen.outerHTML = '<span><span class="spin">░</span> regenerating…</span>';
     toast('epic memory started · ' + (d.title || id));
   };
-  $('eNew').onclick = () => startReviewedConversation(d.project, { epicId: id });
+  renderEpicDocs(id, d);
 }
 
-function showEpicStory(id, d, key) {
-  setRouteKind('epic-story', [crumbHome(), { label: '▸ ' + (d.title || 'epic'), title: 'Back to the epic', go: () => showEpic(id, key) }, { label: 'story' }]);
-  noteViewer(d.text, d.notePath.replace(/^\/home\/[^/]+/, '~'), { kind: 'epic', key, epicId: id });
-  $('noteHeadBtns').innerHTML = '<button id="epicStoryBack">back to epic</button>';
-  $('epicStoryBack').onclick = () => showEpic(id, key);
-}
-
-async function showEpicMemoryDoc(id, kind, title) {
-  const res = await fetch('/api/epic/memory/file?id=' + encodeURIComponent(id) + '&kind=' + encodeURIComponent(kind));
-  const data = await res.json();
-  if (data.error) return errToast(data.error);
-  setRouteKind('memory-doc', [crumbHome(), { label: '▸ ' + (title || 'epic'), title: 'Back to the epic', go: () => showEpic(id) }, { label: kind, title: 'Epic memory · ' + kind }]);
-  noteViewer(data.text, data.path);
-  $('noteHeadBtns').innerHTML = '<button id="epicMemoryBack">back to epic</button>';
-  $('epicMemoryBack').onclick = () => showEpic(id);
+// The epic's chapters: the four memory documents, then the raw story and the
+// evidence wall as annexes. Evidence loads lazily — only when its annex opens.
+async function renderEpicDocs(id, d) {
+  const chapters = [];
+  if (d.memory) {
+    const texts = await Promise.all(P_DOC_KINDS.map(async ([kind]) => {
+      try {
+        const data = await (await fetch('/api/epic/memory/file?id=' + encodeURIComponent(id) + '&kind=' + encodeURIComponent(kind))).json();
+        return data.error ? '' : cleanProjectDoc(data.text);
+      } catch { return ''; }
+    }));
+    if (viewKind !== 'epic' || currentHash !== 'epic=' + encodeURIComponent(id)) return;
+    P_DOC_KINDS.forEach(([kind, label], i) => {
+      if (texts[i]) chapters.push({ id: 'edoc-' + kind, label, md: texts[i] });
+    });
+  }
+  const story = cleanProjectDoc(d.text || '');
+  if (story) chapters.push({ id: 'edoc-story', label: 'story', annex: true, md: story });
+  chapters.push({
+    id: 'edoc-evidence', label: 'evidence', annex: true,
+    load: async () => {
+      const ev = await (await fetch('/api/epic/evidence?id=' + encodeURIComponent(id))).json();
+      if (ev.error) return `<div class="dim">${esc(ev.error)}</div>`;
+      return ev.inputs.map(input => {
+        const label = evidenceLabel(input);
+        const warn = input.outdated || input.status === 'possibly-outdated-note' || input.status === 'conversation-missing';
+        return `<details class="evidence-card${warn ? ' warn' : ''}">
+          <summary><span>${warn ? '⚠' : input.kind === 'note' ? '✓' : '◇'}</span>
+            <span class="ev-title">${esc(input.title || input.key)}</span><span class="ev-kind">${esc(label)}</span></summary>
+          <div class="ev-body"><div class="ev-meta">${esc(shortDir(input.cwd))} · ${fmtDate(input.firstTs)} → ${fmtDate(input.lastTs)} · <code>${esc(input.key)}</code>${input.notePath ? ` · <code>${esc(shortDir(input.notePath))}</code>` : ''}</div>
+          <pre>${esc(input.text || '(no saved evidence)')}</pre></div></details>`;
+      }).join('') || '<div class="empty">this epic has no evidence inputs.</div>';
+    },
+  });
+  if (viewKind !== 'epic' || currentHash !== 'epic=' + encodeURIComponent(id)) return;
+  renderDocChapters('epic:' + id, chapters);
 }
 
 async function openOrBuildEvidence(key) {
@@ -12597,6 +12941,11 @@ live.onmessage = ev => {
       }
     }
     if (tab === 'conv') render();
+    return;
+  }
+  if (d.type === 'project-title') {
+    // A project named itself (or another device renamed it). Patch in place only.
+    applyProjectTitleUpdate(d.project, d.title);
     return;
   }
   if (d.type === 'project-folds') {
