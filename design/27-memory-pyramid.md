@@ -181,19 +181,34 @@ their human origin visible. The human-written `intent.md` seed from project
 creation is preserved as a pinned, vouched preamble section that synthesis
 includes verbatim and never rewrites.
 
-## Migration
+## Migration (done)
 
-1. Keep the four document files and their paths; readers (project view,
-   conversation launcher, briefings) do not change.
-2. Seed leaves from the existing `inputs.json` snapshots where present: the
-   saved `selectedIntentMessages` become `intent` lanes without any model
-   call. Other lanes backfill lazily.
-3. The "build project memory" button becomes "regenerate now" during the
-   transition, and disappears once triggers are proven.
-4. `project-distill` (notes batch) stays available but leaves the critical
-   path; the launcher checkbox "read all current notes" is unaffected.
-5. Delete the whole-project classification step (`classifyProjectIntent` over
-   all messages) after the backfill path ships.
+1. The four document files kept their paths; readers did not change.
+2. Leaves were seeded from the old `inputs.json` snapshots (intent lane,
+   zero model calls); the v2 backfill replaced them with full leaves.
+3. The old whole-project pipeline (profile build, whole-project intent
+   classification, `project-memory` job, `/api/project/memory/build`) is
+   **removed**. The pyramid is the only memory pipeline.
+4. `project-distill` (notes batch) remains as a notes feature outside the
+   memory path.
+
+## Epics are recursive projects
+
+An epic owns a session subset, so the same regeneration core
+(`regenerateDocsCore`) builds the same four documents per epic under
+`~/notes/aiconvo/epics/<id>-mem/`. The epic panel mirrors the project panel:
+hero conversation gantt, identity + summary, four document buttons, and a
+reviewed conversation start whose context bundles the project map plus the
+epic memory (`include.epicMemory`).
+
+## The project panel (redesigned)
+
+Top to bottom: header (name, folds), hero mini-gantt of every conversation
+(the way to a conversation), honest identity + summary, four document
+buttons, one compact memory status line (backfill / regenerate only when
+needed), epics + discovered candidates, and one `+ new conversation` button.
+Starts from the panel are always reviewed; the quick unreviewed start lives
+on the transcript's + button.
 
 ## Edge cases
 

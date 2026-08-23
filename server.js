@@ -124,7 +124,7 @@ function cachePathFor(key) {
 }
 
 // Bump when the cached message format changes; forces a re-index.
-const CACHE_VERSION = 12; // v12: native transcript images and file-path references
+const CACHE_VERSION = 13; // v13: bash tool calls carry their mined file writes
 
 // A memory-briefing bootstrap prompt is the same for every launched session; it says
 // nothing about the actual work. Titles must come from the first real request instead.
@@ -241,9 +241,18 @@ function pathCandidates(text) {
 }
 
 // Tool calls / results out of a content block array. kinds: tool, toolresult.
-function toolEventsOf(content, ts, entry) {
+function toolEventsOf(content, ts, entry, cwd = null) {
   const out = [];
   if (!Array.isArray(content)) return out;
+  // Bash creates files too (redirects, tee, heredocs, inline scripts). The
+  // same miner that feeds the diff timeline annotates the transcript message,
+  // so the chat view can link those files exactly like write/edit calls.
+  const resolveWrite = value => {
+    value = String(value);
+    if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
+    if (!path.isAbsolute(value) && cwd) return path.resolve(cwd, value);
+    return value;
+  };
   for (let bi = 0; bi < content.length; bi++) {
     const b = content[bi];
     if (!b) continue;
@@ -251,8 +260,13 @@ function toolEventsOf(content, ts, entry) {
       const input = b.input || b.arguments || {};
       const p = input.file_path || input.notebook_path || input.path || null;
       const text = toolInputText(b.name, input);
-      out.push({ role: 'tool', name: b.name || '?', text,
-                 path: typeof p === 'string' ? p : null, paths: pathCandidates(text), id: b.id || null, ts });
+      const msg = { role: 'tool', name: b.name || '?', text,
+                    path: typeof p === 'string' ? p : null, paths: pathCandidates(text), id: b.id || null, ts };
+      if (/^(bash|shell)$/i.test(b.name || '') && typeof (input.command || input.cmd) === 'string') {
+        const writes = shellMutationPaths(input.command || input.cmd).map(resolveWrite).slice(0, 6);
+        if (writes.length) msg.writes = writes;
+      }
+      out.push(msg);
     } else if (b.type === 'tool_result') {
       let t = textOf(b.content) || (typeof b.content === 'string' ? b.content : '');
       if (t.length > 4000) t = t.slice(0, 4000) + '\n… (truncated)';
@@ -353,7 +367,7 @@ async function parseFile(absPath) {
     // Claude Code records the user's interrupt as a user message; pi
     // records the aborted assistant turn with stopReason 'aborted'.
     if (role === 'user' && /^\[Request interrupted by user/.test(text.trim())) {
-      messages.push(...toolEventsOf(content, d.timestamp || null, eid).map(m => ({ ...m, _eid: eid })));
+      messages.push(...toolEventsOf(content, d.timestamp || null, eid, meta.cwd || null).map(m => ({ ...m, _eid: eid })));
       messages.push({ role: 'abort', text: 'interrupted by you', ts: d.timestamp || null, _eid: eid });
       continue;
     }
@@ -369,7 +383,7 @@ async function parseFile(absPath) {
       messages.push(msg);
     }
     // Tool calls (assistant) and tool results (claude wraps them in user turns).
-    messages.push(...toolEventsOf(content, d.timestamp || null, eid).map(m => ({ ...m, _eid: eid })));
+    messages.push(...toolEventsOf(content, d.timestamp || null, eid, meta.cwd || null).map(m => ({ ...m, _eid: eid })));
     if (role === 'assistant' && d.message && d.message.stopReason === 'aborted') {
       messages.push({ role: 'abort', text: 'aborted', ts: d.timestamp || null, _eid: eid });
     }
@@ -2944,44 +2958,28 @@ const PROJECT_MEMORY_INPUTS_DIR = path.join(CACHE_DIR, 'project-memory');
 fs.mkdirSync(PROJECT_MEMORY_DIR, { recursive: true });
 fs.mkdirSync(PROJECT_MEMORY_INPUTS_DIR, { recursive: true });
 
-const PROJECT_PROFILE_PROMPT =
-  'The attached file contains dated, session-id-tagged notes or evidence for one software project. ' +
-  'Build a durable project profile. Separate the user purpose from current implementation. ' +
-  'Find coherent multi-session epic candidates not already covered by the listed existing epics. ' +
-  'Extract practical environment facts, but NEVER output passwords, tokens, private keys, secret values, or copied credentials. ' +
-  'Use dates and prefer the newest evidence. Do not present superseded tools or setup as current; put unresolved conflicts in cautions. ' +
-  'For authentication, state only the method, command, variable name, or credential location. ' +
-  'Infer unfinished work only from clear evidence. This build itself creates the overview, deep-intent, environment, status, and reviewable epic-candidate artifacts. Do not list creation of those outputs as unfinished work. ' +
-  'Reply with STRICT JSON only, no prose or code fence: ' +
-  '{"overview":{"summary":"2-4 sentences","purpose":"...","vision":"...","desiredOutcomes":["..."],"principles":["..."],"nonGoals":["..."]},' +
-  '"environment":{"summary":"...","setup":["..."],"commands":["..."],"services":["..."],"locations":["..."],"tooling":["..."],"authentication":["..."],"cautions":["..."]},' +
-  '"status":{"recentFocus":["..."],"unfinished":["..."],"todos":["..."],"openQuestions":["..."]},' +
-  '"epicCandidates":[{"title":"max 70 chars","abstract":"2-4 sentences","reason":"...","sessionIds":["exact session id"]}]}. ' +
-  'Epic candidates need at least two related sessions. Use only exact session ids from the input.';
-
-const PROJECT_PROFILE_PARTIAL_PROMPT = PROJECT_PROFILE_PROMPT +
-  ' This is one chronological section of a larger project. Produce a partial profile for later merging.';
-
-const INTENT_CLASSIFY_PROMPT =
-  'The attached JSON contains a high-level project overview and user messages. Each user message includes the assistant response immediately before it when available. ' +
-  'Classify EVERY item, but return only messages that reveal durable, implementation-independent user intent. ' +
-  'Intent includes vision, motivation, desired outcome or experience, values, product principles, durable constraints, trade-offs, and explicit non-goals. ' +
-  'Do not select routine commands, narrow implementation requests, status checks, or transient fixes unless they clearly reveal a deeper durable intent. ' +
-  'Reply with STRICT JSON only: {"selected":[{"id":N,"kind":"vision|motivation|outcome|principle|constraint|preference|non-goal","confidence":0.0,"reason":"one line"}]}.';
-
-const INTENT_SYNTHESIS_PROMPT =
-  'The attached file contains all user messages classified as durable project intent, with the preceding assistant response for context. ' +
-  'Recover what the user truly wants to achieve, why it matters, and what must remain true across implementation changes. ' +
-  'Resolve repetition and evolution. Keep tensions instead of forcing false agreement. Do not turn current implementation details into goals. ' +
-  'Reply with STRICT JSON only: {"coreIntent":"...","vision":"...","whatMatters":["..."],"desiredOutcomes":["..."],"principles":["..."],"constraints":["..."],"tensions":["..."],"nonGoals":["..."],"openIntentQuestions":["..."]}.';
-
-const INTENT_PARTIAL_PROMPT = INTENT_SYNTHESIS_PROMPT +
-  ' This is one section of a larger evidence set. Produce a partial intent model for later merging.';
-const INTENT_MERGE_PROMPT = INTENT_SYNTHESIS_PROMPT +
-  ' The attached file contains partial intent models. Merge them without losing disagreements or changes over time.';
-
 function modelJson(raw) {
-  return JSON.parse(String(raw).replace(/^```(?:json)?\s*|\s*```$/g, ''));
+  const s = String(raw).replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
+  try { return JSON.parse(s); } catch {}
+  // Tolerate prose around the JSON and trailing commas before retrying.
+  const a = Math.min(...[s.indexOf('{'), s.indexOf('[')].filter(i => i >= 0));
+  const b = Math.max(s.lastIndexOf('}'), s.lastIndexOf(']'));
+  if (Number.isFinite(a) && b > a) {
+    const cut = s.slice(a, b + 1);
+    try { return JSON.parse(cut); } catch {}
+    try { return JSON.parse(cut.replace(/,\s*([}\]])/g, '$1')); } catch {}
+  }
+  return JSON.parse(s); // throws with the original position info
+}
+
+// One corrective retry: strict-JSON replies fail rarely but kill whole jobs.
+async function runPiJson(input, prompt, tries = 2) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const raw = await runPi(input, prompt + (attempt ? ' Your previous reply was not valid JSON. Reply again with VALID strict JSON only — no prose, no code fence, escape all quotes and newlines inside strings.' : ''));
+    try { return modelJson(raw); } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
 }
 
 function projectMemorySlug(project) {
@@ -3038,137 +3036,6 @@ function packTextBlocks(blocks, budget) {
   return groups;
 }
 
-async function projectSourceBlocks(meta) {
-  const rows = [];
-  const sorted = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
-  for (const { key, entry } of sorted) {
-    let data = null;
-    try { data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')); } catch { continue; }
-    let memory = '', source = 'raw excerpt';
-    if (entry.notePath) {
-      try {
-        memory = await fsp.readFile(entry.notePath, 'utf8');
-        const noteState = noteStateForEntry(entry);
-        source = noteState === 'fresh' ? 'fresh note' : 'stale note plus recent raw chat';
-        if (noteState === 'stale') {
-          const chat = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant').slice(-12);
-          memory += '\n\n## Recent raw chat (the note predates some project activity)\n\n' +
-            chat.map(m => `${m.role}: ${clipped(m.text, 6000)}`).join('\n\n');
-        }
-      } catch {}
-    }
-    if (!memory) {
-      const latest = latestCachedEvidenceForKey(key);
-      if (latest && latest.cached && latest.cached.text) { memory = latest.cached.text; source = 'cached evidence'; }
-    }
-    if (!memory) {
-      const chat = (data.messages || []).filter(m => m.role === 'user' || m.role === 'assistant');
-      memory = chat.slice(0, 2).concat(chat.slice(-4)).map(m => `${m.role}: ${clipped(m.text, 4000)}`).join('\n\n');
-    }
-    const block = [
-      `=== SESSION ${key} ===`,
-      `Date: ${data.firstTs || entry.firstTs || '?'} -> ${data.lastTs || entry.lastTs || '?'}`,
-      `Title: ${oneLine(data.title || entry.title, '(untitled)')}`,
-      `Memory source: ${source}`,
-      '', memory,
-    ].join('\n');
-    rows.push({ key, data, block, source });
-  }
-  return rows;
-}
-
-async function analyzeProjectProfile(project, meta, rows, emit) {
-  const existing = meta.epics.map(e => ({ title: e.title, abstract: e.abstract, sessionIds: e.sessionIds }));
-  const header = `PROJECT: ${project}\nEXISTING EPICS (do not duplicate):\n${JSON.stringify(existing)}\n\n`;
-  const blocks = rows.map(row => row.block);
-  const budget = piTargetTokens() - 16000;
-  if (estimateInputTokens(header + blocks.join('\n\n')) <= budget) {
-    emit('Building the high-level project overview…', 1, 5);
-    return modelJson(await runPi(header + blocks.join('\n\n'), PROJECT_PROFILE_PROMPT));
-  }
-  const groups = packTextBlocks(blocks, budget - estimateInputTokens(header));
-  emit(`Building ${groups.length} project overview sections…`, 1, 5);
-  const partials = await mapLimit(groups, 2, (items, i) => runPi(
-    `${header}SECTION ${i + 1}/${groups.length}\n\n${items.join('\n\n')}`, PROJECT_PROFILE_PARTIAL_PROMPT));
-  emit('Merging the high-level project overview…', 1, 5);
-  return modelJson(await runPi(`${header}PARTIAL PROFILES:\n${partials.join('\n\n=== PARTIAL ===\n')}`, PROJECT_PROFILE_PROMPT));
-}
-
-function projectIntentItems(rows) {
-  const items = [];
-  let id = 0;
-  for (const row of rows) {
-    let previousAssistant = '';
-    const messages = row.data.messages || [];
-    for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
-      if (message.role === 'assistant') previousAssistant = message.text || '';
-      if (message.role !== 'user') continue;
-      items.push({
-        id: id++, key: row.key, messageIndex: i, ts: message.ts || row.data.firstTs || null,
-        title: row.data.title || '', user: message.text || '', assistantBefore: previousAssistant,
-      });
-    }
-  }
-  return items;
-}
-
-async function classifyProjectIntent(project, overview, items, emit) {
-  const compact = items.map(item => ({
-    id: item.id, sessionId: item.key, date: item.ts,
-    assistantBefore: clipped(item.assistantBefore, 6000), user: clipped(item.user, 12000),
-  }));
-  const prefix = JSON.stringify({ project, overview });
-  const blocks = compact.map(item => JSON.stringify(item));
-  const groups = packTextBlocks(blocks, piTargetTokens() - estimateInputTokens(prefix) - 12000);
-  let done = 0;
-  const results = await mapLimit(groups, 2, async group => {
-    emit(`Classifying user intent ${++done}/${groups.length}…`, 2, 5);
-    const raw = await runPi(JSON.stringify({ project, overview, messages: group.map(line => JSON.parse(line)) }), INTENT_CLASSIFY_PROMPT);
-    return modelJson(raw).selected || [];
-  });
-  const byId = new Map(items.map(item => [item.id, item]));
-  const selected = [];
-  const seen = new Set();
-  for (const result of results.flat()) {
-    const item = byId.get(Number(result.id));
-    if (!item || seen.has(item.id)) continue;
-    seen.add(item.id);
-    selected.push({ ...item, kind: result.kind || 'outcome', confidence: Number(result.confidence) || 0, reason: oneLine(result.reason, '') });
-  }
-  return selected;
-}
-
-function intentEvidenceBlock(item) {
-  return [
-    `=== INTENT EVIDENCE ${item.id} ===`,
-    `Session: ${item.key}`,
-    `Date: ${item.ts || '?'}`,
-    `Kind: ${item.kind}; classifier reason: ${item.reason || '?'}`,
-    '', 'ASSISTANT BEFORE:', clipped(item.assistantBefore, 10000) || '(none)',
-    '', 'USER:', clipped(item.user, 24000),
-  ].join('\n');
-}
-
-async function synthesizeProjectIntent(project, overview, selected, emit) {
-  if (!selected.length) return {
-    coreIntent: overview.purpose || overview.summary || '', vision: overview.vision || '',
-    whatMatters: overview.principles || [], desiredOutcomes: overview.desiredOutcomes || [],
-    principles: overview.principles || [], constraints: [], tensions: [], nonGoals: overview.nonGoals || [], openIntentQuestions: [],
-  };
-  const header = `PROJECT: ${project}\nHIGH-LEVEL OVERVIEW:\n${JSON.stringify(overview)}\n\n`;
-  const blocks = selected.map(intentEvidenceBlock);
-  const budget = piTargetTokens() - 16000;
-  emit(`Synthesizing ${selected.length} intent messages…`, 3, 5);
-  if (estimateInputTokens(header + blocks.join('\n\n')) <= budget) {
-    return modelJson(await runPi(header + blocks.join('\n\n'), INTENT_SYNTHESIS_PROMPT));
-  }
-  const groups = packTextBlocks(blocks, budget - estimateInputTokens(header));
-  const partials = await mapLimit(groups, 2, (items, i) => runPi(
-    `${header}INTENT SECTION ${i + 1}/${groups.length}\n\n${items.join('\n\n')}`, INTENT_PARTIAL_PROMPT));
-  return modelJson(await runPi(`${header}PARTIAL INTENT MODELS:\n${partials.join('\n\n=== PARTIAL ===\n')}`, INTENT_MERGE_PROMPT));
-}
-
 const mdList = (items, empty = 'None found.') => {
   const values = stringItems(items);
   return values.length ? values.map(item => `- ${item}`).join('\n') : `- ${empty}`;
@@ -3178,41 +3045,8 @@ function projectDocMeta(project, builtAt, sourceHash) {
   return `- **Project:** ${project}\n- **Generated:** ${new Date(builtAt).toISOString()}\n- **Source snapshot:** ${sourceHash}`;
 }
 
-function renderProjectOverviewDoc(project, profile, builtAt, sourceHash) {
-  const o = profile.overview || {};
-  return `# Project overview: ${project}\n\n**Abstract.** ${o.summary || ''}\n\n${projectDocMeta(project, builtAt, sourceHash)}\n\n## Purpose\n\n${o.purpose || '(not established)'}\n\n## Vision\n\n${o.vision || '(not established)'}\n\n## Desired outcomes\n\n${mdList(o.desiredOutcomes)}\n\n## Product principles\n\n${mdList(o.principles)}\n\n## Non-goals\n\n${mdList(o.nonGoals)}\n`;
-}
-
 function quoteIntent(text) {
   return clipped(text, 1600).split('\n').map(line => `> ${line}`).join('\n');
-}
-
-function renderProjectIntentDoc(project, intent, selected, builtAt, sourceHash) {
-  const parts = [
-    `# Deep project intent: ${project}`, '',
-    `**Abstract.** ${intent.coreIntent || intent.vision || ''}`, '', projectDocMeta(project, builtAt, sourceHash), '',
-    '## Core intent', '', intent.coreIntent || '(not established)', '',
-    '## Vision', '', intent.vision || '(not established)', '',
-    '## What matters', '', mdList(intent.whatMatters), '',
-    '## Desired outcomes', '', mdList(intent.desiredOutcomes), '',
-    '## Durable principles', '', mdList(intent.principles), '',
-    '## Durable constraints', '', mdList(intent.constraints), '',
-    '## Tensions and trade-offs', '', mdList(intent.tensions), '',
-    '## Non-goals', '', mdList(intent.nonGoals), '',
-    '## Open intent questions', '', mdList(intent.openIntentQuestions), '',
-    '## Intent evidence', '',
-    'The classifier selected these user messages. The preceding assistant response is kept in the saved evidence snapshot.', '',
-  ];
-  for (const item of selected) {
-    parts.push(
-      `### ${String(item.ts || '?').slice(0, 10)} — ${oneLine(item.title, '(untitled)')}`, '',
-      `- **Kind:** ${item.kind}`, `- **Why selected:** ${item.reason || '(no reason)'}`,
-      `- **Session:** \`${item.key}\``, `- **Message:** #${item.messageIndex}`,
-      `- **Original transcript:** \`${absPathForKey(item.key) || '?'}\``, '',
-      quoteIntent(item.user), ''
-    );
-  }
-  return parts.join('\n');
 }
 
 function renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash) {
@@ -3367,7 +3201,7 @@ async function extractLeaf(key) {
     const groups = packTextBlocks(blocks, Math.max(20000, budget));
     return mapLimit(groups, 2, async (items, i) => {
       const label = groups.length > 1 ? `SECTION ${i + 1}/${groups.length}\n\n` : '';
-      try { return modelJson(await runPi(head + label + items.join('\n\n'), prompt)); }
+      try { return await runPiJson(head + label + items.join('\n\n'), prompt); }
       catch (e) { throw new Error(`leaf extraction failed (${key}): ${e.message}`); }
     });
   };
@@ -3545,13 +3379,13 @@ async function synthesizeLaneJson(header, blocks, prompt, emit, label, step, ste
   const whole = header + blocks.join('\n\n');
   if (estimateInputTokens(whole) <= budget) {
     emit(label + '…', step, steps);
-    return modelJson(await runPi(whole, prompt));
+    return runPiJson(whole, prompt);
   }
   const groups = packTextBlocks(blocks, Math.max(20000, budget - estimateInputTokens(header)));
   emit(`${label} (${groups.length} sections)…`, step, steps);
   const partials = await mapLimit(groups, 2, (items, i) =>
     runPi(`${header}SECTION ${i + 1}/${groups.length}\n\n${items.join('\n\n')}`, prompt + PYRAMID_PARTIAL_SUFFIX));
-  return modelJson(await runPi(`${header}PARTIAL RESULTS:\n${partials.join('\n\n=== PARTIAL ===\n')}`, prompt + PYRAMID_MERGE_SUFFIX));
+  return runPiJson(`${header}PARTIAL RESULTS:\n${partials.join('\n\n=== PARTIAL ===\n')}`, prompt + PYRAMID_MERGE_SUFFIX);
 }
 
 const laneHashOf = items => crypto.createHash('sha256').update('lane-v1\x00' + JSON.stringify(items)).digest('hex').slice(0, 32);
@@ -3570,14 +3404,14 @@ async function weighIntentCandidates(project, overview, candidates, emit, step, 
   emit(`Weighing ${candidates.length} intent quotes${groups.length > 1 ? ` (${groups.length} sections)` : ''}…`, step, steps);
   const partials = await mapLimit(groups, 2, async (items, i) => {
     const label = groups.length > 1 ? `SECTION ${i + 1}/${groups.length}\n\n` : '';
-    return modelJson(await runPi(header + label + items.join('\n'), PYRAMID_WEIGH_PROMPT));
+    return runPiJson(header + label + items.join('\n'), PYRAMID_WEIGH_PROMPT);
   });
   let rows = partials.flatMap(p => Array.isArray(p.tiers) ? p.tiers : []);
   if (groups.length > 1) {
     // Sections could not compare across each other — one cheap merge pass over
     // the one-line assignments restores global consistency.
     const compact = rows.map(t => JSON.stringify({ id: t.id, tier: t.tier, note: oneLine(t.note, '') }));
-    const merged = modelJson(await runPi(header + compact.join('\n'), PYRAMID_WEIGH_MERGE_PROMPT));
+    const merged = await runPiJson(header + compact.join('\n'), PYRAMID_WEIGH_MERGE_PROMPT);
     if (Array.isArray(merged.tiers) && merged.tiers.length) rows = merged.tiers;
   }
   const valid = new Set(['core', 'standing', 'pattern', 'superseded', 'one-off']);
@@ -3646,15 +3480,67 @@ function pyramidIntentBlock(item, tierInfo) {
 
 // Regenerate all four documents from the current leaves. Lanes whose input
 // set is unchanged skip their model call and keep the existing file.
+// Epics are recursive projects: the same four documents, synthesized from
+// the leaf subset of the epic's conversations.
+function epicMemoryPaths(epicId) {
+  const dir = path.join(NOTES_DIR, 'epics', epicId + '-mem');
+  return {
+    dir,
+    manifest: path.join(dir, 'manifest.json'),
+    overview: path.join(dir, 'overview.md'),
+    intent: path.join(dir, 'intent.md'),
+    environment: path.join(dir, 'environment.md'),
+    status: path.join(dir, 'status.md'),
+  };
+}
+
+async function epicMemoryInfo(epic) {
+  try {
+    const manifest = JSON.parse(await fsp.readFile(epicMemoryPaths(epic.id).manifest, 'utf8'));
+    const entries = (epic.sessionIds || []).filter(id => index[id]).map(key => ({ key, entry: index[key] }));
+    return {
+      builtAt: manifest.builtAt, stale: manifest.sourceHash !== projectSourceHash({ entries }),
+      overview: manifest.overview || {}, coreIntent: manifest.coreIntent || null,
+    };
+  } catch { return null; }
+}
+
+async function epicMemoryDocument(epicId, kind) {
+  const paths = epicMemoryPaths(epicId);
+  const file = ({ overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status })[kind];
+  if (!file) throw new Error('unknown epic memory document');
+  return { epicId, kind, path: file, text: await fsp.readFile(file, 'utf8') };
+}
+
 async function regenerateProjectDocs(project, emit = () => {}) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
+  return regenerateDocsCore({
+    label: project, entries: meta.entries, paths: projectMemoryPaths(project),
+    existingEpics: meta.epics, discoverCandidates: true,
+    inputsPath: path.join(PROJECT_MEMORY_INPUTS_DIR, projectMemorySlug(project) + '-pyramid.json'),
+  }, emit);
+}
+
+async function regenerateEpicDocs(epicId, emit = () => {}) {
+  const epic = epics[epicId];
+  if (!epic) throw new Error('epic not found');
+  const entries = (epic.sessionIds || []).filter(id => index[id]).map(key => ({ key, entry: index[key] }));
+  if (!entries.length) throw new Error('epic has no readable conversations');
+  return regenerateDocsCore({
+    label: `${epic.title || epicId} (epic)`, entries, paths: epicMemoryPaths(epicId),
+    existingEpics: [], discoverCandidates: false,
+    inputsPath: path.join(PROJECT_MEMORY_INPUTS_DIR, 'epic-' + epicId + '-pyramid.json'),
+  }, emit);
+}
+
+async function regenerateDocsCore({ label, entries, paths, existingEpics, discoverCandidates, inputsPath }, emit = () => {}) {
+  const project = label;
   emit('Reading memory leaves…', 0, 5);
-  const rows = (await mapLimit(meta.entries, 16, async ({ key, entry }) => ({ key, entry, leaf: await readLeaf(key) })))
+  const rows = (await mapLimit(entries, 16, async ({ key, entry }) => ({ key, entry, leaf: await readLeaf(key) })))
     .filter(r => r.leaf)
     .sort((a, b) => String(a.leaf.span?.firstTs || '').localeCompare(String(b.leaf.span?.firstTs || '')));
   if (!rows.length) throw new Error('no memory leaves yet — run the leaf backfill first');
-  const paths = projectMemoryPaths(project);
   let prev = null;
   try { prev = JSON.parse(await fsp.readFile(paths.manifest, 'utf8')); } catch {}
   const prevHashes = (prev && prev.pyramid && prev.pyramid.laneHashes) || {};
@@ -3686,7 +3572,8 @@ async function regenerateProjectDocs(project, emit = () => {}) {
 
   // Overview first: it is cheap and feeds the weighing and the intent
   // synthesis as context.
-  const header = `PROJECT: ${project}\nEXISTING EPICS (do not duplicate):\n${JSON.stringify(meta.epics.map(e => ({ title: e.title, sessionIds: e.sessionIds })))}\n\n`;
+  const header = `PROJECT: ${project}\n` +
+    (discoverCandidates ? `EXISTING EPICS (do not duplicate):\n${JSON.stringify(existingEpics.map(e => ({ title: e.title, sessionIds: e.sessionIds })))}\n` : 'This is one epic (workstream) of a larger project — describe THIS epic, not the whole project. Skip epicCandidates.\n') + '\n';
   let profile = null;
   if (skip('overview') && prev && prev.overview) {
     emit('Overview unchanged — keeping it.', 1, 6);
@@ -3728,15 +3615,15 @@ async function regenerateProjectDocs(project, emit = () => {}) {
 
   emit('Writing project memory documents…', 5, 6);
   const builtAt = Date.now();
-  const sourceHash = projectSourceHash(meta);
-  const candidates = cleanEpicCandidates(profile, meta);
+  const sourceHash = projectSourceHash({ entries });
+  const candidates = discoverCandidates ? cleanEpicCandidates(profile, { entries, epics: existingEpics }) : [];
   await fsp.mkdir(paths.dir, { recursive: true });
   const writes = [];
   if (!skip('overview')) writes.push(fsp.writeFile(paths.overview, renderPyramidOverviewDoc(project, profile, builtAt, sourceHash)));
   if (intent) writes.push(fsp.writeFile(paths.intent, renderPyramidIntentDoc(project, intent, weighedQuotes, tiers, builtAt, sourceHash)));
   if (environment) writes.push(fsp.writeFile(paths.environment, renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash)));
   if (status) writes.push(fsp.writeFile(paths.status, renderProjectStatusDoc(project, status, builtAt, sourceHash)));
-  writes.push(fsp.writeFile(path.join(PROJECT_MEMORY_INPUTS_DIR, projectMemorySlug(project) + '-pyramid.json'), JSON.stringify({
+  writes.push(fsp.writeFile(inputsPath, JSON.stringify({
     project, builtAt, sourceHash, laneHashes, leaves: rows.map(r => ({ key: r.key, state: leafStateFor(r.entry, r.leaf) })),
     intentQuotes: intentSelected.length, weighedQuotes: weighedQuotes.length,
     tiers: [...tiers.entries()].map(([id, t]) => ({ id, ...t })),
@@ -3749,51 +3636,11 @@ async function regenerateProjectDocs(project, emit = () => {}) {
     selectedIntentMessages: intentSelected.length,
     coreIntent: (intent && intent.coreIntent) || (prev && prev.coreIntent) || null,
     overview: profile.overview || (prev && prev.overview) || {}, candidates,
-    paths: { overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status, inputs: paths.inputs },
+    paths: { overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status, inputs: inputsPath },
     pyramid: { v: 2, builtAt, laneHashes, leafCount: rows.length, seededLeaves: rows.filter(r => r.leaf.partial).length },
   };
   await fsp.writeFile(paths.manifest, JSON.stringify(manifest));
   emit('Project memory saved.', 6, 6);
-  return manifest;
-}
-
-async function buildProjectMemory(project, emit = () => {}) {
-  const meta = projectMetaFor(project);
-  if (!meta) throw new Error('project not found');
-  const sourceHash = projectSourceHash(meta);
-  emit('Reading project memory sources…', 0, 5);
-  const rows = await projectSourceBlocks(meta);
-  if (!rows.length) throw new Error('no readable project conversations');
-  const profile = await analyzeProjectProfile(project, meta, rows, emit);
-  profile.status = normalizeProjectStatus(profile.status);
-  const items = projectIntentItems(rows);
-  const selected = await classifyProjectIntent(project, profile.overview || {}, items, emit);
-  const intent = await synthesizeProjectIntent(project, profile.overview || {}, selected, emit);
-  emit('Writing project memory documents…', 4, 5);
-  const builtAt = Date.now();
-  const paths = projectMemoryPaths(project);
-  await fsp.mkdir(paths.dir, { recursive: true });
-  const candidates = cleanEpicCandidates(profile, meta);
-  await Promise.all([
-    fsp.writeFile(paths.overview, renderProjectOverviewDoc(project, profile, builtAt, sourceHash)),
-    fsp.writeFile(paths.intent, renderProjectIntentDoc(project, intent, selected, builtAt, sourceHash)),
-    fsp.writeFile(paths.environment, renderProjectEnvironmentDoc(project, profile.environment, builtAt, sourceHash)),
-    fsp.writeFile(paths.status, renderProjectStatusDoc(project, profile.status, builtAt, sourceHash)),
-    fsp.writeFile(paths.inputs, JSON.stringify({
-      project, builtAt, sourceHash,
-      sourceSessions: rows.map(row => ({ key: row.key, source: row.source })),
-      classifiedMessages: items.length,
-      selectedIntentMessages: selected.map(item => ({ ...item, originalPath: absPathForKey(item.key) })),
-      profile, intent,
-    })),
-  ]);
-  const manifest = {
-    project, builtAt, sourceHash, conversations: rows.length, classifiedMessages: items.length,
-    selectedIntentMessages: selected.length, overview: profile.overview || {}, candidates,
-    paths: { overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status, inputs: paths.inputs },
-  };
-  await fsp.writeFile(paths.manifest, JSON.stringify(manifest));
-  emit('Project memory saved.', 5, 5);
   return manifest;
 }
 
@@ -3962,7 +3809,15 @@ async function buildEpic(ids, epicId = null, focus = '', assignedId = null, emit
 
 async function epicResponse(epic) {
   const sessions = epic.sessionIds.filter(id => index[id]).map(id => ({ key: id, ...index[id] }));
-  return { ...epic, text: await fsp.readFile(epic.notePath, 'utf8'), sessions };
+  const leaves = { fresh: 0, stale: 0, seeded: 0, missing: 0 };
+  for (const s of sessions) leaves[leafStateFor(s, await readLeaf(s.key))]++;
+  const docsJob = memoryDocsJobs.get('epic:' + epic.id);
+  return {
+    ...epic, text: await fsp.readFile(epic.notePath, 'utf8'), sessions,
+    project: sessions.length ? projectOfEntry(sessions[0]) : null,
+    memory: await epicMemoryInfo(epic), leaves,
+    docsRunning: !!(docsJob && !docsJob.finished),
+  };
 }
 
 async function epicEvidenceResponse(epic) {
@@ -4001,7 +3856,6 @@ async function epicEvidenceResponse(epic) {
 // Background jobs survive browser navigation. Finished jobs stay visible for one hour.
 const distillJobs = new Map(); // key -> job
 const projectDistillJobs = new Map(); // project -> batch job
-const projectMemoryJobs = new Map(); // project -> project memory job
 const evidenceJobs = new Map(); // batch id -> job
 const epicJobs = new Map();    // epic id -> job
 const memoryExtractJobs = new Map(); // batch id -> leaf extraction job
@@ -4031,7 +3885,7 @@ function jobChanged(job) {
 
 function allJobs() {
   const cutoff = Date.now() - JOB_KEEP_MS;
-  return [...distillJobs.values(), ...projectDistillJobs.values(), ...projectMemoryJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...memoryExtractJobs.values(), ...memoryDocsJobs.values(), ...memoryBackfillJobs.values(), ...agentRunJobs.values()]
+  return [...distillJobs.values(), ...projectDistillJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...memoryExtractJobs.values(), ...memoryDocsJobs.values(), ...memoryBackfillJobs.values(), ...agentRunJobs.values()]
     .map(jobView)
     .concat([...restoredRunJobs.values()].filter(j => (j.finishedAt || 0) > cutoff))
     .sort((a, b) => b.startedAt - a.startedAt);
@@ -4150,37 +4004,6 @@ function startProjectDistillJob(project) {
   return job;
 }
 
-function startProjectMemoryJob(project) {
-  const running = projectMemoryJobs.get(project);
-  if (running && !running.finished) return running;
-  if (!projectMetaFor(project)) throw new Error('project not found');
-  const job = {
-    id: 'project-memory:' + project, type: 'project-memory', project,
-    title: `${project}: build project memory`, status: 'running', statusText: 'Starting project memory…',
-    done: 0, total: 5, startedAt: Date.now(), finished: false,
-    model: currentModelLabel(),
-  };
-  projectMemoryJobs.set(project, job);
-  jobChanged(job);
-  job.completion = (async () => {
-    try {
-      const result = await buildProjectMemory(project, (text, done, total) => {
-        job.statusText = text; job.done = done; job.total = total; jobChanged(job);
-      });
-      job.status = 'done';
-      job.statusText = 'Project memory saved.';
-      job.done = job.total;
-      job.result = { project, paths: result.paths, candidates: result.candidates.length };
-    } catch (e) {
-      job.status = 'error'; job.statusText = e.message; job.error = e.message;
-    } finally {
-      job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
-      setTimeout(() => { if (projectMemoryJobs.get(project) === job) projectMemoryJobs.delete(project); }, 60 * 60 * 1000);
-    }
-  })();
-  return job;
-}
-
 // ---- memory pyramid jobs ----
 
 // A batch of leaf extractions. Each leaf fails alone; the batch reports the
@@ -4226,28 +4049,40 @@ function startMemoryExtractJob(ids, label = null) {
 }
 
 function startMemoryDocsJob(project) {
-  const running = memoryDocsJobs.get(project);
-  if (running && !running.finished) return running;
   if (!projectMetaFor(project)) throw new Error('project not found');
+  return startDocsJobCore(project, project + ': regenerate memory documents', project, null,
+    emit => regenerateProjectDocs(project, emit));
+}
+
+function startEpicDocsJob(epicId) {
+  const epic = epics[epicId];
+  if (!epic) throw new Error('epic not found');
+  return startDocsJobCore('epic:' + epicId, (epic.title || epicId) + ': regenerate epic memory', null, epicId,
+    emit => regenerateEpicDocs(epicId, emit));
+}
+
+function startDocsJobCore(mapKey, title, project, epicId, run) {
+  const running = memoryDocsJobs.get(mapKey);
+  if (running && !running.finished) return running;
   const job = {
-    id: 'memory-docs:' + project, type: 'memory-docs', project,
-    title: `${project}: regenerate memory documents`, status: 'running', statusText: 'Reading memory leaves…',
+    id: 'memory-docs:' + mapKey, type: 'memory-docs', project, epicId,
+    title, status: 'running', statusText: 'Reading memory leaves…',
     done: 0, total: 5, startedAt: Date.now(), finished: false, model: currentModelLabel(),
   };
-  memoryDocsJobs.set(project, job);
+  memoryDocsJobs.set(mapKey, job);
   jobChanged(job);
   job.completion = (async () => {
     try {
-      const manifest = await regenerateProjectDocs(project, (text, done, total) => {
+      const manifest = await run((text, done, total) => {
         job.statusText = text; job.done = done; job.total = total; jobChanged(job);
       });
-      job.status = 'done'; job.statusText = 'Project memory regenerated.'; job.done = job.total;
-      job.result = { project, paths: manifest.paths, candidates: (manifest.candidates || []).length };
+      job.status = 'done'; job.statusText = 'Memory documents regenerated.'; job.done = job.total;
+      job.result = { project, epicId, paths: manifest.paths, candidates: (manifest.candidates || []).length };
     } catch (e) {
       job.status = 'error'; job.statusText = e.message; job.error = e.message;
     } finally {
       job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
-      setTimeout(() => { if (memoryDocsJobs.get(project) === job) memoryDocsJobs.delete(project); }, 60 * 60 * 1000);
+      setTimeout(() => { if (memoryDocsJobs.get(mapKey) === job) memoryDocsJobs.delete(mapKey); }, 60 * 60 * 1000);
     }
   })();
   return job;
@@ -5207,7 +5042,7 @@ function shellSegments(command) {
     }
     if (char === '"' || char === "'") { quote = char; part += char; continue; }
     const pair = text.slice(i, i + 2);
-    if (char === '\n' || char === ';' || pair === '&&' || pair === '||') {
+    if (char === '\n' || char === ';' || char === '|' || pair === '&&' || pair === '||') {
       if (part.trim()) out.push(part.trim());
       part = '';
       if (pair === '&&' || pair === '||') i++;
@@ -5358,6 +5193,11 @@ async function conversationFileEventResponse(key, callId, tsValue, pathValue) {
   if (!entry) throw new Error('not found');
   const events = await conversationDiffs(key);
   let picked = callId ? events.filter(e => e.callId === callId) : [];
+  // One bash call can touch several files; the clicked path narrows the view.
+  if (picked.length > 1 && pathValue) {
+    const byPath = picked.filter(e => e.path === pathValue || e.relativePath === pathValue || e.path.endsWith('/' + pathValue));
+    if (byPath.length) picked = byPath;
+  }
   if (!picked.length && pathValue) {
     const same = events.filter(e => e.path === pathValue || e.relativePath === pathValue || e.path.endsWith('/' + pathValue));
     const wantMs = Date.parse(tsValue || '');
@@ -7393,6 +7233,21 @@ async function buildProjectContextBundle(project, include, focusName) {
     parts.push('', '## Epics (cross-session narratives)', '', blocks.join('\n\n---\n\n'));
   }
 
+  // Starting from an epic: its own four memory documents ride along, so the
+  // new agent gets the epic map in addition to the project map.
+  if (include.epicMemory && epics[include.epicMemory]) {
+    const blocks = [];
+    for (const kind of ['overview', 'intent', 'environment', 'status']) {
+      try {
+        const doc = await epicMemoryDocument(include.epicMemory, kind);
+        blocks.push(`### epic ${kind} · ${doc.path} ${trustLabel(doc.path)}\n\n${doc.text.trim()}`);
+      } catch {}
+    }
+    if (blocks.length) {
+      parts.push('', `## Epic memory: ${epics[include.epicMemory].title || include.epicMemory}`, '', blocks.join('\n\n---\n\n'));
+    }
+  }
+
   let noteCount = 0;
   if (includeFlag(include, 'notes')) {
     const blocks = [];
@@ -8108,6 +7963,15 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/project/memory/file' && req.method === 'GET') {
       try { json(res, 200, await projectMemoryDocument(u.searchParams.get('name') || '', u.searchParams.get('kind') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/epic/memory/file' && req.method === 'GET') {
+      try { json(res, 200, await epicMemoryDocument(u.searchParams.get('id') || '', u.searchParams.get('kind') || '')); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/epic/memory/regenerate' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 202, jobView(startEpicDocsJob(parsed.id || ''))); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/memory/leaf' && req.method === 'GET') {
       const key = u.searchParams.get('id') || '';
       if (!index[key]) return json(res, 404, { error: 'not found' });
@@ -8134,12 +7998,6 @@ const server = http.createServer(async (req, res) => {
         }
         json(res, 202, jobView(startMemoryBackfillJob(parsed.project || '')));
       } catch (e) { json(res, 400, { error: e.message }); }
-    } else if (u.pathname === '/api/project/memory/build' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const parsed = JSON.parse(body || '{}');
-      try { json(res, 202, jobView(startProjectMemoryJob(parsed.project || ''))); }
-      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/distill' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;

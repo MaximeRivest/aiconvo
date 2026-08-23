@@ -407,9 +407,6 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .phead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; background: var(--bg); border-bottom: 1px solid var(--border); border-left: 4px solid var(--accent); padding: var(--sp-2) 0 var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); }
 .phead h2 { margin: 0 0 2px; font-size: var(--fs-title); }
 .pmeta { color: var(--text-dim); font-size: var(--fs-meta); margin-bottom: var(--sp-2); }
-.pdefault-model { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; font-size: var(--fs-meta); color: var(--text-dim); }
-.pdefault-model > span:first-child { color: var(--text-faint); }
-.pdefault-model .hint { margin-left: 2px; }
 .pactions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 /* ---- project folds: chips, suggestions, and the fold picker ---- */
 .pfolds, .pfold-suggest { margin-top: var(--sp-2); font-size: var(--fs-meta); color: var(--text-dim); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
@@ -422,24 +419,27 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .pfold-confirm { border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text); padding: var(--sp-2) var(--sp-3); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; font-size: var(--fs-meta); }
 .psection { margin: 0 0 var(--sp-4); }
 .psection > h3 { font-size: var(--fs-label); color: var(--text-faint); border-bottom: 1px solid var(--border); padding-bottom: 4px; margin: 0 0 8px; }
-.pcard { border: 1px solid var(--border); border-left: 4px solid var(--magenta); margin: 0 0 var(--sp-2); background: var(--surface-1); }
-.pcard > summary { cursor: pointer; padding: 8px 10px; display: flex; gap: 8px; align-items: baseline; }
-.pcard > summary::-webkit-details-marker { display: none; }
-.pcard .ptitle { font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pcard .pkind { color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; }
-.pcard .pbody { border-top: 1px solid var(--border); padding: 8px 10px; font-size: var(--fs-meta); }
-.pcard .pbody p { margin: 0 0 6px; }
-.pcard .pbuttons { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: 8px; }
-.pfresh { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); border: 1px solid var(--border); margin-bottom: var(--sp-2); }
-.pfresh > div { padding: 8px 10px; border-right: 1px solid var(--border); }
-.pfresh > div:last-child { border-right: 0; }
-.pfresh b { display: block; font-size: 14px; }
-.pfresh span { color: var(--text-faint); font-size: var(--fs-micro); }
-.plauncher { border: 1px solid var(--border-strong); background: var(--surface-1); padding: var(--sp-3); }
-.plauncher label { display: block; margin: 8px 0 3px; color: var(--text-faint); font-size: var(--fs-micro); }
-.plauncher input[type=text], .plauncher select { width: 100%; max-width: 360px; }
-.plauncher .mem { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-2) 0; }
-.plauncher .mem label { margin: 0; color: var(--text); font-size: var(--fs-meta); }
+/* mini gantt: the hero timeline of one project or epic */
+.mgantt { border: 1px solid var(--border); background: var(--surface-1); margin: 0 0 var(--sp-4); }
+.mg-lanes { position: relative; overflow: hidden; }
+.mg-lanes.scroll { overflow-y: auto; scrollbar-width: thin; }
+.mg-inner { position: relative; }
+.mg-bar { position: absolute; height: 16px; margin-top: 2px; border: 0; border-radius: 0; border-left: 3px solid var(--accent); background: var(--surface-2); color: var(--text-dim); font-family: var(--font); font-size: var(--fs-micro); line-height: 16px; text-align: left; padding: 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; min-width: 4px; }
+.mg-bar:hover { color: var(--text); outline: 1px solid var(--accent); z-index: 2; }
+.mg-bar.active { color: var(--ok); }
+.mg-axis { position: relative; height: 15px; border-top: 1px solid var(--border); color: var(--text-faint); font-size: var(--fs-micro); overflow: hidden; }
+.mg-tick { position: absolute; top: 1px; transform: translateX(-50%); }
+.mg-tick.first { transform: none; }
+.mg-tick.last { transform: translateX(-100%); }
+/* redesigned project/epic panel */
+.pdesc .pidentity { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 4px; }
+.pdesc .psummary { margin: 0 0 var(--sp-3); max-width: 78ch; }
+.pdocbtns { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2); margin: 0 0 var(--sp-2); }
+.pdocbtns button { height: 34px; text-align: left; padding: 0 10px; }
+.pmemline { font-size: var(--fs-micro); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pmemline button { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); }
+.pnewrow { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-4) 0; }
+.pfoldbtn { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); margin-left: 6px; }
 .settings-view { max-width: var(--read-max); margin: 0 auto; }
 .settings-view .hint { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
 .settings-tools { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: 0 0 var(--sp-2); }
@@ -816,18 +816,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 
 
 /* launcher mode row + overlays (mode manager, mode form, context confirm) */
-.pmoderow { display: flex; gap: 6px; align-items: center; }
-.pmoderow select { flex: 1 1 auto; min-width: 0; }
-.pmodewarn { color: var(--warn); }
-.mode-manage, .mode-form, .ctx-confirm { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: var(--overlay); padding: 16px; }
+.mode-form, .ctx-confirm { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: var(--overlay); padding: 16px; }
 .mm-card, .mf-card, .cc-card { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); display: flex; flex-direction: column; gap: 8px; padding: 12px; width: min(680px, 94vw); max-height: 90vh; }
 .mm-head { display: flex; align-items: baseline; gap: 10px; }
 .mm-head b { flex: 0 0 auto; }
 .mm-head .hint, .mm-head span { flex: 1 1 auto; }
-.mm-list { overflow: auto; display: flex; flex-direction: column; gap: 2px; min-height: 120px; }
-.mm-row { display: flex; gap: 8px; align-items: center; border: 1px solid var(--border); padding: 6px 8px; }
-.mm-row .mm-info { flex: 1 1 auto; min-width: 0; }
-.mm-btns { display: flex; gap: 4px; flex: 0 0 auto; }
 .mm-foot, .cc-foot, .mf-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .mf-foot .mf-err { flex: 1 1 auto; color: var(--warn); }
 .mf-body { overflow: auto; display: flex; flex-direction: column; gap: 6px; }
@@ -1369,12 +1362,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .pactions button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
   .pfolds { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .pfolds .fold-chip { flex: 0 0 auto; white-space: nowrap; }
-  .pfresh { grid-template-columns: 1fr 1fr; }
-  .pfresh > div { border-bottom: 1px solid var(--border); }
-  .plauncher { padding: 10px; }
-  .plauncher input[type=text], .plauncher select { max-width: none; }
-  .plauncher .mem { flex-direction: column; gap: 10px; }
-  .pcard > summary { min-height: 48px; align-items: center; }
   /* Note/memory reader: stack the section tree above the content. Side by
      side, a 320px tree leaves ~50px of text on a phone. */
   .nhead { position: static; padding: 10px; }
@@ -2425,7 +2412,7 @@ $('jobsList').onclick = e => {
     else open(job.key);
   } else if (job.type === 'evidence' && job.status === 'done' && (job.result?.sessionIds?.length === 1 || job.key)) {
     showConversationEvidence(job.key || job.result.sessionIds[0]);
-  } else if ((job.type === 'project-distill' || job.type === 'project-memory' || job.type === 'memory-docs' || job.type === 'memory-backfill') && job.project) {
+  } else if ((job.type === 'project-distill' || job.type === 'memory-docs' || job.type === 'memory-backfill') && job.project) {
     showProjectOverview(job.project);
   } else if (job.type === 'memory-extract' && job.key) {
     open(job.key);
@@ -6545,17 +6532,6 @@ async function openRepoFile(root, rel, backProject = null) {
 let projectOverview = null;
 let projectOverviewName = null;
 
-function projectFreshGlyph(state) {
-  return state === 'fresh' ? '<span class="ok">✓ fresh</span>' :
-    state === 'stale' ? '<span class="warn">⚠ stale</span>' :
-    state === 'seeded' ? '<span class="warn">◐ seeded</span>' :
-    state === 'empty' ? '<span class="dim">· empty</span>' : '<span class="dim">— missing</span>';
-}
-
-function projectStartDefaults(d) {
-  return localStorage.getItem('aiconvo.projectAgent:' + d.project) || 'pi';
-}
-
 // ---- launcher: pi prompt modes + reviewed inline context ----
 // Modes are ModeDef files owned by the modes extension (~/.pi/agent/modes).
 // The bundled context is composed here, edited by the user, and only then
@@ -6571,121 +6547,13 @@ async function refreshLauncherModes() {
   return launcherModes;
 }
 
-function selectedLauncherMode() {
-  const sel = $('pMode');
-  return launcherModes.find(m => m.key === (sel && sel.value)) || null;
-}
-
-function updateModeWarn() {
-  const warn = $('pModeWarn');
-  if (!warn) return;
-  const drops = (selectedLauncherMode()?.removeSections || []).filter(s => s === 'append_prompt' || s === 'project_context');
-  if (drops.length) {
-    warn.textContent = '⚠ this mode removes "' + drops.join('", "') + '" from the system prompt — the injected memory will NOT reach the model.';
-    warn.hidden = false;
-  } else {
-    warn.hidden = true;
-  }
-}
-
-async function loadLauncherModes(d) {
-  const sel = $('pMode');
-  if (!sel) return;
-  $('pModeManage').onclick = () => openModeManager(d);
-  renderLauncherModels(d);
-  await refreshLauncherModes();
-  if (!launcherModes.length) {
-    sel.innerHTML = '<option value="">(no modes found)</option>';
-    return;
-  }
-  const saved = localStorage.getItem('aiconvo.projectMode:' + d.project);
-  sel.innerHTML = launcherModes.map(m =>
-    `<option value="${esc(m.key)}">${esc(m.key)} — ${esc(m.label)}${m.custom ? '' : ' · built-in'}</option>`).join('');
-  sel.value = saved && launcherModes.some(m => m.key === saved) ? saved : 'coding';
-  if (!launcherModes.some(m => m.key === sel.value)) sel.value = launcherModes[0].key;
-  sel.onchange = () => {
-    localStorage.setItem('aiconvo.projectMode:' + d.project, sel.value);
-    updateModeWarn();
-  };
-  updateModeWarn();
-}
-
 // A launcher starts by inheriting the project default. Picking models here
 // creates an override for this new conversation only.
-function launcherModelsOf(d) {
-  if (Array.isArray(d.launchModels) && d.launchModels.length) return d.launchModels;
-  const model = d.resolvedDefaultModel;
-  return model ? [{ provider: model.provider, modelId: model.modelId }] : [];
-}
-function renderLauncherModels(d) {
-  const host = $('pModelStrip');
-  if (!host) return;
-  const inherited = !Array.isArray(d.launchModels) || !d.launchModels.length;
-  const inheritedLabel = d.resolvedDefaultModel && d.resolvedDefaultModel.source === 'pi' ? 'pi default' : 'project default';
-  const list = launcherModelsOf(d);
-  const label = list.length
-    ? esc(shortModelName(list[0].modelId)) + (list.length > 1 ? ` <span class="mmore">+${list.length - 1}</span>` : '')
-    : 'choose model';
-  host.innerHTML = `<button type="button" id="pModelPick" class="model-pick${inherited ? ' inherited' : ''}" title="${list.length
-    ? esc(list.map(m => m.provider + '/' + m.modelId).join('\n')) + (inherited ? '\ninherited · ' + inheritedLabel : '') + '\nClick to change for this conversation only.'
-    : 'Pick the model(s) for this conversation.'}">◇ <span class="mname">${label}</span>${inherited ? ` <span class="minherit">${inheritedLabel}</span>` : ''} ▾</button>` +
-    (inherited ? '' : `<button type="button" id="pModelReset" class="ghost" title="Drop the override and follow the ${inheritedLabel}">reset</button>`);
-  $('pModelPick').onclick = e => openModelPicker(e.currentTarget, {
-    multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId))
-  }, picked => {
-    d.launchModels = picked;
-    renderLauncherModels(d);
-  });
-  const reset = $('pModelReset');
-  if (reset) reset.onclick = () => { d.launchModels = null; renderLauncherModels(d); };
-}
-
 const MODE_SECTION_LABELS = {
   available_tools: 'available tools', custom_tools_note: 'custom tools note', guidelines: 'guidelines',
   pi_docs: 'pi docs', append_prompt: 'additional instructions (injected memory!)', project_context: 'project context files',
   skills: 'skills', date: 'current date', cwd: 'working directory',
 };
-
-function openModeManager(d) {
-  document.querySelectorAll('.mode-manage').forEach(el => el.remove());
-  const ov = document.createElement('div');
-  ov.className = 'mode-manage';
-  ov.innerHTML = `<div class="mm-card">
-    <div class="mm-head"><b>pi prompt modes</b><span class="hint">same files as the TUI (/mode, /mode-new, /mode-edit)</span><button type="button" class="ghost mm-close">close</button></div>
-    <div class="mm-list"></div>
-    <div class="mm-foot"><button type="button" class="primary mm-new">new mode</button></div>
-  </div>`;
-  document.body.appendChild(ov);
-  ov.querySelector('.mm-close').onclick = () => { ov.remove(); loadLauncherModes(d); };
-  ov.addEventListener('click', e => { if (e.target === ov) { ov.remove(); loadLauncherModes(d); } });
-  const list = ov.querySelector('.mm-list');
-  const repaint = () => {
-    list.innerHTML = launcherModes.map((m, i) => `<div class="mm-row">
-      <div class="mm-info"><b>${esc(m.label)}</b> <span class="dim">${esc(m.key)} · ${m.custom ? 'custom' : 'built-in'}${(m.removeSections || []).length ? ' · strips ' + m.removeSections.length + ' section(s)' : ''}</span>
-        <div class="hint">${esc(String(m.opener || m.appendix || m.systemPrompt || '').replace(/\s+/g, ' ').slice(0, 110))}</div></div>
-      <div class="mm-btns"><button type="button" data-mm-edit="${i}">${m.custom ? 'edit' : 'override'}</button>
-      ${m.custom ? `<button type="button" data-mm-del="${i}">delete</button>` : ''}</div>
-    </div>`).join('');
-    list.querySelectorAll('[data-mm-edit]').forEach(b => b.onclick = () => openModeForm(d, launcherModes[Number(b.dataset.mmEdit)], async () => {
-      await refreshLauncherModes();
-      repaint();
-    }));
-    list.querySelectorAll('[data-mm-del]').forEach(b => b.onclick = async () => {
-      const m = launcherModes[Number(b.dataset.mmDel)];
-      if (!confirm(`Delete custom mode "${m.key}"?`)) return;
-      const res = await fetch('/api/modes/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: m.key }) });
-      const out = await res.json();
-      if (out.error) return errToast(out.error);
-      await refreshLauncherModes();
-      repaint();
-    });
-  };
-  ov.querySelector('.mm-new').onclick = () => openModeForm(d, null, async () => {
-    await refreshLauncherModes();
-    repaint();
-  });
-  repaint();
-}
 
 function openModeForm(d, initial, onSaved) {
   document.querySelectorAll('.mode-form').forEach(el => el.remove());
@@ -6734,7 +6602,6 @@ function openModeForm(d, initial, onSaved) {
     if (out.error) { ov.querySelector('.mf-err').textContent = out.error; return; }
     toast('saved mode: ' + out.mode.key);
     closeAll();
-    await loadLauncherModes(d);
     if (onSaved) await onSaved();
   };
 }
@@ -6788,165 +6655,141 @@ function confirmFold(d, target, counts) {
   paint();
 }
 
-async function showProjectOverview(name) {
-  if (!name) return;
-  markSettingsClosed();
-  projectOverviewName = name;
-  setRoute('project', 'project=' + encodeURIComponent(name), [crumbHome(), { label: name, title: 'Project overview · ' + name }]);
-  $('view').innerHTML = `<div class="project-overview"><div class="phead"><h2>${esc(name)}</h2><div class="pmeta">loading project overview…</div></div></div>`;
-  const d = await (await fetch('/api/project?name=' + encodeURIComponent(name))).json();
-  if (d.error) {
-    $('view').innerHTML = `<div class="empty">could not open ${esc(name)}.<div class="hint">${esc(d.error)}</div></div>`;
-    return;
+// ---- mini gantt: conversations of one project or epic over time ----
+// The hero section: every conversation as a clickable bar on a time axis.
+function miniGanttHtml(rows) {
+  const now = Date.now();
+  const items = rows.map(r => {
+    const a = Date.parse(r.firstTs || r.lastTs || '') || 0;
+    const b = Math.max(a, Date.parse(r.lastTs || r.firstTs || '') || 0);
+    return { ...r, a, b };
+  }).filter(r => r.a).sort((x, y) => x.a - y.a);
+  if (!items.length) return '<div class="empty" style="margin:8px 0">no conversations yet.</div>';
+  const t0 = items[0].a;
+  const t1 = Math.max(now, ...items.map(i => i.b));
+  const span = Math.max(t1 - t0, 3600000);
+  const pos = t => ((t - t0) / span) * 100;
+  const laneEnds = [];
+  for (const it of items) {
+    const minGap = span * 0.008;
+    let lane = laneEnds.findIndex(end => end + minGap <= it.a);
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
+    laneEnds[lane] = Math.max(it.b, it.a + span * 0.01);
+    it.lane = lane;
   }
-  projectOverview = d;
-  const color = projectColor(name);
-  const recentEpicIds = d.epics.slice(0, 2).map(e => e.id);
-  const freshness = d.freshness || {};
+  const rowH = 20;
+  const fullH = laneEnds.length * rowH + 2;
+  const bars = items.map(it => {
+    const left = pos(it.a);
+    const width = Math.max(pos(it.b) - left, 0.6);
+    const active = it.mtimeMs && now - it.mtimeMs < 5 * 60 * 1000;
+    const label = width > 6 ? esc(String(it.title || '').slice(0, 70)) : '';
+    return `<button class="mg-bar${active ? ' active' : ''}" data-mg="${esc(it.key)}" style="left:${left}%;width:${width}%;top:${it.lane * rowH}px" title="${esc(it.title || it.key)}\n${fmtDate(it.firstTs)} → ${fmtDate(it.lastTs)}">${active ? '● ' : ''}${label}</button>`;
+  }).join('');
+  const ticks = [];
+  for (let i = 0; i <= 5; i++) {
+    const t = t0 + (span * i) / 5;
+    ticks.push(`<span class="mg-tick${i === 0 ? ' first' : i === 5 ? ' last' : ''}" style="left:${i * 20}%">${new Date(t).toISOString().slice(0, 10)}</span>`);
+  }
+  return `<div class="mgantt"><div class="mg-lanes${fullH > 242 ? ' scroll' : ''}" style="height:${Math.min(fullH, 242)}px"><div class="mg-inner" style="height:${fullH}px">${bars}</div></div><div class="mg-axis">${ticks.join('')}</div></div>`;
+}
+
+function wireMiniGantt(root) {
+  root.querySelectorAll('[data-mg]').forEach(b => b.onclick = () => open(b.dataset.mg));
+}
+
+// ---- reviewed conversation start (project panel and epic panel) ----
+// From the panel the context is ALWAYS reviewed before it goes; the quick
+// unreviewed path lives on the transcript's + button (startSiblingConversation).
+async function startReviewedConversation(project, opts = {}) {
+  if (!project || project === '?') return errToast('no project to start in');
+  document.querySelectorAll('.ctx-confirm').forEach(el => el.remove());
+  const include = { map: true, epics: opts.epicId ? [opts.epicId] : [], notes: false, evidenceKeys: [], epicMemory: opts.epicId || null };
+  let bundle = null;
+  try { bundle = await postJson('/api/project/context', { project, name: '', include }); } catch {}
+  if (!bundle || bundle.error) return errToast('could not build context: ' + ((bundle && bundle.error) || 'network error'));
+  const ov = document.createElement('div');
+  ov.className = 'ctx-confirm';
+  ov.innerHTML = `<div class="cc-card">
+    <div class="cc-head"><b>review the context before it goes</b><span class="dim cc-size"></span></div>
+    <div class="cc-meta dim">project map${opts.epicId ? ' + epic memory' : ''} · injected into the system prompt · project default model</div>
+    <textarea class="cc-text" spellcheck="false"></textarea>
+    <div class="hint">Edit freely — what you see is what the model gets.</div>
+    <div class="cc-foot">
+      <button type="button" class="ghost cc-cancel">cancel</button>
+      <button type="button" class="primary cc-go">start conversation</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const ta = ov.querySelector('.cc-text');
+  ta.value = bundle.text;
+  const sizeLine = () => {
+    const toks = Math.round(ta.value.length / 4);
+    ov.querySelector('.cc-size').textContent = `${(ta.value.length / 1024).toFixed(1)} KB · ~${toks.toLocaleString()} tokens`;
+  };
+  sizeLine();
+  ta.oninput = sizeLine;
+  ov.querySelector('.cc-cancel').onclick = () => ov.remove();
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector('.cc-go').onclick = async () => {
+    ov.remove();
+    toast('starting conversation · ' + project);
+    const out = await postJson('/api/project/start', {
+      project, agent: 'pi', name: '', surface: 'rpc', mode: null, models: [],
+      context: ta.value, include, silent: true,
+    });
+    if (out.error) return errToast(out.error);
+    if (out.key) await open(out.key, 'bottom');
+    const t = $('agentText');
+    if (t) t.focus();
+  };
+  ta.focus();
+}
+
+// ---- the redesigned project panel (hero gantt · description · docs · epics) ----
+function renderProjectPanel(d) {
+  const color = projectColor(d.project);
   const memory = d.memory || null;
+  const o = (memory && memory.overview) || {};
+  const pyramid = d.pyramid || {};
+  const leaves = pyramid.leaves || {};
+  const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
+  const heroRows = sessions.filter(s => projectOf(s) === d.project)
+    .map(s => ({ key: s.key, title: s.timelineTitle || s.title || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
+  const docBtn = (kind, glyph, label) => `<button data-p-memory="${kind}" ${memory ? '' : 'disabled'} title="Open the ${label} document">${glyph} ${label}</button>`;
   $('view').innerHTML = `<div class="project-overview">
     <div class="phead" style="border-left-color:${color.fill}">
       <h2>❯ ${esc(d.project)}</h2>
-      <div class="pmeta"><code>${esc(shortDir(d.cwd))}</code> · ${d.conversations} conversations · ${d.notes} notes · ${d.epics.length} epics · latest ${fmtDate(d.latestTs)}</div>
-      <div class="pdefault-model"><span>default model</span><button id="pDefaultModel" type="button"></button><button id="pDefaultReset" type="button" class="ghost">use pi default</button><span class="hint">new conversations inherit this model</span></div>
-      <div class="pactions">
-        <button id="pTree" title="Toggle to the file tree: all files, commits, and worktrees">☷ file tree</button>
-        <button id="pRefresh">refresh evidence</button>
-        <button id="pDiffs">file Gantt</button>
-        <button id="pFold" class="ghost" title="This is really another project? Fold both into one">⇄ fold into…</button>
-        <button id="pLatest" class="ghost">latest conversation</button>
-        ${d.created && !d.conversations ? '<button id="pUnregister" class="ghost" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
-        <button id="pBack" class="ghost">back</button>
-      </div>
+      <div class="pmeta"><code>${esc(shortDir(d.cwd))}</code> · ${d.conversations} conversations · ${d.epics.length} epics · latest ${fmtDate(d.latestTs)}<button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}</div>
       ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
       ${(d.foldSuggestions || []).map((x, i) => `<div class="pfold-suggest">same project as <b>${esc(x.other)}</b>? <span class="dim">${esc(x.reason)}</span><button data-p-fold-accept="${i}" title="Fold ${esc(x.from)} into ${esc(x.into)}">⇄ fold</button><button class="ghost" data-p-fold-dismiss="${i}" title="Not the same project · stop suggesting this pair">✕</button></div>`).join('')}
       <div id="pFoldPanel" hidden></div>
     </div>
-    <section class="psection"><h3>memory health</h3>
-      <div class="pfresh">
-        <div><b>${freshness.freshNotes || 0}</b><span>fresh notes</span></div>
-        <div><b>${freshness.staleNotes || 0}</b><span>stale notes</span></div>
-        <div><b>${freshness.missingNotes || 0}</b><span>missing notes</span></div>
-        <div><b>${freshness.freshEvidence || 0}</b><span>fresh evidence</span></div>
-        <div><b>${freshness.staleEvidence || 0}</b><span>stale evidence</span></div>
-        <div><b>${freshness.missingEvidence || 0}</b><span>missing evidence</span></div>
+    ${miniGanttHtml(heroRows)}
+    <section class="psection pdesc">
+      ${memory
+        ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(o.summary || '(no overview summary yet)')}</p>`
+        : '<p class="psummary dim">No project memory yet. Build the memory leaves once — after that, the documents stay current automatically.</p>'}
+      <div class="pdocbtns">
+        ${docBtn('overview', '⌂', 'overview')}
+        ${docBtn('intent', '✦', 'deep intent')}
+        ${docBtn('environment', '⚙', 'environment')}
+        ${docBtn('status', '☑', 'todo / focus')}
       </div>
-      <div class="pactions">
-        <button id="pDistillAll" class="primary" title="Distill every missing note and update every stale note in this project">${(freshness.missingNotes || 0) + (freshness.staleNotes || 0) ? `update all notes (${(freshness.missingNotes || 0) + (freshness.staleNotes || 0)})` : 'all notes current'}</button>
-        <button id="pRefreshMissing">refresh missing evidence</button>
-        <button id="pRefreshStale">refresh stale evidence</button>
-        <button id="pBuildAll" class="ghost">build all evidence</button>
+      <div class="pmemline dim">
+        ${memory ? `memory ${fmtDate(memory.builtAt)} · ${pyramid.docs && pyramid.docs.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}
+        ${pyramid.backfillRunning ? '<span><span class="spin">░</span> extracting leaves…</span>' : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : ''}
+        ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : ''}
       </div>
     </section>
-    <section class="psection"><h3>memory pyramid <span style="text-transform:none">(beta · design/27)</span></h3>
-      <div class="pfresh">
-        <div><b>${(d.pyramid?.leaves?.fresh) || 0}</b><span>fresh leaves</span></div>
-        <div><b>${(d.pyramid?.leaves?.stale) || 0}</b><span>stale leaves</span></div>
-        <div><b>${(d.pyramid?.leaves?.seeded) || 0}</b><span>seeded · intent only</span></div>
-        <div><b>${(d.pyramid?.leaves?.missing) || 0}</b><span>missing leaves</span></div>
-      </div>
-      <div class="pmeta">${d.pyramid?.docs
-        ? `docs regenerated ${fmtDate(d.pyramid.docs.builtAt)} · ${d.pyramid.docs.stale ? '⚠ stale' : '✓ current'}`
-        : 'documents not yet regenerated from leaves'}${d.pyramid?.leaves?.empty ? ` · ${d.pyramid.leaves.empty} empty conversations skipped` : ''}</div>
-      <div class="pactions">
-        <button id="pLeafBackfill" ${d.pyramid?.backfillRunning ? 'disabled' : ''} title="Extract one memory leaf per conversation (missing, stale, and seeded ones). Runs in the background; pausable; finished leaves are kept forever.">${d.pyramid?.backfillRunning ? 'backfill running…' : `backfill leaves (${((d.pyramid?.leaves?.stale) || 0) + ((d.pyramid?.leaves?.seeded) || 0) + ((d.pyramid?.leaves?.missing) || 0)})`}</button>
-        ${d.pyramid?.backfillRunning ? '<button id="pLeafPause" class="ghost">pause backfill</button>' : ''}
-        <button id="pDocsRegen" ${d.pyramid?.docsRunning ? 'disabled' : ''} title="Regenerate all four memory documents fresh from the current leaves">${d.pyramid?.docsRunning ? 'regenerating docs…' : 'regenerate docs from leaves'}</button>
-      </div>
-      <div class="hint">Leaves are extracted once per conversation and cached forever. Documents always regenerate fresh from all leaves — prose never accumulates.</div>
+    <section class="psection"><h3>epics</h3>
+      ${d.epics.length ? d.epics.map(e => `<div class="item" data-p-epic-open="${esc(e.id)}"><div style="min-width:0;flex:1"><div class="title">▸ ${esc(e.title)}</div><div class="meta">${e.sessionIds.length} conversations · ${fmtDate(e.updatedAt)}</div></div></div>`).join('') : '<div class="hint">no epics yet — candidates appear here after the memory regenerates.</div>'}
+      ${(memory && memory.candidates || []).length ? '<h3 style="margin-top:var(--sp-3)">discovered candidates</h3>' + memory.candidates.map(c => `<div class="item"><div style="min-width:0;flex:1"><div class="title">${esc(c.title)}</div><div class="meta">${c.sessionIds.length} conversations · ${esc(c.abstract || c.reason || '')}</div></div><button data-p-candidate="${esc(c.id)}">build epic</button></div>`).join('') : ''}
     </section>
-    <section class="psection" id="pTrust" hidden><h3>trust · vouched content</h3><div id="pTrustBody"></div></section>
-    <section class="psection"><h3>project memory</h3>
-      ${memory ? `<div class="pcard">
-        <div class="pbody">
-          <p><b>${memory.stale ? '⚠ stale' : '✓ current'}</b> · built ${fmtDate(memory.builtAt)} · ${memory.classifiedMessages || 0} user messages classified · ${memory.selectedIntentMessages || 0} intent messages selected</p>
-          <p>${esc(memory.overview?.summary || '(no overview)')}</p>
-          <div class="pbuttons">
-            <button data-p-memory="overview">high-level overview</button>
-            <button data-p-memory="intent">deep intent</button>
-            <button data-p-memory="environment">environment</button>
-            <button data-p-memory="status">todo / focus</button>
-            <button id="pMemoryBuild">${memory.stale ? 'update project memory' : 'rebuild project memory'}</button>
-          </div>
-        </div>
-      </div>
-      ${memory.candidates?.length ? `<h3 style="margin-top:var(--sp-4)">discovered epic candidates</h3>${memory.candidates.map(c => `<div class="item">
-        <div style="min-width:0;flex:1"><div class="title">${esc(c.title)}</div><div class="meta">${c.sessionIds.length} conversations · ${esc(c.abstract || c.reason || '')}</div></div>
-        <button data-p-candidate="${esc(c.id)}">build epic</button>
-      </div>`).join('')}` : '<div class="hint">no uncovered multi-session epic candidates.</div>'}` : `<div class="empty" style="margin:10px 0;text-align:left">no project memory yet.<div class="hint">Build it to uncover deep intent, setup facts, current work, and epic candidates.</div></div>
-      <button id="pMemoryBuild" class="primary">build project memory</button>`}
-    </section>
-    <section class="psection"><h3>workstreams / epics</h3>
-      ${d.epics.length ? d.epics.slice(0, 12).map((e, i) => `
-        <details class="pcard" ${i === 0 ? 'open' : ''}>
-          <summary><span>▸</span><span class="ptitle">${esc(e.title)}</span><span class="pkind">${e.sessionIds.length} conversations · ${fmtDate(e.updatedAt)}</span></summary>
-          <div class="pbody"><p>${esc(e.abstract || '(no abstract)')}</p>
-            <div class="pbuttons"><button data-p-epic-open="${esc(e.id)}">open</button>
-              <button data-p-epic-rebuild="${esc(e.id)}">rebuild</button>
-              <button data-p-epic-select="${esc(e.id)}">select for new conversation</button></div>
-          </div>
-        </details>`).join('') : '<div class="empty" style="margin:10px 0;text-align:left">no epics yet.<div class="hint">select conversations and build an epic.</div></div>'}
-    </section>
-    <section class="psection"><h3>recent conversations</h3>
-      ${d.recent.map(r => `<div class="item" data-p-conv="${esc(r.key)}" style="border-left:4px solid ${projectColor(d.project).fill}">
-        <div style="min-width:0;flex:1"><div class="title">${r.active ? '● ' : ''}${esc(r.title)}</div>
-        <div class="meta">${fmtDate(r.lastTs)} · note ${projectFreshGlyph(r.note)} · evidence ${projectFreshGlyph(r.evidence)} · leaf ${projectFreshGlyph(r.leaf)}</div></div></div>`).join('')}
-    </section>
-    <section class="psection plauncher" id="projectStart"><h3>new conversation in this project</h3>
-      <label for="pAgent">agent</label><select id="pAgent"><option value="pi">pi</option><option value="claude">claude</option></select>
-      <label for="pMode">prompt mode (pi)</label>
-      <div class="pmoderow">
-        <select id="pMode"></select>
-        <button id="pModeManage" type="button" title="Create, edit, or delete pi prompt modes">manage modes</button>
-      </div>
-      <div id="pModeWarn" class="hint pmodewarn" hidden></div>
-      <label>models for this conversation</label>
-      <div class="model-strip pmodelstrip" id="pModelStrip"></div>
-      <div class="hint">One model runs once. Two or more models run in parallel. No override uses the project default.</div>
-      <label for="pName">conversation name (optional)</label><input id="pName" type="text" placeholder="what will you work on next?">
-      <label>memory to include</label>
-      <div class="mem">
-        <label><input type="checkbox" id="pMemMap" checked> project map</label>
-        <label><input type="checkbox" id="pMemEpics" checked> current epics (${Math.min(2, d.epics.length)})</label>
-        <label><input type="checkbox" id="pMemNotes"> read all current notes</label>
-        <label><input type="checkbox" id="pMemEvidence"> selected evidence</label>
-      </div>
-      <button id="pStart" class="primary">start</button>
-      <button id="pStartTerm">in alacritty</button>
-      <span id="pStartStatus" class="dim"></span>
-      <div class="hint">The included memory is inlined into the system prompt — you review and edit the exact text before it goes. Trust labels mark what you vouched; everything else stays [unverified]. Claude keeps the old briefing-file behavior.</div>
-    </section>
+    <div class="pnewrow"><button id="pNew" class="primary">+ new conversation</button><span class="hint">you review the context before it goes</span></div>
   </div>`;
-  $('pAgent').value = projectStartDefaults(d);
-  const paintProjectDefault = () => {
-    const explicit = d.defaultModel;
-    const resolved = d.resolvedDefaultModel;
-    $('pDefaultModel').textContent = resolved ? `◇ ${resolved.modelId} ▾` : 'choose default model';
-    $('pDefaultModel').title = resolved ? resolved.provider + '/' + resolved.modelId + (resolved.source === 'pi' ? ' · follows pi default' : ' · project default') : 'Set the model inherited by new conversations';
-    $('pDefaultReset').hidden = !explicit;
-    if (!Array.isArray(d.launchModels) || !d.launchModels.length) renderLauncherModels(d);
-  };
-  $('pDefaultModel').onclick = e => {
-    const m = d.resolvedDefaultModel;
-    openModelPicker(e.currentTarget, { selected: new Set(m ? [m.provider + '/' + m.modelId] : []) }, async ([picked]) => {
-      const out = await postJsonMethod('/api/project/model', 'PUT', { project: d.project, model: picked });
-      if (out.error) return errToast('default model failed: ' + out.error);
-      d.defaultModel = out.model;
-      d.resolvedDefaultModel = out.resolved;
-      paintProjectDefault();
-      toast('project default · ' + out.resolved.modelId);
-    });
-  };
-  $('pDefaultReset').onclick = async () => {
-    const out = await postJsonMethod('/api/project/model', 'PUT', { project: d.project, model: null });
-    if (out.error) return errToast('default model failed: ' + out.error);
-    d.defaultModel = out.model;
-    d.resolvedDefaultModel = out.resolved;
-    paintProjectDefault();
-    toast('project default follows pi');
-  };
-  paintProjectDefault();
-  $('pBack').onclick = () => { projectOverview = null; projectOverviewName = null; goHome(); };
+  wireMiniGantt($('view'));
+  $('pFold').onclick = () => openFoldPicker(d);
   const pUnregister = $('pUnregister');
   if (pUnregister) pUnregister.onclick = async () => {
     if (!confirm(`Remove “${d.project}” from the project list? The folder stays on disk.`)) return;
@@ -6955,8 +6798,6 @@ async function showProjectOverview(name) {
     projectOverview = null; projectOverviewName = null;
     await load(); goHome();
   };
-  $('pLatest').onclick = () => d.recent[0] && open(d.recent[0].key);
-  $('pFold').onclick = () => openFoldPicker(d);
   $('view').querySelectorAll('[data-p-unfold]').forEach(b => b.onclick = async () => {
     if (!confirm(`Unfold “${b.dataset.pUnfold}” into its own project?`)) return;
     await foldApi('/api/project/unfold', { name: b.dataset.pUnfold });
@@ -6974,126 +6815,46 @@ async function showProjectOverview(name) {
     await foldApi('/api/project/fold-dismiss', { from: x.from, into: x.into });
     showProjectOverview(d.project);
   });
-  $('pDiffs').onclick = () => showProjectFileHistory(d.project);
-  $('pTree').onclick = () => showProjectTree(d.project);
-  $('pRefresh').onclick = () => projectRefreshEvidence(d, 'all');
-  $('pDistillAll').disabled = !((freshness.missingNotes || 0) + (freshness.staleNotes || 0));
-  $('pDistillAll').onclick = () => projectUpdateAllNotes(d);
-  $('pRefreshMissing').onclick = () => projectRefreshEvidence(d, 'missing');
-  $('pRefreshStale').onclick = () => projectRefreshEvidence(d, 'stale');
-  $('pBuildAll').onclick = () => projectRefreshEvidence(d, 'all', true);
-  $('pMemoryBuild').onclick = () => projectBuildMemory(d);
+  $('view').querySelectorAll('[data-p-memory]').forEach(b => b.onclick = () => showProjectMemoryDoc(d.project, b.dataset.pMemory));
+  $('view').querySelectorAll('[data-p-epic-open]').forEach(b => b.onclick = () => showEpic(b.dataset.pEpicOpen));
+  $('view').querySelectorAll('[data-p-candidate]').forEach(b => b.onclick = () => buildDiscoveredEpic(d, b.dataset.pCandidate));
   const pLeafBackfill = $('pLeafBackfill');
   if (pLeafBackfill) pLeafBackfill.onclick = async () => {
-    const n = ((d.pyramid?.leaves?.stale) || 0) + ((d.pyramid?.leaves?.seeded) || 0) + ((d.pyramid?.leaves?.missing) || 0);
-    if (!n) return toast('all memory leaves are current.');
-    if (n > 20 && !confirm(`Extract ${n} memory leaves? Each costs roughly one small model call. The backfill runs in the background and you can pause it; finished leaves are kept.`)) return;
-    const out = await postJsonMethod('/api/memory/backfill', 'POST', { project: d.project });
+    if (needLeaves > 20 && !confirm(`Extract ${needLeaves} memory leaves? Each costs roughly one small model call. The backfill runs in the background; finished leaves are kept.`)) return;
+    const out = await postJson('/api/memory/backfill', { project: d.project });
     if (out.error) return errToast('backfill failed to start: ' + out.error);
     updateJob(out);
-    pLeafBackfill.disabled = true;
-    pLeafBackfill.textContent = 'backfill running…';
     toggleJobs(true);
-    toast('leaf backfill started · ' + d.project);
+    pLeafBackfill.outerHTML = '<span><span class="spin">░</span> extracting leaves…</span>';
   };
-  const pLeafPause = $('pLeafPause');
-  if (pLeafPause) pLeafPause.onclick = async () => {
-    const out = await postJsonMethod('/api/memory/backfill', 'POST', { project: d.project, action: 'pause' });
-    if (out.error) return errToast(out.error);
-    toast('backfill will pause after the current leaves.');
-  };
-  $('pDocsRegen').onclick = async () => {
-    const out = await postJsonMethod('/api/project/memory/regenerate', 'POST', { project: d.project });
+  const pDocsRegen = $('pDocsRegen');
+  if (pDocsRegen) pDocsRegen.onclick = async () => {
+    const out = await postJson('/api/project/memory/regenerate', { project: d.project });
     if (out.error) return errToast('regeneration failed to start: ' + out.error);
     updateJob(out);
-    $('pDocsRegen').disabled = true;
-    $('pDocsRegen').textContent = 'regenerating docs…';
     toggleJobs(true);
-    toast('document regeneration started · ' + d.project);
+    pDocsRegen.outerHTML = '<span><span class="spin">░</span> regenerating docs…</span>';
   };
-  $('view').querySelectorAll('[data-p-memory]').forEach(b => b.onclick = () => showProjectMemoryDoc(d.project, b.dataset.pMemory));
-  $('view').querySelectorAll('[data-p-candidate]').forEach(b => b.onclick = () => buildDiscoveredEpic(d, b.dataset.pCandidate));
-  $('view').querySelectorAll('[data-p-epic-open]').forEach(b => b.onclick = () => showEpic(b.dataset.pEpicOpen));
-  $('view').querySelectorAll('[data-p-epic-rebuild]').forEach(b => b.onclick = () => {
-    const epic = d.epics.find(e => e.id === b.dataset.pEpicRebuild);
-    if (epic) {
-      selected = new Set(epic.sessionIds);
-      runBuildEpic(epic.id);
-    }
-  });
-  $('view').querySelectorAll('[data-p-conv]').forEach(b => b.onclick = () => open(b.dataset.pConv));
-  const syncStartBtns = () => {
-    const claude = $('pAgent').value === 'claude';
-    $('pStart').hidden = claude;
-    $('pStartTerm').className = claude ? 'primary' : '';
-    $('pStartTerm').textContent = claude ? 'start in alacritty' : 'in alacritty';
-    // Mode, models, and inline context are pi-only; dim them for claude.
-    $('pMode').disabled = claude;
-    $('pModeManage').disabled = claude;
-    if ($('pModelStrip')) $('pModelStrip').style.opacity = claude ? '.45' : '';
-  };
-  $('pAgent').onchange = () => {
-    localStorage.setItem('aiconvo.projectAgent:' + d.project, $('pAgent').value);
-    syncStartBtns();
-  };
-  syncStartBtns();
-  loadLauncherModes(d);  $('pStart').onclick = () => launchProjectConversation(d, recentEpicIds, 'rpc');
-  $('pStartTerm').onclick = () => launchProjectConversation(d, recentEpicIds, 'alacritty');
-  loadProjectTrust(d);
+  $('pNew').onclick = () => startReviewedConversation(d.project);
+}
+
+async function showProjectOverview(name) {
+  if (!name) return;
+  markSettingsClosed();
+  projectOverviewName = name;
+  setRoute('project', 'project=' + encodeURIComponent(name), [crumbHome(), { label: name, title: 'Project overview · ' + name }]);
+  $('view').innerHTML = `<div class="project-overview"><div class="phead"><h2>${esc(name)}</h2><div class="pmeta">loading project overview…</div></div></div>`;
+  const d = await (await fetch('/api/project?name=' + encodeURIComponent(name))).json();
+  if (d.error) {
+    $('view').innerHTML = `<div class="empty">could not open ${esc(name)}.<div class="hint">${esc(d.error)}</div></div>`;
+    return;
+  }
+  projectOverview = d;
+  return renderProjectPanel(d);
 }
 
 // The trust section is a review queue: disputed and stale vouches first, so a
 // short session of re-reading keeps the vouched surface honest.
-async function loadProjectTrust(d) {
-  let all;
-  try { all = await (await fetch('/api/vouch/all')).json(); } catch { return; }
-  const body = $('pTrustBody');
-  if (!body || !all || !all.paths) return;
-  const entries = Object.entries(all.paths).filter(([p]) => (d.cwd && p.startsWith(d.cwd + '/')) || p.includes('/notes/aiconvo/'));
-  $('pTrust').hidden = false;
-  if (!entries.length) {
-    body.innerHTML = '<div class="hint">Nothing is vouched yet. All AI-generated notes and memory are unverified — open a note or a file and press ✓ vouch after you review it.</div>';
-    return;
-  }
-  const glyph = info => info.disputed ? '✗' : info.state === 'fresh' ? '✓' : info.state === 'partial' ? '✓±' : info.state === 'missing' ? '?' : '⚠';
-  const stateText = info => [
-    info.disputed ? 'disputed' : null,
-    info.state === 'fresh' ? 'vouched' : info.state === 'partial' ? `partly vouched · ${info.vouchedLines}/${info.totalLines} lines` : info.state === 'missing' ? 'file missing' : 'changed since review — re-read it',
-  ].filter(Boolean).join(' · ');
-  const order = { missing: 0, stale: 1, partial: 2, fresh: 3 };
-  entries.sort((a, b) => (b[1].disputed ? 1 : 0) - (a[1].disputed ? 1 : 0) || (order[a[1].state] ?? 9) - (order[b[1].state] ?? 9));
-  body.innerHTML = '<div class="hint">Only vouched content is human-verified. Everything else stays fully available — just labeled unverified.</div>' +
-    entries.slice(0, 30).map(([p, info]) => `<div class="item" data-p-trust="${esc(p)}" style="cursor:pointer"><div style="min-width:0;flex:1"><div class="title">${glyph(info)} ${esc(shortDir(p))}</div><div class="meta">${esc(stateText(info))} · last vouch ${fmtDate(info.ts)}</div></div></div>`).join('') +
-    (entries.length > 30 ? `<div class="hint">… ${entries.length - 30} more vouched paths</div>` : '');
-  body.querySelectorAll('[data-p-trust]').forEach(row => row.onclick = () => openTrustPath(d, row.dataset.pTrust));
-}
-
-function openTrustPath(d, p) {
-  const noteRel = p.includes('/notes/aiconvo/') ? p.split('/notes/aiconvo/')[1] : null;
-  if (noteRel) {
-    if (noteRel.startsWith('epics/')) return showEpic(noteRel.slice(6).replace(/\.md$/, ''));
-    const memory = noteRel.match(/^projects\/[^/]+\/([a-z]+)\.md$/);
-    if (memory) return showProjectMemoryDoc(d.project, memory[1]);
-    if (!noteRel.includes('/')) return openNoteFile(noteRel);
-  }
-  showFileBlame(p);
-}
-
-async function projectBuildMemory(d) {
-  if (!confirm(`Analyze all ${d.conversations} project conversations for deep intent, environment facts, current work, and epic candidates?`)) return;
-  const res = await fetch('/api/project/memory/build', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project: d.project }),
-  });
-  const job = await res.json();
-  if (job.error) return errToast('project memory failed to start: ' + job.error);
-  updateJob(job);
-  $('pMemoryBuild').disabled = true;
-  $('pMemoryBuild').textContent = 'building project memory…';
-  toggleJobs(true);
-  toast('project memory analysis started.');
-}
-
 async function showProjectMemoryDoc(project, kind) {
   const res = await fetch('/api/project/memory/file?name=' + encodeURIComponent(project) + '&kind=' + encodeURIComponent(kind));
   const data = await res.json();
@@ -7113,141 +6874,9 @@ function buildDiscoveredEpic(d, candidateId) {
   runBuildEpic(null, candidate.title);
 }
 
-async function projectUpdateAllNotes(d) {
-  const freshness = d.freshness || {};
-  const missing = freshness.missingNotes || 0;
-  const stale = freshness.staleNotes || 0;
-  const total = missing + stale;
-  if (!total) return toast('all project notes are current.');
-  if (!confirm(`Distill ${missing} missing notes and update ${stale} stale notes? This starts ${total} background distillations.`)) return;
-  const res = await fetch('/api/project/distill', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project: d.project }),
-  });
-  const job = await res.json();
-  if (job.error) return errToast('project distillation failed to start: ' + job.error);
-  updateJob(job);
-  $('pMemNotes').checked = true;
-  $('pDistillAll').disabled = true;
-  $('pDistillAll').textContent = 'updating all notes…';
-  $('pStart').disabled = true;
-  $('pStartStatus').textContent = ' wait for all notes…';
-  toast(`updating ${total} project notes. The new-conversation button will unlock when they are ready.`);
-}
-
-async function projectRefreshEvidence(d, mode, confirmAll = false) {
-  const ids = d.recent.filter(r => {
-    if (mode === 'missing') return r.evidence === 'missing';
-    if (mode === 'stale') return r.evidence === 'stale' || r.note === 'stale';
-    return true;
-  }).map(r => r.key);
-  if (!ids.length) return toast('nothing to refresh.');
-  if (confirmAll && ids.length > 20 && !confirm(`Build evidence for ${ids.length} conversations? This can start many model jobs.`)) return;
-  await buildEvidence(ids, mode !== 'missing');
-}
-
-async function startProjectConversation(d, epicIds, surface, extra = {}) {
-  const status = $('pStartStatus');
-  status.textContent = ' starting…';
-  const agent = $('pAgent').value;
-  localStorage.setItem('aiconvo.projectAgent:' + d.project, agent);
-  const via = agent === 'claude' ? 'alacritty' : (surface || 'rpc');
-  const res = await fetch('/api/project/start', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      project: d.project, agent, name: $('pName').value.trim(), surface: via,
-      mode: agent === 'pi' ? (($('pMode') && $('pMode').value) || null) : null,
-      models: agent === 'pi' ? launcherModelsOf(d) : [],
-      context: extra.context || null,
-      include: {
-        map: $('pMemMap').checked,
-        epics: $('pMemEpics').checked ? epicIds : [],
-        notes: $('pMemNotes').checked,
-        // "selected evidence" = evidence cards of the currently selected
-        // conversations (shift/ctrl-click or drag on the timeline).
-        evidenceKeys: $('pMemEvidence').checked ? [...selected] : [],
-      },
-    }),
-  });
-  const out = await res.json();
-  if (out.error) { status.textContent = '' ; return errToast(out.error); }
-  status.textContent = ' started: ' + out.name;
-  if (out.warning) errToast(out.warning);
-  else toast('✓ started ' + out.kind + (out.surface === 'rpc' ? ' in the app' : ' in Alacritty') + ' · ' + d.project + (out.kickoff ? ' · memory briefing sent' : ''));
-  if (out.key) {
-    projectOverview = null;
-    projectOverviewName = null;
-    await open(out.key, 'bottom');
-  }
-}
-
 // Two-step start for pi: assemble the inline context bundle first, let the
 // user read and edit the exact text, then send. Claude skips this and keeps
 // the old one-step briefing behavior.
-async function launchProjectConversation(d, epicIds, surface) {
-  if ($('pAgent').value !== 'pi') return startProjectConversation(d, epicIds, surface);
-  const status = $('pStartStatus');
-  status.textContent = ' composing context…';
-  let bundle = null;
-  try {
-    const res = await fetch('/api/project/context', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        project: d.project, name: $('pName').value.trim(),
-        include: {
-          map: $('pMemMap').checked,
-          epics: $('pMemEpics').checked ? epicIds : [],
-          notes: $('pMemNotes').checked,
-          evidenceKeys: $('pMemEvidence').checked ? [...selected] : [],
-        },
-      }),
-    });
-    bundle = await res.json();
-  } catch {}
-  status.textContent = '';
-  if (!bundle || bundle.error) return errToast('could not build context: ' + ((bundle && bundle.error) || 'network error'));
-  openContextConfirm(d, epicIds, surface, bundle);
-}
-
-function openContextConfirm(d, epicIds, surface, bundle) {
-  document.querySelectorAll('.ctx-confirm').forEach(el => el.remove());
-  const ov = document.createElement('div');
-  ov.className = 'ctx-confirm';
-  const c = bundle.counts || {};
-  const kickoff = 'Your system prompt carries this project\'s work memory.' + ($('pName').value.trim() ? ` Today's focus: "${$('pName').value.trim()}".` : '') +
-    ' Reply with at most 3 lines on where the project stands, then wait for instructions.';
-  ov.innerHTML = `<div class="cc-card">
-    <div class="cc-head"><b>review the context before it goes</b><span class="dim cc-size"></span></div>
-    <div class="cc-meta dim">${c.memoryDocs || 0} memory docs · ${c.notes || 0} notes · ${c.epics || 0} epics · ${c.evidence || 0} evidence · mode: ${esc(($('pMode') && $('pMode').value) || 'coding')} · kickoff model: ${esc((launcherModelsOf(d)[0] || {}).modelId || 'pi default')} · injected into the system prompt</div>
-    <div class="cc-bigwarn" hidden>⚠ far beyond most model contexts — trim the text or fewer checkboxes, or the provider will reject the request.</div>
-    <textarea class="cc-text" spellcheck="false"></textarea>
-    <div class="hint">This exact text rides in the system prompt (--append-system-prompt). Edit freely — what you see is what the model gets.</div>
-    <div class="cc-first hint">first message: ${esc(kickoff)}</div>
-    <div class="cc-foot">
-      <button type="button" class="ghost cc-cancel">cancel</button>
-      <button type="button" class="primary cc-go">${surface === 'alacritty' ? 'start in alacritty' : 'start in app'}</button>
-    </div>
-  </div>`;
-  document.body.appendChild(ov);
-  const ta = ov.querySelector('.cc-text');
-  ta.value = bundle.text;
-  const sizeLine = () => {
-    const kb = (ta.value.length / 1024).toFixed(1);
-    const toks = Math.round(ta.value.length / 4);
-    ov.querySelector('.cc-size').textContent = `${kb} KB · ~${toks.toLocaleString()} tokens`;
-    ov.querySelector('.cc-bigwarn').hidden = toks <= 100000;
-  };
-  sizeLine();
-  ta.oninput = sizeLine;
-  ov.querySelector('.cc-cancel').onclick = () => ov.remove();
-  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-  ov.querySelector('.cc-go').onclick = async () => {
-    ov.remove();
-    await startProjectConversation(d, epicIds, surface, { context: ta.value });
-  };
-  ta.focus();
-}
-
 // ---- conversation view ----
 let current = null;
 
@@ -7376,7 +7005,10 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
       ? `<details class="resfold"><summary>↳ result${resLines ? ` · ${resLines} line${resLines > 1 ? 's' : ''}` : ''}${resImages ? ` · ${resImages} image${resImages > 1 ? 's' : ''}` : ''}</summary><div class="tool-out">${toolTextHtml(res.text, res.paths, hl)}${messageMediaHtml(res.images)}</div></details>`
       : '';
     const structuredPath = m.path && !isFileWriteTool(m) ? ` · ${transcriptPathButton(m.path, shortFilePath(m.path))}` : '';
-    return `<details class="msg tool"${toolAnchor}${idxAttr}${keepOpen ? ' open' : ''}><summary>⚙ <span class="tname">${esc(m.name || '?')}</span>${hint ? ' · ' + esc(hint) : ''}${first ? ` <span class="res-first">→ ${esc(first.slice(0, 60))}</span>` : ''}${structuredPath}${fileLink}</summary><div class="tool-out">${toolTextHtml(m.text, m.paths, hl)}</div>${resFold}</details>`;
+    // Bash-created files (redirects, tee, heredocs) link into the same
+    // whole-file view as write/edit calls — mined server-side (m.writes).
+    const writeLinks = (m.writes || []).map(p => ` <button class="msg-file" data-file-diff="${esc(p)}" data-file-ts="${esc(m.ts || '')}" data-file-anchor="${esc(m.ts || '')}" data-file-call="${esc(m.id || '')}" title="Open this file change\n${esc(p)}">▤ ${esc(shortFilePath(p))}</button>`).join('');
+    return `<details class="msg tool"${toolAnchor}${idxAttr}${keepOpen ? ' open' : ''}><summary>⚙ <span class="tname">${esc(m.name || '?')}</span>${hint ? ' · ' + esc(hint) : ''}${first ? ` <span class="res-first">→ ${esc(first.slice(0, 60))}</span>` : ''}${structuredPath}${fileLink}${writeLinks}</summary><div class="tool-out">${toolTextHtml(m.text, m.paths, hl)}</div>${resFold}</details>`;
   }
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
@@ -9726,10 +9358,14 @@ async function renderConv(scroll) {
     for (const m of d.messages) {
       if (!inTrace(m)) continue;
       if (keepInMode(m, mode)) { merged.push(m); run = null; continue; }
-      if (!isFileWriteTool(m)) continue;
+      // Structured write/edit calls AND bash-mined writes both surface here.
+      const touched = isFileWriteTool(m) ? [m.path] : (m.role === 'tool' && m.writes) || [];
+      if (!touched.length) continue;
       if (!run || run.off !== !!m.off) { run = { role: 'filetouch', ts: m.ts, off: !!m.off, files: [] }; merged.push(run); }
-      const seen = run.files.find(f => f.path === m.path);
-      if (seen) { seen.ts = m.ts; seen.call = m.id || seen.call; } else run.files.push({ path: m.path, ts: m.ts, call: m.id || null });
+      for (const p of touched) {
+        const seen = run.files.find(f => f.path === p);
+        if (seen) { seen.ts = m.ts; seen.call = m.id || seen.call; } else run.files.push({ path: p, ts: m.ts, call: m.id || null });
+      }
     }
     msgs = merged;
   }
@@ -9776,7 +9412,9 @@ async function renderConv(scroll) {
     const files = [];
     const seenFiles = new Set();
     for (const t of toolBuf) {
-      if (t.file && !seenFiles.has(t.file.path)) { seenFiles.add(t.file.path); files.push(t.file); }
+      for (const f of t.files || []) {
+        if (!seenFiles.has(f.path)) { seenFiles.add(f.path); files.push(f); }
+      }
     }
     const fileBtn = f => `<button class="tg-file" data-file-diff="${esc(f.path)}" data-file-ts="${esc(f.ts || '')}" data-file-anchor="${esc(f.ts || '')}" data-file-call="${esc(f.call || '')}" title="Open this file change\n${esc(f.path)}">▤ ${esc(f.path.split('/').pop())}</button>`;
     const inline = files.length && files.length <= 3 ? ' · ' + files.map(fileBtn).join(' ') : '';
@@ -9799,7 +9437,8 @@ async function renderConv(scroll) {
           const name = plainReasoning || m.role === 'thinking' ? 'thinking' : (m.name || 'tool');
           if (html) toolBuf.push({
             html, name, gkey: m.ts || 'i' + i,
-            file: isFileWriteTool(m) ? { path: m.path, ts: m.ts, call: m.id } : null,
+            files: isFileWriteTool(m) ? [{ path: m.path, ts: m.ts, call: m.id }]
+              : (m.writes || []).map(p => ({ path: p, ts: m.ts, call: m.id })),
           });
         } else {
           flushTools();
@@ -11433,25 +11072,78 @@ async function forkFrom(key, n, btn) {
 }
 
 // ---- epics ----
+// The epic panel mirrors the project panel: an epic is a recursive project
+// with its own hero gantt, four memory documents, and a reviewed start.
 async function showEpic(id, focusKey = activeRel) {
   markSettingsClosed();
   const d = await (await fetch('/api/epic?id=' + encodeURIComponent(id))).json();
   if (d.error) return errToast(d.error);
   const key = focusKey && d.sessions.some(s => s.key === focusKey) ? focusKey : (d.sessions[0] && d.sessions[0].key);
   if (key) activeRel = key;
-  setRoute('epic', 'epic=' + encodeURIComponent(id), [crumbHome(), { label: '▸ ' + (d.title || 'epic'), title: 'Epic · ' + (d.title || id) }]);
-  const related = key ? await relatedFor(key) : null;
-  noteViewer(d.text, d.notePath.replace(/^\/home\/[^/]+/, '~'), { kind: 'epic', key, related, epicId: id });
-  const eb = document.createElement('button');
-  eb.textContent = 'evidence';
-  eb.title = 'Inspect every note and evidence card used to build this epic.';
-  eb.onclick = () => showEpicEvidence(id, key);
-  $('noteHeadBtns').appendChild(eb);
-  const b = document.createElement('button');
-  b.textContent = selected.size ? `add ${selected.size} selected + rebuild` : 'rebuild timeline';
-  b.title = 'Keep current conversations and add any selected conversations.';
-  b.onclick = () => buildEpic(id);
-  $('noteHeadBtns').appendChild(b);
+  setRoute('epic', 'epic=' + encodeURIComponent(id),
+    [crumbHome(), ...(d.project && d.project !== '?' ? [crumbProject(d.project)] : []), { label: '▸ ' + (d.title || 'epic'), title: 'Epic · ' + (d.title || id) }]);
+  const memory = d.memory || null;
+  const o = (memory && memory.overview) || {};
+  const leaves = d.leaves || {};
+  const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
+  const heroRows = d.sessions.map(s => ({ key: s.key, title: s.timelineTitle || s.title || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
+  const docBtn = (kind, glyph, label) => `<button data-e-memory="${kind}" ${memory ? '' : 'disabled'} title="Open the epic ${label} document">${glyph} ${label}</button>`;
+  $('view').innerHTML = `<div class="project-overview">
+    <div class="phead" style="border-left-color:${d.project && d.project !== '?' ? projectColor(d.project).fill : 'var(--accent)'}">
+      <h2>▸ ${esc(d.title || 'epic')}</h2>
+      <div class="pmeta">epic in <b>${esc(d.project || '?')}</b> · ${d.sessions.length} conversations · updated ${fmtDate(d.updatedAt)}<button id="eStory" class="ghost pfoldbtn" title="The narrative story built for this epic">story</button><button id="eEvidence" class="ghost pfoldbtn" title="Every note and evidence card used to build this epic">evidence</button><button id="eRebuild" class="ghost pfoldbtn" title="Keep current conversations and add any selected conversations">${selected.size ? `add ${selected.size} selected + rebuild` : 'rebuild story'}</button></div>
+    </div>
+    ${miniGanttHtml(heroRows)}
+    <section class="psection pdesc">
+      ${memory
+        ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(o.summary || d.abstract || '')}</p>`
+        : `<p class="psummary">${esc(d.abstract || '(no abstract)')}</p>`}
+      <div class="pdocbtns">
+        ${docBtn('overview', '⌂', 'overview')}
+        ${docBtn('intent', '✦', 'deep intent')}
+        ${docBtn('environment', '⚙', 'environment')}
+        ${docBtn('status', '☑', 'todo / focus')}
+      </div>
+      <div class="pmemline dim">
+        ${memory ? `epic memory ${fmtDate(memory.builtAt)} · ${memory.stale ? '⚠ stale' : '✓ current'}` : 'no epic memory yet'}
+        ${d.docsRunning ? '<span><span class="spin">░</span> regenerating…</span>' : `<button id="eDocsRegen" class="ghost">${memory ? 'regenerate epic memory' : 'build epic memory'}</button>`}
+        ${needLeaves ? `<span class="warn">${needLeaves} leaves not fresh — build them from the project panel</span>` : ''}
+      </div>
+    </section>
+    <div class="pnewrow"><button id="eNew" class="primary">+ new conversation from this epic</button><span class="hint">project map + epic memory · you review the context first</span></div>
+  </div>`;
+  wireMiniGantt($('view'));
+  $('eStory').onclick = () => showEpicStory(id, d, key);
+  $('eEvidence').onclick = () => showEpicEvidence(id, key);
+  $('eRebuild').onclick = () => buildEpic(id);
+  $('view').querySelectorAll('[data-e-memory]').forEach(b => b.onclick = () => showEpicMemoryDoc(id, b.dataset.eMemory, d.title));
+  const regen = $('eDocsRegen');
+  if (regen) regen.onclick = async () => {
+    const out = await postJson('/api/epic/memory/regenerate', { id });
+    if (out.error) return errToast(out.error);
+    updateJob(out);
+    toggleJobs(true);
+    regen.outerHTML = '<span><span class="spin">░</span> regenerating…</span>';
+    toast('epic memory started · ' + (d.title || id));
+  };
+  $('eNew').onclick = () => startReviewedConversation(d.project, { epicId: id });
+}
+
+function showEpicStory(id, d, key) {
+  setRouteKind('epic-story', [crumbHome(), { label: '▸ ' + (d.title || 'epic'), title: 'Back to the epic', go: () => showEpic(id, key) }, { label: 'story' }]);
+  noteViewer(d.text, d.notePath.replace(/^\/home\/[^/]+/, '~'), { kind: 'epic', key, epicId: id });
+  $('noteHeadBtns').innerHTML = '<button id="epicStoryBack">back to epic</button>';
+  $('epicStoryBack').onclick = () => showEpic(id, key);
+}
+
+async function showEpicMemoryDoc(id, kind, title) {
+  const res = await fetch('/api/epic/memory/file?id=' + encodeURIComponent(id) + '&kind=' + encodeURIComponent(kind));
+  const data = await res.json();
+  if (data.error) return errToast(data.error);
+  setRouteKind('memory-doc', [crumbHome(), { label: '▸ ' + (title || 'epic'), title: 'Back to the epic', go: () => showEpic(id) }, { label: kind, title: 'Epic memory · ' + kind }]);
+  noteViewer(data.text, data.path);
+  $('noteHeadBtns').innerHTML = '<button id="epicMemoryBack">back to epic</button>';
+  $('epicMemoryBack').onclick = () => showEpic(id);
 }
 
 async function openOrBuildEvidence(key) {
@@ -13039,7 +12731,6 @@ live.onmessage = ev => {
       const label = d.job.type === 'epic' ? 'epic saved' :
         d.job.type === 'evidence' ? 'evidence ready' :
         d.job.type === 'project-distill' ? 'all project notes ready' :
-        d.job.type === 'project-memory' ? 'project memory ready' :
         d.job.type === 'memory-extract' ? 'memory leaves saved' :
         d.job.type === 'memory-docs' ? 'memory documents regenerated' :
         d.job.type === 'memory-backfill' ? (d.job.result?.paused ? 'leaf backfill paused' : 'leaf backfill finished') :
@@ -13047,33 +12738,26 @@ live.onmessage = ev => {
       toast('✓ ' + label + ': ' + d.job.title, () => {
         if (d.job.type === 'epic') showEpic(d.job.epicId);
         else if (d.job.type === 'evidence' && (d.job.result?.sessionIds?.length === 1 || d.job.key)) showConversationEvidence(d.job.key || d.job.result.sessionIds[0]);
-        else if (d.job.type === 'project-distill' || d.job.type === 'project-memory' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') showProjectOverview(d.job.project);
+        else if (d.job.type === 'project-distill' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') showProjectOverview(d.job.project);
         else if (d.job.type === 'agent-run') open(d.job.key, 'bottom');
         else if (d.job.type === 'distill') startDistill(d.job.key);
       }, 'ok');
-      if ((d.job.type === 'project-distill' || d.job.type === 'project-memory' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && viewKind === 'project' && projectOverviewName === d.job.project && $('projectStart')) {
+      if ((d.job.type === 'project-distill' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && d.job.project && viewKind === 'project' && projectOverviewName === d.job.project) {
         showProjectOverview(d.job.project).then(() => {
           if (d.job.type === 'project-distill' && $('pMemNotes')) $('pMemNotes').checked = true;
         });
       }
+      if (d.job.type === 'memory-docs' && d.job.epicId && viewKind === 'epic' && currentHash === 'epic=' + encodeURIComponent(d.job.epicId)) {
+        showEpic(d.job.epicId);
+      }
     }
     if (d.job.status === 'error' && (!old || old.status === 'running') && !d.job.parentId) {
-      errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'project-memory' ? 'project memory failed: ' : d.job.type === 'memory-extract' ? 'leaf extraction failed: ' : d.job.type === 'memory-docs' ? 'document regeneration failed: ' : d.job.type === 'memory-backfill' ? 'leaf backfill failed: ' : d.job.type === 'agent-run' ? 'model run failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
+      errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'memory-extract' ? 'leaf extraction failed: ' : d.job.type === 'memory-docs' ? 'document regeneration failed: ' : d.job.type === 'memory-backfill' ? 'leaf backfill failed: ' : d.job.type === 'agent-run' ? 'model run failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
       if ((d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && projectOverviewName === d.job.project && viewKind === 'project' && $('pDocsRegen')) {
         $('pDocsRegen').disabled = false;
         $('pDocsRegen').textContent = 'retry doc regeneration';
         const bf = $('pLeafBackfill');
         if (bf) { bf.disabled = false; }
-      }
-      if (d.job.type === 'project-memory' && projectOverviewName === d.job.project && $('pMemoryBuild')) {
-        $('pMemoryBuild').disabled = false;
-        $('pMemoryBuild').textContent = 'retry project memory';
-      }
-      if (d.job.type === 'project-distill' && projectOverviewName === d.job.project && $('projectStart')) {
-        $('pDistillAll').disabled = false;
-        $('pDistillAll').textContent = 'retry note update';
-        $('pStart').disabled = false;
-        $('pStartStatus').textContent = ' some notes failed';
       }
     }
     return;
