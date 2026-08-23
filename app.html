@@ -8019,9 +8019,9 @@ function paintCtxMeter(el, c) {
   const approx = c.estimate ? '~' : '';
   const parts = [];
   const left = c.leftTokens != null ? c.leftTokens : Math.max(0, c.ctxTokens - (c.usedTokens || 0));
+  const pctUsed = c.pctLeft != null ? 100 - c.pctLeft : null;
   if (c.usedTokens) {
-    parts.push(`${approx}${fmtTokens(left)} left` + (c.pctLeft != null ? ` (${c.pctLeft}%)` : ''));
-    parts.push(`${approx}${fmtTokens(c.usedTokens)} used`);
+    parts.push(`${approx}${fmtTokens(c.usedTokens)}/${fmtTokens(c.ctxTokens)} used` + (pctUsed != null ? ` (${pctUsed}%)` : ''));
   } else {
     parts.push(`${fmtTokens(c.ctxTokens)} window`);
   }
@@ -8037,7 +8037,7 @@ function paintCtxMeter(el, c) {
   el.className = 'ctxmeter' + (warn ? ' warn' : '');
   el.textContent = (warn ? '⚠ ' : '') + parts.join(' · ');
   el.title = `context window of ${c.model || 'the model'}: `
-    + (c.usedTokens ? `${left.toLocaleString()} tokens left · ${c.usedTokens.toLocaleString()} of ${c.ctxTokens.toLocaleString()} used`
+    + (c.usedTokens ? `${c.usedTokens.toLocaleString()} of ${c.ctxTokens.toLocaleString()} tokens used · ${left.toLocaleString()} left`
                     : `no reply counted yet · window ${c.ctxTokens.toLocaleString()} tokens`)
     + (c.estimate ? ' (estimate: the counters come from ' + (c.usedModel || 'no reply') + ')' : '')
     + ` · cost on this path ${money(c.traceCost)} · all branches ${money(c.familyCost)}`;
