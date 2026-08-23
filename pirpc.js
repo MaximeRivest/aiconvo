@@ -331,6 +331,28 @@ async function piSetModel(target, provider, modelId) {
   }
 }
 
+// Set the session's reasoning (thinking) level through pi's own runtime.
+// pi writes its native thinking_level_change entry, so resumes, branches,
+// and forks inherit it. level 'cycle' steps to the next available level.
+async function piSetThinking(target, level) {
+  await ensurePiProtocol(target.env);
+  const w = getWarmSession({ ...target, discoverExtensions: true });
+  clearTimeout(w.idleTimer);
+  try {
+    const avail = await w.sess.request({ type: 'get_available_thinking_levels' });
+    const levels = (avail.data && avail.data.levels) || [];
+    if (levels.length <= 1) throw new Error('This model has no reasoning control.');
+    if (level === 'cycle') await w.sess.request({ type: 'cycle_thinking_level' });
+    else await w.sess.request({ type: 'set_thinking_level', level });
+    const state = await w.sess.request({ type: 'get_state' });
+    return { level: (state.data && state.data.thinkingLevel) || level, levels };
+  } finally {
+    // pi persisted its thinking_level_change entry: this is the new baseline.
+    w.fileSig = fileSigOf(warmKey(target.sessionPath));
+    armWarmIdle(w, target.sessionPath);
+  }
+}
+
 // Queue a message into a run that is ALREADY STREAMING on the warm process.
 // pi's own runtime queues it (streamingBehavior): "followUp" waits for the
 // current turn, "steer" interrupts after the current step. agent_settled of
@@ -491,4 +513,4 @@ async function piBeginWarm(target) {
   return { file, sessionId, pid: sess.pid };
 }
 
-module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };
+module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetModel, piSetThinking, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };

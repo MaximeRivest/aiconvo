@@ -556,6 +556,23 @@ async function piSetModel(target, provider, modelId) {
   }
 }
 
+// Set the session's reasoning (thinking) level through pi's own runtime
+// (persists a native thinking_level_change entry, so resumes and branches
+// inherit it). level 'cycle' steps to the next available level.
+async function piSetThinking(target, level) {
+  const S = await ensureS(target);
+  clearTimeout(S.idleTimer);
+  try {
+    if (!S.session.supportsThinking()) throw new Error('This model has no reasoning control.');
+    if (level === 'cycle') S.session.cycleThinkingLevel();
+    else S.session.setThinkingLevel(level);
+    return { level: S.session.thinkingLevel, levels: S.session.getAvailableThinkingLevels() };
+  } finally {
+    S.fileSig = fileSigOf(S.file);
+    armIdle(S);
+  }
+}
+
 // Start a new pi session in cwd and keep it in the pool.
 async function piBeginWarm(target) {
   const S = await createS({ cwd: target.cwd, env: target.env, extraArgs: target.extraArgs });
@@ -597,7 +614,7 @@ function setEditorTextFor(sessionPath, text) {
 }
 
 module.exports = {
-  piForkAt, piForkBefore, piSetModel, piHeadlessRun, piQueuePrompt, piBeginWarm,
+  piForkAt, piForkBefore, piSetModel, piSetThinking, piHeadlessRun, piQueuePrompt, piBeginWarm,
   stopWarmSession, stopAllWarmSessions, listWarmSessions,
   setEditorTextFor, loadSdk, sdkInfo,
 };

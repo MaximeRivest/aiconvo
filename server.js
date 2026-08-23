@@ -913,6 +913,9 @@ function parseTreeEntries(kind, raw) {
       } else if (d.type === 'model_change' && d.modelId) {
         // The model that serves the turns below this entry, until the next switch.
         node.modelChange = { provider: d.provider || null, model: d.modelId };
+      } else if (d.type === 'thinking_level_change' && d.thinkingLevel) {
+        // The reasoning level that serves the turns below this entry.
+        node.thinkingChange = d.thinkingLevel;
       }
     } else {
       if (!d.uuid || d.isSidechain) continue;
@@ -1079,6 +1082,8 @@ async function conversationContextResponse(key, leafId) {
     if (n.modelChange) { provider = n.modelChange.provider; model = n.modelChange.model; break; }
     if (n.role === 'assistant' && n.model) { provider = n.provider || null; model = n.model; break; }
   }
+  // The reasoning level that serves the next turn: nearest thinking entry wins.
+  const thinking = (chain.find(n => n.thinkingChange) || {}).thinkingChange || null;
   const models = (modelsCache.models.length ? modelsCache : await listPiModels()).models || [];
   let hit = model ? settingsLib.findModel(models, provider, model) : null;
   if (!hit && model) hit = models.find(m => m.model === model) || null;
@@ -1090,7 +1095,7 @@ async function conversationContextResponse(key, leafId) {
     key,
     source: entry.source,
     leaf: leaf ? leaf.id : null,
-    provider, model,
+    provider, model, thinking,
     ctxTokens, usedTokens,
     leftTokens: Math.max(0, ctxTokens - usedTokens),
     pctLeft: ctxTokens ? Math.max(0, Math.min(100, Math.round(100 * (1 - usedTokens / ctxTokens)))) : null,
@@ -1842,6 +1847,30 @@ async function setConversationModel(key, provider, modelId, force) {
   try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
   if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
   return { ok: true, model: provider + '/' + modelId, reopened: reopen };
+}
+
+// Set the conversation's reasoning level durably through pi's own runtime.
+async function setConversationThinking(key, level, force) {
+  const { entry, sessionPath, cwd } = sessionPathsFor(key);
+  if (conversationKind(entry) === 'claude') throw new Error('Reasoning control needs pi.');
+  if (level !== 'cycle' && !settingsLib.THINKING_LEVELS.includes(level)) throw new Error('bad level: ' + level);
+  const running = findRunningConversation(key);
+  let reopen = false;
+  if (running) {
+    if (!force) {
+      const err = new Error('A terminal owns this conversation (pid ' + running.pid + ').');
+      err.needsForce = true;
+      throw err;
+    }
+    await stopRunningAgent(running);
+    await waitFileQuiet(sessionPath);
+    reopen = true;
+  }
+  if (headlessRuns.has(sessionPath)) throw new Error('A web run is active on this conversation. Wait or abort it.');
+  const out = await withSessionOp(sessionPath, () => piEng().piSetThinking({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, level));
+  try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
+  if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
+  return { ok: true, level: out.level, levels: out.levels, reopened: reopen };
 }
 
 // ---------- distillation ----------
@@ -7350,6 +7379,13 @@ const server = http.createServer(async (req, res) => {
         const out = await setConversationModel(p.id, p.provider, p.modelId, !!p.force);
         saveConversationModels(p.id, [{ provider: p.provider, modelId: p.modelId }]);
         json(res, 200, out);
+      } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/conversation/thinking' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, await setConversationThinking(p.id, p.level, !!p.force));
       } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
     } else if (u.pathname === '/api/conversation/models' && req.method === 'PUT') {
       let body = '';

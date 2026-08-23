@@ -217,24 +217,11 @@ body.g-off #left { height: auto; }
 
 /* ---- home / away layout (design: home is the whole-system view) ----
    Home fills the work area with the timeline tray; every other view
-   hides the tray and fills the area with #view plus the breadcrumb. */
+   hides the tray and fills the area with #view. */
 body.home #view { display: none !important; }
-body.home #crumb { display: none !important; }
 body.home #left { flex: 1 1 auto; width: 100% !important; height: auto !important; min-height: 0; border-top: 0; border-right: 0; }
 body.home #ganttResize { display: none; }
 body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; }
-
-/* ---- breadcrumb spine ---- */
-#crumb { display: flex; gap: 4px; align-items: center; padding: 3px var(--sp-3); background: var(--surface-1); border-bottom: 1px solid var(--border); font-size: var(--fs-meta); color: var(--text-dim); flex-shrink: 0; white-space: nowrap; position: relative; }
-#crumb button { border: 0; background: transparent; height: 22px; padding: 0 4px; color: var(--cyan); font-size: var(--fs-meta); max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
-#crumb button:hover { text-decoration: underline; background: transparent; }
-#crumb .sep { color: var(--text-faint); }
-#crumb .here { color: var(--text); font-weight: 700; padding: 0 4px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
-#crumbSibs { position: absolute; top: 100%; left: 0; z-index: 70; background: var(--bg); border: 1px solid var(--border-strong); max-height: 60vh; overflow-y: auto; min-width: 300px; max-width: 480px; box-shadow: 0 4px 18px var(--shadow-color); }
-#crumbSibs .sib { display: block; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; }
-#crumbSibs .sib:hover { background: var(--surface-2); }
-#crumbSibs .sib.on { border-left: 3px solid var(--accent); }
-#crumbSibs .sib .meta { color: var(--text-faint); font-size: var(--fs-micro); }
 
 /* ---- project tree mode ---- */
 .ptree-toolbar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3); }
@@ -843,6 +830,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .model-pick .minherit { color: var(--text-faint); font-size: 9px; border: 1px solid var(--border); padding: 0 5px; }
 .model-pick.inherited { border-style: dashed; }
 .model-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 6px; }
+.agent-compose-row .think-pick { margin-left: auto; }
+.agent-compose-row .think-pick:not([hidden]) ~ .model-strip { margin-left: 0; }
 /* inside the compose row the strip is inline; the model chip starts the
    right-hand group (model · fan chips · send), the meter floats mid-row */
 .agent-compose-row .model-strip { padding: 0; margin-left: auto; }
@@ -1219,12 +1208,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   #jobsBtn::after { content: "jobs"; font: 10px var(--font); }
   #activeBtn { margin-left: auto; font-size: 11px; }
 
-  #crumb { min-height: 44px; padding: 3px 7px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
-  #crumb::-webkit-scrollbar { display: none; }
-  #crumb button { height: 36px; max-width: 58vw; font-size: 12px; }
-  #crumb .here { max-width: 58vw; }
-  #crumbSibs { position: fixed; top: 96px; left: 6px; right: 6px; min-width: 0; max-width: none; max-height: 65dvh; }
-
   #filtersPop, #agentsPop { position: fixed; top: 56px; left: 6px; right: 6px; width: auto; max-height: calc(100dvh - 64px); overflow: auto; }
   body.home #filtersPop, body.home #agentsPop { top: 108px; }
   #windowsPop { padding: 8px 8px calc(12px + env(safe-area-inset-bottom)); }
@@ -1268,7 +1251,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
      so the transcript is never hidden behind the composer */
   body:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + 16px + env(safe-area-inset-bottom)); }
   /* reading hides the chrome: scroll down → gone, scroll up or reach the top → back */
-  body.chrome-min:not(.home) header, body.chrome-min:not(.home) #crumb { display: none; }
+  body.chrome-min:not(.home) header { display: none; }
   /* the head scrolls away with the transcript; sticky costs too much screen */
   .convhead { position: static; top: auto; margin: -1px -2px 8px; padding: 6px 2px; }
   .convhead .ch-top, .convhead .ch-row { align-items: center; flex-wrap: wrap; }
@@ -1294,6 +1277,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   /* resting composer: one slim bar — tap it, or hold a draft, to expand */
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
+.agent-compose.compose-min .think-pick,
   .agent-compose.compose-min .live-pane,
   .agent-compose.compose-min .ctxmeter,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
@@ -1399,7 +1383,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* ---- zen mode: only the conversation. z toggles; one body class, no
    second render path — CSS removes the chrome at the last step. ---- */
 body.zen:not(.home) header,
-body.zen:not(.home) #crumb,
 body.zen:not(.home) #left,
 body.zen:not(.home) .convhead,
 body.zen:not(.home) #cornerStack,
@@ -1408,6 +1391,7 @@ body.zen:not(.home) .tracebanner,
 body.zen:not(.home) .msg .role,
 body.zen:not(.home) .cmp-badges,
 body.zen:not(.home) .model-strip,
+body.zen:not(.home) .think-pick,
 body.zen:not(.home) .agent-compose .ctxmeter,
 body.zen:not(.home) .agent-state { display: none !important; }
 body.zen:not(.home) .transcript, body.zen:not(.home) #runCards:not(:empty) { border: 0; }
@@ -1454,7 +1438,6 @@ window.aiconvoSyncTheme();
   <button id="settingsBtn" title="Memory model (,)">settings</button>
   <button id="jobsBtn" title="Background work (j)">jobs [<span id="jobCount">0</span>]</button>
 </header>
-<div id="crumb" hidden></div>
 <button id="zenExit" title="Leave zen mode (z)">zen ✕</button>
 <button id="gRecenter" title="Jump to now" aria-label="Jump to now">⌖</button>
 <div id="windowsPop" hidden></div>
@@ -1609,9 +1592,7 @@ function setRouteKind(kind, crumbs) {
   document.body.classList.remove('chrome-min'); // navigation always shows the chrome again
   chromeScrollLast = -1;
   chromeUpAcc = chromeDownAcc = 0;
-  const sibs = $('crumbSibs');
-  if (sibs) sibs.remove();
-  renderCrumb(crumbs || []);
+  routeSegs = crumbs || [];
 }
 
 function setRoute(kind, hash, crumbs) {
@@ -1685,36 +1666,18 @@ function dispatchHash(h) {
   return open(h);
 }
 
-// ---- breadcrumb spine ----
-function renderCrumb(segs) {
-  const bar = $('crumb');
-  if (!bar) return;
-  if (!segs || !segs.length) { bar.hidden = true; bar.innerHTML = ''; return; }
-  bar.hidden = false;
-  bar.innerHTML = segs.map((seg, i) => {
-    const last = i === segs.length - 1;
-    const el = (!last || seg.always)
-      ? `<button data-crumb="${i}" title="${esc(seg.title || seg.label)}">${esc(seg.label)}</button>`
-      : `<span class="here" title="${esc(seg.title || seg.label)}">${esc(seg.label)}</span>`;
-    return (i ? '<span class="sep">▸</span>' : '') + el;
-  }).join('');
-  bar.querySelectorAll('[data-crumb]').forEach(b => b.onclick = e => {
-    const seg = segs[Number(b.dataset.crumb)];
-    if (seg && seg.go) seg.go(e);
-  });
-}
+// ---- route segments ----
+// The breadcrumb bar is gone (header title + home cover navigation), but the
+// segment labels still name windows in the window switcher (winLabel).
+let routeSegs = [];
 
 const crumbHome = () => ({ label: '❯ home', title: 'The whole-system timeline', go: () => goHome() });
 const crumbProject = name => ({ label: name, title: 'Project overview · ' + name, go: () => showProjectOverview(name) });
 
-function crumbConversation(key, isLast) {
+function crumbConversation(key) {
   const s = sessions.find(x => x.key === key);
   const label = String((s && (s.title || s.timelineTitle)) || 'conversation').slice(0, 42);
-  return {
-    label, always: true,
-    title: isLast ? 'Switch to a sibling conversation' : 'Back to this conversation',
-    go: e => isLast ? toggleCrumbSiblings(key, e) : open(key),
-  };
+  return { label, title: 'Back to this conversation', go: () => open(key) };
 }
 
 // crumbs for the conversation family. tail: extra segments after the conversation.
@@ -1722,31 +1685,8 @@ function convCrumbs(key, ...tail) {
   const s = sessions.find(x => x.key === key);
   const segs = [crumbHome()];
   if (s) segs.push(crumbProject(projectOf(s)));
-  segs.push(crumbConversation(key, !tail.length));
+  segs.push(crumbConversation(key));
   return segs.concat(tail);
-}
-
-// Quick-switch: the conversation crumb opens a sibling list for its project.
-function toggleCrumbSiblings(key, ev) {
-  const old = $('crumbSibs');
-  if (old) { old.remove(); return; }
-  const s = sessions.find(x => x.key === key);
-  const project = s ? projectOf(s) : null;
-  const sibs = sessions.filter(x => x.key && (!project || projectOf(x) === project)).slice(0, 40);
-  if (!sibs.length) return;
-  const box = document.createElement('div');
-  box.id = 'crumbSibs';
-  box.innerHTML = sibs.map(x => `<div class="sib${x.key === key ? ' on' : ''}" data-k="${esc(x.key)}">
-    <div>${esc(x.title || '(untitled)')}</div>
-    <div class="meta">${fmtDate(x.lastTs)} · ${x.userCount || 0} user · ${x.assistantCount || 0} assistant</div></div>`).join('');
-  $('crumb').appendChild(box);
-  if (ev && ev.target) box.style.left = Math.max(0, ev.target.offsetLeft - 8) + 'px';
-  box.querySelectorAll('[data-k]').forEach(el => el.onclick = () => { box.remove(); if (el.dataset.k !== key) open(el.dataset.k); });
-  setTimeout(() => document.addEventListener('click', function close(e) {
-    if (box.contains(e.target) || e.target.closest('[data-crumb]')) return;
-    box.remove();
-    document.removeEventListener('click', close);
-  }), 0);
 }
 
 const $ = id => document.getElementById(id);
@@ -1873,8 +1813,7 @@ function winKindLabel(kind) {
 
 function winLabel() {
   if (viewKind === 'home') return tab === 'conv' ? 'home' : 'home · ' + tab;
-  const segs = [...document.querySelectorAll('#crumb button, #crumb .here')]
-    .map(el => el.textContent.trim()).filter(Boolean);
+  const segs = routeSegs.map(s => String(s.label || '').trim()).filter(Boolean);
   if (segs.length > 1) return segs.slice(1).join(' ▸ ');
   return winKindLabel(viewKind) || 'window';
 }
@@ -7143,7 +7082,7 @@ new MutationObserver(() => {
 }).observe($('view'), { childList: true });
 
 // ---- phone chrome auto-hide (design: reading owns the screen) ----
-// Scrolling down hides the header and crumb; scrolling up, or the top,
+// Scrolling down hides the header; scrolling up, or the top,
 // brings them back. Accumulated distance per direction, not per-event
 // deltas: high-refresh screens deliver many tiny scroll events.
 // Toggling chrome-min changes the layout height above the scroller. Without
@@ -7156,8 +7095,7 @@ function setChromeMin(min, compensate) {
   const view = $('view');
   const measure = () => {
     const head = document.querySelector('header');
-    const crumb = $('crumb');
-    return (head ? head.offsetHeight : 0) + (crumb && !crumb.hidden ? crumb.offsetHeight : 0);
+    return head ? head.offsetHeight : 0;
   };
   // Measure while the chrome is visible: display:none reads 0.
   const before = min ? measure() : 0;
@@ -7595,15 +7533,60 @@ async function refreshCtxMeter(d) {
   const leaf = traceLeaves.get(d.key) || '';
   const sig = leaf + '|' + (d.lastTs || '') + '|' + ((d.messages || []).length);
   const hit = ctxMeterCache.get(d.key);
-  if (hit && hit.sig === sig) return paintCtxMeter(el, hit.data);
+  if (hit && hit.sig === sig) {
+    if (hit.data && hit.data.thinking) thinkLevels.set(d.key, hit.data.thinking);
+    paintThinkBtn();
+    return paintCtxMeter(el, hit.data);
+  }
   try {
     const r = await fetch('/api/conversation/context?id=' + encodeURIComponent(d.key)
       + (leaf ? '&leaf=' + encodeURIComponent(leaf) : ''));
     if (!r.ok) { el.hidden = true; return; }
     const data = await r.json();
     ctxMeterCache.set(d.key, { sig, data });
-    if (current && current.key === d.key) paintCtxMeter($('ctxMeter'), data);
+    if (data && data.thinking) thinkLevels.set(d.key, data.thinking);
+    if (current && current.key === d.key) { paintCtxMeter($('ctxMeter'), data); paintThinkBtn(); }
   } catch { el.hidden = true; }
+}
+
+// ---- reasoning level (pi thinking) ----
+// The button left of the model picker shows the level that serves the next
+// reply — read from the session's own thinking_level_change entries. Click
+// or shift+tab cycles through the model's available levels; pi persists the
+// change natively, so the terminal and resumes inherit it.
+const thinkLevels = new Map(); // conversation key → 'off' | 'minimal' | … | 'max'
+function paintThinkBtn() {
+  const btn = $('agentThink');
+  if (!btn) return;
+  const lvl = thinkLevels.get(activeRel);
+  btn.textContent = '∴ ' + (lvl || '?');
+  btn.title = (lvl
+    ? 'Reasoning for the next reply: ' + lvl + '.'
+    : 'Reasoning level not known yet.') + ' Click or shift+tab to cycle.';
+  btn.hidden = false;
+}
+async function cycleThinking() {
+  const key = activeRel;
+  if (!key || !$('agentThink') || window._thinkBusy) return;
+  window._thinkBusy = true;
+  try {
+    const payload = { id: key, level: 'cycle' };
+    let out = await postJson('/api/conversation/thinking', payload);
+    if (out && out.needsForce) {
+      if (confirm('A terminal owns this conversation. Stop the terminal and change reasoning from the web?'))
+        out = await postJson('/api/conversation/thinking', { ...payload, force: true });
+      else out = null;
+    }
+    if (!out) return;
+    if (out.error) return errToast('reasoning change failed: ' + out.error);
+    thinkLevels.set(key, out.level);
+    // The ctx-meter cache carries the old level; refresh it so a repaint
+    // does not roll the button back.
+    const hit = ctxMeterCache.get(key);
+    if (hit && hit.data) hit.data.thinking = out.level;
+    paintThinkBtn();
+    toast('reasoning: ' + out.level);
+  } finally { window._thinkBusy = false; }
 }
 function paintCtxMeter(el, c) {
   if (!el) return;
@@ -7758,6 +7741,7 @@ function agentComposerHtml(d) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>
       </button>
       <span id="ctxMeter" class="ctxmeter" hidden></span>
+      ${d.source !== 'claude' ? '<button id="agentThink" class="model-pick think-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
       ${d.source === 'claude' ? '<button class="primary" id="agentSend" type="button" title="Open the terminal and send (ctrl+enter)">open &amp; send</button>' : ''}
@@ -8761,6 +8745,8 @@ function wireAgentComposer() {
   const runBtn = $('agentRun');
   if (runBtn) runBtn.onclick = () => headlessSendFromComposer(runBtn);
   renderModelStrip();
+  const thinkBtn = $('agentThink');
+  if (thinkBtn) { thinkBtn.onclick = () => cycleThinking(); paintThinkBtn(); }
   const isPi = !!runBtn; // pi composers have the web send button
   const slashBtn = $('agentSlash');
   if (slashBtn) slashBtn.onclick = () => openSlashPalette();
@@ -8816,6 +8802,8 @@ function wireAgentComposer() {
       }
     };
     ta.onkeydown = e => {
+      // Shift+tab cycles the reasoning level, TUI-style, even while typing.
+      if (isPi && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleThinking(); return; }
       if (isPi && window._slashOpen) {
         const n = (window._slashList || []).length;
         if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
@@ -11949,6 +11937,13 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'Enter') {
     const run = $('agentRun'), ta = $('agentText');
     if (run && ta && ta.value.trim()) { e.preventDefault(); headlessSendFromComposer(run); return; }
+  }
+  // Shift+tab cycles the reasoning level without composer focus (the focused
+  // composer handles its own shift+tab).
+  if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && $('agentThink')) {
+    e.preventDefault();
+    cycleThinking();
+    return;
   }
   if (e.altKey && !e.ctrlKey && !e.metaKey && /^[1-5]$/.test(e.key) && searchMode && viewKind === 'home') {
     e.preventDefault();
