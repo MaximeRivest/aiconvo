@@ -2425,8 +2425,10 @@ $('jobsList').onclick = e => {
     else open(job.key);
   } else if (job.type === 'evidence' && job.status === 'done' && (job.result?.sessionIds?.length === 1 || job.key)) {
     showConversationEvidence(job.key || job.result.sessionIds[0]);
-  } else if ((job.type === 'project-distill' || job.type === 'project-memory') && job.project) {
+  } else if ((job.type === 'project-distill' || job.type === 'project-memory' || job.type === 'memory-docs' || job.type === 'memory-backfill') && job.project) {
     showProjectOverview(job.project);
+  } else if (job.type === 'memory-extract' && job.key) {
+    open(job.key);
   } else if (job.type === 'epic' && job.status === 'done' && job.epicId) showEpic(job.epicId);
 };
 
@@ -6545,7 +6547,9 @@ let projectOverviewName = null;
 
 function projectFreshGlyph(state) {
   return state === 'fresh' ? '<span class="ok">✓ fresh</span>' :
-    state === 'stale' ? '<span class="warn">⚠ stale</span>' : '<span class="dim">— missing</span>';
+    state === 'stale' ? '<span class="warn">⚠ stale</span>' :
+    state === 'seeded' ? '<span class="warn">◐ seeded</span>' :
+    state === 'empty' ? '<span class="dim">· empty</span>' : '<span class="dim">— missing</span>';
 }
 
 function projectStartDefaults(d) {
@@ -6834,6 +6838,23 @@ async function showProjectOverview(name) {
         <button id="pBuildAll" class="ghost">build all evidence</button>
       </div>
     </section>
+    <section class="psection"><h3>memory pyramid <span style="text-transform:none">(beta · design/27)</span></h3>
+      <div class="pfresh">
+        <div><b>${(d.pyramid?.leaves?.fresh) || 0}</b><span>fresh leaves</span></div>
+        <div><b>${(d.pyramid?.leaves?.stale) || 0}</b><span>stale leaves</span></div>
+        <div><b>${(d.pyramid?.leaves?.seeded) || 0}</b><span>seeded · intent only</span></div>
+        <div><b>${(d.pyramid?.leaves?.missing) || 0}</b><span>missing leaves</span></div>
+      </div>
+      <div class="pmeta">${d.pyramid?.docs
+        ? `docs regenerated ${fmtDate(d.pyramid.docs.builtAt)} · ${d.pyramid.docs.stale ? '⚠ stale' : '✓ current'}`
+        : 'documents not yet regenerated from leaves'}${d.pyramid?.leaves?.empty ? ` · ${d.pyramid.leaves.empty} empty conversations skipped` : ''}</div>
+      <div class="pactions">
+        <button id="pLeafBackfill" ${d.pyramid?.backfillRunning ? 'disabled' : ''} title="Extract one memory leaf per conversation (missing, stale, and seeded ones). Runs in the background; pausable; finished leaves are kept forever.">${d.pyramid?.backfillRunning ? 'backfill running…' : `backfill leaves (${((d.pyramid?.leaves?.stale) || 0) + ((d.pyramid?.leaves?.seeded) || 0) + ((d.pyramid?.leaves?.missing) || 0)})`}</button>
+        ${d.pyramid?.backfillRunning ? '<button id="pLeafPause" class="ghost">pause backfill</button>' : ''}
+        <button id="pDocsRegen" ${d.pyramid?.docsRunning ? 'disabled' : ''} title="Regenerate all four memory documents fresh from the current leaves">${d.pyramid?.docsRunning ? 'regenerating docs…' : 'regenerate docs from leaves'}</button>
+      </div>
+      <div class="hint">Leaves are extracted once per conversation and cached forever. Documents always regenerate fresh from all leaves — prose never accumulates.</div>
+    </section>
     <section class="psection" id="pTrust" hidden><h3>trust · vouched content</h3><div id="pTrustBody"></div></section>
     <section class="psection"><h3>project memory</h3>
       ${memory ? `<div class="pcard">
@@ -6869,7 +6890,7 @@ async function showProjectOverview(name) {
     <section class="psection"><h3>recent conversations</h3>
       ${d.recent.map(r => `<div class="item" data-p-conv="${esc(r.key)}" style="border-left:4px solid ${projectColor(d.project).fill}">
         <div style="min-width:0;flex:1"><div class="title">${r.active ? '● ' : ''}${esc(r.title)}</div>
-        <div class="meta">${fmtDate(r.lastTs)} · note ${projectFreshGlyph(r.note)} · evidence ${projectFreshGlyph(r.evidence)}</div></div></div>`).join('')}
+        <div class="meta">${fmtDate(r.lastTs)} · note ${projectFreshGlyph(r.note)} · evidence ${projectFreshGlyph(r.evidence)} · leaf ${projectFreshGlyph(r.leaf)}</div></div></div>`).join('')}
     </section>
     <section class="psection plauncher" id="projectStart"><h3>new conversation in this project</h3>
       <label for="pAgent">agent</label><select id="pAgent"><option value="pi">pi</option><option value="claude">claude</option></select>
@@ -6962,6 +6983,34 @@ async function showProjectOverview(name) {
   $('pRefreshStale').onclick = () => projectRefreshEvidence(d, 'stale');
   $('pBuildAll').onclick = () => projectRefreshEvidence(d, 'all', true);
   $('pMemoryBuild').onclick = () => projectBuildMemory(d);
+  const pLeafBackfill = $('pLeafBackfill');
+  if (pLeafBackfill) pLeafBackfill.onclick = async () => {
+    const n = ((d.pyramid?.leaves?.stale) || 0) + ((d.pyramid?.leaves?.seeded) || 0) + ((d.pyramid?.leaves?.missing) || 0);
+    if (!n) return toast('all memory leaves are current.');
+    if (n > 20 && !confirm(`Extract ${n} memory leaves? Each costs roughly one small model call. The backfill runs in the background and you can pause it; finished leaves are kept.`)) return;
+    const out = await postJsonMethod('/api/memory/backfill', 'POST', { project: d.project });
+    if (out.error) return errToast('backfill failed to start: ' + out.error);
+    updateJob(out);
+    pLeafBackfill.disabled = true;
+    pLeafBackfill.textContent = 'backfill running…';
+    toggleJobs(true);
+    toast('leaf backfill started · ' + d.project);
+  };
+  const pLeafPause = $('pLeafPause');
+  if (pLeafPause) pLeafPause.onclick = async () => {
+    const out = await postJsonMethod('/api/memory/backfill', 'POST', { project: d.project, action: 'pause' });
+    if (out.error) return errToast(out.error);
+    toast('backfill will pause after the current leaves.');
+  };
+  $('pDocsRegen').onclick = async () => {
+    const out = await postJsonMethod('/api/project/memory/regenerate', 'POST', { project: d.project });
+    if (out.error) return errToast('regeneration failed to start: ' + out.error);
+    updateJob(out);
+    $('pDocsRegen').disabled = true;
+    $('pDocsRegen').textContent = 'regenerating docs…';
+    toggleJobs(true);
+    toast('document regeneration started · ' + d.project);
+  };
   $('view').querySelectorAll('[data-p-memory]').forEach(b => b.onclick = () => showProjectMemoryDoc(d.project, b.dataset.pMemory));
   $('view').querySelectorAll('[data-p-candidate]').forEach(b => b.onclick = () => buildDiscoveredEpic(d, b.dataset.pCandidate));
   $('view').querySelectorAll('[data-p-epic-open]').forEach(b => b.onclick = () => showEpic(b.dataset.pEpicOpen));
@@ -12957,22 +13006,31 @@ live.onmessage = ev => {
         d.job.type === 'evidence' ? 'evidence ready' :
         d.job.type === 'project-distill' ? 'all project notes ready' :
         d.job.type === 'project-memory' ? 'project memory ready' :
+        d.job.type === 'memory-extract' ? 'memory leaves saved' :
+        d.job.type === 'memory-docs' ? 'memory documents regenerated' :
+        d.job.type === 'memory-backfill' ? (d.job.result?.paused ? 'leaf backfill paused' : 'leaf backfill finished') :
         d.job.type === 'agent-run' ? 'model run finished' : 'note saved';
       toast('✓ ' + label + ': ' + d.job.title, () => {
         if (d.job.type === 'epic') showEpic(d.job.epicId);
         else if (d.job.type === 'evidence' && (d.job.result?.sessionIds?.length === 1 || d.job.key)) showConversationEvidence(d.job.key || d.job.result.sessionIds[0]);
-        else if (d.job.type === 'project-distill' || d.job.type === 'project-memory') showProjectOverview(d.job.project);
+        else if (d.job.type === 'project-distill' || d.job.type === 'project-memory' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') showProjectOverview(d.job.project);
         else if (d.job.type === 'agent-run') open(d.job.key, 'bottom');
         else if (d.job.type === 'distill') startDistill(d.job.key);
       }, 'ok');
-      if ((d.job.type === 'project-distill' || d.job.type === 'project-memory') && viewKind === 'project' && projectOverviewName === d.job.project && $('projectStart')) {
+      if ((d.job.type === 'project-distill' || d.job.type === 'project-memory' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && viewKind === 'project' && projectOverviewName === d.job.project && $('projectStart')) {
         showProjectOverview(d.job.project).then(() => {
           if (d.job.type === 'project-distill' && $('pMemNotes')) $('pMemNotes').checked = true;
         });
       }
     }
     if (d.job.status === 'error' && (!old || old.status === 'running') && !d.job.parentId) {
-      errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'project-memory' ? 'project memory failed: ' : d.job.type === 'agent-run' ? 'model run failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
+      errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'project-memory' ? 'project memory failed: ' : d.job.type === 'memory-extract' ? 'leaf extraction failed: ' : d.job.type === 'memory-docs' ? 'document regeneration failed: ' : d.job.type === 'memory-backfill' ? 'leaf backfill failed: ' : d.job.type === 'agent-run' ? 'model run failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
+      if ((d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && projectOverviewName === d.job.project && viewKind === 'project' && $('pDocsRegen')) {
+        $('pDocsRegen').disabled = false;
+        $('pDocsRegen').textContent = 'retry doc regeneration';
+        const bf = $('pLeafBackfill');
+        if (bf) { bf.disabled = false; }
+      }
       if (d.job.type === 'project-memory' && projectOverviewName === d.job.project && $('pMemoryBuild')) {
         $('pMemoryBuild').disabled = false;
         $('pMemoryBuild').textContent = 'retry project memory';

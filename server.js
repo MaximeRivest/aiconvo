@@ -519,6 +519,7 @@ async function indexFile(source, relPath, stat) {
     await fsp.writeFile(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages, entryParents }));
     saveIndexSoon();
     broadcast({ type: 'update', key, ...entry });
+    markLeafDirty(key, prev, entry, stat.mtimeMs);
     if (searchIdx) {
       try {
         searchIdx.putConversation(key, { ...entry, project: projectNameOf(entry.cwd) }, messages);
@@ -3257,6 +3258,318 @@ function cleanEpicCandidates(profile, meta) {
   return out.slice(0, 20);
 }
 
+// ---- memory pyramid (design/27-memory-pyramid.md) ----
+// Leaves accumulate per conversation (extracted once, cached forever).
+// Documents regenerate fresh from all leaves — no synthesis pass ever reads
+// its own previous output, so the prose cannot rot.
+const MEMORY_LEAVES_DIR = path.join(CACHE_DIR, 'memory-leaves');
+const LEAF_VERSION = 1;
+
+const LEAF_EXTRACT_PROMPT =
+  'The attached file is one AI-assisted work conversation from a software project. Extract durable memory facts from it. ' +
+  'Reply with STRICT JSON only, no prose or code fence: ' +
+  '{"abstract":"2-3 sentences: what was attempted and what came out",' +
+  '"intent":[{"id":N,"kind":"vision|motivation|outcome|principle|constraint|preference|non-goal","confidence":0.0,"reason":"one line"}],' +
+  '"environment":[{"type":"setup|command|service|location|tooling|auth|caution","fact":"one line"}],' +
+  '"problems":[{"state":"open|resolved","fact":"one line"}]}. ' +
+  'intent: select ONLY numbered user messages that reveal durable, implementation-independent user intent — vision, motivation, desired outcome or experience, values, product principles, durable constraints, trade-offs, explicit non-goals. ' +
+  'Routine commands, narrow implementation requests, status checks, and transient fixes are not intent. Use the exact ids from the input. ' +
+  'environment: reusable setup facts only — commands that matter, services and addresses, important paths, tooling, authentication METHODS. NEVER output passwords, tokens, private keys, secret values, or copied credentials. ' +
+  'problems: what broke and stayed open, and notable resolutions that changed the approach. ' +
+  'Empty arrays are fine. Extract only what the conversation supports; do not invent.';
+
+function leafPathFor(key) {
+  return path.join(MEMORY_LEAVES_DIR, key.replace(/[:\/\\]/g, '__') + '.json');
+}
+
+// Small in-memory cache: project stats re-read every leaf on each open.
+const memoryLeafCache = new Map(); // key -> { mtimeMs, size, leaf }
+async function readLeaf(key) {
+  const p = leafPathFor(key);
+  let st = null;
+  try { st = await fsp.stat(p); } catch { memoryLeafCache.delete(key); return null; }
+  const hit = memoryLeafCache.get(key);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.leaf;
+  try {
+    const leaf = JSON.parse(await fsp.readFile(p, 'utf8'));
+    memoryLeafCache.set(key, { mtimeMs: st.mtimeMs, size: st.size, leaf });
+    if (memoryLeafCache.size > 4000) memoryLeafCache.delete(memoryLeafCache.keys().next().value);
+    return leaf;
+  } catch { return null; }
+}
+
+function leafStateFor(entry, leaf) {
+  if (!leaf) return 'missing';
+  if (leaf.partial) return 'seeded'; // intent lane only (migrated from an old build)
+  return leaf.memoryHash && entry && leaf.memoryHash === entry.memoryHash ? 'fresh' : 'stale';
+}
+
+// One conversation -> one leaf. One model call when it fits; grouped calls
+// with a merged result otherwise. The verbatim intent quotes are attached
+// here from the transcript — the model only returns ids.
+async function extractLeaf(key) {
+  const entry = index[key];
+  if (!entry) throw new Error('unknown conversation: ' + key);
+  const memoryHash = entry.memoryHash || null; // captured before the call: growth during the job leaves the leaf correctly stale
+  const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+  const messages = data.messages || [];
+  const intentItems = [];
+  let prevAssistant = '';
+  messages.forEach((m, i) => {
+    if (m.role === 'assistant') prevAssistant = m.text || '';
+    if (m.role !== 'user' || !String(m.text || '').trim() || isBootstrapMessage(m.text)) return;
+    intentItems.push({ id: i, ts: m.ts || null, user: m.text || '', assistantBefore: prevAssistant });
+  });
+  const toolLines = [];
+  for (const m of messages) {
+    if (m.role === 'tool') toolLines.push(`[${m.ts || '?'}] ${m.name || 'tool'}${m.path ? ' ' + m.path : ''}: ${clipped(m.text, 500)}`);
+    else if (m.role === 'toolresult') toolLines.push(`  -> ${m.err ? 'ERROR ' : ''}${clipped(m.text, 700)}`);
+    else if (m.role === 'abort') toolLines.push(`[${m.ts || '?'}] ABORTED: ${clipped(m.text || 'aborted', 200)}`);
+  }
+  const tools = toolLines.length > 500
+    ? toolLines.slice(0, 100).concat([`… ${toolLines.length - 400} tool events omitted …`], toolLines.slice(-300))
+    : toolLines;
+  const header = [
+    `CONVERSATION ${key}`,
+    `Project: ${projectNameOf(entry.cwd)} · Directory: ${entry.cwd || '?'}`,
+    `Date: ${data.firstTs || entry.firstTs || '?'} -> ${data.lastTs || entry.lastTs || '?'}`,
+    `Title: ${oneLine(data.title || entry.title, '(untitled)')}`,
+    '', '',
+  ].join('\n');
+  const blocks = [
+    '=== USER MESSAGES (numbered, each with the assistant message immediately before it) ===',
+    ...intentItems.map(it => `[#${it.id}] ${it.ts || '?'}\nASSISTANT BEFORE: ${clipped(it.assistantBefore, 6000) || '(none)'}\nUSER: ${clipped(it.user, 12000)}`),
+    '=== TOOL ACTIVITY (chronological, clipped) ===',
+    ...(tools.length ? tools : ['(none)']),
+  ];
+  const budget = piTargetTokens() - 8000 - estimateInputTokens(header);
+  const groups = packTextBlocks(blocks, Math.max(20000, budget));
+  const results = await mapLimit(groups, 2, async (items, i) => {
+    const label = groups.length > 1 ? `SECTION ${i + 1}/${groups.length}\n\n` : '';
+    try { return modelJson(await runPi(header + label + items.join('\n\n'), LEAF_EXTRACT_PROMPT)); }
+    catch (e) { throw new Error(`leaf extraction failed (${key}): ${e.message}`); }
+  });
+  const byId = new Map(intentItems.map(it => [it.id, it]));
+  const seen = new Set();
+  const intent = [];
+  for (const r of results) {
+    for (const sel of Array.isArray(r.intent) ? r.intent : []) {
+      const it = byId.get(Number(sel.id));
+      if (!it || seen.has(it.id)) continue;
+      seen.add(it.id);
+      intent.push({
+        messageIndex: it.id, ts: it.ts, kind: oneLine(sel.kind, 'outcome'), confidence: Number(sel.confidence) || 0,
+        reason: oneLine(sel.reason, ''), user: clipped(it.user, 24000), assistantBefore: clipped(it.assistantBefore, 10000),
+      });
+    }
+  }
+  const dedupe = (rows, keyOf) => {
+    const out = [], have = new Set();
+    for (const row of rows) { const k = keyOf(row); if (!k || have.has(k)) continue; have.add(k); out.push(row); }
+    return out;
+  };
+  const environment = dedupe(
+    results.flatMap(r => stringFactRows(r.environment, 'type')), r => r.type + '\x00' + r.fact).slice(0, 60);
+  const problems = dedupe(
+    results.flatMap(r => stringFactRows(r.problems, 'state')), r => r.state + '\x00' + r.fact).slice(0, 40);
+  const abstract = results.map(r => oneLine(r.abstract, '')).filter(Boolean)
+    .sort((a, b) => b.length - a.length)[0] || '';
+  const leaf = {
+    v: LEAF_VERSION, key, memoryHash, builtAt: Date.now(),
+    span: { firstTs: data.firstTs || entry.firstTs || null, lastTs: data.lastTs || entry.lastTs || null },
+    title: oneLine(data.title || entry.title, '(untitled)').slice(0, 200),
+    abstract, intent, environment, problems,
+  };
+  await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true });
+  await fsp.writeFile(leafPathFor(key), JSON.stringify(leaf));
+  memoryLeafCache.delete(key);
+  return leaf;
+}
+
+function stringFactRows(rows, field) {
+  return (Array.isArray(rows) ? rows : [])
+    .map(r => ({ [field]: oneLine(r && r[field], ''), fact: oneLine(r && r.fact, '') }))
+    .filter(r => r.fact);
+}
+
+// Migration seed: old whole-project builds saved every selected intent
+// message in inputs.json. Turn those into partial leaves (intent lane only)
+// so the strongest lane survives with zero model calls.
+async function seedLeavesFromSnapshots() {
+  let files = [];
+  try { files = (await fsp.readdir(PROJECT_MEMORY_INPUTS_DIR)).filter(f => f.endsWith('.json') && !f.endsWith('-pyramid.json')); } catch { return 0; }
+  let made = 0;
+  for (const f of files) {
+    let snap = null;
+    try { snap = JSON.parse(await fsp.readFile(path.join(PROJECT_MEMORY_INPUTS_DIR, f), 'utf8')); } catch { continue; }
+    const byKey = new Map();
+    for (const m of snap.selectedIntentMessages || []) {
+      if (!m || !m.key) continue;
+      if (!byKey.has(m.key)) byKey.set(m.key, []);
+      byKey.get(m.key).push(m);
+    }
+    for (const [key, quotes] of byKey) {
+      if (!index[key]) continue;
+      if (fs.existsSync(leafPathFor(key))) continue;
+      const entry = index[key];
+      const leaf = {
+        v: LEAF_VERSION, key, memoryHash: null, partial: true, seededFrom: snap.builtAt || null, builtAt: Date.now(),
+        span: { firstTs: entry.firstTs || null, lastTs: entry.lastTs || null },
+        title: oneLine(entry.title, '(untitled)').slice(0, 200),
+        abstract: '', environment: [], problems: [],
+        intent: quotes.map(q => ({
+          messageIndex: q.messageIndex, ts: q.ts || null, kind: q.kind || 'outcome',
+          confidence: Number(q.confidence) || 0, reason: oneLine(q.reason, ''),
+          user: clipped(q.user, 24000), assistantBefore: clipped(q.assistantBefore, 10000),
+        })),
+      };
+      await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true });
+      await fsp.writeFile(leafPathFor(key), JSON.stringify(leaf));
+      made++;
+    }
+  }
+  if (made) console.log(`memory pyramid: seeded ${made} partial leaves from old build snapshots`);
+  return made;
+}
+
+// ---- layer 2: document regeneration ----
+const PYRAMID_PARTIAL_SUFFIX = ' This is one chronological section of a larger project; produce a partial result of the same JSON shape for later merging.';
+const PYRAMID_MERGE_SUFFIX = ' The attached file contains partial results from chronological sections of one project. Merge them into one result of the same JSON shape, without duplication; newer evidence wins on conflict.';
+
+const PYRAMID_OVERVIEW_PROMPT =
+  'The attached file lists dated abstracts for every conversation of one software project, oldest first. ' +
+  'Build a durable high-level view of the WHOLE project arc — purpose and vision must reflect the full history, not only recent work. ' +
+  'Also find coherent multi-session epic candidates not already covered by the listed existing epics. ' +
+  'Reply with STRICT JSON only, no prose or code fence: ' +
+  '{"overview":{"summary":"2-4 sentences","purpose":"...","vision":"...","desiredOutcomes":["..."],"principles":["..."],"nonGoals":["..."]},' +
+  '"epicCandidates":[{"title":"max 70 chars","abstract":"2-4 sentences","reason":"...","sessionIds":["exact session id"]}]}. ' +
+  'Epic candidates need at least two related sessions. Use only exact session ids from the input.';
+
+const PYRAMID_ENV_PROMPT =
+  'The attached file lists dated environment facts extracted from every conversation of one software project, oldest first. ' +
+  'Build the CURRENT development environment document. The newest evidence wins; drop superseded setup; put unresolved conflicts in cautions. ' +
+  'NEVER output passwords, tokens, private keys, secret values, or copied credentials — only methods, variable names, commands, and credential locations. ' +
+  'Reply with STRICT JSON only, no prose or code fence: ' +
+  '{"summary":"1-2 sentences","setup":["..."],"commands":["..."],"services":["..."],"locations":["..."],"tooling":["..."],"authentication":["..."],"cautions":["..."]}.';
+
+const PYRAMID_STATUS_PROMPT =
+  'The attached file lists dated problem records (open or resolved) and the newest conversation abstracts for one software project, oldest first. ' +
+  'Build the CURRENT status snapshot. A problem resolved later is not open. Finished work is not unfinished. Prefer the newest evidence. ' +
+  'Reply with STRICT JSON only, no prose or code fence: ' +
+  '{"recentFocus":["..."],"unfinished":["..."],"todos":["..."],"openQuestions":["..."]}.';
+
+async function synthesizeLaneJson(header, blocks, prompt, emit, label, step, steps) {
+  const budget = piTargetTokens() - 16000;
+  const whole = header + blocks.join('\n\n');
+  if (estimateInputTokens(whole) <= budget) {
+    emit(label + '…', step, steps);
+    return modelJson(await runPi(whole, prompt));
+  }
+  const groups = packTextBlocks(blocks, Math.max(20000, budget - estimateInputTokens(header)));
+  emit(`${label} (${groups.length} sections)…`, step, steps);
+  const partials = await mapLimit(groups, 2, (items, i) =>
+    runPi(`${header}SECTION ${i + 1}/${groups.length}\n\n${items.join('\n\n')}`, prompt + PYRAMID_PARTIAL_SUFFIX));
+  return modelJson(await runPi(`${header}PARTIAL RESULTS:\n${partials.join('\n\n=== PARTIAL ===\n')}`, prompt + PYRAMID_MERGE_SUFFIX));
+}
+
+const laneHashOf = items => crypto.createHash('sha256').update('lane-v1\x00' + JSON.stringify(items)).digest('hex').slice(0, 32);
+
+// Regenerate all four documents from the current leaves. Lanes whose input
+// set is unchanged skip their model call and keep the existing file.
+async function regenerateProjectDocs(project, emit = () => {}) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  emit('Reading memory leaves…', 0, 5);
+  const rows = (await mapLimit(meta.entries, 16, async ({ key, entry }) => ({ key, entry, leaf: await readLeaf(key) })))
+    .filter(r => r.leaf)
+    .sort((a, b) => String(a.leaf.span?.firstTs || '').localeCompare(String(b.leaf.span?.firstTs || '')));
+  if (!rows.length) throw new Error('no memory leaves yet — run the leaf backfill first');
+  const paths = projectMemoryPaths(project);
+  let prev = null;
+  try { prev = JSON.parse(await fsp.readFile(paths.manifest, 'utf8')); } catch {}
+  const prevHashes = (prev && prev.pyramid && prev.pyramid.laneHashes) || {};
+  const dated = ts => String(ts || '?').slice(0, 10);
+
+  // Lane inputs.
+  const abstractBlocks = rows.map(r => [
+    `=== SESSION ${r.key} ===`,
+    `Date: ${dated(r.leaf.span?.firstTs)} -> ${dated(r.leaf.span?.lastTs)}`,
+    `Title: ${r.leaf.title}`,
+    `Abstract: ${r.leaf.abstract || '(none)'}`,
+    (r.leaf.problems || []).some(p => p.state === 'open') ? `Open problems: ${(r.leaf.problems || []).filter(p => p.state === 'open').map(p => p.fact).join('; ')}` : '',
+  ].filter(Boolean).join('\n'));
+  const intentSelected = rows.flatMap(r => (r.leaf.intent || []).map((q, i) => ({
+    id: r.key + ':' + q.messageIndex, key: r.key, messageIndex: q.messageIndex, ts: q.ts || r.leaf.span?.lastTs || null,
+    title: r.leaf.title, kind: q.kind || 'outcome', confidence: q.confidence || 0, reason: q.reason || '',
+    user: q.user || '', assistantBefore: q.assistantBefore || '',
+  }))).sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+  const envFacts = rows.flatMap(r => (r.leaf.environment || []).map(f => `[${dated(r.leaf.span?.lastTs)}] ${f.type}: ${f.fact}`));
+  const problemFacts = rows.flatMap(r => (r.leaf.problems || []).map(f => `[${dated(r.leaf.span?.lastTs)}] ${f.state}: ${f.fact} (session ${r.key})`));
+  const newestAbstracts = rows.slice(-12).map(r => `[${dated(r.leaf.span?.lastTs)}] ${r.leaf.title}: ${r.leaf.abstract || '(none)'}`);
+
+  const laneHashes = {
+    overview: laneHashOf(abstractBlocks), intent: laneHashOf(intentSelected.map(q => q.id)),
+    environment: laneHashOf(envFacts), status: laneHashOf(problemFacts.concat(newestAbstracts)),
+  };
+  const skip = lane => prevHashes[lane] === laneHashes[lane] && fs.existsSync(paths[lane === 'status' ? 'status' : lane]);
+
+  // Overview first: it is cheap and feeds the intent synthesis as context.
+  const header = `PROJECT: ${project}\nEXISTING EPICS (do not duplicate):\n${JSON.stringify(meta.epics.map(e => ({ title: e.title, sessionIds: e.sessionIds })))}\n\n`;
+  let profile = null;
+  if (skip('overview') && prev && prev.overview) {
+    emit('Overview unchanged — keeping it.', 1, 5);
+    profile = { overview: prev.overview, epicCandidates: (prev.candidates || []) };
+  } else {
+    profile = await synthesizeLaneJson(header, abstractBlocks, PYRAMID_OVERVIEW_PROMPT, emit, 'Building the project overview', 1, 5);
+  }
+  const overview = profile.overview || {};
+
+  let intent = null;
+  if (!skip('intent')) intent = await synthesizeProjectIntent(project, overview, intentSelected, emit);
+  else emit('Intent unchanged — keeping it.', 2, 5);
+
+  let environment = null, status = null;
+  const envHeader = `PROJECT: ${project}\n\n`;
+  await Promise.all([
+    (async () => {
+      if (skip('environment')) return emit('Environment unchanged — keeping it.', 3, 5);
+      environment = await synthesizeLaneJson(envHeader, envFacts.length ? envFacts : ['(no environment facts yet)'], PYRAMID_ENV_PROMPT, emit, 'Building the environment document', 3, 5);
+    })(),
+    (async () => {
+      if (skip('status')) return;
+      const statusBlocks = ['=== PROBLEMS ===', ...(problemFacts.length ? problemFacts : ['(none)']), '=== NEWEST ABSTRACTS ===', ...newestAbstracts];
+      status = normalizeProjectStatus(await synthesizeLaneJson(envHeader, statusBlocks, PYRAMID_STATUS_PROMPT, emit, 'Building the status document', 3, 5));
+    })(),
+  ]);
+
+  emit('Writing project memory documents…', 4, 5);
+  const builtAt = Date.now();
+  const sourceHash = projectSourceHash(meta);
+  const candidates = cleanEpicCandidates(profile, meta);
+  await fsp.mkdir(paths.dir, { recursive: true });
+  const writes = [];
+  if (!skip('overview')) writes.push(fsp.writeFile(paths.overview, renderProjectOverviewDoc(project, profile, builtAt, sourceHash)));
+  if (intent) writes.push(fsp.writeFile(paths.intent, renderProjectIntentDoc(project, intent, intentSelected, builtAt, sourceHash)));
+  if (environment) writes.push(fsp.writeFile(paths.environment, renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash)));
+  if (status) writes.push(fsp.writeFile(paths.status, renderProjectStatusDoc(project, status, builtAt, sourceHash)));
+  writes.push(fsp.writeFile(path.join(PROJECT_MEMORY_INPUTS_DIR, projectMemorySlug(project) + '-pyramid.json'), JSON.stringify({
+    project, builtAt, sourceHash, laneHashes, leaves: rows.map(r => ({ key: r.key, state: leafStateFor(r.entry, r.leaf) })),
+    intentQuotes: intentSelected.length, envFacts: envFacts.length, problems: problemFacts.length,
+  })));
+  await Promise.all(writes);
+  const manifest = {
+    project, builtAt, sourceHash, conversations: rows.length,
+    classifiedMessages: prev && prev.classifiedMessages || 0,
+    selectedIntentMessages: intentSelected.length,
+    overview: profile.overview || (prev && prev.overview) || {}, candidates,
+    paths: { overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status, inputs: paths.inputs },
+    pyramid: { v: 1, builtAt, laneHashes, leafCount: rows.length, seededLeaves: rows.filter(r => r.leaf.partial).length },
+  };
+  await fsp.writeFile(paths.manifest, JSON.stringify(manifest));
+  emit('Project memory saved.', 5, 5);
+  return manifest;
+}
+
 async function buildProjectMemory(project, emit = () => {}) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
@@ -3307,6 +3620,7 @@ async function projectMemoryInfo(project, meta = projectMetaFor(project)) {
       conversations: manifest.conversations, classifiedMessages: manifest.classifiedMessages,
       selectedIntentMessages: manifest.selectedIntentMessages,
       overview: manifest.overview || {}, candidates: manifest.candidates || [], paths: manifest.paths || {},
+      pyramid: manifest.pyramid || null,
     };
   } catch { return null; }
 }
@@ -3503,6 +3817,9 @@ const projectDistillJobs = new Map(); // project -> batch job
 const projectMemoryJobs = new Map(); // project -> project memory job
 const evidenceJobs = new Map(); // batch id -> job
 const epicJobs = new Map();    // epic id -> job
+const memoryExtractJobs = new Map(); // batch id -> leaf extraction job
+const memoryDocsJobs = new Map();    // project -> document regeneration job
+const memoryBackfillJobs = new Map(); // project -> backfill job
 
 function jobView(job) {
   return {
@@ -3527,7 +3844,7 @@ function jobChanged(job) {
 
 function allJobs() {
   const cutoff = Date.now() - JOB_KEEP_MS;
-  return [...distillJobs.values(), ...projectDistillJobs.values(), ...projectMemoryJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...agentRunJobs.values()]
+  return [...distillJobs.values(), ...projectDistillJobs.values(), ...projectMemoryJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...memoryExtractJobs.values(), ...memoryDocsJobs.values(), ...memoryBackfillJobs.values(), ...agentRunJobs.values()]
     .map(jobView)
     .concat([...restoredRunJobs.values()].filter(j => (j.finishedAt || 0) > cutoff))
     .sort((a, b) => b.startedAt - a.startedAt);
@@ -3675,6 +3992,181 @@ function startProjectMemoryJob(project) {
     }
   })();
   return job;
+}
+
+// ---- memory pyramid jobs ----
+
+// A batch of leaf extractions. Each leaf fails alone; the batch reports the
+// count. Concurrency 2 keeps the trickle polite to rate limits.
+function startMemoryExtractJob(ids, label = null) {
+  const keys = [...new Set(ids)].filter(k => index[k]);
+  if (!keys.length) throw new Error('no conversations to extract');
+  const id = crypto.randomUUID();
+  const job = {
+    id: 'memory-extract:' + id, type: 'memory-extract',
+    key: keys.length === 1 ? keys[0] : null, sessionIds: keys,
+    title: label || `${keys.length} memory ${keys.length === 1 ? 'leaf' : 'leaves'}`,
+    status: 'running', statusText: 'Extracting memory leaves…', done: 0, total: keys.length,
+    startedAt: Date.now(), finished: false, model: currentModelLabel(),
+  };
+  memoryExtractJobs.set(job.id, job);
+  jobChanged(job);
+  job.completion = (async () => {
+    const failures = [];
+    const projects = new Set();
+    await mapLimit(keys, 2, async key => {
+      try {
+        await extractLeaf(key);
+        const entry = index[key];
+        if (entry) projects.add(projectNameOf(entry.cwd));
+      } catch (e) { failures.push(e.message); }
+      job.done++;
+      job.statusText = `Extracted ${job.done}/${job.total} leaves…`;
+      jobChanged(job);
+    });
+    if (failures.length === keys.length) {
+      job.status = 'error'; job.error = failures[0]; job.statusText = failures[0];
+    } else {
+      job.status = 'done';
+      job.statusText = failures.length ? `${keys.length - failures.length} leaves saved · ${failures.length} failed` : 'Memory leaves saved.';
+      job.result = { extracted: keys.length - failures.length, failed: failures.length };
+    }
+    job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
+    for (const project of projects) scheduleDocsRegen(project);
+    setTimeout(() => { if (memoryExtractJobs.get(job.id) === job) memoryExtractJobs.delete(job.id); }, 60 * 60 * 1000);
+  })();
+  return job;
+}
+
+function startMemoryDocsJob(project) {
+  const running = memoryDocsJobs.get(project);
+  if (running && !running.finished) return running;
+  if (!projectMetaFor(project)) throw new Error('project not found');
+  const job = {
+    id: 'memory-docs:' + project, type: 'memory-docs', project,
+    title: `${project}: regenerate memory documents`, status: 'running', statusText: 'Reading memory leaves…',
+    done: 0, total: 5, startedAt: Date.now(), finished: false, model: currentModelLabel(),
+  };
+  memoryDocsJobs.set(project, job);
+  jobChanged(job);
+  job.completion = (async () => {
+    try {
+      const manifest = await regenerateProjectDocs(project, (text, done, total) => {
+        job.statusText = text; job.done = done; job.total = total; jobChanged(job);
+      });
+      job.status = 'done'; job.statusText = 'Project memory regenerated.'; job.done = job.total;
+      job.result = { project, paths: manifest.paths, candidates: (manifest.candidates || []).length };
+    } catch (e) {
+      job.status = 'error'; job.statusText = e.message; job.error = e.message;
+    } finally {
+      job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
+      setTimeout(() => { if (memoryDocsJobs.get(project) === job) memoryDocsJobs.delete(project); }, 60 * 60 * 1000);
+    }
+  })();
+  return job;
+}
+
+// The one-time backfill for old projects: oldest first, resumable (finished
+// leaves persist), pausable. Regenerates the documents once at the end.
+function startMemoryBackfillJob(project) {
+  const running = memoryBackfillJobs.get(project);
+  if (running && !running.finished) return running;
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const job = {
+    id: 'memory-backfill:' + project, type: 'memory-backfill', project,
+    title: `${project}: memory leaf backfill`, status: 'running', statusText: 'Checking leaves…',
+    done: 0, total: 0, startedAt: Date.now(), finished: false, model: currentModelLabel(),
+    cancelRequested: false,
+  };
+  memoryBackfillJobs.set(project, job);
+  jobChanged(job);
+  job.completion = (async () => {
+    try {
+      const sorted = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
+      const todo = [];
+      for (const { key, entry } of sorted) {
+        if (!entry.realUserCount) continue;
+        if (leafStateFor(entry, await readLeaf(key)) !== 'fresh') todo.push(key);
+      }
+      job.total = todo.length;
+      if (!todo.length) { job.status = 'done'; job.statusText = 'All leaves are current.'; return; }
+      jobChanged(job);
+      let failed = 0;
+      await mapLimit(todo, 2, async key => {
+        if (job.cancelRequested) return;
+        try { await extractLeaf(key); } catch { failed++; }
+        job.done++;
+        job.statusText = `Backfill ${job.done}/${job.total} leaves…${failed ? ` (${failed} failed)` : ''}`;
+        jobChanged(job);
+      });
+      if (job.cancelRequested) {
+        job.status = 'done'; job.statusText = `Paused at ${job.done}/${job.total}. Start again to resume.`;
+        job.result = { paused: true, done: job.done, total: job.total };
+        return;
+      }
+      job.status = failed === todo.length ? 'error' : 'done';
+      job.statusText = failed ? `Backfill finished · ${failed} leaves failed.` : 'Backfill finished.';
+      job.result = { done: job.done, failed };
+      if (failed < todo.length) { try { startMemoryDocsJob(project); } catch {} }
+    } catch (e) {
+      job.status = 'error'; job.statusText = e.message; job.error = e.message;
+    } finally {
+      job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
+      setTimeout(() => { if (memoryBackfillJobs.get(project) === job) memoryBackfillJobs.delete(project); }, 60 * 60 * 1000);
+    }
+  })();
+  return job;
+}
+
+// ---- pyramid triggers ----
+// Settle -> extract: a conversation whose content changed and then stayed
+// quiet for LEAF_SETTLE_MS gets its leaf re-extracted automatically.
+// Guarded against re-index floods: only a real memoryHash change marks dirty.
+const LEAF_SETTLE_MS = 10 * 60 * 1000;
+const LEAF_SWEEP_MS = 2 * 60 * 1000;
+const leafDirty = new Map(); // key -> last content change (ms)
+
+function markLeafDirty(key, prevEntry, entry, mtimeMs) {
+  if (!entry || !entry.realUserCount) return;
+  if (prevEntry && prevEntry.memoryHash === entry.memoryHash) return; // re-index without content change
+  if (!prevEntry && Date.now() - (mtimeMs || 0) > 24 * 60 * 60 * 1000) return; // old file first seen (cache bump / backfill territory)
+  leafDirty.set(key, Date.now());
+}
+
+async function sweepSettledLeaves() {
+  const now = Date.now();
+  const ready = [];
+  for (const [key, at] of leafDirty) {
+    const entry = index[key];
+    if (!entry) { leafDirty.delete(key); continue; }
+    if (now - Math.max(at, entry.mtimeMs || 0) < LEAF_SETTLE_MS) continue;
+    leafDirty.delete(key);
+    ready.push(key);
+  }
+  if (!ready.length) return;
+  const stale = [];
+  for (const key of ready) {
+    if (leafStateFor(index[key], await readLeaf(key)) !== 'fresh') stale.push(key);
+  }
+  if (stale.length) {
+    try { startMemoryExtractJob(stale, `${stale.length} settled conversation${stale.length === 1 ? '' : 's'}`); } catch {}
+  }
+}
+
+// Leaves changed -> regenerate the documents, debounced. Only projects that
+// already opted into memory (a manifest exists) regenerate automatically.
+const DOCS_REGEN_DEBOUNCE_MS = 30 * 60 * 1000;
+const docsRegenTimers = new Map(); // project -> timer
+function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
+  if (!project || project === '?') return;
+  clearTimeout(docsRegenTimers.get(project));
+  docsRegenTimers.set(project, setTimeout(() => {
+    docsRegenTimers.delete(project);
+    fsp.access(projectMemoryPaths(project).manifest).then(
+      () => { try { startMemoryDocsJob(project); } catch {} },
+      () => {});
+  }, delayMs));
 }
 
 function startEvidenceJob(ids, force = false) {
@@ -6414,21 +6906,27 @@ async function projectResponse(project) {
     saveEvidenceStateMemoSoon();
     return state;
   });
+  const leafMarks = await mapLimit(sorted, 16, async ({ key, entry }) =>
+    entry.realUserCount ? leafStateFor(entry, await readLeaf(key)) : 'empty');
+  const leaves = { fresh: 0, stale: 0, seeded: 0, missing: 0, empty: 0 };
   for (let si = 0; si < sorted.length; si++) {
     const { key, entry } = sorted[si];
     const noteState = noteStateForEntry(entry);
     if (entry.notePath) { notes++; if (noteState === 'fresh') freshNotes++; }
     const evidenceState = markers[si] === 'note' ? noteState : markers[si];
     if (evidenceState !== 'missing') { evidenceCards++; if (evidenceState === 'fresh') freshEvidence++; }
+    leaves[leafMarks[si]] = (leaves[leafMarks[si]] || 0) + 1;
     if (recent.length < 12) {
       recent.push({
         key, title: entry.timelineTitle || entry.title || key, source: entry.source || 'claude',
         cwd: entry.cwd || null, lastTs: entry.lastTs || null, active: !!(entry.mtimeMs && now - entry.mtimeMs < 5 * 60 * 1000),
-        notePath: entry.notePath || null, note: noteState, evidence: evidenceState,
+        notePath: entry.notePath || null, note: noteState, evidence: evidenceState, leaf: leafMarks[si],
       });
     }
   }
   const memory = await projectMemoryInfo(project, meta);
+  const backfill = memoryBackfillJobs.get(project);
+  const docsJob = memoryDocsJobs.get(project);
   const explicitDefault = projectDefaultModel(project);
   return {
     project, cwd, conversations: entries.length, notes, epics: projectEpics, memory,
@@ -6441,6 +6939,12 @@ async function projectResponse(project) {
       freshEvidence, staleEvidence: evidenceCards - freshEvidence, missingEvidence: entries.length - evidenceCards,
     },
     recent,
+    pyramid: {
+      leaves,
+      docs: memory && memory.pyramid ? { builtAt: memory.pyramid.builtAt, stale: memory.stale } : null,
+      backfillRunning: !!(backfill && !backfill.finished),
+      docsRunning: !!(docsJob && !docsJob.finished),
+    },
     agents: ['pi', 'claude'],
   };
 }
@@ -7417,6 +7921,32 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/project/memory/file' && req.method === 'GET') {
       try { json(res, 200, await projectMemoryDocument(u.searchParams.get('name') || '', u.searchParams.get('kind') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/memory/leaf' && req.method === 'GET') {
+      const key = u.searchParams.get('id') || '';
+      if (!index[key]) return json(res, 404, { error: 'not found' });
+      const leaf = await readLeaf(key);
+      json(res, 200, { key, state: leafStateFor(index[key], leaf), leaf });
+    } else if (u.pathname === '/api/project/memory/regenerate' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try { json(res, 202, jobView(startMemoryDocsJob(parsed.project || ''))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/memory/backfill' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      try {
+        if (parsed.action === 'pause') {
+          const job = memoryBackfillJobs.get(parsed.project || '');
+          if (!job || job.finished) return json(res, 404, { error: 'no running backfill for this project' });
+          job.cancelRequested = true;
+          job.statusText = 'Pausing after the current leaves…';
+          jobChanged(job);
+          return json(res, 200, jobView(job));
+        }
+        json(res, 202, jobView(startMemoryBackfillJob(parsed.project || '')));
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/memory/build' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -8109,6 +8639,8 @@ server.listen(PORT, HOST, () => {
     refreshProjectFolds().catch(() => {})
       .then(() => syncSearchIndex())
       .then(() => scheduleSemanticSync(2000));
+    seedLeavesFromSnapshots().catch(() => {});
+    setInterval(() => { sweepSettledLeaves().catch(() => {}); }, LEAF_SWEEP_MS);
   });
   listPiModels().finally(() => setTimeout(() => listPiModels(true), 2500));
 });
