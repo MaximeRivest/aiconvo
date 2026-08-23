@@ -62,7 +62,13 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
   if [ -S /run/WSL/1_interop ]; then
     DISPLAY_LINES="${DISPLAY_LINES}"$'\n'"Environment=WSL_INTEROP=/run/WSL/1_interop"
   fi
+  # WSLg exposes PulseAudio here; paplay-based sound extensions need it.
+  if [ -S /mnt/wslg/PulseServer ]; then
+    DISPLAY_LINES="${DISPLAY_LINES}"$'\n'"Environment=PULSE_SERVER=unix:/mnt/wslg/PulseServer"
+  fi
   WIN_PATH=":/mnt/c/Windows/System32/WindowsPowerShell/v1.0:/mnt/c/Windows/System32"
+  command -v paplay >/dev/null 2>&1 \
+    || echo "note: 'paplay' is missing — sound extensions need: sudo apt install pulseaudio-utils"
 fi
 cat > "$UNIT_DIR/aiconvo.service" <<EOF
 [Unit]
