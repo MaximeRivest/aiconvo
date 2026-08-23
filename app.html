@@ -1093,18 +1093,16 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tnode .tt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tnode.inactive { border-style: dashed; color: var(--text-dim); }
 .tnode .fk { color: var(--magenta); }
-.tnode.sel { outline: 2px solid var(--accent); z-index: 7; background: var(--surface-2); }
-.tnode.kb { outline: 2px dashed var(--accent); outline-offset: 2px; }
-.tnode.kb.sel { outline-style: solid; }
+.tnode.sel { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tnode.here { border-color: var(--accent); border-width: 2px; padding: 3px 7px; }
 .tnode .herechip { color: var(--accent); font-weight: 700; white-space: nowrap; }
-/* The action row lives INSIDE the selected card: quiet text verbs under a
-   hairline, no floating box. The card sits above its neighbors while open. */
-.tacts { display: flex; gap: 12px; align-items: baseline; margin: 5px -8px 0; padding: 4px 8px 1px; border-top: 1px solid var(--border-strong); }
-.tacts button, .tacts button.primary { background: none; border: 0; border-radius: 0; padding: 0; min-height: 0; height: auto; font: inherit; font-size: 10px; letter-spacing: .05em; color: var(--accent); cursor: pointer; }
-.tacts button.primary { font-weight: 700; }
-.tacts button:hover, .tacts button:focus, .tacts button.primary:hover { background: none; color: var(--accent); text-decoration: underline; outline: none; }
-.tacts .tmeta2 { color: var(--text-faint); font-size: 10px; margin-left: auto; white-space: nowrap; }
+/* The tree status bar: one fixed line at the bottom of the view, vim-style.
+   Selection paints it — the verbs never move, so the hand learns them. */
+.treebar { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 8; display: flex; gap: 18px; align-items: baseline; justify-content: center; margin-top: var(--sp-3); padding: 8px 14px; background: var(--bg); border-top: 1px solid var(--border-strong); font-size: var(--fs-meta); }
+.treebar .tbsel { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38%; }
+.treebar button { background: none; border: 0; border-radius: 0; padding: 0; min-height: 0; height: auto; font: inherit; font-size: var(--fs-meta); color: var(--accent); cursor: pointer; white-space: nowrap; }
+.treebar button:hover, .treebar button:focus { background: none; color: var(--accent); text-decoration: underline; outline: none; }
+.treebar .k { display: inline-block; margin-right: 5px; padding: 0 4px; border: 1px solid var(--border-strong); color: var(--text-faint); font-size: 10px; }
 .msg.jump { outline: 2px solid var(--accent); }
 .nhead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; border: 1px solid var(--border); background: var(--surface-1); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3); }
 .nhead h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-title); }
@@ -11021,9 +11019,7 @@ function noteFileEditor(text, pathLabel, context, section) {
 // ---- conversation tree (design: root at the top, y axis is time) ----
 // Each box is one user message or one merged assistant turn. Solid boxes and
 // green edges mark the current branch; dashed marks other branches.
-// Row height leaves air under every card: the in-card action row (~24px)
-// must open without covering the next card.
-const TREE_COLW = 300, TREE_ROWH = 88;
+const TREE_COLW = 300, TREE_ROWH = 76;
 
 async function showTree(key) {
   activeRel = key;
@@ -11098,24 +11094,27 @@ async function showTree(key) {
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
       <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges}</svg>${boxes}
-    </div></div></div>`;
+    </div></div>
+    <div class="treebar" id="treebar"></div></div>`;
   const wrap = $('treewrap');
   // Keyboard navigation state: T opens the tree, arrows walk it.
   const leaf = hereNode || rows[rows.length - 1] || null;
   treeNav = { key, byId, children, roots, wrap, source: t.source, sel: leaf ? leaf.id : null };
-  wrap.querySelectorAll('.tnode').forEach(el => el.onclick = ev => {
-    ev.stopPropagation();
-    treeSetSel(el.dataset.tn, { scroll: false });
-    selectTreeNode(key, byId.get(el.dataset.tn), el, wrap, t.source);
+  // Click = select (the status bar shows the verbs) · double click = read.
+  wrap.querySelectorAll('.tnode').forEach(el => {
+    el.onclick = () => treeSetSel(el.dataset.tn, { scroll: false });
+    el.ondblclick = () => {
+      const n = byId.get(el.dataset.tn);
+      if (n) openAtTs(n.key || key, n.jumpTs);
+    };
   });
-  $('view').onclick = () => closeTreeActions();
   // Land on the newest message of the active branch.
   if (leaf) requestAnimationFrame(() => treeSetSel(leaf.id));
 }
 
 // ---- tree keyboard navigation ----
-// One cursor box (.kb ring). Arrows move: ↑ parent, ↓ child on the active
-// path, ←→ siblings (branches and forks). Enter opens the action menu.
+// One cursor ring. Arrows move: ↑ parent, ↓ child on the active path,
+// ←→ siblings (branches and forks). The bottom bar holds the verbs.
 let treeNav = null;
 
 function treeSelEl() {
@@ -11125,32 +11124,49 @@ function treeSelEl() {
 
 function treeSetSel(id, { scroll = true } = {}) {
   if (!treeNav || !id || !treeNav.byId.has(id)) return;
-  closeTreeActions();
   treeNav.sel = id;
-  treeNav.wrap.querySelectorAll('.tnode.kb').forEach(el => el.classList.remove('kb'));
+  treeNav.wrap.querySelectorAll('.tnode.sel').forEach(el => el.classList.remove('sel'));
   const el = treeSelEl();
   if (el) {
-    el.classList.add('kb');
+    el.classList.add('sel');
     if (scroll) el.scrollIntoView({ block: 'center', inline: 'center' });
   }
+  paintTreeBar();
+}
+
+// The status bar: fixed at the bottom, painted by the selection. The verbs
+// keep one place and one order, so their positions become habit.
+function paintTreeBar() {
+  const bar = $('treebar');
+  if (!bar || !treeNav) return;
+  const n = treeNav.byId.get(treeNav.sel);
+  if (!n) { bar.innerHTML = ''; return; }
+  const isPi = treeNav.source === 'pi' || treeNav.source === 'pi-remote';
+  // Label by shape: at a leaf the path only goes on (continue); inside the
+  // tree a new sibling path starts (branch). Same action underneath.
+  const isLeaf = !(treeNav.children.get(n.id) || []).length;
+  const btn = (act, k, label, title) => `<button data-act="${act}" title="${esc(title)}"><span class="k">${k}</span>${label}</button>`;
+  bar.innerHTML =
+    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${Math.round(n.chars / 100) / 10}k</span>` +
+    btn('read', 'r', 'read', 'Open the transcript at this box (enter, or double click). The ● here marker does not move.') +
+    (isPi ? btn('branch', 'b', isLeaf ? 'continue' : 'branch', (isLeaf ? 'Move the ● here marker to this box and continue the path from it.' : 'Start a new branch after this box: the ● here marker moves to it, no copy is made.') + ' Then send from the composer as usual.') : '') +
+    (isPi && n.role === 'user' ? btn('edit', 'e', 'edit', 'Fork into a NEW session that stops just before this message. Open the new conversation to edit and resend it. The original does not change.') : '') +
+    (isPi && n.aKids >= 2 ? btn('agg', 'a', 'aggregate…', 'Collect the answer branches under this node, quote each with its model name, and ask one model to synthesize them.') : '') +
+    btn('fork', 'f', 'fork', 'Copy the path from the start to this message into a NEW session file and continue there. The original does not change. For Claude this is the only option: its CLI always continues at the file end.');
+  // A box can live in a forked session: actions target that session.
+  const key = n.key || treeNav.key;
+  bar.querySelector('[data-act=read]').onclick = () => openAtTs(key, n.jumpTs);
+  const bb = bar.querySelector('[data-act=branch]');
+  if (bb) bb.onclick = ev => branchFrom(key, n, ev.currentTarget);
+  const eb = bar.querySelector('[data-act=edit]');
+  if (eb) eb.onclick = ev => editFrom(key, n, ev.currentTarget);
+  const ab = bar.querySelector('[data-act=agg]');
+  if (ab) ab.onclick = () => openAggregateDialog(key, n);
+  bar.querySelector('[data-act=fork]').onclick = ev => forkFrom(key, n, ev.currentTarget);
 }
 
 function treeKeydown(e) {
   if (viewKind !== 'tree' || !treeNav) return false;
-  const menu = document.querySelector('.tacts');
-  if (menu) {
-    // The menu is open: arrows move between its buttons, enter activates.
-    if (['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-      e.preventDefault();
-      const btns = [...menu.querySelectorAll('button')];
-      if (!btns.length) return true;
-      const at = btns.indexOf(document.activeElement);
-      const dir = (e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : -1;
-      btns[((at < 0 ? 0 : at + dir) + btns.length) % btns.length].focus();
-      return true;
-    }
-    return false;
-  }
   const n = treeNav.byId.get(treeNav.sel);
   if (!n) return false;
   const byTs = list => [...list].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
@@ -11177,65 +11193,19 @@ function treeKeydown(e) {
   }
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
-    const el = treeSelEl();
-    if (el) {
-      selectTreeNode(treeNav.key, n, el, treeNav.wrap, treeNav.source);
-      const first = document.querySelector('.tacts button');
-      if (first) first.focus();
-    }
+    openAtTs(n.key || treeNav.key, n.jumpTs);
     return true;
   }
-  // Quick actions on the selected box — same verbs as the menu buttons.
+  // Quick actions on the selected box — same verbs as the status bar.
   const act = { r: 'read', a: 'agg', b: 'branch', e: 'edit', f: 'fork' }[e.key];
   if (act) {
     e.preventDefault();
-    const el = treeSelEl();
-    if (!el) return true;
-    selectTreeNode(treeNav.key, n, el, treeNav.wrap, treeNav.source);
-    const btn = document.querySelector(`.tacts [data-act=${act}]`);
+    const btn = document.querySelector(`.treebar [data-act=${act}]`);
     if (btn) btn.click();
-    else { closeTreeActions(); toast('that action is not available on this box'); }
+    else toast('that action is not available on this box');
     return true;
   }
   return false;
-}
-
-function closeTreeActions() {
-  document.querySelectorAll('.tnode.sel').forEach(e => e.classList.remove('sel'));
-  document.querySelectorAll('.tacts').forEach(e => e.remove());
-}
-
-function selectTreeNode(key, n, el, wrap, source) {
-  closeTreeActions();
-  el.classList.add('sel');
-  const acts = document.createElement('div');
-  acts.className = 'tacts';
-  // Two different pi actions (Claude supports neither; it only forks):
-  //  - continue = branch the SAME conversation after this message.
-  //  - edit = fork BEFORE this user message; its text lands in the composer.
-  const isPi = source === 'pi' || source === 'pi-remote';
-  // Label by shape: at a leaf the path only goes on (continue); inside the
-  // tree a new sibling path starts (branch). Same action underneath.
-  const isLeaf = !((treeNav && treeNav.children.get(n.id)) || []).length;
-  const growLabel = isLeaf ? 'continue' : 'branch';
-  acts.innerHTML =
-    `<button class="primary" data-act="read" title="Open the transcript at this box. The ● here marker does not move.">read</button>` +
-    (isPi ? `<button data-act="branch" title="${isLeaf ? 'Move the ● here marker to this box and continue the path from it.' : 'Start a new branch after this box: the ● here marker moves to it, no copy is made.'} Then send from the composer as usual.">${growLabel}</button>` : '') +
-    (isPi && n.role === 'user' ? `<button data-act="edit" title="Fork into a NEW session that stops just before this message. Open the new conversation to edit and resend it. The original does not change.">edit</button>` : '') +
-    (isPi && n.aKids >= 2 ? `<button data-act="agg" title="Collect the answer branches under this node, quote each with its model name, and ask one model to synthesize them.">aggregate…</button>` : '') +
-    `<button data-act="fork" title="Copy the path from the start to this message into a NEW session file and continue there. The original does not change. For Claude this is the only option: its CLI always continues at the file end.">fork</button>` +
-    `<span class="tmeta2" title="${n.count > 1 ? n.count + ' messages' : '1 message'} · ${Math.round(n.chars / 100) / 10}k characters">${Math.round(n.chars / 100) / 10}k</span>`;
-  acts.onclick = ev => ev.stopPropagation();
-  // A box can live in a forked session: actions target that session.
-  acts.querySelector('[data-act=read]').onclick = () => openAtTs(n.key || key, n.jumpTs);
-  const ab = acts.querySelector('[data-act=agg]');
-  if (ab) ab.onclick = () => openAggregateDialog(n.key || key, n);
-  const bb = acts.querySelector('[data-act=branch]');
-  if (bb) bb.onclick = ev => branchFrom(n.key || key, n, ev.target);
-  const eb = acts.querySelector('[data-act=edit]');
-  if (eb) eb.onclick = ev => editFrom(n.key || key, n, ev.target);
-  acts.querySelector('[data-act=fork]').onclick = ev => forkFrom(n.key || key, n, ev.target);
-  el.appendChild(acts);
 }
 
 // ---- node dialog: aggregate ----
@@ -11252,7 +11222,6 @@ function nodeDialog(titleHtml, bodyHtml) {
 }
 
 function openAggregateDialog(key, n) {
-  closeTreeActions();
   // The first conversation model is the default aggregator.
   let models = fanModels().slice(0, 1);
   const { overlay, close } = nodeDialog('aggregate the replies',
@@ -12556,8 +12525,8 @@ function helpNow() {
     sections.push({ label: 'conversation tree', keys: [
       ['↑ ↓', 'parent / child (follows the active path)'],
       ['← →', 'sibling branches and forks'],
-      ['enter', 'actions for the selected box'],
-      ['r / b / e / f', 'read / continue·branch / edit / fork'],
+      ['enter / dblclick', 'read from the selected box'],
+      ['r / b / e / f', 'read / continue·branch / edit / fork — the bottom bar shows what applies'],
       ['a', 'aggregate the replies under this box'],
       ['T / esc', 'back to the transcript'],
     ] });
@@ -12700,8 +12669,7 @@ document.addEventListener('keydown', e => {
     }
     if (!inField && filePick >= 0) { clearFilePick(); return; }
     if (!inField && viewKind === 'tree') {
-      // In the tree: esc closes the action menu, then returns to the transcript.
-      if (document.querySelector('.tacts')) { closeTreeActions(); return; }
+      // In the tree: esc returns to the transcript.
       if (activeRel) { open(activeRel, 'bottom'); return; }
     }
     if (inField) { e.target.blur(); return; }
