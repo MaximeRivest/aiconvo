@@ -8367,6 +8367,7 @@ function agentComposerHtml(d) {
     <textarea id="agentText" rows="1" placeholder="say the word…"></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
     <div class="agent-compose-row">
+      ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
       <button id="agentAttach" type="button">attach image</button>
       <input id="agentFiles" type="file" accept="image/*" multiple hidden>
@@ -8374,7 +8375,6 @@ function agentComposerHtml(d) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>
       </button>
       <span id="ctxMeter" class="ctxmeter" hidden></span>
-      ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<button id="agentThink" class="model-pick think-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
