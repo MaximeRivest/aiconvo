@@ -419,14 +419,11 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .pfold-confirm { border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text); padding: var(--sp-2) var(--sp-3); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; font-size: var(--fs-meta); }
 .psection { margin: 0 0 var(--sp-4); }
 .psection > h3 { font-size: var(--fs-label); color: var(--text-faint); border-bottom: 1px solid var(--border); padding-bottom: 4px; margin: 0 0 8px; }
-/* mini gantt: the hero timeline of one project or epic */
+/* mini gantt: the hero timeline of one project or epic (home visual language) */
 .mgantt { border: 1px solid var(--border); background: var(--surface-1); margin: 0 0 var(--sp-4); }
 .mg-lanes { position: relative; overflow: hidden; }
 .mg-lanes.scroll { overflow-y: auto; scrollbar-width: thin; }
-.mg-inner { position: relative; }
-.mg-bar { position: absolute; height: 16px; margin-top: 2px; border: 0; border-radius: 0; border-left: 3px solid var(--accent); background: var(--surface-2); color: var(--text-dim); font-family: var(--font); font-size: var(--fs-micro); line-height: 16px; text-align: left; padding: 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; min-width: 4px; }
-.mg-bar:hover { color: var(--text); outline: 1px solid var(--accent); z-index: 2; }
-.mg-bar.active { color: var(--ok); }
+.mgantt .tmark { cursor: pointer; outline: none; }
 .mg-axis { position: relative; height: 15px; border-top: 1px solid var(--border); color: var(--text-faint); font-size: var(--fs-micro); overflow: hidden; }
 .mg-tick { position: absolute; top: 1px; transform: translateX(-50%); }
 .mg-tick.first { transform: none; }
@@ -6656,46 +6653,71 @@ function confirmFold(d, target, counts) {
 }
 
 // ---- mini gantt: conversations of one project or epic over time ----
-// The hero section: every conversation as a clickable bar on a time axis.
-function miniGanttHtml(rows) {
+// The hero section, drawn with the home timeline's visual language: a
+// duration line, a density violin per conversation, live dots, stroked
+// labels. Same .tmark classes, so every theme styles it for free.
+function miniGanttHtml(rows, color) {
+  return `<div class="mgantt" data-mg-host></div>`;
+}
+
+function wireMiniGantt(root, rows, color) {
+  const host = root.querySelector('[data-mg-host]');
+  if (!host) return;
   const now = Date.now();
   const items = rows.map(r => {
     const a = Date.parse(r.firstTs || r.lastTs || '') || 0;
     const b = Math.max(a, Date.parse(r.lastTs || r.firstTs || '') || 0);
     return { ...r, a, b };
   }).filter(r => r.a).sort((x, y) => x.a - y.a);
-  if (!items.length) return '<div class="empty" style="margin:8px 0">no conversations yet.</div>';
+  if (!items.length) { host.outerHTML = '<div class="empty" style="margin:8px 0">no conversations yet.</div>'; return; }
+  const W = Math.max(320, host.clientWidth || 800);
   const t0 = items[0].a;
   const t1 = Math.max(now, ...items.map(i => i.b));
   const span = Math.max(t1 - t0, 3600000);
-  const pos = t => ((t - t0) / span) * 100;
+  const xFor = t => 4 + ((t - t0) / span) * (W - 8);
+  // Lane packing with a pixel gap wide enough for the label above the line.
   const laneEnds = [];
+  const gapT = span * (90 / W);
   for (const it of items) {
-    const minGap = span * 0.008;
-    let lane = laneEnds.findIndex(end => end + minGap <= it.a);
+    let lane = laneEnds.findIndex(end => end + gapT <= it.a);
     if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-    laneEnds[lane] = Math.max(it.b, it.a + span * 0.01);
+    laneEnds[lane] = Math.max(it.b, it.a + span * (24 / W));
     it.lane = lane;
   }
-  const rowH = 20;
-  const fullH = laneEnds.length * rowH + 2;
-  const bars = items.map(it => {
-    const left = pos(it.a);
-    const width = Math.max(pos(it.b) - left, 0.6);
-    const active = it.mtimeMs && now - it.mtimeMs < 5 * 60 * 1000;
-    const label = width > 6 ? esc(String(it.title || '').slice(0, 70)) : '';
-    return `<button class="mg-bar${active ? ' active' : ''}" data-mg="${esc(it.key)}" style="left:${left}%;width:${width}%;top:${it.lane * rowH}px" title="${esc(it.title || it.key)}\n${fmtDate(it.firstTs)} → ${fmtDate(it.lastTs)}">${active ? '● ' : ''}${label}</button>`;
+  const laneH = 26, topPad = 4;
+  const chartH = topPad + laneEnds.length * laneH + 4;
+  const marks = items.map(it => {
+    const s = sessions.find(x => x.key === it.key) || it;
+    const x0 = xFor(it.a), x1 = Math.max(x0 + 6, xFor(it.b));
+    const cy = topPad + it.lane * laneH + laneH / 2 + 4;
+    const profile = s.densityChat || [];
+    const bins = it.b > it.a && profile.length ? profile : [Math.max(1, ...(profile.length ? profile : [1]))];
+    const live = isActive(s);
+    const work = typeof isWorking === 'function' && isWorking(s);
+    const shortTitle = String(s.timelineTitle || it.title || '').slice(0, 12);
+    const tip = `${it.title || it.key}\n${fmtDate(it.firstTs)} → ${fmtDate(it.lastTs)}${s.userCount ? `\n${s.userCount} user · ${s.assistantCount || 0} assistant` : ''}${work ? '\n● working now' : live ? '\n○ active in the last 5 min' : ''}`;
+    return `<g class="tmark${live ? ' active' : ''}" data-mg="${esc(it.key)}" tabindex="0">
+      <title>${esc(tip)}</title>
+      <line class="duration" style="stroke:${color.stroke}" x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}"/>
+      <path class="violin" style="fill:${color.fill};stroke:${color.stroke}" d="${violinPath(x0, x1, cy, bins)}"/>
+      ${live || work ? `<circle class="livedot${work ? '' : ' idle'}" cx="${x1}" cy="${cy}" r="3.5"/>` : ''}
+      <text x="${x0}" y="${cy - 10}">${esc(shortTitle)}</text>
+    </g>`;
   }).join('');
   const ticks = [];
   for (let i = 0; i <= 5; i++) {
     const t = t0 + (span * i) / 5;
-    ticks.push(`<span class="mg-tick${i === 0 ? ' first' : i === 5 ? ' last' : ''}" style="left:${i * 20}%">${new Date(t).toISOString().slice(0, 10)}</span>`);
+    const label = new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    ticks.push(`<span class="mg-tick${i === 0 ? ' first' : i === 5 ? ' last' : ''}" style="left:${i * 20}%">${esc(label)}</span>`);
   }
-  return `<div class="mgantt"><div class="mg-lanes${fullH > 242 ? ' scroll' : ''}" style="height:${Math.min(fullH, 242)}px"><div class="mg-inner" style="height:${fullH}px">${bars}</div></div><div class="mg-axis">${ticks.join('')}</div></div>`;
-}
-
-function wireMiniGantt(root) {
-  root.querySelectorAll('[data-mg]').forEach(b => b.onclick = () => open(b.dataset.mg));
+  const maxH = 260;
+  host.innerHTML = `<div class="mg-lanes${chartH > maxH ? ' scroll' : ''}" style="height:${Math.min(chartH, maxH)}px">
+    <svg width="${W}" height="${chartH}" viewBox="0 0 ${W} ${chartH}">${marks}</svg>
+  </div><div class="mg-axis">${ticks.join('')}</div>`;
+  host.querySelectorAll('[data-mg]').forEach(g => {
+    g.onclick = () => open(g.dataset.mg);
+    g.onkeydown = e => { if (e.key === 'Enter') open(g.dataset.mg); };
+  });
 }
 
 // ---- reviewed conversation start (project panel and epic panel) ----
@@ -6755,7 +6777,7 @@ function renderProjectPanel(d) {
   const leaves = pyramid.leaves || {};
   const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
   const heroRows = sessions.filter(s => projectOf(s) === d.project)
-    .map(s => ({ key: s.key, title: s.timelineTitle || s.title || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
+    .map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
   const docBtn = (kind, glyph, label) => `<button data-p-memory="${kind}" ${memory ? '' : 'disabled'} title="Open the ${label} document">${glyph} ${label}</button>`;
   $('view').innerHTML = `<div class="project-overview">
     <div class="phead" style="border-left-color:${color.fill}">
@@ -6788,7 +6810,7 @@ function renderProjectPanel(d) {
     </section>
     <div class="pnewrow"><button id="pNew" class="primary">+ new conversation</button><span class="hint">you review the context before it goes</span></div>
   </div>`;
-  wireMiniGantt($('view'));
+  wireMiniGantt($('view'), heroRows, color);
   $('pFold').onclick = () => openFoldPicker(d);
   const pUnregister = $('pUnregister');
   if (pUnregister) pUnregister.onclick = async () => {
@@ -11086,7 +11108,8 @@ async function showEpic(id, focusKey = activeRel) {
   const o = (memory && memory.overview) || {};
   const leaves = d.leaves || {};
   const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
-  const heroRows = d.sessions.map(s => ({ key: s.key, title: s.timelineTitle || s.title || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
+  const heroRows = d.sessions.map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
+  const epicColor = d.project && d.project !== '?' ? projectColor(d.project) : { fill: 'var(--accent)', stroke: 'var(--accent)' };
   const docBtn = (kind, glyph, label) => `<button data-e-memory="${kind}" ${memory ? '' : 'disabled'} title="Open the epic ${label} document">${glyph} ${label}</button>`;
   $('view').innerHTML = `<div class="project-overview">
     <div class="phead" style="border-left-color:${d.project && d.project !== '?' ? projectColor(d.project).fill : 'var(--accent)'}">
@@ -11112,7 +11135,7 @@ async function showEpic(id, focusKey = activeRel) {
     </section>
     <div class="pnewrow"><button id="eNew" class="primary">+ new conversation from this epic</button><span class="hint">project map + epic memory · you review the context first</span></div>
   </div>`;
-  wireMiniGantt($('view'));
+  wireMiniGantt($('view'), heroRows, epicColor);
   $('eStory').onclick = () => showEpicStory(id, d, key);
   $('eEvidence').onclick = () => showEpicEvidence(id, key);
   $('eRebuild').onclick = () => buildEpic(id);
