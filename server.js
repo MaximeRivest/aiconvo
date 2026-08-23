@@ -4155,6 +4155,7 @@ function startMemoryExtractJob(ids, label = null) {
     }
     job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
     for (const project of projects) scheduleDocsRegen(project);
+    scheduleEpicRegenForKeys(keys);
     setTimeout(() => { if (memoryExtractJobs.get(job.id) === job) memoryExtractJobs.delete(job.id); }, 60 * 60 * 1000);
   })();
   return job;
@@ -4242,7 +4243,10 @@ function startMemoryBackfillJob(project) {
       job.status = failed === todo.length ? 'error' : 'done';
       job.statusText = failed ? `Backfill finished · ${failed} leaves failed.` : 'Backfill finished.';
       job.result = { done: job.done, failed };
-      if (failed < todo.length) { try { startMemoryDocsJob(project); } catch {} }
+      if (failed < todo.length) {
+        try { startMemoryDocsJob(project); } catch {}
+        scheduleEpicRegenForKeys(todo, 60 * 1000); // backfill already batched: refresh epic docs soon after
+      }
     } catch (e) {
       job.status = 'error'; job.statusText = e.message; job.error = e.message;
     } finally {
@@ -4291,7 +4295,7 @@ async function sweepSettledLeaves() {
 // Leaves changed -> regenerate the documents, debounced. Only projects that
 // already opted into memory (a manifest exists) regenerate automatically.
 const DOCS_REGEN_DEBOUNCE_MS = 30 * 60 * 1000;
-const docsRegenTimers = new Map(); // project -> timer
+const docsRegenTimers = new Map(); // project or 'epic:<id>' -> timer
 function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
   if (!project || project === '?') return;
   clearTimeout(docsRegenTimers.get(project));
@@ -4301,6 +4305,25 @@ function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
       () => { try { startMemoryDocsJob(project); } catch {} },
       () => {});
   }, delayMs));
+}
+
+// Epics are recursive projects: an epic whose manifest exists keeps itself
+// current on the same settle -> leaf -> debounced-docs path. Epics never
+// create themselves; only already-built epic memory refreshes.
+function scheduleEpicRegenForKeys(keys, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
+  const touched = new Set(keys);
+  for (const epic of Object.values(epics)) {
+    if (!epic || !epic.id) continue;
+    if (!(epic.sessionIds || []).some(id => touched.has(id))) continue;
+    const mapKey = 'epic:' + epic.id;
+    clearTimeout(docsRegenTimers.get(mapKey));
+    docsRegenTimers.set(mapKey, setTimeout(() => {
+      docsRegenTimers.delete(mapKey);
+      fsp.access(epicMemoryPaths(epic.id).manifest).then(
+        () => { try { startEpicDocsJob(epic.id); } catch {} },
+        () => {});
+    }, delayMs));
+  }
 }
 
 function startEvidenceJob(ids, force = false) {
