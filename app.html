@@ -1225,7 +1225,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .overlay[hidden] { display: none; }
 .dialog { background: var(--surface-1); border: 1px solid var(--border-strong); padding: var(--sp-4); width: 380px; }
 .dialog h3 { margin: 0 0 var(--sp-3); font-size: var(--fs-body); }
-.dialog input { width: 100%; margin-bottom: var(--sp-3); }
+.dialog input:not([type=checkbox]):not([type=radio]) { width: 100%; margin-bottom: var(--sp-3); }
 .dialog .btnrow { display: flex; gap: var(--sp-2); justify-content: flex-end; }
 .dialog table { border-collapse: collapse; width: 100%; font-size: var(--fs-label); }
 .dialog td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
@@ -3820,7 +3820,15 @@ $('list').addEventListener('click', e => {
   if (!item) return;
   if (item.dataset.epic) return showEpic(item.dataset.epic);
   if (item.dataset.note) return openNoteFile(item.dataset.note);
-  if (item.dataset.project) return toggleProjectRowHl(item.dataset.project);
+  if (item.dataset.project) {
+    const name = item.dataset.project;
+    // Touch has no dblclick: a second tap on the highlighted label opens.
+    if (matchMedia('(pointer: coarse)').matches && rowHlProject === name) {
+      rowHlProject = null; applyProjectRowHl();
+      return showProjectOverview(name);
+    }
+    return toggleProjectRowHl(name);
+  }
   if (item.dataset.cluster) {
     const cluster = timelineClusters.get(item.dataset.cluster);
     if (!cluster) return;
@@ -3859,7 +3867,7 @@ function showMarkPop(item, rel) {
   const pop = $('markPop');
   pop.innerHTML = `<h4>${esc(s.title || s.timelineTitle || '(untitled)')}</h4>` +
     `<div class="mp-meta">project ${esc(projectOf(s))} · ${esc(s.source || 'claude')}\n${fmtDate(s.firstTs)} → ${fmtDate(s.lastTs)}\n${s.userCount || 0} user · ${s.assistantCount || 0} assistant${$('densityTools').checked ? ' · tool calls included' : ''}${live ? '\n' + live : ''}${fam ? `\n⤑ ${fam.length} linked branches (fan-out / forks)` : ''}</div>` +
-    `<div class="mp-hint">double click to open</div>`;
+    `<div class="mp-hint">${matchMedia('(pointer: coarse)').matches ? 'tap here to open' : 'double click to open'}</div>`;
   pop.dataset.rel = rel;
   pop.hidden = false;
   const r = item.getBoundingClientRect();
@@ -3869,6 +3877,12 @@ function showMarkPop(item, rel) {
   if (y + pop.offsetHeight > window.innerHeight - 8) y = Math.max(8, r.top - pop.offsetHeight - 8);
   pop.style.left = x + 'px'; pop.style.top = y + 'px';
 }
+// Touch devices get no dblclick from the WebView: tapping the pop opens the
+// conversation instead (the "small button" affordance).
+$('markPop').addEventListener('click', () => {
+  const rel = $('markPop').dataset.rel;
+  if (rel) { hideMarkPop(); open(rel); }
+});
 
 // Click a project label to light up its whole row; double click opens it.
 let rowHlProject = null;
@@ -10482,6 +10496,11 @@ function parseNote(text) {
 // inline + fenced code, bullet and numbered lists, blockquotes, tables, rules, links.
 // q (optional) wraps search matches in <mark>.
 function mdRender(src, q = '') {
+  // Web-search models wrap citations in private-use markers (U+E200 block):
+  // "\ue200cite\ue202turn1search0\ue201". Strip them; they render as tofu.
+  src = String(src ?? '')
+    .replace(/[\ue200-\ue2ff](?:cite|navlist)[\ue200-\ue2ff][^\ue200-\ue2ff]*[\ue200-\ue2ff]/g, '')
+    .replace(/[\ue200-\ue2ff]/g, '');
   // Multi-word queries mark each term (matching the AND search semantics).
   const qr = q ? termRegex(q) : null;
   const mark = h => qr ? h.replace(qr, m => `<mark>${m}</mark>`) : h;
