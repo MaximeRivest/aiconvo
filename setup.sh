@@ -45,6 +45,20 @@ fi
 command -v git >/dev/null 2>&1 \
   || echo "note: 'git' is not installed — repo views stay empty."
 
+# --- 3b. pi extensions this UI depends on -----------------------------------
+# The modes extension makes prompt modes first-class (composer mode button,
+# /mode over RPC). Install it when missing; never clobber a local edit.
+PI_EXT_DIR="$HOME/.pi/agent/extensions"
+if [ -f "$REPO/extensions/modes.ts" ]; then
+  mkdir -p "$PI_EXT_DIR"
+  if [ ! -f "$PI_EXT_DIR/modes.ts" ]; then
+    cp "$REPO/extensions/modes.ts" "$PI_EXT_DIR/modes.ts"
+    echo "installed pi extension: modes.ts → $PI_EXT_DIR"
+  elif ! cmp -s "$REPO/extensions/modes.ts" "$PI_EXT_DIR/modes.ts"; then
+    echo "note: $PI_EXT_DIR/modes.ts differs from $REPO/extensions/modes.ts — not overwritten."
+  fi
+fi
+
 # --- 4. systemd user unit ----------------------------------------------------
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"

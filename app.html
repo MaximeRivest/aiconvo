@@ -356,8 +356,14 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .project-row-label span { color: var(--text-faint); font-size: 9px; margin-top: 2px; }
 .project-row-label { pointer-events: auto; cursor: pointer; }
 .project-row-label:hover { background: var(--surface-2); }
-.project-row-label.on { background: var(--accent-strong); color: var(--accent-ink); }
-.project-row-label.on span { color: var(--accent-ink); opacity: .8; }
+.project-row-label.hl { background: var(--surface-3); }
+.project-row-label.hl strong { color: var(--accent); }
+.project-row-label.hl > span:first-of-type { font-size: 0; }
+.project-row-label.hl > span:first-of-type::after { content: "double click to open"; color: var(--text-dim); font: 9px var(--font); letter-spacing: .01em; }
+.tmark.rowhl .violin { stroke: var(--text) !important; stroke-width: 1.5; }
+.tmark.rowhl .duration { stroke: var(--text) !important; opacity: 1; }
+.project-row-bg { fill: transparent; pointer-events: none; }
+.project-row-bg.hl { fill: color-mix(in srgb, var(--accent) 7%, transparent); }
 #selRect { position: absolute; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; z-index: 3; }
 .tday line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
 .tday.major line { stroke: var(--border-strong); stroke-dasharray: none; }
@@ -757,6 +763,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 #runCards:not(:empty) { width: 100%; max-width: var(--read-max); margin: 0 auto; border: 1px solid var(--border); border-top: 0; }
 .runcard { border: 0 !important; border-left: 3px dashed var(--accent) !important; }
 .rc-status { color: var(--text-dim); font-size: var(--fs-micro); margin-bottom: 4px; }
+/* mermaid diagrams: the figure replaces the fence; the source stays one
+   double-click away (and stays visible on render errors) */
+.mmd { margin: 8px 0; }
+.mmd-fig { background: var(--surface-1); border: 1px solid var(--border); padding: 10px; overflow-x: auto; text-align: center; }
+.mmd-fig svg { max-width: 100%; height: auto; }
+.mmd.ok:not(.show-src) .mmd-src { display: none; }
+.mmd-err { color: var(--danger); font-size: var(--fs-micro); margin-bottom: 4px; }
 /* transcript reasoning rows (everything view) */
 .msg.thinking { border-left: 2px dotted var(--border-strong); padding-left: 8px; }
 .msg.thinking summary { cursor: pointer; list-style: none; color: var(--text-dim); font-size: var(--fs-micro); }
@@ -779,6 +792,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* command palette: grouped, filtered, floats above the composer */
 .slash-pop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; max-height: 340px; overflow: auto; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); z-index: 40; }
 .slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 8px 10px; }
+.slash-inp-row { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface-1); }
+.slash-lead { color: var(--accent); font-weight: 700; }
+.slash-inp-row input { flex: 1; border: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-micro); outline: none; }
 .slash-group { color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; padding: 8px 10px 2px; }
 .slash-row { display: flex; gap: 12px; align-items: baseline; padding: 5px 10px; cursor: pointer; }
 .slash-row:hover { background: var(--surface-2); }
@@ -951,6 +967,17 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.tool > summary::-webkit-details-marker, .msg.toolresult > summary::-webkit-details-marker { display: none; }
 .msg.tool > summary:hover, .msg.toolresult > summary:hover { color: var(--text-dim); }
 .msg .tool-out { max-height: 50vh; overflow: auto; margin-top: 6px; }
+.msg-media { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.msg-media button { width: 112px; height: 82px; padding: 0; overflow: hidden; background: var(--surface-1); border: 1px solid var(--border); }
+.msg-media button:hover { border-color: var(--border-strong); background: var(--surface-1); }
+.msg-media img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.msg-path { border: 0; border-bottom: 1px dotted var(--border-strong); background: transparent; color: var(--cyan); padding: 0; height: auto; font: inherit; text-align: left; }
+.msg-path:hover { background: transparent; color: var(--text); }
+.media-lightbox { position: fixed; inset: 0; z-index: 10020; display: grid; grid-template-rows: auto minmax(0, 1fr); background: color-mix(in srgb, var(--bg) 94%, transparent); }
+.media-lightbox-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+.media-lightbox-head button { margin-left: auto; }
+.media-lightbox-body { min-height: 0; display: grid; place-items: center; padding: 12px; overflow: auto; }
+.media-lightbox-body img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; background: var(--surface-1); }
 .msg.toolline { padding: 3px 14px; font-size: 11px; color: var(--text-faint); }
 .msg-file-inline { border: 0; background: transparent; color: var(--text-dim); font-size: 11px; padding: 0; height: auto; cursor: pointer; font-family: inherit; }
 .msg-file-inline:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
@@ -1320,7 +1347,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   /* resting composer: one slim bar — tap it, or hold a draft, to expand */
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
-.agent-compose.compose-min .think-pick,
+.agent-compose.compose-min .think-pick, .agent-compose.compose-min .mode-pick,
   .agent-compose.compose-min .ctxmeter,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
@@ -2457,10 +2484,147 @@ function selectTheme(t, repaint = true) {
   if (t) document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
   syncActiveTheme();
+  refreshMermaidTheme();
   if (!repaint) return;
   renderTabList();
   if (current && $('conversationTranscript')) { einkPage = -1; renderConv(); }
 }
+
+// ---- mermaid diagrams (```mermaid fences, everywhere markdown renders) ----
+// The library is vendored (/vendor/mermaid.min.js, ~3.5 MB) and loads only
+// when a diagram is actually on screen — the app stays fast and local-first.
+let mermaidLoad = null;
+// Resolve any CSS color to its luminance (tokens are hsl/hex strings).
+function cssColorLuma(c) {
+  const el = document.createElement('div');
+  el.style.color = c;
+  document.body.appendChild(el);
+  const rgb = (getComputedStyle(el).color.match(/\d+(\.\d+)?/g) || [0, 0, 0]).map(Number);
+  el.remove();
+  return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+}
+// Diagrams speak the app's design tokens (theme 'base' + themeVariables).
+// A diagram that styles itself (%%{init}%% directive, classDefs) still wins:
+// directives override the site config per diagram.
+function mermaidConfig() {
+  const tk = themeToken;
+  return {
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      darkMode: cssColorLuma(tk('--bg')) < 0.5,
+      background: tk('--bg'),
+      fontFamily: tk('--font') || 'ui-monospace, monospace',
+      fontSize: '13px',
+      // nodes and shapes
+      primaryColor: tk('--surface-2'),
+      primaryTextColor: tk('--text'),
+      primaryBorderColor: tk('--border-strong'),
+      secondaryColor: tk('--surface-1'),
+      secondaryTextColor: tk('--text'),
+      secondaryBorderColor: tk('--border'),
+      tertiaryColor: tk('--bg'),
+      tertiaryTextColor: tk('--text-dim'),
+      tertiaryBorderColor: tk('--border'),
+      mainBkg: tk('--surface-2'),
+      nodeBorder: tk('--border-strong'),
+      clusterBkg: tk('--surface-1'),
+      clusterBorder: tk('--border'),
+      // text and edges
+      textColor: tk('--text'),
+      titleColor: tk('--text'),
+      lineColor: tk('--text-dim'),
+      edgeLabelBackground: tk('--bg'),
+      // sequence diagrams
+      actorBkg: tk('--surface-2'),
+      actorBorder: tk('--border-strong'),
+      actorTextColor: tk('--text'),
+      actorLineColor: tk('--border-strong'),
+      signalColor: tk('--text-dim'),
+      signalTextColor: tk('--text-dim'),
+      labelBoxBkgColor: tk('--surface-1'),
+      labelBoxBorderColor: tk('--border-strong'),
+      labelTextColor: tk('--text'),
+      loopTextColor: tk('--text-dim'),
+      activationBkgColor: tk('--surface-3') || tk('--surface-2'),
+      activationBorderColor: tk('--accent'),
+      // notes
+      noteBkgColor: tk('--surface-1'),
+      noteTextColor: tk('--text-dim'),
+      noteBorderColor: tk('--border-strong'),
+      // states of error and emphasis
+      errorBkgColor: tk('--danger'),
+      errorTextColor: tk('--bg'),
+      // pies and sections lean on the terminal palette
+      pie1: tk('--accent'), pie2: tk('--cyan'), pie3: tk('--yellow'),
+      pie4: tk('--magenta'), pie5: tk('--blue'), pie6: tk('--red'),
+      pieTitleTextColor: tk('--text'),
+      pieSectionTextColor: tk('--text'),
+      pieLegendTextColor: tk('--text-dim'),
+    },
+  };
+}
+function loadMermaid() {
+  if (window.mermaid) return Promise.resolve();
+  if (!mermaidLoad) {
+    mermaidLoad = new Promise((ok, bad) => {
+      const s = document.createElement('script');
+      s.src = '/vendor/mermaid.min.js';
+      s.onload = ok;
+      s.onerror = () => { mermaidLoad = null; bad(new Error('mermaid.min.js failed to load')); };
+      document.head.appendChild(s);
+    }).then(() => window.mermaid.initialize(mermaidConfig()));
+  }
+  return mermaidLoad;
+}
+let mermaidSeq = 0;
+async function renderMermaids(root) {
+  const boxes = [...(root || document).querySelectorAll('.mmd:not([data-done])')];
+  if (!boxes.length) return;
+  try { await loadMermaid(); } catch { return; } // sources stay readable as code
+  for (const box of boxes) {
+    if (box.dataset.done || !box.isConnected) continue;
+    box.dataset.done = '1';
+    const code = (box.querySelector('.mmd-src') || {}).textContent || '';
+    const id = 'mmd' + (++mermaidSeq);
+    try {
+      const { svg } = await window.mermaid.render(id, code);
+      const fig = document.createElement('div');
+      fig.className = 'mmd-fig';
+      fig.innerHTML = svg;
+      fig.title = 'Double-click to see the mermaid source';
+      fig.ondblclick = () => box.classList.toggle('show-src');
+      box.prepend(fig);
+      box.classList.add('ok');
+    } catch (e) {
+      const stray = document.getElementById(id) || document.getElementById('d' + id);
+      if (stray) stray.remove();
+      box.classList.add('err');
+      const err = document.createElement('div');
+      err.className = 'mmd-err';
+      err.textContent = '⚠ mermaid: ' + String(e.message || 'render failed').split('\n')[0];
+      box.prepend(err); // the source stays visible under the error
+    }
+  }
+}
+function refreshMermaidTheme() {
+  if (!window.mermaid) return;
+  window.mermaid.initialize(mermaidConfig());
+  document.querySelectorAll('.mmd').forEach(b => {
+    delete b.dataset.done;
+    b.classList.remove('ok', 'err', 'show-src');
+    b.querySelectorAll('.mmd-fig, .mmd-err').forEach(x => x.remove());
+  });
+  renderMermaids(document);
+}
+// One observer, whole app: any view that lands markdown gets its diagrams.
+let mermaidT = null;
+new MutationObserver(() => {
+  if (!document.querySelector('.mmd:not([data-done])')) return;
+  clearTimeout(mermaidT);
+  mermaidT = setTimeout(() => renderMermaids(document), 120);
+}).observe(document.body, { childList: true, subtree: true });
 async function loadCustomThemes() {
   try {
     const [catalog, css] = await Promise.all([
@@ -3251,24 +3415,24 @@ function visibleTimelineRows(rows, pos, chartW, list) {
 function projectLabelsHtml(pos) {
   if (pos.type !== 'project') return '';
   return `<div class="project-labels">${pos.projects.map(row => {
-    const color = projectColor(row.project);
     const top = LABEL_H + row.baseLane * PROJECT_LANE_H;
     const height = row.laneCount * PROJECT_LANE_H;
-    const tracks = row.laneCount > 1 ? ` · ${row.laneCount} tracks` : '';
-    const activityLabel = row.mode === 'opened' ? 'opened' : 'message';
     const main = row.mode ? row.title : row.project;
-    const detail = row.mode ? `${row.project} · ${activityLabel} ${fmtDate(row.latest)}`
-      : row.count ? `${row.count} conversations${tracks} · ${fmtDate(row.latest)}`
-      : `new · born ${fmtDate(row.born || row.latest)}`;
+    const detail = `${row.count || 0} conversations`;
     const repo = !row.mode && gitReposCache.find(r => r.project === row.project);
     const repoLink = repo ? `<span class="rowrepo" data-git-repo="${esc(repo.root)}" title="Git history · ${esc(repo.root)}">⌂ ${esc(repo.branch || 'repo')}</span>` : '';
     // A quiet fold hint: this row looks like another project (same remote /
     // name twin). One click folds; dismiss lives on the project overview.
     const sug = !row.mode && (projectFolds.suggestions || []).find(x => x.from === row.project);
     const foldChip = sug ? `<span class="rowfold" data-fold-from="${esc(sug.from)}" data-fold-into="${esc(sug.into)}" title="${esc(sug.reason)} · fold ${esc(sug.from)} into ${esc(sug.into)}">⇄ ${esc(sug.into)}?</span>` : '';
-    return `<div class="project-row-label item" data-project="${esc(main)}" style="top:${top}px;height:${height}px;border-left:4px solid ${color.stroke}" title="${esc(main)} · ${esc(detail)} · click for project overview">
+    return `<div class="project-row-label item" data-project="${esc(main)}" style="top:${top}px;height:${height}px" title="${esc(main)} · ${esc(detail)} · click to select the row · double click for the project overview">
       <strong>${esc(main)}</strong><span>${esc(detail)}</span>${repoLink}${foldChip}</div>`;
   }).join('')}</div>`;
+}
+
+function projectRowsSvg(pos, chartW) {
+  if (pos.type !== 'project') return '';
+  return pos.projects.map(row => `<rect class="project-row-bg" data-project-bg="${esc(row.project)}" x="0" y="${LABEL_H + row.baseLane * PROJECT_LANE_H}" width="${chartW}" height="${row.laneCount * PROJECT_LANE_H}"/>`).join('');
 }
 
 function clusterProfile(members, field, start, end) {
@@ -3467,7 +3631,7 @@ function renderTimeline() {
   const notes = noteHits.length ? `<div class="timeline-note-hits">${noteHits.map(s => `<div class="item" data-note="${esc(s.file)}"><div><div class="title"><span class="note-sig">✓</span> ${esc(s.title)}</div><div class="snip">${esc(s.snippet || '')}</div></div></div>`).join('')}</div>` : '';
   // The hatch pattern paints selected violins on binary themes.
   const defs = `<defs><pattern id="selHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="var(--bg)"/><line x1="0" y1="0" x2="0" y2="5" stroke="var(--text)" stroke-width="1.6"/></pattern></defs>`;
-  list.innerHTML = notes + (rows.length ? `<div class="timeline" style="width:${chartW}px;height:${chartH}px">${projectLabelsHtml(pos)}${svgTagFor(list, chartW, chartH)}${defs}${daysSvg}${nowLine}${marks}${glyphs}</svg></div>` : `<div class="empty">${searchMode ? 'no matches. try different words.' : 'no conversations match.'}</div>`);
+  list.innerHTML = notes + (rows.length ? `<div class="timeline" style="width:${chartW}px;height:${chartH}px">${projectLabelsHtml(pos)}${svgTagFor(list, chartW, chartH)}${defs}${projectRowsSvg(pos, chartW)}${daysSvg}${nowLine}${marks}${glyphs}</svg></div>` : `<div class="empty">${searchMode ? 'no matches. try different words.' : 'no conversations match.'}</div>`);
   // Order buttons live in the top-left gutter of the home project chart.
   const showSort = viewKind === 'home' && pos && pos.type === 'project' && rows.length > 0;
   $('projSort').hidden = !showSort;
@@ -3675,7 +3839,7 @@ $('list').addEventListener('click', e => {
   if (!item) return;
   if (item.dataset.epic) return showEpic(item.dataset.epic);
   if (item.dataset.note) return openNoteFile(item.dataset.note);
-  if (item.dataset.project) return showProjectOverview(item.dataset.project);
+  if (item.dataset.project) return toggleProjectRowHl(item.dataset.project);
   if (item.dataset.cluster) {
     const cluster = timelineClusters.get(item.dataset.cluster);
     if (!cluster) return;
@@ -3699,7 +3863,7 @@ $('list').addEventListener('click', e => {
 });
 
 // ---- floating mark details ----
-// One click shows the details that hover showed; a second click opens.
+// One click shows the details; a double click opens the conversation.
 function hideMarkPop() {
   const pop = $('markPop');
   pop.hidden = true;
@@ -3714,7 +3878,7 @@ function showMarkPop(item, rel) {
   const pop = $('markPop');
   pop.innerHTML = `<h4>${esc(s.title || s.timelineTitle || '(untitled)')}</h4>` +
     `<div class="mp-meta">project ${esc(projectOf(s))} · ${esc(s.source || 'claude')}\n${fmtDate(s.firstTs)} → ${fmtDate(s.lastTs)}\n${s.userCount || 0} user · ${s.assistantCount || 0} assistant${$('densityTools').checked ? ' · tool calls included' : ''}${live ? '\n' + live : ''}${fam ? `\n⤑ ${fam.length} linked branches (fan-out / forks)` : ''}</div>` +
-    `<div class="mp-hint">click again to open</div>`;
+    `<div class="mp-hint">double click to open</div>`;
   pop.dataset.rel = rel;
   pop.hidden = false;
   const r = item.getBoundingClientRect();
@@ -3734,6 +3898,8 @@ function toggleProjectRowHl(name) {
 function applyProjectRowHl() {
   document.querySelectorAll('.project-row-label').forEach(el =>
     el.classList.toggle('hl', el.dataset.project === rowHlProject));
+  document.querySelectorAll('.project-row-bg').forEach(el =>
+    el.classList.toggle('hl', el.dataset.projectBg === rowHlProject));
   for (const r of ((timelineGeom && timelineGeom.rows) || [])) {
     const key = String(r.s._openKey || r.s.key || '');
     if (!key) continue;
@@ -7052,6 +7218,62 @@ function keepInMode(m, mode) {
 const FILE_WRITE_TOOLS = /^(write|edit|multiedit|multi_edit|notebookedit|notebook_edit|str_replace_editor)$/i;
 const isFileWriteTool = m => m && m.role === 'tool' && m.path && FILE_WRITE_TOOLS.test(m.name || '');
 const shortFilePath = p => String(p).split('/').slice(-2).join('/');
+const transcriptMediaUrl = image => '/api/conversation/media?id=' + encodeURIComponent(activeRel || '') +
+  '&entry=' + encodeURIComponent(image.entry || '') + '&path=' + encodeURIComponent(image.path || '');
+function messageMediaHtml(images) {
+  if (!images || !images.length) return '';
+  return `<div class="msg-media">${images.map((image, i) => {
+    const src = transcriptMediaUrl(image);
+    return `<button type="button" data-media-src="${esc(src)}" title="Open image ${i + 1} of ${images.length}"><img src="${esc(src)}" loading="lazy" decoding="async" alt="Attached image ${i + 1}"></button>`;
+  }).join('')}</div>`;
+}
+function transcriptPathButton(pathValue, label = '') {
+  return `<button type="button" class="msg-path" data-transcript-path="${esc(pathValue)}" title="Open ${esc(pathValue)}">${esc(label || pathValue)}</button>`;
+}
+function toolTextHtml(text, paths, hl) {
+  const source = String(text || '');
+  const candidates = [...new Set((paths || []).filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (!candidates.length) return hl(source);
+  const rx = new RegExp(candidates.map(value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+  let out = '', at = 0;
+  for (const match of source.matchAll(rx)) {
+    out += hl(source.slice(at, match.index)) + transcriptPathButton(match[0]);
+    at = match.index + match[0].length;
+  }
+  return out + hl(source.slice(at));
+}
+function openMediaLightbox(src, title = 'image') {
+  document.querySelectorAll('.media-lightbox').forEach(el => el.remove());
+  const box = document.createElement('div');
+  box.className = 'media-lightbox';
+  box.innerHTML = `<div class="media-lightbox-head"><span>${esc(title)}</span><button type="button">close</button></div><div class="media-lightbox-body"><img src="${esc(src)}" alt="${esc(title)}"></div>`;
+  const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  box.querySelector('button').onclick = close;
+  box.onclick = e => { if (e.target === box || e.target.classList.contains('media-lightbox-body')) close(); };
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(box);
+}
+
+async function openTranscriptPath(pathValue) {
+  const key = activeRel;
+  if (!key) return;
+  if (/\.(png|jpe?g|gif|webp)(?::\d+(?::\d+)?)?$/i.test(pathValue)) {
+    const src = '/api/conversation/file-content?id=' + encodeURIComponent(key) + '&path=' + encodeURIComponent(pathValue);
+    return openMediaLightbox(src, pathValue);
+  }
+  const oldScroll = $('view').scrollTop;
+  $('view').innerHTML = `<div class="quick-file-view"><div class="qf-head"><button id="qfBack">← conversation</button><b>${esc(shortFilePath(pathValue))}</b></div><div class="qf-body"><div class="ff-loading">opening file…</div></div></div>`;
+  $('qfBack').onclick = async () => { await renderConv('top'); $('view').scrollTop = oldScroll; };
+  let data;
+  try { data = await (await fetch('/api/conversation/file?id=' + encodeURIComponent(key) + '&path=' + encodeURIComponent(pathValue))).json(); }
+  catch { data = { error: 'network failure' }; }
+  const body = $('view').querySelector('.qf-body');
+  if (!body) return;
+  if (data.error) { body.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+  body.innerHTML = `<div class="ff-status"><code>${esc(data.path)}</code></div><pre class="md-code"><code>${esc(data.text)}</code></pre>`;
+}
+
 function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   if (m.role === 'filetouch') {
     // Synthetic row: file writes hidden by the current view mode still
@@ -7086,8 +7308,9 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   // ✓/✗; other tools fold their args and carry a nested result fold.
   if (m.role === 'toolresult') {
     if (m._merged) return '';           // rides inside its call's fold
-    const lines = m.text.split('\n').length;
-    return `<details class="msg toolresult"${idxAttr}${keepOpen ? ' open' : ''}><summary>↳ result · ${lines} line${lines > 1 ? 's' : ''}</summary><div class="tool-out">${hl(m.text)}</div></details>`;
+    const lines = m.text ? m.text.split('\n').length : 0;
+    const imageLabel = m.images && m.images.length ? ` · ${m.images.length} image${m.images.length > 1 ? 's' : ''}` : '';
+    return `<details class="msg toolresult"${idxAttr}${keepOpen ? ' open' : ''}><summary>↳ result${lines ? ` · ${lines} line${lines > 1 ? 's' : ''}` : ''}${imageLabel}</summary><div class="tool-out">${toolTextHtml(m.text, m.paths, hl)}${messageMediaHtml(m.images)}</div></details>`;
   }
   if (m.role === 'tool') {
     const toolAnchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
@@ -7098,15 +7321,17 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
     }
     const hint = String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
     const first = res ? String(res.text || '').trim().split('\n').find(x => x.trim()) || '' : '';
-    const resLines = res ? String(res.text || '').split('\n').length : 0;
+    const resLines = res && res.text ? String(res.text).split('\n').length : 0;
+    const resImages = res && res.images ? res.images.length : 0;
     const resFold = res
-      ? `<details class="resfold"><summary>↳ result · ${resLines} line${resLines > 1 ? 's' : ''}</summary><div class="tool-out">${hl(res.text)}</div></details>`
+      ? `<details class="resfold"><summary>↳ result${resLines ? ` · ${resLines} line${resLines > 1 ? 's' : ''}` : ''}${resImages ? ` · ${resImages} image${resImages > 1 ? 's' : ''}` : ''}</summary><div class="tool-out">${toolTextHtml(res.text, res.paths, hl)}${messageMediaHtml(res.images)}</div></details>`
       : '';
-    return `<details class="msg tool"${toolAnchor}${idxAttr}${keepOpen ? ' open' : ''}><summary>⚙ <span class="tname">${esc(m.name || '?')}</span>${hint ? ' · ' + esc(hint) : ''}${first ? ` <span class="res-first">→ ${esc(first.slice(0, 60))}</span>` : ''}${fileLink}</summary><div class="tool-out">${hl(m.text)}</div>${resFold}</details>`;
+    const structuredPath = m.path && !isFileWriteTool(m) ? ` · ${transcriptPathButton(m.path, shortFilePath(m.path))}` : '';
+    return `<details class="msg tool"${toolAnchor}${idxAttr}${keepOpen ? ' open' : ''}><summary>⚙ <span class="tname">${esc(m.name || '?')}</span>${hint ? ' · ' + esc(hint) : ''}${first ? ` <span class="res-first">→ ${esc(first.slice(0, 60))}</span>` : ''}${structuredPath}${fileLink}</summary><div class="tool-out">${toolTextHtml(m.text, m.paths, hl)}</div>${resFold}</details>`;
   }
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
-    const full = `<div class="md">${mdRender(m.text, q)}</div>`;
+    const full = `<div class="md">${mdRender(m.text, q)}</div>${messageMediaHtml(m.images)}`;
     const words = m.text.split(/\s+/).length;
     return `<div class="msg ${m.role}${keepOpen ? '' : ' can-fold'}" data-words="${words}"${anchor}${idxAttr}>${role}${full}</div>`;
   }
@@ -7716,7 +7941,9 @@ async function refreshCtxMeter(d) {
   const hit = ctxMeterCache.get(d.key);
   if (hit && hit.sig === sig) {
     if (hit.data && hit.data.thinking) thinkLevels.set(d.key, hit.data.thinking);
+    if (hit.data && hit.data.mode) convModes.set(d.key, hit.data.mode);
     paintThinkBtn();
+    paintModeBtn();
     return paintCtxMeter(el, hit.data);
   }
   try {
@@ -7726,7 +7953,8 @@ async function refreshCtxMeter(d) {
     const data = await r.json();
     ctxMeterCache.set(d.key, { sig, data });
     if (data && data.thinking) thinkLevels.set(d.key, data.thinking);
-    if (current && current.key === d.key) { paintCtxMeter($('ctxMeter'), data); paintThinkBtn(); }
+    if (data && data.mode) convModes.set(d.key, data.mode);
+    if (current && current.key === d.key) { paintCtxMeter($('ctxMeter'), data); paintThinkBtn(); paintModeBtn(); }
   } catch { el.hidden = true; }
 }
 
@@ -7768,6 +7996,112 @@ async function cycleThinking() {
     paintThinkBtn();
     toast('reasoning: ' + out.level);
   } finally { window._thinkBusy = false; }
+}
+
+// ---- prompt mode (modes extension) ----
+// The button left of the reasoning control shows the mode that serves the
+// next reply — read from the session's own mode-switch entries. The picker
+// works like the model picker: click switches, and the same ModeDef files
+// the TUI uses (~/.pi/agent/modes) can be created and edited here.
+const convModes = new Map(); // conversation key → { key, label }
+function paintModeBtn() {
+  const btn = $('agentMode');
+  if (!btn) return;
+  const m = convModes.get(activeRel);
+  btn.textContent = '▣ ' + ((m && m.key) || 'mode');
+  btn.title = (m
+    ? 'Prompt mode for the next reply: ' + (m.label || m.key) + '.'
+    : 'Prompt mode (modes extension).') + ' Click to switch, edit, or create modes.';
+  btn.hidden = false;
+}
+// Switching runs pi's own /mode command over RPC — the modes extension
+// persists the switch in the session, so the terminal and resumes agree.
+async function setConversationMode(key) {
+  const btn = $('agentRun');
+  if (!btn) return errToast('mode switching needs pi');
+  const conv = activeRel;
+  const ok = await headlessSendFromComposer(btn, '/mode ' + key);
+  if (!ok) return;
+  const m = (launcherModes || []).find(x => x.key === key);
+  convModes.set(conv, { key, label: (m && m.label) || key });
+  const hit = ctxMeterCache.get(conv);
+  if (hit && hit.data) hit.data.mode = convModes.get(conv);
+  if (conv === activeRel) paintModeBtn();
+}
+
+async function openModePicker(anchor) {
+  document.querySelectorAll('.mpick').forEach(el => el.remove());
+  const pop = document.createElement('div');
+  pop.className = 'mpick';
+  const rect = anchor.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 468)) + 'px';
+  pop.style.top = Math.min(rect.bottom + 4, window.innerHeight - 420) + 'px';
+  pop.innerHTML = '<div class="mp-loading">loading modes…</div>';
+  document.body.appendChild(pop);
+  await refreshLauncherModes();
+  if (!pop.isConnected) return;
+  const close = () => { pop.remove(); document.removeEventListener('click', onDoc, true); };
+  // Clicks inside the mode form/manager (stacked above) must not close this.
+  const onDoc = e => {
+    if (pop.contains(e.target) || (anchor.contains ? anchor.contains(e.target) : e.target === anchor)) return;
+    if (e.target.closest && e.target.closest('.mode-form, .mode-manage')) return;
+    close();
+  };
+  setTimeout(() => document.addEventListener('click', onDoc, true), 0);
+  pop.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+  pop.innerHTML = `<div class="mp-top"><input type="search" class="mp-filter" placeholder="find a mode · enter switches"></div>` +
+    `<div class="mp-list"></div>` +
+    `<div class="mp-foot"><button type="button" class="mp-modenew">+ new mode</button> <button type="button" class="mp-cancel">cancel</button></div>`;
+  const list = pop.querySelector('.mp-list');
+  const filterInput = pop.querySelector('.mp-filter');
+  let hi = -1;
+  const activeKey = (convModes.get(activeRel) || {}).key || 'coding';
+  const visibleRows = () => [...list.querySelectorAll('.mp-row')];
+  const setHi = i => {
+    const vis = visibleRows();
+    hi = vis.length ? Math.max(0, Math.min(vis.length - 1, i)) : -1;
+    list.querySelectorAll('.mp-row.hi').forEach(b => b.classList.remove('hi'));
+    if (hi >= 0) { vis[hi].classList.add('hi'); vis[hi].scrollIntoView({ block: 'nearest' }); }
+  };
+  const snippetOf = m => String(m.opener || m.appendix || m.systemPrompt || '').replace(/\s+/g, ' ').trim();
+  const apply = () => {
+    const terms = filterInput.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const shown = (launcherModes || []).filter(m =>
+      terms.every(t => (m.key + ' ' + m.label + ' ' + snippetOf(m)).toLowerCase().includes(t)));
+    list.innerHTML = shown.map(m =>
+      `<button class="mp-row${m.key === activeKey ? ' on' : ''}" data-mode="${esc(m.key)}" title="${esc(snippetOf(m).slice(0, 300))}">` +
+        `<span class="mp-check">${m.key === activeKey ? '✓' : ''}</span><b>${esc(m.key)}</b>` +
+        `<span>${esc(m.label)}${m.custom ? '' : ' · built-in'}</span>` +
+        `<span class="mp-ctx mp-modeedit" role="button" title="${m.custom ? 'edit this mode' : 'override this built-in'}">✎</span></button>`
+    ).join('') || '<div class="mp-empty">no matching modes</div>';
+    list.querySelectorAll('.mp-row').forEach(b => b.onclick = ev => {
+      const m = (launcherModes || []).find(x => x.key === b.dataset.mode);
+      if (!m) return;
+      if (ev.target.closest && ev.target.closest('.mp-modeedit')) {
+        openModeForm(null, m, async () => { await refreshLauncherModes(); apply(); });
+        return;
+      }
+      close();
+      setConversationMode(m.key);
+    });
+    setHi(hi);
+  };
+  filterInput.onkeydown = e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHi(hi < 0 ? 0 : hi + 1); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setHi(hi - 1); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const vis = visibleRows();
+      const row = vis[hi >= 0 ? hi : 0];
+      if (row) row.click();
+    }
+  };
+  filterInput.oninput = () => { hi = 0; apply(); };
+  pop.querySelector('.mp-modenew').onclick = () =>
+    openModeForm(null, null, async () => { await refreshLauncherModes(); apply(); });
+  pop.querySelector('.mp-cancel').onclick = close;
+  apply();
+  filterInput.focus();
 }
 function paintCtxMeter(el, c) {
   if (!el) return;
@@ -7991,6 +8325,7 @@ function agentComposerHtml(d) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>
       </button>
       <span id="ctxMeter" class="ctxmeter" hidden></span>
+      ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<button id="agentThink" class="model-pick think-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
@@ -8022,9 +8357,13 @@ function echoUserPrompt(prompt) {
 // Headless send: the blessed path. Continues from the trace leaf when you
 // follow an older branch. Images ride along natively (pi RPC ImageContent).
 // Slash commands still need the terminal.
-async function headlessSendFromComposer(btn) {
+// promptOverride: send this text instead of the composer's. The composer,
+// its draft, and its images stay untouched — the detached slash palette and
+// the mode picker run commands through here.
+async function headlessSendFromComposer(btn, promptOverride) {
   const ta = $('agentText');
-  const prompt = (ta && ta.value || '').trim();
+  const fromBox = promptOverride == null;
+  const prompt = (fromBox ? (ta && ta.value || '') : String(promptOverride)).trim();
   if (!prompt) return errToast('type a prompt first');
   // The heartbeat answers the send instantly — the reader sees life
   // before the first run event arrives.
@@ -8054,7 +8393,7 @@ async function headlessSendFromComposer(btn) {
   window._sendPendingAt = Date.now();
   if ($('liveStrip')) $('liveStrip').hidden = false;
   const images = [];
-  for (const img of (window._agentImages || [])) images.push(await shrinkAgentImage(img));
+  if (fromBox) for (const img of (window._agentImages || [])) images.push(await shrinkAgentImage(img));
   const payload = { id: key, prompt, node, models, images };
   let out = await postJson('/api/node/send', payload);
   if (out && out.needsForce) {
@@ -8067,21 +8406,21 @@ async function headlessSendFromComposer(btn) {
   if (!out) return clearSendPending(key);
   if (out.error) { clearSendPending(key); return errToast('send failed: ' + out.error); }
   if (key === activeRel && viewKind === 'conversation') echoUserPrompt(prompt);
-  ta.value = '';
-  autoGrowCompose();
-  // A slash command consumed the composer — bring back the parked draft.
-  if (prompt.startsWith('/')) restoreSlashDraft();
-  else window._slashDraft = null;
-  window._agentImages = [];
-  renderAgentThumbs();
-  // The reply streams in below: rest the composer. Blur everywhere — on
-  // desktop a focused textarea would swallow the navigation shortcuts.
-  ta.blur();
-  updateComposeMin();
+  if (fromBox && ta) {
+    ta.value = '';
+    autoGrowCompose();
+    window._agentImages = [];
+    renderAgentThumbs();
+    // The reply streams in below: rest the composer. Blur everywhere — on
+    // desktop a focused textarea would swallow the navigation shortcuts.
+    ta.blur();
+    updateComposeMin();
+  }
   traceLeaves.delete(key);
   compareCache.delete(key);
-  if (out.queued) return toast('queued into the running turn — pi picks it up as a follow-up (session model)');
+  if (out.queued) { toast('queued into the running turn — pi picks it up as a follow-up (session model)'); return true; }
   toast(out.runs ? out.runs.length + ' models running in parallel — replies appear side by side' : 'running · ' + ((out.job && out.job.model) || (models[0] && models[0].modelId) || 'session model'));
+  return true;
 }
 
 // One server-side model set owns the next reply. One entry means one run;
@@ -8154,36 +8493,20 @@ function ensureSlashCmds(key) {
   }
   return slashCmdCache.get(key);
 }
-// A picked command runs immediately, like the TUI. Arguments still work:
-// type "/name args" manually, the palette folds once arguments begin.
-async function sendSlashCmd(name) {
-  const ta = $('agentText');
-  if (!ta) return;
-  ta.value = '/' + name;
+// A picked command runs as its own text — the composer, its draft, and its
+// images are never touched. Arguments ride along: "/name args" runs whole.
+async function sendSlashCmd(text) {
   hideSlashPop();
   const run = $('agentRun');
-  if (run) return headlessSendFromComposer(run);
-  const send = $('agentSend');
-  if (send) return sendToAlacritty(send);
-}
-
-// The slash palette must never eat a draft. Opening the palette over typed
-// text parks the draft here; it returns when the palette closes or the
-// command has run.
-function saveSlashDraft(ta) {
-  if (window._slashDraft == null && ta.value && !ta.value.startsWith('/'))
-    window._slashDraft = { value: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
-}
-function restoreSlashDraft() {
-  const d = window._slashDraft;
-  window._slashDraft = null;
-  const ta = $('agentText');
-  if (!d || !ta) return false;
-  ta.value = d.value;
-  try { ta.setSelectionRange(d.start, d.end); } catch {}
-  autoGrowCompose();
-  updateComposeMin();
-  return true;
+  if (!run) return errToast('slash commands over RPC need pi');
+  const ok = await headlessSendFromComposer(run, text);
+  if (ok) {
+    // The inline path (typing / into the composer) leaves the command text
+    // in the box — it was the query, not a draft. Clear it.
+    const ta = $('agentText');
+    if (ta && ta.value.startsWith('/')) { ta.value = ''; autoGrowCompose(); updateComposeMin(); }
+  }
+  return ok;
 }
 
 function slashGroupOf(source) {
@@ -8192,37 +8515,135 @@ function slashGroupOf(source) {
 
 function hideSlashPop() {
   const p = $('slashPop');
-  if (p) p.hidden = true;
+  if (p) { p.hidden = true; p.innerHTML = ''; }
+  const wasDetached = window._slashDetached;
+  window._slashDetached = false;
   window._slashOpen = false;
+  if (wasDetached) { const ta = $('agentText'); if (ta) ta.focus(); }
 }
 
-// Enter/click runs it; Tab fills the composer for editing.
+function slashRowsHtml(list, sel) {
+  let html = '';
+  let lastGroup = null;
+  list.forEach((c, i) => {
+    const g = slashGroupOf(c.source);
+    if (g !== lastGroup) { html += `<div class="slash-group">${esc(g)}</div>`; lastGroup = g; }
+    html += `<div class="slash-row${i === sel ? ' sel' : ''}" data-i="${i}">` +
+      `<span class="slash-name">/${esc(c.name)}</span>` +
+      `<span class="slash-desc">${esc((c.description || '').slice(0, 60))}</span></div>`;
+  });
+  return html;
+}
+function wireSlashRows(host) {
+  host.querySelectorAll('.slash-row').forEach(r => {
+    r.onmousedown = e => { e.preventDefault(); pickSlash(Number(r.dataset.i)); };
+  });
+  const sel = host.querySelector('.slash-row.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+function slashMatches(cmds, token) {
+  // Substring filter over name + description: palette, not just autocomplete.
+  return cmds.filter(c =>
+    !token || c.name.toLowerCase().includes(token) || (c.description || '').toLowerCase().includes(token));
+}
+
+// Enter/click runs it; Tab fills the query for argument editing.
 function pickSlash(i, fillOnly) {
   const c = (window._slashList || [])[i];
   if (!c) return;
   if (fillOnly) {
-    const ta = $('agentText');
-    ta.value = '/' + c.name + ' ';
-    ta.focus();
-    hideSlashPop();
+    if (window._slashDetached) {
+      const inp = $('slashInput');
+      if (inp) { inp.value = '/' + c.name + ' '; inp.focus(); paintSlashPop(); }
+    } else {
+      const ta = $('agentText');
+      if (ta) { ta.value = '/' + c.name + ' '; ta.focus(); hideSlashPop(); }
+    }
     return;
   }
-  sendSlashCmd(c.name);
+  // Keep any arguments already typed after the exact command token.
+  const src = window._slashDetached
+    ? ($('slashInput') && $('slashInput').value || '')
+    : ($('agentText') && $('agentText').value || '');
+  const norm = src.startsWith('/') ? src : '/' + src;
+  const token = norm.slice(1).split(/\s/)[0];
+  const args = token.toLowerCase() === c.name.toLowerCase() ? norm.slice(1 + token.length) : '';
+  sendSlashCmd('/' + c.name + args);
 }
 
-async function openSlashPalette() {
-  const ta = $('agentText');
-  if (!ta) return;
-  saveSlashDraft(ta);
-  ta.value = '/';
-  ta.focus();
-  ta.setSelectionRange(1, 1);
-  updateSlashPop(ta);
+// The detached palette: its own query input, floating above the composer.
+// The user's text stays exactly where it is — nothing is borrowed.
+function openSlashPalette() {
+  const pop = $('slashPop');
+  if (!pop) return;
+  if (window._slashDetached && !pop.hidden) return hideSlashPop(); // toggle
+  window._slashOpen = false;
+  window._slashDetached = true;
+  window._slashSel = 0;
+  pop.innerHTML = '<div class="slash-inp-row"><span class="slash-lead">/</span>' +
+    '<input id="slashInput" type="text" placeholder="command · enter runs · tab completes · esc closes" spellcheck="false" autocomplete="off"></div>' +
+    '<div id="slashRows"></div>';
+  pop.hidden = false;
+  const inp = $('slashInput');
+  inp.oninput = () => { window._slashSel = 0; paintSlashPop(); };
+  inp.onkeydown = e => {
+    e.stopPropagation(); // app shortcuts stay quiet while the palette types
+    const n = (window._slashList || []).length;
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
+      e.preventDefault();
+      window._slashSel = ((window._slashSel || 0) + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+      paintSlashPop();
+      return;
+    }
+    if (e.key === 'Tab') { e.preventDefault(); if (n) pickSlash(window._slashSel || 0, true); return; }
+    if (e.key === 'Escape') { e.preventDefault(); hideSlashPop(); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const raw = inp.value.trim();
+      const token = raw.replace(/^\//, '').split(/\s/)[0].toLowerCase();
+      const exact = (window._slashList || []).some(c => c.name.toLowerCase() === token);
+      // An exact command (with or without args) runs as typed; otherwise the
+      // highlighted row runs — the TUI's completion behavior.
+      if (exact || !n) {
+        const norm = raw.startsWith('/') ? raw : '/' + raw;
+        if (norm.length > 1) sendSlashCmd(norm);
+        return;
+      }
+      pickSlash(window._slashSel || 0);
+    }
+  };
+  inp.focus();
+  paintSlashPop();
 }
 
+async function paintSlashPop() {
+  const host = $('slashRows');
+  const inp = $('slashInput');
+  if (!host || !inp || !window._slashDetached) return;
+  let cmds;
+  try {
+    if (!host.childElementCount) host.innerHTML = '<div class="slash-hint">loading pi commands…</div>';
+    cmds = await ensureSlashCmds(activeRel);
+  } catch (e) {
+    host.innerHTML = `<div class="slash-hint">${esc(e.message || 'could not load commands')}</div>`;
+    return;
+  }
+  if (!window._slashDetached || $('slashInput') !== inp) return;
+  const token = inp.value.replace(/^\//, '').split(/\s/)[0].toLowerCase();
+  const matched = slashMatches(cmds, token);
+  window._slashList = matched.slice(0, 14);
+  window._slashSel = Math.min(window._slashSel || 0, Math.max(0, window._slashList.length - 1));
+  host.innerHTML = window._slashList.length
+    ? slashRowsHtml(window._slashList, window._slashSel)
+    : '<div class="slash-hint">no matching command</div>';
+  wireSlashRows(host);
+}
+
+// The inline palette: typing / as the first character of the composer.
+// The typed text is the query itself, so nothing needs saving.
 async function updateSlashPop(ta) {
   const pop = $('slashPop');
-  if (!pop || !ta) return;
+  if (!pop || !ta || window._slashDetached) return;
   if (!ta.value.startsWith('/') || ta.value.includes('\n')) return hideSlashPop();
   const wanted = ta.value;
   let cmds;
@@ -8235,31 +8656,15 @@ async function updateSlashPop(ta) {
     return;
   }
   const now = $('agentText');
-  if (now !== ta || ta.value !== wanted) return; // typed on while loading
+  if (now !== ta || ta.value !== wanted || window._slashDetached) return; // typed on while loading
   const token = ta.value.slice(1).split(/\s/)[0].toLowerCase();
   const hasArgs = /\s/.test(ta.value.trim()) || /\s$/.test(ta.value);
-  // Substring filter over name + description: palette, not just autocomplete.
-  const matched = cmds.filter(c =>
-    !token || c.name.toLowerCase().includes(token) || (c.description || '').toLowerCase().includes(token));
+  const matched = slashMatches(cmds, token);
   window._slashList = matched.slice(0, 14);
   if (!matched.length || (hasArgs && matched.some(c => c.name.toLowerCase() === token))) return hideSlashPop();
   window._slashSel = Math.min(window._slashSel || 0, window._slashList.length - 1);
-  // Group headers between rows; the flat list stays the keyboard order.
-  let html = '';
-  let lastGroup = null;
-  window._slashList.forEach((c, i) => {
-    const g = slashGroupOf(c.source);
-    if (g !== lastGroup) { html += `<div class="slash-group">${esc(g)}</div>`; lastGroup = g; }
-    html += `<div class="slash-row${i === window._slashSel ? ' sel' : ''}" data-i="${i}">` +
-      `<span class="slash-name">/${esc(c.name)}</span>` +
-      `<span class="slash-desc">${esc((c.description || '').slice(0, 60))}</span></div>`;
-  });
-  pop.innerHTML = html;
-  pop.querySelectorAll('.slash-row').forEach(r => {
-    r.onmousedown = e => { e.preventDefault(); pickSlash(Number(r.dataset.i)); };
-  });
-  const sel = pop.querySelector('.slash-row.sel');
-  if (sel) sel.scrollIntoView({ block: 'nearest' });
+  pop.innerHTML = slashRowsHtml(window._slashList, window._slashSel);
+  wireSlashRows(pop);
   pop.hidden = false;
   window._slashOpen = true;
 }
@@ -9034,10 +9439,13 @@ function wireAgentComposer() {
   renderModelStrip();
   const thinkBtn = $('agentThink');
   if (thinkBtn) { thinkBtn.onclick = () => cycleThinking(); paintThinkBtn(); }
+  const modeBtn = $('agentMode');
+  if (modeBtn) { modeBtn.onclick = e => openModePicker(e.currentTarget); paintModeBtn(); }
   const isPi = !!runBtn; // pi composers have the web send button
   const slashBtn = $('agentSlash');
   if (slashBtn) slashBtn.onclick = () => openSlashPalette();
   window._slashOpen = false;
+  window._slashDetached = false; // a re-render replaced the pop's DOM
   if (send) send.onclick = () => {
     if (!isPi && ta && ta.value.startsWith('/')) {
       agentLiveQueue(async () => {
@@ -9062,11 +9470,7 @@ function wireAgentComposer() {
         // hidden terminal, no keystroke streaming — the TUI adapter is
         // pi's own get_commands + prompt.
         if (v.startsWith('/')) updateSlashPop(ta);
-        else {
-          hideSlashPop();
-          // The slash was deleted: an emptied composer takes the draft back.
-          if (!v && window._slashDraft) restoreSlashDraft();
-        }
+        else if (!window._slashDetached) hideSlashPop();
         return;
       }
       // Typing must NEVER implicitly open a terminal. Live slash keys spawn
@@ -9095,13 +9499,6 @@ function wireAgentComposer() {
     ta.onkeydown = e => {
       // Shift+tab cycles the reasoning level, TUI-style, even while typing.
       if (isPi && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleThinking(); return; }
-      // Escape with a parked draft always brings it back, pop open or not.
-      if (isPi && e.key === 'Escape' && window._slashDraft && ta.value.startsWith('/')) {
-        e.preventDefault();
-        hideSlashPop();
-        restoreSlashDraft();
-        return;
-      }
       if (isPi && window._slashOpen) {
         const n = (window._slashList || []).length;
         if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
@@ -9111,7 +9508,7 @@ function wireAgentComposer() {
           return;
         }
         if (e.key === 'Tab' && n) { e.preventDefault(); pickSlash(window._slashSel || 0, true); return; }
-        if (e.key === 'Escape') { e.preventDefault(); hideSlashPop(); if (!restoreSlashDraft() && ta.value === '/') ta.value = ''; return; }
+        if (e.key === 'Escape') { e.preventDefault(); hideSlashPop(); if (ta.value === '/') ta.value = ''; return; }
         if (e.key === 'Enter' && !e.shiftKey && n) {
           const token = ta.value.slice(1).split(/\s/)[0].toLowerCase();
           if (!(window._slashList || []).some(c => c.name.toLowerCase() === token)) {
@@ -9405,6 +9802,14 @@ async function renderConv(scroll) {
     e.stopPropagation();
     e.preventDefault(); // a link inside a <summary> must not toggle the fold
     openToolCallFile(activeRel, b.dataset.fileDiff, b.dataset.fileTs, b.dataset.fileAnchor, b.dataset.fileCall);
+  });
+  $('view').querySelectorAll('[data-media-src]').forEach(b => b.onclick = e => {
+    e.stopPropagation(); e.preventDefault();
+    openMediaLightbox(b.dataset.mediaSrc, b.title || 'image');
+  });
+  $('view').querySelectorAll('[data-transcript-path]').forEach(b => b.onclick = e => {
+    e.stopPropagation(); e.preventDefault();
+    openTranscriptPath(b.dataset.transcriptPath);
   });
   $('view').querySelectorAll('.toolgroup').forEach(g =>
     g.addEventListener('toggle', () => toolGroupOpen.set(activeRel + '|' + g.dataset.gkey, g.open)));
@@ -10440,6 +10845,13 @@ function mdRender(src, q = '') {
       const lang = fenceLang(spec);
       const label = spec.split(/\s+/)[0] || '';
       const body = (parts[i + 1] || '').replace(/^\n|\n$/g, '');
+      // ```mermaid renders as a diagram (lazy-loaded, local vendor bundle).
+      // While a search highlights terms, the source stays visible as code.
+      if (label === 'mermaid' && !qr) {
+        out.push(`<div class="mmd"><pre class="md-code mmd-src" data-lang="mermaid"><code>${esc(body)}</code></pre></div>`);
+        i += 2;
+        continue;
+      }
       let html;
       if (qr) html = mark(esc(body));
       else {

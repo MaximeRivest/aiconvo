@@ -124,7 +124,7 @@ function cachePathFor(key) {
 }
 
 // Bump when the cached message format changes; forces a re-index.
-const CACHE_VERSION = 11; // v11: aborted/interrupted turns become 'abort' marker rows
+const CACHE_VERSION = 12; // v12: native transcript images and file-path references
 
 // A memory-briefing bootstrap prompt is the same for every launched session; it says
 // nothing about the actual work. Titles must come from the first real request instead.
@@ -206,21 +206,58 @@ function toolInputText(name, input) {
   return s.length > 2000 ? s.slice(0, 2000) + ' …' : s;
 }
 
+// An image descriptor never contains the large base64 body. The browser gets
+// that body from a lazy media endpoint only when the thumbnail nears view.
+function imageDescriptor(block, entry, blockPath) {
+  if (!block || block.type !== 'image') return null;
+  const mime = String(block.mimeType || (block.source && block.source.media_type) || 'image/png').toLowerCase();
+  const data = block.data || (block.source && block.source.data);
+  if (typeof data !== 'string' || !/^image\/(png|jpeg|jpg|gif|webp)$/.test(mime)) return null;
+  return { entry, path: blockPath.join('.'), mime: mime === 'image/jpg' ? 'image/jpeg' : mime };
+}
+
+function directImagesOf(content, entry, prefix = []) {
+  if (!Array.isArray(content)) return [];
+  const out = [];
+  content.forEach((block, i) => {
+    const image = imageDescriptor(block, entry, prefix.concat(i));
+    if (image) out.push(image);
+  });
+  return out;
+}
+
+// Conservative candidates from unstructured tool output. Structured tool
+// fields stay the first choice. A click verifies each candidate on disk.
+function pathCandidates(text) {
+  const out = [], seen = new Set();
+  const rx = /(?:^|[\s"'`(])((?:~\/|\/|\.\.?\/)[^\s"'`<>|)\]}]+)/gm;
+  for (const match of String(text || '').matchAll(rx)) {
+    let value = match[1].replace(/[.,;!?]+$/, '');
+    if (value.length < 2 || value.length > 1000 || seen.has(value)) continue;
+    seen.add(value); out.push(value);
+    if (out.length >= 24) break;
+  }
+  return out;
+}
+
 // Tool calls / results out of a content block array. kinds: tool, toolresult.
-function toolEventsOf(content, ts) {
+function toolEventsOf(content, ts, entry) {
   const out = [];
   if (!Array.isArray(content)) return out;
-  for (const b of content) {
+  for (let bi = 0; bi < content.length; bi++) {
+    const b = content[bi];
     if (!b) continue;
     if (b.type === 'tool_use' || b.type === 'toolCall') {
       const input = b.input || b.arguments || {};
       const p = input.file_path || input.notebook_path || input.path || null;
-      out.push({ role: 'tool', name: b.name || '?', text: toolInputText(b.name, input),
-                 path: typeof p === 'string' ? p : null, id: b.id || null, ts });
+      const text = toolInputText(b.name, input);
+      out.push({ role: 'tool', name: b.name || '?', text,
+                 path: typeof p === 'string' ? p : null, paths: pathCandidates(text), id: b.id || null, ts });
     } else if (b.type === 'tool_result') {
       let t = textOf(b.content) || (typeof b.content === 'string' ? b.content : '');
       if (t.length > 4000) t = t.slice(0, 4000) + '\n… (truncated)';
-      if (t.trim()) out.push({ role: 'toolresult', text: t, tid: b.tool_use_id || null, ts, err: !!b.is_error });
+      const images = directImagesOf(b.content, entry, [bi]);
+      if (t.trim() || images.length) out.push({ role: 'toolresult', text: t, images, paths: pathCandidates(t), tid: b.tool_use_id || null, ts, err: !!b.is_error });
     }
   }
   return out;
@@ -290,7 +327,8 @@ async function parseFile(absPath) {
         // pi tool result message
         let t = textOf(content);
         if (t.length > 4000) t = t.slice(0, 4000) + '\n… (truncated)';
-        if (t.trim()) messages.push({ role: 'toolresult', text: t, tid: d.message.toolCallId || d.message.toolCallID || null, ts: d.timestamp || null, err: !!(d.message.isError || d.message.is_error), _eid: eid });
+        const images = directImagesOf(content, eid);
+        if (t.trim() || images.length) messages.push({ role: 'toolresult', text: t, images, paths: pathCandidates(t), tid: d.message.toolCallId || d.message.toolCallID || null, ts: d.timestamp || null, err: !!(d.message.isError || d.message.is_error), _eid: eid });
         continue;
       }
       if (role !== 'user' && role !== 'assistant') continue;
@@ -310,16 +348,17 @@ async function parseFile(absPath) {
       }
     }
     const text = textOf(content);
+    const turnImages = directImagesOf(content, eid);
     // Interruptions become their own marker row, not a chat bubble.
     // Claude Code records the user's interrupt as a user message; pi
     // records the aborted assistant turn with stopReason 'aborted'.
     if (role === 'user' && /^\[Request interrupted by user/.test(text.trim())) {
-      messages.push(...toolEventsOf(content, d.timestamp || null).map(m => ({ ...m, _eid: eid })));
+      messages.push(...toolEventsOf(content, d.timestamp || null, eid).map(m => ({ ...m, _eid: eid })));
       messages.push({ role: 'abort', text: 'interrupted by you', ts: d.timestamp || null, _eid: eid });
       continue;
     }
-    if (text.trim() && !(role === 'user' && isNoise(text))) {
-      const msg = { role, text, ts: d.timestamp || null, _eid: eid };
+    if ((text.trim() || turnImages.length) && !(role === 'user' && isNoise(text))) {
+      const msg = { role, text, images: turnImages, ts: d.timestamp || null, _eid: eid };
       // Both formats store the generating model on the assistant entry
       // (pi also stores the provider). Kept per message: models can change
       // mid-conversation and per branch.
@@ -330,7 +369,7 @@ async function parseFile(absPath) {
       messages.push(msg);
     }
     // Tool calls (assistant) and tool results (claude wraps them in user turns).
-    messages.push(...toolEventsOf(content, d.timestamp || null).map(m => ({ ...m, _eid: eid })));
+    messages.push(...toolEventsOf(content, d.timestamp || null, eid).map(m => ({ ...m, _eid: eid })));
     if (role === 'assistant' && d.message && d.message.stopReason === 'aborted') {
       messages.push({ role: 'abort', text: 'aborted', ts: d.timestamp || null, _eid: eid });
     }
@@ -352,6 +391,30 @@ async function parseFile(absPath) {
   // Ordered pairs, not an object: JS objects reorder all-digit keys.
   const entryParents = [...parents.entries()];
   return { meta, messages, entryParents };
+}
+
+async function transcriptImage(key, entry, blockPath) {
+  if (!index[key] || !entry || !/^\d+(?:\.\d+)*$/.test(blockPath || '')) throw new Error('bad image reference');
+  const wanted = blockPath.split('.').map(Number);
+  const stream = fs.createReadStream(absPathForKey(key), { encoding: 'utf8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  for await (const line of rl) {
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    if ((d.id || d.uuid) !== entry) continue;
+    let block = d.message && d.message.content;
+    for (let i = 0; i < wanted.length; i++) {
+      block = Array.isArray(block) ? block[wanted[i]] : null;
+      if (i < wanted.length - 1) block = block && block.content;
+    }
+    const image = imageDescriptor(block, entry, wanted);
+    const data = block && (block.data || (block.source && block.source.data));
+    if (!image || typeof data !== 'string') throw new Error('image block not found');
+    const body = Buffer.from(data, 'base64');
+    if (!body.length || body.length > 32 * 1024 * 1024) throw new Error('image is empty or too large');
+    return { body, mime: image.mime };
+  }
+  throw new Error('image entry not found');
 }
 
 // Live update push: browsers subscribe on /api/events.
@@ -916,6 +979,12 @@ function parseTreeEntries(kind, raw) {
       } else if (d.type === 'thinking_level_change' && d.thinkingLevel) {
         // The reasoning level that serves the turns below this entry.
         node.thinkingChange = d.thinkingLevel;
+      } else if (d.type === 'custom' && d.customType === 'mode-switch' && d.data) {
+        // The modes extension persists the active prompt mode as a custom
+        // entry. The nearest one above a node serves that node's turns.
+        const def = d.data.definition && typeof d.data.definition === 'object' ? d.data.definition : null;
+        const key = String(d.data.mode || (def && def.key) || '').trim();
+        if (key) node.modeChange = { key, label: (def && def.label) || key };
       }
     } else {
       if (!d.uuid || d.isSidechain) continue;
@@ -1078,7 +1147,7 @@ async function conversationContextResponse(key, leafId) {
   // value right after a switch, and the UI rolls the control back.
   if (leaf) {
     const settingKids = new Map(); // parent id → newest setting-only child
-    for (const n of all) if ((n.modelChange || n.thinkingChange) && n.parent) settingKids.set(n.parent, n);
+    for (const n of all) if ((n.modelChange || n.thinkingChange || n.modeChange) && n.parent) settingKids.set(n.parent, n);
     for (let tip = settingKids.get(leaf.id); tip && !seen.has(tip.id); tip = settingKids.get(tip.id)) {
       seen.add(tip.id);
       chain.unshift(tip); // nearest links come first
@@ -1095,6 +1164,8 @@ async function conversationContextResponse(key, leafId) {
   }
   // The reasoning level that serves the next turn: nearest thinking entry wins.
   const thinking = (chain.find(n => n.thinkingChange) || {}).thinkingChange || null;
+  // The prompt mode that serves the next turn (modes extension), if any.
+  const mode = (chain.find(n => n.modeChange) || {}).modeChange || null;
   const models = (modelsCache.models.length ? modelsCache : await listPiModels()).models || [];
   let hit = model ? settingsLib.findModel(models, provider, model) : null;
   if (!hit && model) hit = models.find(m => m.model === model) || null;
@@ -1106,7 +1177,7 @@ async function conversationContextResponse(key, leafId) {
     key,
     source: entry.source,
     leaf: leaf ? leaf.id : null,
-    provider, model, thinking,
+    provider, model, thinking, mode,
     ctxTokens, usedTokens,
     leftTokens: Math.max(0, ctxTokens - usedTokens),
     pctLeft: ctxTokens ? Math.max(0, Math.min(100, Math.round(100 * (1 - usedTokens / ctxTokens)))) : null,
@@ -5907,6 +5978,40 @@ async function editableFilePath(pathValue) {
   throw new Error('this path is outside every indexed repository and project');
 }
 
+function pathWithoutLocation(pathValue) {
+  return String(pathValue || '').replace(/:(\d+)(?::(\d+))?$/, '');
+}
+
+async function transcriptFilePath(key, pathValue, maxBytes = 32 * 1024 * 1024) {
+  if (!index[key]) throw new Error('conversation not found');
+  const clean = pathWithoutLocation(pathValue);
+  const expanded = expandHomePath(clean);
+  const abs = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(index[key].cwd || '', expanded));
+  let st;
+  try { st = await fsp.stat(abs); } catch { throw new Error('file not found on disk'); }
+  if (!st.isFile()) throw new Error('not a regular file');
+  if (st.size > maxBytes) throw new Error('file is too large to open here');
+  const inside = root => root && (abs === root || abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
+  if ((gitRepoIndexCache.repos || []).some(repo => inside(repo.root)) ||
+      Object.values(index).some(entry => inside(entry.cwd))) return { abs, stat: st };
+  const repos = await discoverGitRepos();
+  if (repos.some(repo => inside(repo.root))) return { abs, stat: st };
+  throw new Error('this path is outside every indexed repository and project');
+}
+
+async function transcriptFileReadResponse(key, pathValue) {
+  const { abs } = await transcriptFilePath(key, pathValue, FILE_EDIT_MAX);
+  const body = await fsp.readFile(abs);
+  if (body.subarray(0, 8192).includes(0)) throw new Error('this is a binary file');
+  const text = body.toString('utf8');
+  return { path: abs, text, sha: sha256Hex(text) };
+}
+
+function imageMimeForPath(file) {
+  return ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.webp': 'image/webp' })[path.extname(file).toLowerCase()] || null;
+}
+
 async function fileReadResponse(pathValue) {
   const abs = await editableFilePath(pathValue);
   const text = await fsp.readFile(abs, 'utf8');
@@ -7016,6 +7121,7 @@ const server = http.createServer(async (req, res) => {
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400' },
       '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400' },
       '/icon.svg': { file: 'icon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
+      '/vendor/mermaid.min.js': { file: 'vendor/mermaid.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store' },
     }[u.pathname];
     if (staticFile) {
@@ -7048,7 +7154,7 @@ const server = http.createServer(async (req, res) => {
         try {
           const st = await fsp.stat(p);
           const size = await new Promise(resolve => {
-            const child = spawn('du', ['-sb', p], { timeout: 10000 });
+            const child = spawn('/run/current-system/sw/bin/du', ['-sb', p], { timeout: 10000 });
             let out = '';
             child.stdout.on('data', c => { out += c; });
             child.on('error', () => resolve(0));
@@ -7073,6 +7179,25 @@ const server = http.createServer(async (req, res) => {
       const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
       data.selectedModels = await inferredConversationModels(key, data);
       json(res, 200, data);
+    } else if (u.pathname === '/api/conversation/media' && req.method === 'GET') {
+      try {
+        const media = await transcriptImage(u.searchParams.get('id'), u.searchParams.get('entry'), u.searchParams.get('path'));
+        res.writeHead(200, { 'Content-Type': media.mime, 'Content-Length': media.body.length,
+          'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' });
+        res.end(media.body);
+      } catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/file' && req.method === 'GET') {
+      try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'))); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/file-content' && req.method === 'GET') {
+      try {
+        const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'));
+        const mime = imageMimeForPath(found.abs);
+        if (!mime) throw new Error('this file is not a supported image');
+        res.writeHead(200, { 'Content-Type': mime, 'Content-Length': found.stat.size,
+          'Cache-Control': 'private, max-age=60', 'X-Content-Type-Options': 'nosniff' });
+        fs.createReadStream(found.abs).pipe(res);
+      } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/here') {
       // "Where was I?" — the most recent session whose cwd is (or contains) dir.
       const dir = u.searchParams.get('dir') || '';

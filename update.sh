@@ -16,6 +16,18 @@ else
   git log --oneline "$before..$after" | sed 's/^/  /'
 fi
 
+# Keep the modes extension in step with the repo copy (install when missing).
+PI_EXT_DIR="$HOME/.pi/agent/extensions"
+if [ -f extensions/modes.ts ]; then
+  mkdir -p "$PI_EXT_DIR"
+  if [ ! -f "$PI_EXT_DIR/modes.ts" ]; then
+    cp extensions/modes.ts "$PI_EXT_DIR/modes.ts"
+    echo "installed pi extension: modes.ts → $PI_EXT_DIR"
+  elif ! cmp -s extensions/modes.ts "$PI_EXT_DIR/modes.ts"; then
+    echo "note: $PI_EXT_DIR/modes.ts differs from the repo copy — not overwritten."
+  fi
+fi
+
 systemctl --user restart aiconvo
 
 ok=""
