@@ -8018,8 +8018,13 @@ function paintCtxMeter(el, c) {
   const money = v => '$' + (v >= 0.1 ? v.toFixed(2) : v.toFixed(4));
   const approx = c.estimate ? '~' : '';
   const parts = [];
-  parts.push(c.usedTokens ? `${approx}${fmtTokens(c.usedTokens)}/${fmtTokens(c.ctxTokens)}` : `—/${fmtTokens(c.ctxTokens)}`);
-  if (c.usedTokens && c.pctLeft != null) parts.push(`${c.pctLeft}% left`);
+  const left = c.leftTokens != null ? c.leftTokens : Math.max(0, c.ctxTokens - (c.usedTokens || 0));
+  if (c.usedTokens) {
+    parts.push(`${approx}${fmtTokens(left)} left` + (c.pctLeft != null ? ` (${c.pctLeft}%)` : ''));
+    parts.push(`${approx}${fmtTokens(c.usedTokens)} used`);
+  } else {
+    parts.push(`${fmtTokens(c.ctxTokens)} window`);
+  }
   if (c.traceCost > 0) {
     const extra = c.familyCost - c.traceCost;
     parts.push(money(c.traceCost) + (extra > 0.0005 ? ` (+${money(extra)} branches)` : ''));
@@ -8032,7 +8037,7 @@ function paintCtxMeter(el, c) {
   el.className = 'ctxmeter' + (warn ? ' warn' : '');
   el.textContent = (warn ? '⚠ ' : '') + parts.join(' · ');
   el.title = `context window of ${c.model || 'the model'}: `
-    + (c.usedTokens ? `${c.usedTokens.toLocaleString()} of ${c.ctxTokens.toLocaleString()} tokens used`
+    + (c.usedTokens ? `${left.toLocaleString()} tokens left · ${c.usedTokens.toLocaleString()} of ${c.ctxTokens.toLocaleString()} used`
                     : `no reply counted yet · window ${c.ctxTokens.toLocaleString()} tokens`)
     + (c.estimate ? ' (estimate: the counters come from ' + (c.usedModel || 'no reply') + ')' : '')
     + ` · cost on this path ${money(c.traceCost)} · all branches ${money(c.familyCost)}`;
@@ -11016,7 +11021,9 @@ function noteFileEditor(text, pathLabel, context, section) {
 // ---- conversation tree (design: root at the top, y axis is time) ----
 // Each box is one user message or one merged assistant turn. Solid boxes and
 // green edges mark the current branch; dashed marks other branches.
-const TREE_COLW = 300, TREE_ROWH = 62;
+// Row height leaves air under every card: the in-card action row (~24px)
+// must open without covering the next card.
+const TREE_COLW = 300, TREE_ROWH = 88;
 
 async function showTree(key) {
   activeRel = key;
