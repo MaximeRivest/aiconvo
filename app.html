@@ -1308,6 +1308,15 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   body:not(.home) #qwrap { display: none; }
   #ticker, header .count { display: none !important; }
   #activeBtn, #filtersBtn, #settingsBtn, #jobsBtn, #barFold { width: 42px; min-width: 42px; height: 44px; padding: 0; }
+  /* Conversation: one 52px row — home, +, title, agents, jobs, settings.
+     The cwd breadcrumb and the fold button cost too much width; scroll
+     already hides the chrome, and home reaches the project overview. */
+  body.conv header { flex-wrap: nowrap; }
+  body.conv #chProject, body.conv #barFold { display: none; }
+  body.conv #chNew { height: 44px; min-width: 44px; padding: 0 10px; font-size: 17px; }
+  body.conv #chTitle { flex: 1 1 auto; min-width: 0; max-width: none; }
+  body.conv #chTitle input { width: 100%; }
+  body.conv #headSpace { flex: 0 1 0px; }
   body.bar-fold header { height: 16px !important; min-height: 16px !important; }
   #filtersBtn { font-size: 0; }
   #filtersBtn::after { content: "filter"; font: 10px var(--font); }
@@ -1379,16 +1388,23 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose.compose-min .think-pick, .agent-compose.compose-min .mode-pick,
   .agent-compose.compose-min .ctxmeter,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
+  .agent-compose.compose-min #agentSlash, .agent-compose.compose-min #agentTree,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
   .agent-compose.compose-min textarea { flex: 1 1 auto; min-width: 0; min-height: 46px; height: 46px; max-height: 46px; }
   .agent-compose.compose-min .agent-compose-row { flex: 0 0 auto; }
   .agent-compose .agent-state { min-height: 24px; white-space: nowrap; overflow: hidden; }
   #agentBarHint { overflow: hidden; text-overflow: ellipsis; }
-  .agent-compose textarea { min-height: 48px; max-height: 40vh; resize: none; font-size: 16px; }
-  .agent-compose-row { gap: 7px; }
+  .agent-compose textarea { min-height: 48px; max-height: 40vh; resize: none; font-size: 16px; scrollbar-width: none; }
+  /* Expanded composer: the chips scroll sideways in one row; the send
+     button stays pinned at the right edge, always visible. */
+  .agent-compose-row { gap: 7px; overflow-x: auto; scrollbar-width: none; }
+  .agent-compose textarea::-webkit-scrollbar, .agent-compose-row::-webkit-scrollbar { display: none; }
+  .agent-compose-row > * { flex: 0 0 auto; }
   .agent-compose-row button { height: 46px; min-height: 46px; }
+  /* Dictation first: the mic must never hide behind the sideways scroll. */
+  .agent-compose-row .agent-mic { order: -1; }
   .agent-mic { width: 46px; min-width: 46px; }
-  #agentSend { margin-left: auto; }
+  #agentSend, #agentRun { margin-left: auto; position: sticky; right: 0; z-index: 1; box-shadow: -6px 0 6px -2px var(--surface-1); }
 
   .project-overview, .settings-view, .diff-view { width: 100%; }
   /* Phone: the project head scrolls away like the conversation head does.
@@ -11156,7 +11172,7 @@ function treeKeydown(e) {
     return true;
   }
   // Quick actions on the selected box — same verbs as the menu buttons.
-  const act = { r: 'read', s: 'sendhere', a: 'agg', b: 'branch', e: 'edit', f: 'fork' }[e.key];
+  const act = { r: 'read', a: 'agg', b: 'branch', e: 'edit', f: 'fork' }[e.key];
   if (act) {
     e.preventDefault();
     const el = treeSelEl();
@@ -11187,18 +11203,15 @@ function selectTreeNode(key, n, el, wrap, source) {
   //  - edit = fork BEFORE this user message; its text lands in the composer.
   const isPi = source === 'pi' || source === 'pi-remote';
   acts.innerHTML =
-    `<button class="primary" data-act="read" title="Open the transcript at this message">read from here</button>` +
-    (isPi ? `<button data-act="sendhere" title="Send a new message that continues from this point — with one model or several in parallel. Runs headless; the reply lands in the tree.">send from here…</button>` : '') +
-    (isPi && n.aKids >= 2 ? `<button data-act="agg" title="Collect the answer branches under this node, quote each with its model name, and ask one model to synthesize them.">aggregate replies…</button>` : '') +
-    (isPi ? `<button data-act="branch" title="Continue this same conversation after this message. The tree grows a new branch here; no copy is made. Quit the Alacritty window first if this conversation is open.">continue from here</button>` : '') +
-    (isPi && n.role === 'user' ? `<button data-act="edit" title="Fork into a NEW session that stops just before this message. Open the new conversation in Alacritty to edit and resend it. The original does not change.">edit this message</button>` : '') +
-    `<button data-act="fork" title="Copy the path from the start to this message into a NEW session file and continue there. The original does not change. For Claude this is the only option: its CLI always continues at the file end.">fork (copy)</button>` +
+    `<button class="primary" data-act="read" title="Open the transcript at this message">read</button>` +
+    (isPi ? `<button data-act="branch" title="Continue this conversation after this message: the tree grows a new branch here, no copy is made. Then send from the composer as usual.">continue</button>` : '') +
+    (isPi && n.role === 'user' ? `<button data-act="edit" title="Fork into a NEW session that stops just before this message. Open the new conversation to edit and resend it. The original does not change.">edit</button>` : '') +
+    (isPi && n.aKids >= 2 ? `<button data-act="agg" title="Collect the answer branches under this node, quote each with its model name, and ask one model to synthesize them.">aggregate…</button>` : '') +
+    `<button data-act="fork" title="Copy the path from the start to this message into a NEW session file and continue there. The original does not change. For Claude this is the only option: its CLI always continues at the file end.">fork</button>` +
     `<span class="tmeta2">${n.count > 1 ? n.count + ' messages' : '1 message'} · ${Math.round(n.chars / 100) / 10}k chars</span>`;
   acts.onclick = ev => ev.stopPropagation();
   // A box can live in a forked session: actions target that session.
   acts.querySelector('[data-act=read]').onclick = () => openAtTs(n.key || key, n.jumpTs);
-  const sb = acts.querySelector('[data-act=sendhere]');
-  if (sb) sb.onclick = () => openNodeSendDialog(n.key || key, n);
   const ab = acts.querySelector('[data-act=agg]');
   if (ab) ab.onclick = () => openAggregateDialog(n.key || key, n);
   const bb = acts.querySelector('[data-act=branch]');
@@ -11209,7 +11222,7 @@ function selectTreeNode(key, n, el, wrap, source) {
   wrap.appendChild(acts);
 }
 
-// ---- node dialogs: send from here / aggregate ----
+// ---- node dialog: aggregate ----
 function nodeDialog(titleHtml, bodyHtml) {
   document.querySelectorAll('.node-dialog-overlay').forEach(el => el.remove());
   const overlay = document.createElement('div');
@@ -11220,49 +11233,6 @@ function nodeDialog(titleHtml, bodyHtml) {
   overlay.onclick = e => { if (e.target === overlay) close(); };
   overlay.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
   return { overlay, close };
-}
-
-function modelChipsHtml(models) {
-  return models.length
-    ? models.map(m => `<code>${esc(m.modelId)}</code>`).join(' ') + ` · ${models.length >= 2 ? models.length + ' parallel branches' : 'one run'}`
-    : `<span class="dim">session model · one run</span>`;
-}
-
-function openNodeSendDialog(key, n) {
-  closeTreeActions();
-  // The conversation's model set prefills this dialog. One model makes one
-  // branch; several models make parallel branches.
-  let models = fanModels();
-  const { overlay, close } = nodeDialog('send from here',
-    `<div class="dim" style="margin-bottom:8px">continues after: “${esc(n.title)}”</div>
-     <textarea id="ndPrompt" rows="5" style="width:100%;box-sizing:border-box;font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--border-strong);padding:8px" placeholder="your message"></textarea>
-     <div style="margin:10px 0"><button id="ndModels" type="button">choose model(s)…</button> <span id="ndChips">${modelChipsHtml(models)}</span></div>
-     <div class="dim" style="margin-bottom:10px">one model = a new branch in this conversation · several models = parallel forks, shown as sibling branches in this tree</div>
-     <div><button class="primary" id="ndSend">send</button> <button id="ndCancel">cancel</button></div>`);
-  overlay.querySelector('#ndCancel').onclick = close;
-  overlay.querySelector('#ndModels').onclick = e => openModelPicker(e.target, { multi: true, selected: new Set(models.map(m => m.provider + '/' + m.modelId)) }, picked => {
-    models = picked;
-    overlay.querySelector('#ndChips').innerHTML = modelChipsHtml(models);
-  });
-  overlay.querySelector('#ndSend').onclick = async () => {
-    const prompt = overlay.querySelector('#ndPrompt').value.trim();
-    if (!prompt) return errToast('type a message first');
-    const btn = overlay.querySelector('#ndSend');
-    btn.disabled = true;
-    btn.textContent = 'starting…';
-    let out = await postJson('/api/node/send', { id: key, node: n.id, prompt, models });
-    if (out && out.needsForce) {
-      if (confirm('A terminal owns this conversation. Stop the terminal and run from the web?'))
-        out = await postJson('/api/node/send', { id: key, node: n.id, prompt, models, force: true });
-      else out = null;
-    }
-    if (!out) { btn.disabled = false; btn.textContent = 'send'; return; }
-    if (out.error) { btn.disabled = false; btn.textContent = 'send'; return errToast('send failed: ' + out.error); }
-    close();
-    toast(out.runs ? out.runs.length + ' parallel runs started — watch the tree' : 'run started · ' + ((out.job && out.job.model) || 'session model'));
-    if (viewKind === 'tree') setTimeout(() => showTree(key), 2500);
-  };
-  overlay.querySelector('#ndPrompt').focus();
 }
 
 function openAggregateDialog(key, n) {
@@ -11310,7 +11280,7 @@ async function branchFrom(key, n, btn) {
     openAtTs(key, n.jumpTs);
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = 'continue from here';
+    btn.textContent = 'continue';
     errToast(e.message || 'the branch failed');
   }
 }
@@ -11332,7 +11302,7 @@ async function editFrom(key, n, btn) {
     await open(d.key);
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = 'edit this message';
+    btn.textContent = 'edit';
     errToast(e.message || 'the edit fork failed');
   }
 }
@@ -11361,7 +11331,7 @@ async function forkFrom(key, n, btn) {
     open(d.key);
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = 'fork (copy)';
+    btn.textContent = 'fork';
     errToast(e.message || 'the fork failed');
   }
 }
@@ -12570,7 +12540,7 @@ function helpNow() {
       ['↑ ↓', 'parent / child (follows the active path)'],
       ['← →', 'sibling branches and forks'],
       ['enter', 'actions for the selected box'],
-      ['r / s / b / f', 'read / send from here / continue / fork'],
+      ['r / b / e / f', 'read / continue / edit / fork'],
       ['a', 'aggregate the replies under this box'],
       ['T / esc', 'back to the transcript'],
     ] });
