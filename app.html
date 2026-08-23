@@ -437,6 +437,7 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .pdocmain { flex: 1; min-width: 0; }
 .ptoc { flex: 0 0 26ch; position: sticky; top: 0; max-height: calc(100dvh - 90px); overflow-y: auto; scrollbar-width: thin; padding-bottom: var(--sp-3); }
 .ptoc-label { font-size: var(--fs-label); color: var(--text-faint); border-bottom: 1px solid var(--border); padding-bottom: 4px; margin: 0 0 8px; }
+.ptoc-bar { display: none; }
 .ptoc-group { margin: 0 0 var(--sp-1, 4px); }
 .ptoc-row { display: flex; align-items: baseline; gap: 4px; }
 .ptoc-row > a { flex: 1; min-width: 0; }
@@ -1083,7 +1084,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .nwrap { max-width: 1100px; margin: 0 auto; }
 /* Conversation tree view: boxes on a time axis, root at the top. */
 .treescroll { overflow-x: auto; }
-.treewrap { position: relative; }
+.treewrap { position: relative; margin: 0 auto; }
 .treewrap svg { position: absolute; inset: 0; pointer-events: none; }
 .tnode { position: absolute; box-sizing: border-box; border: 1px solid var(--border-strong); background: var(--surface-1); padding: 4px 8px; cursor: pointer; font-size: var(--fs-meta); }
 .tnode:hover { background: var(--surface-2); }
@@ -1393,8 +1394,24 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   /* Phone: the project head scrolls away like the conversation head does.
      Sticky here buried the content under title + buttons + fold chips. */
   .phead { position: static; top: auto; margin: -1px -2px 10px; }
-  .pdoclayout { flex-direction: column; }
-  .pdoclayout .ptoc { position: static; flex: none; width: 100%; max-height: none; overflow: visible; }
+  /* Column direction + align-items:flex-start let items grow to max-content
+     width; wide code blocks then push the text off screen. Stretch fixes it. */
+  .pdoclayout { flex-direction: column; align-items: stretch; }
+  /* Phone: the TOC folds into a thin sticky bar. It shows the current
+     section. Tap the bar to open the list; tap a link to jump and close. */
+  .pdoclayout .ptoc { position: sticky; top: -8px; z-index: 9; flex: none; width: 100%; max-height: none; overflow: visible; background: var(--bg); border-bottom: 1px solid var(--border-strong); padding-bottom: 0; }
+  .ptoc-bar { display: flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; user-select: none; font-size: var(--fs-meta); }
+  .ptoc-bar::before { content: '▸ contents'; flex: 0 0 auto; color: var(--text-faint); }
+  .ptoc.open .ptoc-bar::before { content: '▾ contents'; }
+  .ptoc-bar .ptoc-cur { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); text-align: right; }
+  .pdoclayout .ptoc .ptoc-label { display: none; }
+  .ptoc:not(.open) .ptoc-group { display: none; }
+  .ptoc.open { max-height: 60dvh; overflow-y: auto; }
+  .ptoc.open a { padding: 6px 0; }
+  /* Jump targets must land below the sticky bar. */
+  .pdocsec, .pdsub, .pdocbody h1, .pdocbody h2 { scroll-margin-top: 48px; }
+  /* Long tokens (paths, urls) must wrap, not push the page sideways. */
+  .pdocbody { overflow-wrap: anywhere; }
   .pactions { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .pactions button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
   .pfolds { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
@@ -6998,8 +7015,11 @@ function renderDocChapters(ownerKey, chapters) {
       `<div class="pdocbody">${ch.md ? mdRender(ch.md) : ch.html || '<div class="dim">open to read…</div>'}</div></section>`);
   });
   body.innerHTML = secs.join('');
-  toc.innerHTML = '<div class="ptoc-label">contents</div>' + groups.join('');
+  toc.innerHTML = '<div class="ptoc-bar"><span class="ptoc-cur"></span></div><div class="ptoc-label">contents</div>' + groups.join('');
   toc.hidden = false;
+  toc.classList.remove('open');
+  // Phone: the bar opens and closes the list.
+  toc.querySelector('.ptoc-bar').onclick = () => toc.classList.toggle('open');
   body.querySelectorAll('.pdocsec').forEach(sec => {
     const ch = chById.get(sec.id);
     if (ch && ch.md) wrapSubsections(sec, fold);
@@ -7042,6 +7062,7 @@ function renderDocChapters(ownerKey, chapters) {
     const sec = el.closest('.pdocsec');
     if (sec && sec.classList.contains('closed')) sec.querySelector('.pdochead').click();
     if (el.classList.contains('pdsub') && el.classList.contains('closed')) el.querySelector('h2').click();
+    toc.classList.remove('open');
     el.scrollIntoView({ block: 'start' });
   });
   // Scroll-spy: the TOC entry of the section under the reading line lights up.
@@ -7055,6 +7076,9 @@ function renderDocChapters(ownerKey, chapters) {
     }
     const id = cur && cur.id;
     toc.querySelectorAll('[data-toc]').forEach(a => a.classList.toggle('on', a.dataset.toc === id));
+    const on = toc.querySelector('a.on');
+    const barCur = toc.querySelector('.ptoc-cur');
+    if (barCur) barCur.textContent = on ? on.textContent : '';
   };
   const onScroll = () => {
     if (!toc.isConnected) { view.removeEventListener('scroll', onScroll); return; }
@@ -8294,6 +8318,7 @@ function agentComposerHtml(d) {
     <div class="agent-compose-row">
       ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
+      <button id="agentTree" type="button" title="Open the conversation tree (shift+T): branches, forks, parallel replies">tree</button>
       <button id="agentAttach" type="button">attach image</button>
       <input id="agentFiles" type="file" accept="image/*" multiple hidden>
       <button class="agent-mic" id="agentMic" type="button" title="Start / stop dictation (m, or ctrl+m while typing)" aria-label="Start dictation" aria-pressed="false" hidden>
@@ -9418,6 +9443,8 @@ function wireAgentComposer() {
   const isPi = !!runBtn; // pi composers have the web send button
   const slashBtn = $('agentSlash');
   if (slashBtn) slashBtn.onclick = () => openSlashPalette();
+  const treeBtn = $('agentTree');
+  if (treeBtn) treeBtn.onclick = () => { if (activeRel) showTree(activeRel); };
   window._slashOpen = false;
   window._slashDetached = false; // a re-render replaced the pop's DOM
   if (send) send.onclick = () => {
@@ -10978,7 +11005,6 @@ async function showTree(key) {
   try { t = await (await fetch('/api/tree?id=' + encodeURIComponent(key))).json(); }
   catch { return errToast('could not load the conversation tree'); }
   if (t.error) return errToast(t.error);
-  const related = await relatedFor(key);
   const nodes = t.nodes;
   const byId = new Map(nodes.map(n => [n.id, n]));
   const children = new Map();
@@ -11039,16 +11065,10 @@ async function showTree(key) {
     `<div class="tnode ${n.role}${n.active ? '' : ' inactive'}${n.fork ? ' fork' : ''}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc(n.fork ? 'in fork: ' + forkTitle(n) : n.title)}">
       <div class="tm"><b>${n.role === 'user' ? 'user' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role === 'assistant' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} msgs</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}</div>
       <div class="tt">${esc(n.title)}</div></div>`).join('');
-  const branches = nodes.filter(n => (children.get(n.id) || []).length > 1).length;
-  const famNote = (t.family || []).length > 1 ? ` · ${t.family.length} linked sessions (forks share their start)` : '';
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
-    <div class="nhead"><h2>${esc(t.title || '(untitled)')}</h2>
-    <div class="nmeta">message tree · ${nodes.length} boxes · ${branches ? branches + ' branch point' + (branches > 1 ? 's' : '') : 'no branches yet'}${famNote} · root at the top, time flows down · solid = current branch, dashed = other branches, magenta = fork · keys: ↑↓ parent/child · ←→ siblings · enter = actions · T or esc = transcript
-    ${contextNavHtml(key, related, 'tree')}</div></div>
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
       <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges}</svg>${boxes}
     </div></div></div>`;
-  wireContextNav();
   const wrap = $('treewrap');
   // Keyboard navigation state: T opens the tree, arrows walk it.
   const leaf = [...rows].reverse().find(n => n.active) || rows[rows.length - 1] || null;
