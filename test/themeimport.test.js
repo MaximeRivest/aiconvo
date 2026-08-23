@@ -93,6 +93,34 @@ test('a real dark terminal palette becomes a valid theme', () => {
   assert.strictEqual(scheme, 'dark');
   const result = validateTheme(css, 'victorian-study');
   assert.strictEqual(result.valid, true, result.errors.join('\n'));
+  assert.strictEqual(result.declarations['--accent-strong'], '#8f8c50');
+});
+
+test('a named OS accent stays separate from success green', () => {
+  const { css } = buildTheme({ ...CANDLE, accent: parseHex('#c9822e') }, {
+    id: 'victorian-study', name: 'Victorian Study',
+  });
+  const result = validateTheme(css, 'victorian-study');
+  assert.strictEqual(result.valid, true, result.errors.join('\n'));
+  assert.strictEqual(result.declarations['--accent'], '#c9822e');
+  assert.strictEqual(result.declarations['--accent-strong'], '#c9822e');
+  assert.strictEqual(result.declarations['--green'], '#8f8c50');
+});
+
+test('alacritty reader picks up a sibling Omarchy colors.toml accent', () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'alacritty.toml'), [
+    '[colors.primary]', 'background = "#120d08"', 'foreground = "#d8c49a"',
+    '[colors.normal]', 'red = "#a8503c"', 'green = "#7d7a45"', 'yellow = "#c9a227"',
+    'blue = "#5f7d94"', 'magenta = "#96637a"', 'cyan = "#6f8f80"',
+    'black = "#120d08"', 'white = "#d8c49a"',
+    '[colors.bright]', 'red = "#c05a42"', 'green = "#8f8c50"', 'yellow = "#d9b23a"',
+    'blue = "#6f8da4"', 'magenta = "#a6738a"', 'cyan = "#7fa091"',
+    'black = "#6e5c44"', 'white = "#f0e2bf"',
+  ].join('\n'));
+  fs.writeFileSync(path.join(dir, 'colors.toml'), 'mode = "dark"\naccent = "#c9822e"\n');
+  const palette = readAlacritty(path.join(dir, 'alacritty.toml'));
+  assert.deepStrictEqual(palette.accent, parseHex('#c9822e'));
 });
 
 test('light palettes and low-contrast palettes get repaired, not rejected', () => {

@@ -26,7 +26,7 @@
   button { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r); padding: 0 12px; height: 30px; font: var(--fs-label) var(--font); cursor: pointer; transition: background var(--t), color var(--t); }
   button:hover { background: var(--surface-3); }
   button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
-  button.primary:hover { filter: brightness(1.12); }
+  button.primary:hover { background: color-mix(in oklab, var(--accent-strong) 86%, var(--accent-ink)); border-color: transparent; }
   button.ghost { border-color: transparent; background: transparent; color: var(--text-dim); }
   button.ghost:hover { color: var(--text); }
   button.danger { border-color: var(--danger); color: var(--danger); background: transparent; }

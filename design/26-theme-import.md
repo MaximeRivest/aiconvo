@@ -53,6 +53,8 @@ Re-run the importer after you switch Omarchy themes.
   Hue and saturation stay, so the theme keeps its character.
 - The 16 ANSI colors pass through unchanged for hosted terminal views.
 - The terminal selection colors carry over when they are readable.
+- Omarchy `colors.toml` `accent` and pi `vars.accent` become `--accent`
+  and `--accent-strong`. `--green` stays the ANSI green.
 
 ## Agent prompt
 
@@ -70,8 +72,9 @@ Create a custom theme for aiconvo (the conversation browser).
    `node themeimport.js --from <file>` instead of writing CSS by hand.
    Otherwise copy design/theme-template.css and fill every token.
 4. Map colors by meaning, not by position: red stays for errors, yellow
-   for warnings, green for the accent and success. Build the surface ramp
-   as small steps from the background toward the foreground.
+   for warnings, green for success. Use the OS or brand accent for
+   `--accent` when it is not green. Build the surface ramp as small steps
+   from the background toward the foreground.
 5. Validate: `node test/theme-check.js ~/.config/aiconvo/themes/<id>.css`
    Fix every reported error. Contrast failures: adjust lightness only.
 6. Write the file to ~/.config/aiconvo/themes/<id>.css. Then reload

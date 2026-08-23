@@ -75,6 +75,10 @@ Values can use hex, `rgb()`, `hsl()`, or a direct `var(--token)` reference.
 Other semantic aliases inherit from `design/tokens.css` and follow these base
 colors automatically.
 
+Set `--accent` when the accent must differ from `--green`. Use this for an OS
+or brand color. Keep `--green` for success. `--live`, `--src-pi`, and
+`--role-user` also accept overrides.
+
 Themes can optionally change project color weight:
 
 ```css

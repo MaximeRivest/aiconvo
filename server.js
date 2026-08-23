@@ -6699,7 +6699,11 @@ async function startProjectConversation(options) {
   // A creation kickoff carries the user's real first prompt; nothing rewrites it.
   const kickoffText = typeof options.kickoffText === 'string' ? options.kickoffText.trim() : '';
   let text = kickoffText || String(options.name || '').trim();
-  if (kickoffText) {
+  if (options.silent) {
+    // Silent start: the context rides in the system prompt, but no first
+    // message goes out — the new conversation opens as an empty composer.
+    text = '';
+  } else if (kickoffText) {
     // The seed context (if any) already rides in the system prompt.
   } else if (contextFile) {
     // The context is already in the system prompt: the first user message
@@ -7033,6 +7037,27 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/themes.css') {
       res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(themesLib.bundleCustomThemes(THEMES_DIR));
+    } else if (u.pathname === '/api/projects/stats' && req.method === 'POST') {
+      // Folder birth date and disk size per project path, for home Gantt ordering.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let paths = [];
+      try { paths = (JSON.parse(body).paths || []).filter(p => typeof p === 'string').slice(0, 500); } catch {}
+      const stats = {};
+      await Promise.all(paths.map(async p => {
+        try {
+          const st = await fsp.stat(p);
+          const size = await new Promise(resolve => {
+            const child = spawn('du', ['-sb', p], { timeout: 10000 });
+            let out = '';
+            child.stdout.on('data', c => { out += c; });
+            child.on('error', () => resolve(0));
+            child.on('close', code => { const m = out.match(/^(\d+)/); resolve(code === 0 && m ? Number(m[1]) : 0); });
+          });
+          stats[p] = { born: st.birthtimeMs, size };
+        } catch { stats[p] = null; }
+      }));
+      json(res, 200, { stats });
     } else if (u.pathname === '/api/sessions') {
       const fam = familyGroups();
       const list = Object.entries(index).map(([key, e]) => {

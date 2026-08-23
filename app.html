@@ -79,7 +79,7 @@ body { margin: 0; font: var(--fs-body)/1.5 var(--font); background: var(--bg); c
 button { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--r); padding: 4px 12px; min-height: 30px; height: auto; font: var(--fs-label) var(--font); cursor: pointer; transition: background var(--t), color var(--t); }
 button:hover { background: var(--surface-3); }
 button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
-button.primary:hover { filter: brightness(1.12); }
+button.primary:hover { background: color-mix(in oklab, var(--accent-strong) 86%, var(--accent-ink)); border-color: transparent; }
 button.ghost { border-color: transparent; background: transparent; color: var(--text-dim); }
 button.ghost:hover { color: var(--text); background: transparent; }
 button.danger { border-color: var(--danger); color: var(--danger); background: transparent; }
@@ -122,6 +122,14 @@ code { color: var(--cyan); }
 a { color: var(--cyan); }
 
 /* ---- header ---- */
+/* Theme-aware square scrollbars everywhere (Chromium + Firefox). */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border: 2px solid transparent; background-clip: padding-box; border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
 header { display: flex; gap: var(--sp-2); align-items: center; padding: 0 var(--sp-3); height: var(--header-h); background: var(--surface-1); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 header > button { flex-shrink: 0; max-width: 100%; }
 /* ---- collapsible bar: it folds to a thin rail, e-reader style ---- */
@@ -138,16 +146,17 @@ body.bar-fold header:has(#activeBtn.work), body.bar-fold header:has(#jobsBtn.run
 #brand { font-weight: 400; font-size: 16px; line-height: 1; color: var(--text-dim); border: 0; background: none; padding: 0 var(--sp-2); height: 26px; }
 #brand:hover { color: var(--accent); background: none; }
 /* Away from home, a spacer pushes agents · jobs · settings to the right. */
-#headSpace { display: none; }
-body:not(.home) #headSpace { display: block; flex: 1 1 auto; }
-/* In a conversation the ticker owns the middle-to-right span. */
-body:not(.home) #ticker { flex: 1 1 0; max-width: none; text-align: right; }
-body:not(.home) #ticker:not([hidden]) ~ #headSpace { display: none; }
+/* Banner header on every view: identity left, count centered, tools right. */
+header { position: relative; }
+#headSpace { display: block; flex: 1 1 auto; }
+header .count { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 /* Conversation identity in the top bar: ⌂ · project path · title … ✎ ↻.
    The old in-view conversation header is gone. */
-#chProject, #chTitle, #convHeadExtra { display: none; }
+#chProject, #chNew, #chTitle, #convHeadExtra { display: none; }
 body.conv #chProject { display: inline-flex; align-items: center; background: transparent; border: 0; height: 26px; padding: 0 2px; color: var(--text-dim); font-size: var(--fs-meta); font-family: inherit; cursor: pointer; flex-shrink: 0; max-width: 22vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body.conv #chProject:hover { color: var(--text); text-decoration: underline; background: transparent; }
+body.conv #chNew { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 4px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); font-size: 13px; line-height: 1; flex-shrink: 0; }
+body.conv #chNew:hover { color: var(--accent); border-color: var(--accent); background: transparent; }
 body.conv #chTitle { display: block; max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-size: var(--fs-body); cursor: text; }
 body.conv #chTitle:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
 /* The AI rewrite appears only while the title is being edited. */
@@ -235,7 +244,13 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 /* ---- layout ---- */
 main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 #view { order: 1; }
-#left { order: 2; width: 100%; height: var(--list-h, 220px); flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface-1); border-top: 1px solid var(--border); }
+#left { order: 2; width: 100%; height: var(--list-h, 220px); flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface-1); border-top: 1px solid var(--border); position: relative; }
+/* Project ordering buttons sit in the chart's top-left gutter cell. */
+#projSort { position: absolute; top: 2px; left: 8px; z-index: 6; display: flex; gap: 3px; }
+#projSort[hidden] { display: none; }
+#projSort button { height: 15px; min-width: 20px; padding: 0 5px; border: 1px solid var(--border); border-radius: 0; background: var(--surface-2); color: var(--text-dim); font: 9px var(--font); }
+#projSort button:hover { color: var(--text); border-color: var(--border-strong); }
+#projSort button.on { color: var(--accent); border-color: var(--accent); }
 /* gantt layout: left (vertical) */
 body.g-v main { flex-direction: row; }
 body.g-v #view { order: 2; }
@@ -251,6 +266,15 @@ body.g-off #left { height: auto; }
    Home fills the work area with the timeline tray; every other view
    hides the tray and fills the area with #view. */
 body.home #view { display: none !important; }
+/* Home is the bare chart: no tabs bar, no filter bar. */
+body.home #tabs, body.home #ganttBar { display: none !important; }
+/* Home keeps the header quiet: no search field, windows button, or filters. */
+body.home #qwrap, body.home #winBtn, body.home #filtersBtn { display: none !important; }
+/* Floating mark details: one click shows them, a second click opens. */
+#markPop { position: fixed; z-index: 70; max-width: 340px; padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--border-strong); color: var(--text); font: 12px var(--font); box-shadow: 0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent); }
+#markPop h4 { margin: 0 0 4px; font-size: 12px; line-height: 1.35; }
+#markPop .mp-meta { color: var(--text-dim); white-space: pre-line; line-height: 1.45; }
+#markPop .mp-hint { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border); color: var(--text-faint, var(--text-dim)); font-size: 11px; }
 body.home #left { flex: 1 1 auto; width: 100% !important; height: auto !important; min-height: 0; border-top: 0; border-right: 0; }
 body.home #ganttResize { display: none; }
 body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; }
@@ -341,7 +365,8 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .tmark .duration { stroke-width: 1.5; opacity: .8; }
 .tmark .violin { stroke-width: 1; opacity: .9; }
 .tmark text { fill: var(--text); font: 10px var(--font); paint-order: stroke; stroke: var(--surface-1); stroke-width: 3px; stroke-linejoin: round; }
-.tmark:hover .violin, .tmark.active .violin { stroke: var(--cyan) !important; stroke-width: 2; opacity: 1; }
+.tmark:hover .violin, .tmark.active .violin, .tmark:focus .violin { stroke: var(--text) !important; stroke-width: 2; opacity: 1; }
+.tmark { outline: none; }
 .tmark.selected .violin { stroke: var(--success) !important; stroke-width: 2.5; }
 .tmark.note .violin { fill: var(--success); stroke: var(--success); opacity: .8; }
 .tmark.note .duration { stroke: var(--success); }
@@ -730,16 +755,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 #runCards:not(:empty) { width: 100%; max-width: var(--read-max); margin: 0 auto; border: 1px solid var(--border); border-top: 0; }
 .runcard { border: 0 !important; border-left: 3px dashed var(--accent) !important; }
 .rc-status { color: var(--text-dim); font-size: var(--fs-micro); margin-bottom: 4px; }
-.rc-blocks pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: inherit; }
-.rc-textblk { margin: 6px 0; }
-.rc-think { color: var(--text-faint); font-size: 11px; font-style: italic; }
-.rc-think.rc-think-min { font-style: normal; color: var(--text-dim); }
 /* transcript reasoning rows (everything view) */
 .msg.thinking { border-left: 2px dotted var(--border-strong); padding-left: 8px; }
 .msg.thinking summary { cursor: pointer; list-style: none; color: var(--text-dim); font-size: var(--fs-micro); }
 .msg.thinking summary::-webkit-details-marker { display: none; }
 .msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
-.rc-body { color: var(--text); } /* message-size text, inherited — not widget-size */
 /* extension view: a modal takeover, not a black box in the chat */
 .rc-cv { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; background: var(--overlay-strong); }
 .rc-cv-card { width: fit-content; min-width: min(420px, 94vw); max-width: 96vw; max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); overflow: hidden; }
@@ -774,17 +794,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .rc-dialog-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
 .rc-dialog-row input[type="text"] { flex: 1; min-width: 120px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 4px 6px; font: inherit; }
 .rc-dialog textarea { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 6px; font: inherit; font-size: var(--fs-micro); }
-.rc-tool { margin: 4px 0; border-left: 2px solid var(--border-strong); padding-left: 8px; }
-.rc-tool summary { cursor: pointer; list-style: none; color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rc-tool summary::-webkit-details-marker { display: none; }
-.rc-tool[open] { border-left-color: var(--accent); }
-.rc-tool .rc-args { color: var(--text-dim); font-size: 11px; margin: 4px 0 0; max-height: 120px; overflow: auto; }
-.rc-tool .rc-out { color: var(--text-faint); font-size: 11px; margin: 4px 0 0; max-height: 40vh; overflow: auto; }
-.rc-tool .rc-args { max-height: 20vh; overflow: auto; }
-/* the streaming reply keeps ONE size: a capped box that follows its own
-   tail — the card never grows in the reader's face */
-.rc-textblk .rc-body { max-height: 40vh; overflow: auto; }
-.rc-textblk .rc-think:not(.rc-think-min) { max-height: 40vh; overflow: auto; }
 
 
 
@@ -860,24 +869,32 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose-row .model-strip { padding: 0; margin-left: auto; }
 .agent-compose-row #agentSend { margin-left: auto; }
 .agent-compose-row .ctxmeter { overflow: hidden; text-overflow: ellipsis; }
-/* reserved activity line: exactly one line, always there, never pushes
-   anything — the live heartbeat streams here instead of in the transcript */
-/* The live pane: a fixed window between the transcript and the composer.
-   Thinking, streaming replies, and tool output FLOW THROUGH it — the pane
-   itself never changes size, so the page never recomposes. Finished units
-   freeze into the steps line in the transcript above. */
-.live-pane { height: 148px; display: flex; flex-direction: column; gap: 4px; padding: 2px 4px 8px; background: var(--bg); }
-/* the growing steps ledger: one quiet centered line above the live pane */
-.lp-steps[open] { border: 1px dashed var(--border-strong); margin: 4px 0; padding: 0 6px 6px; background: var(--bg); }
-.lp-steps[open] > summary { border-bottom: 1px dashed var(--border); margin-bottom: 4px; }
-.lp-steps > summary { cursor: pointer; list-style: none; user-select: none; position: relative; text-align: center; padding: 2px 0; font-size: 11px; color: var(--text-faint); }
-.lp-steps > summary::-webkit-details-marker { display: none; }
-.lp-steps > summary:hover { color: var(--text-dim); }
-.lp-steps .lp-abort { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); height: 20px; padding: 0 8px; font-size: 10px; border: 1px solid var(--border); background: transparent; color: var(--text-faint); }
-.lp-steps .lp-abort:hover { color: var(--danger); border-color: var(--danger); background: transparent; }
-.lp-steps-body { padding-left: 12px; }
-.lp-head { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 16px; }
-.lp-out { flex: 1; margin: 0; overflow: auto; font-size: 11px; line-height: 1.5; color: var(--text-faint); white-space: pre-wrap; word-break: break-word; font-family: inherit; }
+/* ---- the live strip — one element, two states ----
+   Folded: one quiet line. steps count · the active unit · the streaming
+   tail ticking through. Nothing moves the page.
+   Open: the glass wall. It grows from the bottom (max ~65vh) and shows the
+   whole run append-only — full thinking, full tool calls, full output.
+   Nothing folds, nothing truncates, text only lands at the end. */
+.live-strip { background: var(--bg); }
+.ls-row { display: flex; align-items: center; gap: 6px; padding: 3px 0 2px; }
+.ls-line { flex: 1; min-width: 0; display: flex; border: 0; background: transparent; height: 22px; padding: 0 6px; font-size: 11px; color: var(--text-dim); cursor: pointer; text-align: left; }
+.ls-line > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 22px; }
+.ls-line:hover { background: var(--surface-2); color: var(--text); }
+.live-strip.work .ls-line { color: var(--accent); }
+.live-strip.work .ls-line { animation: activepulse 2.4s ease-in-out infinite; }
+.ls-abort { height: 20px; padding: 0 8px; font-size: 10px; border: 1px solid var(--border); background: transparent; color: var(--text-faint); flex-shrink: 0; }
+.ls-abort:hover { color: var(--danger); border-color: var(--danger); background: transparent; }
+.ls-full { position: relative; border: 1px dashed var(--border-strong); background: var(--bg); }
+.ls-blocks { max-height: 65vh; min-height: 120px; overflow-y: auto; padding: 8px 12px; font-size: 12px; line-height: 1.55; overscroll-behavior: contain; }
+.ls-blocks pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: inherit; }
+.ls-b { margin: 0 0 12px; }
+.ls-b-head { font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }
+.ls-think { color: var(--text-faint); font-style: italic; }
+.ls-args { color: var(--text-dim); border-left: 2px solid var(--border-strong); padding-left: 8px; }
+.ls-out { color: var(--text-faint); }
+.ls-text { color: var(--text); }
+.ls-livechip { position: absolute; right: 10px; bottom: 8px; height: 24px; padding: 0 10px; font-size: 11px; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text-dim); }
+.ls-livechip:hover { color: var(--text); }
 
 .cmp-row { margin: 8px 0 14px; max-width: none; }
 .cmp-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
@@ -1300,7 +1317,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
 .agent-compose.compose-min .think-pick,
-  .agent-compose.compose-min .live-pane,
   .agent-compose.compose-min .ctxmeter,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
@@ -1392,11 +1408,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .model-pick { height: 40px; }
   .mpick .mp-prov { height: 30px; min-height: 30px; border-radius: 15px; }
   .cmp-col .md { max-height: 40dvh; }
-  /* streaming run cards: readable text, tappable fold lines */
-  .rc-body { font-size: 14px; }
-  .rc-think { font-size: 12px; }
-  .rc-tool summary { padding: 8px 0; }
-  .rc-tool .rc-args, .rc-tool .rc-out { font-size: 12px; }
+  /* the open live strip: readable streaming text on the phone */
+  .ls-blocks { max-height: 55dvh; font-size: 14px; }
 }
 
 /* distill stream */
@@ -1448,6 +1461,7 @@ window.aiconvoSyncTheme();
 <header>
   <button id="brand" aria-label="Home">⌂</button>
   <button id="chProject" title="Open the project overview"></button>
+  <button id="chNew" title="New conversation in this project — same model and thinking level, the project map in the system prompt, an empty composer">+</button>
   <div id="chTitle"></div>
   <span id="convHeadExtra"></span>
   <button id="winBtn" title="Windows. Open another view without losing this one. (w)" aria-label="Windows" aria-expanded="false">⧉</button>
@@ -1456,12 +1470,12 @@ window.aiconvoSyncTheme();
     <input id="q" type="text" placeholder="search everything — conversations, notes, epics, memory" title="Words AND together · &quot;exact phrase&quot; · project: role: source: type: after: before: path: · ↑↓ select · enter open · alt+1–5 scope">
     <button id="qclear" title="Clear search" hidden>✗</button>
   </div>
+  <span id="headSpace"></span>
   <button id="ticker" hidden title="Open the latest active conversation"></button>
   <span class="count" id="count"></span>
-  <span id="headSpace"></span>
-  <button id="activeBtn" hidden title="Running, writing, and recent agents (a)">● 0</button>
+  <button id="activeBtn" hidden title="Running, writing, and recent agents (a)">⚇ 0</button>
   <button id="filtersBtn" title="Source, directory, and view filters">filters</button>
-  <button id="jobsBtn" hidden title="Background work (j)">⟳<span id="jobCount"></span></button>
+  <button id="jobsBtn" hidden title="Background work (j)">⚒<span id="jobCount"></span></button>
   <button id="settingsBtn" title="Settings (,)">⚙</button>
   <button id="barFold" title="Fold the top bar — click the rail to bring it back (`)">▴</button>
 </header>
@@ -1477,6 +1491,7 @@ window.aiconvoSyncTheme();
   <label><input id="densityTools" type="checkbox"> include tool calls in timeline density</label>
   <label title="Fan-out and forks copy a session into linked branch files. Off: one row per conversation family. On: every branch file gets its own row."><input id="showBranches" type="checkbox"> show fork branches as separate rows</label>
 </div>
+<div id="markPop" hidden></div>
 <main>
   <div id="left">
     <div id="ganttResize" title="Drag to resize the timeline tray. Double-click to reset."></div>
@@ -1497,6 +1512,7 @@ window.aiconvoSyncTheme();
       <input id="ganttDate" type="date" title="Jump to a date (t)">
     </div>
     <div id="list"></div>
+    <div id="projSort" hidden></div>
     <div id="selbar" hidden>
       <span class="n"><span id="selCount">0</span> selected</span>
       <button id="copySel">copy</button>
@@ -2538,7 +2554,8 @@ function updateActiveBtn() {
   const n = sessions.filter(isActive).length;
   const working = activeRuns.size > 0 || sessions.some(isWorking);
   $('activeBtn').hidden = n === 0 && !working;
-  $('activeBtn').textContent = (working ? '● ' : '○ ') + Math.max(n, working ? 1 : 0);
+  // Robot face: filled eyes while an agent works, open eyes when just active.
+  $('activeBtn').textContent = (working ? '⚉ ' : '⚇ ') + Math.max(n, working ? 1 : 0);
   // The gentle pulse runs only while something truly works (e-ink kills all
   // animation globally, so this stays static there).
   $('activeBtn').classList.toggle('work', working);
@@ -2631,7 +2648,7 @@ async function renderAgentsPop(refetch) {
     (webSec ? '<div class="ag-sec">● web runs — streaming now</div>' + webSec : '') +
     (workSec ? '<div class="ag-sec">● terminals — working</div>' + workSec : '') +
     (idleSec ? '<div class="ag-sec">○ terminals — idle at the prompt</div>' + idleSec : '') +
-    (writeSec ? '<div class="ag-sec">✎ writing</div>' + writeSec : '') +
+    (writeSec ? '<div class="ag-sec">█ writing</div>' + writeSec : '') +
     (otherSec ? '<div class="ag-sec">⚙ other agent processes</div>' + otherSec : '') +
     (recent.length ? '<div class="ag-sec">recent — last hour</div>' + recent.map(s => row(s, s.key, 'wrote ' + secs(now - s.mtimeMs))).join('') : '') ||
     '<div class="ag-sec">nothing is running, writing, or recent.</div>';
@@ -3083,26 +3100,18 @@ async function quickFold(from, into) {
   await foldApi('/api/project/fold', { from, into });
 }
 
-function projectColor(project) {
+// Every project paints in one accent color: the timeline stays quiet and the
+// theme decides the hue. Binary themes keep pure ink.
+function projectColor(_project) {
   const mode = themeMode();
   if (mode === 'binary') {
     const ink = themeToken('--text');
     return { fill: ink, stroke: ink };
   }
-  let hash = 2166136261;
-  for (const c of project) { hash ^= c.charCodeAt(0); hash = Math.imul(hash, 16777619); }
-  if (mode === 'gray') {
-    const base = themeNumber('--project-gray-base', 60);
-    const step = themeNumber('--project-gray-step', 7);
-    const offset = themeNumber('--project-gray-stroke-offset', 30);
-    const fillL = base + ((hash >>> 0) % 4) * step;
-    return { fill: `hsl(0 0% ${fillL}%)`, stroke: `hsl(0 0% ${fillL - offset}%)` };
-  }
-  const hue = ((hash >>> 0) * 137.508) % 360;
-  return {
-    fill: `hsl(${hue.toFixed(0)} ${themeToken('--project-fill-s')} ${themeToken('--project-fill-l')})`,
-    stroke: `hsl(${hue.toFixed(0)} ${themeToken('--project-stroke-s')} ${themeToken('--project-stroke-l')})`,
-  };
+  const accent = themeToken('--accent'); // always defined in tokens.css
+  // Translucent accent fill with a solid accent stroke: dense violins overlap
+  // without turning into a flat block, and every theme token stays in control.
+  return { fill: `color-mix(in srgb, ${accent} 55%, transparent)`, stroke: accent };
 }
 
 // Prefer a prior lane from the same project when that lane is free.
@@ -3123,6 +3132,65 @@ function timelineLanes(items) {
 
 // Full-screen mode has one horizontal swimlane per project. Projects with the
 // newest message appear first. Conversations from one project share its row.
+// ---- project row ordering (home Gantt top-left buttons) ----
+let projSortMode = localStorage.getItem('aiconvo.projSort') || 'recent';
+if (!['recent', 'alpha', 'born', 'size'].includes(projSortMode)) projSortMode = 'recent';
+let projSortAsc = null; // null = the mode's default direction
+const defaultProjAsc = mode => mode === 'alpha';
+let projectStats = {};        // project name → { born, size } from disk
+let projectStatsAsked = false;
+const projStatOf = name => projectStats[name] || {};
+async function ensureProjectStats() {
+  if (projectStatsAsked || !sessions.length) return;
+  projectStatsAsked = true;
+  const paths = new Map();
+  for (const s of sessions) { const p = projectOf(s); if (s.cwd && !paths.has(p)) paths.set(p, s.cwd); }
+  for (const c of (projectFolds.created || [])) if (c.path && !paths.has(c.name)) paths.set(c.name, c.path);
+  try {
+    const r = await fetch('/api/projects/stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths: [...paths.values()] }) });
+    const d = await r.json();
+    const byPath = d.stats || {};
+    for (const [name, p] of paths) if (byPath[p]) projectStats[name] = byPath[p];
+  } catch {}
+  render();
+}
+function sortProjectRows(projects) {
+  const dir = ((projSortAsc === null ? defaultProjAsc(projSortMode) : projSortAsc) ? 1 : -1);
+  const key = {
+    recent: r => r.latest,
+    alpha: r => r.project,
+    born: r => projStatOf(r.project).born || r.born || 0,
+    size: r => projStatOf(r.project).size || 0,
+  }[projSortMode];
+  projects.sort((a, b) => {
+    const av = key(a), bv = key(b);
+    const c = typeof av === 'string' ? String(av).localeCompare(String(bv)) : av - bv;
+    return dir * (c || a.project.localeCompare(b.project));
+  });
+}
+const PROJ_SORT_DEFS = [
+  ['alpha', 'az', 'project name'],
+  ['born', '◷', 'folder date on disk'],
+  ['size', '⤢', 'disk size'],
+  ['recent', '●', 'latest activity'],
+];
+function renderProjSortBtns() {
+  $('projSort').innerHTML = PROJ_SORT_DEFS.map(([id, icon, label]) => {
+    const on = projSortMode === id;
+    const asc = projSortAsc === null ? defaultProjAsc(id) : projSortAsc;
+    return `<button data-psort="${id}" class="${on ? 'on' : ''}" title="Order projects by ${label} — click again to flip the direction">${icon}${on ? (asc ? '▴' : '▾') : ''}</button>`;
+  }).join('');
+}
+$('projSort').addEventListener('click', e => {
+  const b = e.target.closest('[data-psort]');
+  if (!b) return;
+  const id = b.dataset.psort;
+  if (projSortMode === id) projSortAsc = !(projSortAsc === null ? defaultProjAsc(id) : projSortAsc);
+  else { projSortMode = id; projSortAsc = null; }
+  localStorage.setItem('aiconvo.projSort', projSortMode);
+  render();
+});
+
 function timelineProjectLanes(items) {
   const byProject = new Map();
   for (const item of items) {
@@ -3145,7 +3213,8 @@ function timelineProjectLanes(items) {
     if (sessions.some(s => projectOf(s) === c.name)) continue; // real lanes exist
     byProject.set(c.name, { project: c.name, latest: c.createdAt || Date.now(), count: 0, items: [], born: c.createdAt || 0 });
   }
-  const projects = [...byProject.values()].sort((a, b) => b.latest - a.latest || a.project.localeCompare(b.project));
+  const projects = [...byProject.values()];
+  sortProjectRows(projects);
   // Keep a small visual gap between adjacent marks. This also separates spans
   // that nearly overlap after time is converted to pixels.
   const gapMs = 8 / Math.max(1, pxDay()) * DAY_MS;
@@ -3193,7 +3262,7 @@ function projectLabelsHtml(pos) {
     // name twin). One click folds; dismiss lives on the project overview.
     const sug = !row.mode && (projectFolds.suggestions || []).find(x => x.from === row.project);
     const foldChip = sug ? `<span class="rowfold" data-fold-from="${esc(sug.from)}" data-fold-into="${esc(sug.into)}" title="${esc(sug.reason)} · fold ${esc(sug.from)} into ${esc(sug.into)}">⇄ ${esc(sug.into)}?</span>` : '';
-    return `<div class="project-row-label item" data-project="${esc(main)}" style="top:${top}px;height:${height}px;border-left:4px solid ${color.fill}" title="${esc(main)} · ${esc(detail)} · click for project overview">
+    return `<div class="project-row-label item" data-project="${esc(main)}" style="top:${top}px;height:${height}px;border-left:4px solid ${color.stroke}" title="${esc(main)} · ${esc(detail)} · click for project overview">
       <strong>${esc(main)}</strong><span>${esc(detail)}</span>${repoLink}${foldChip}</div>`;
   }).join('')}</div>`;
 }
@@ -3357,7 +3426,7 @@ function renderTimeline() {
     // filled ● = working right now, hollow ○ = active in the last 5 min.
     // Active frame shows only on e-ink, where the colored stroke is invisible.
     return `<g class="tmark${famIsActive(s) ? ' active' : ''}${s.key && selected.has(s.key) ? ' selected' : ''}" ${clusterId ? `data-cluster="${esc(clusterId)}"` : `data-rel="${esc(s._openKey || s.key)}"`} tabindex="0">
-      <title>${esc(tip)}</title><line class="duration" style="stroke:${color.fill}" ${g.line}/>
+      <title>${esc(tip)}</title><line class="duration" style="stroke:${color.stroke}" ${g.line}/>
       <path class="violin" style="fill:${color.fill};stroke:${color.stroke}" d="${g.d}"/>
       ${live || work ? `<circle class="livedot${work ? '' : ' idle'}" cx="${pos.type !== 'v' ? g.x1 : g.c}" cy="${pos.type !== 'v' ? g.c : g.x0}" r="3.5"/>` : ''}
       ${famIsActive(s) ? `<rect class="activeframe" x="${pos.type !== 'v' ? g.x0 - 3 : g.c - g.w / 2 + 1}" y="${pos.type !== 'v' ? g.c - g.w / 2 + 1 : g.x0 - 3}" width="${pos.type !== 'v' ? g.x1 - g.x0 + 6 : g.w - 2}" height="${pos.type !== 'v' ? g.w - 2 : g.x1 - g.x0 + 6}"/>` : ''}
@@ -3395,6 +3464,10 @@ function renderTimeline() {
   // The hatch pattern paints selected violins on binary themes.
   const defs = `<defs><pattern id="selHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="var(--bg)"/><line x1="0" y1="0" x2="0" y2="5" stroke="var(--text)" stroke-width="1.6"/></pattern></defs>`;
   list.innerHTML = notes + (rows.length ? `<div class="timeline" style="width:${chartW}px;height:${chartH}px">${projectLabelsHtml(pos)}${svgTagFor(list, chartW, chartH)}${defs}${daysSvg}${nowLine}${marks}${glyphs}</svg></div>` : `<div class="empty">${searchMode ? 'no matches. try different words.' : 'no conversations match.'}</div>`);
+  // Order buttons live in the top-left gutter of the home project chart.
+  const showSort = viewKind === 'home' && pos && pos.type === 'project' && rows.length > 0;
+  $('projSort').hidden = !showSort;
+  if (showSort) { renderProjSortBtns(); ensureProjectStats(); }
   scrollTimeline(list, st, sl);
 }
 
@@ -3577,6 +3650,7 @@ function renderSelbar() {
 
 $('list').addEventListener('click', e => {
   if (e.timeStamp < suppressClickUntil) return; // a rubber-band drag ended here
+  if (!e.target.closest('.tmark')) hideMarkPop();
   const repoLink = e.target.closest('[data-git-repo]');
   if (repoLink) return showGitRepoHistory(repoLink.dataset.gitRepo);
   const foldChip = e.target.closest('[data-fold-from]');
@@ -3606,6 +3680,11 @@ $('list').addEventListener('click', e => {
   }
   const rel = item.dataset.rel;
   if (!rel) return;
+  if (item.classList.contains('tmark') && viewKind === 'home' && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.target.type !== 'checkbox') {
+    const pop = $('markPop');
+    if (!pop.hidden && pop.dataset.rel === rel) { hideMarkPop(); return open(rel); }
+    return showMarkPop(item, rel);
+  }
   if (e.shiftKey || e.ctrlKey || e.metaKey || e.target.type === 'checkbox') {
     selected.has(rel) ? selected.delete(rel) : selected.add(rel);
     render();
@@ -3613,6 +3692,33 @@ $('list').addEventListener('click', e => {
   }
   open(rel);
 });
+
+// ---- floating mark details ----
+// One click shows the details that hover showed; a second click opens.
+function hideMarkPop() {
+  const pop = $('markPop');
+  pop.hidden = true;
+  delete pop.dataset.rel;
+}
+function showMarkPop(item, rel) {
+  const row = ((timelineGeom && timelineGeom.rows) || []).find(r => (r.s._openKey || r.s.key) === rel);
+  if (!row) return open(rel);
+  const s = row.s;
+  const fam = s._famMembers || null;
+  const live = isWorking(s) ? '● working now' : isActive(s) ? '○ active in the last 5 min' : '';
+  const pop = $('markPop');
+  pop.innerHTML = `<h4>${esc(s.title || s.timelineTitle || '(untitled)')}</h4>` +
+    `<div class="mp-meta">project ${esc(projectOf(s))} · ${esc(s.source || 'claude')}\n${fmtDate(s.firstTs)} → ${fmtDate(s.lastTs)}\n${s.userCount || 0} user · ${s.assistantCount || 0} assistant${$('densityTools').checked ? ' · tool calls included' : ''}${live ? '\n' + live : ''}${fam ? `\n⤑ ${fam.length} linked branches (fan-out / forks)` : ''}</div>` +
+    `<div class="mp-hint">click again to open</div>`;
+  pop.dataset.rel = rel;
+  pop.hidden = false;
+  const r = item.getBoundingClientRect();
+  pop.style.left = '0px'; pop.style.top = '0px';
+  const x = Math.min(Math.max(8, r.left), window.innerWidth - pop.offsetWidth - 8);
+  let y = r.bottom + 8;
+  if (y + pop.offsetHeight > window.innerHeight - 8) y = Math.max(8, r.top - pop.offsetHeight - 8);
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+}
 
 // ---- rubber-band selection on the timeline ----
 let timelineGeom = null;      // { rows, xFor } from the last timeline paint
@@ -7641,8 +7747,67 @@ function wireHead() {
   refreshCtxMeter(current);
   const proj = $('chProject');
   if (proj) proj.onclick = () => current && showProjectOverview(projectOf(current));
+  const nb = $('chNew');
+  if (nb) nb.onclick = startSiblingConversation;
   wireTitleControls();
   wireContextNav();
+}
+
+// The + in the bar: a fresh conversation in this project — the model and
+// thinking level this conversation serves next, the project map in the
+// system prompt, and nothing else. No first message goes out: the new
+// conversation opens as an empty composer.
+async function startSiblingConversation() {
+  if (!current || window._chNewBusy) return;
+  const project = projectOf(current);
+  if (!project || project === '?') return errToast('this conversation has no project');
+  window._chNewBusy = true;
+  const prevKey = activeRel;
+  // Everything the new conversation inherits is known NOW, from caches:
+  // read it before navigating, then move the screen at once.
+  let models = fanModels().slice(0, 1);
+  if (!models.length) {
+    const hit = ctxMeterCache.get(prevKey);
+    const c = hit && hit.data;
+    if (c && c.provider && c.model) models = [{ provider: c.provider, modelId: c.model }];
+  }
+  const thinking = thinkLevels.get(prevKey) || null;
+  // The press answers instantly: leave the transcript (draft captured) and
+  // show the launch progress full-screen, staged as it truly happens.
+  if (viewKind === 'conversation') captureWinDraft(activeWin());
+  setRouteKind('launch', [crumbHome(), crumbProject(project), { label: 'new conversation' }]);
+  $('view').innerHTML = `<div class="dprog" style="margin-top:70px;text-align:center">
+    <div style="font-size:15px"><span class="spin">░</span> new conversation · <b>${esc(project)}</b></div>
+    <div class="hint" id="launchStatus" style="margin-top:10px">composing the project map…</div>
+    <div class="hint" style="color:var(--text-faint);margin-top:6px">${esc(models.length ? models[0].modelId : 'project default model')}${thinking && thinking !== 'off' ? ' · thinking ' + esc(thinking) : ''} · map in the system prompt</div>
+  </div>`;
+  const stage = t => { const el = $('launchStatus'); if (el) el.textContent = t; };
+  try {
+    const include = { map: true, epics: [], notes: false, evidenceKeys: [] };
+    const bundle = await postJson('/api/project/context', { project, name: '', include });
+    if (bundle.error) throw new Error(bundle.error);
+    stage('starting the session…');
+    const out = await postJson('/api/project/start', {
+      project, agent: 'pi', name: '', surface: 'rpc', mode: null,
+      models, context: bundle.text, include, silent: true,
+    });
+    if (out.error) throw new Error(out.error);
+    if (!out.key) throw new Error('no conversation came back');
+    if (thinking && thinking !== 'off') {
+      stage('setting thinking · ' + thinking + '…');
+      try { await postJson('/api/conversation/thinking', { id: out.key, level: thinking }); } catch {}
+    }
+    stage('opening…');
+    await open(out.key, 'bottom');
+    toast('✓ fresh conversation · ' + project);
+    const ta = $('agentText');
+    if (ta) ta.focus();
+  } catch (e) {
+    errToast('new conversation failed: ' + e.message);
+    if (prevKey) open(prevKey); // back where the press happened
+  } finally {
+    window._chNewBusy = false;
+  }
 }
 
 // ---- conversation titles: inline manual edit + on-demand AI retitle ----
@@ -7753,8 +7918,13 @@ async function continueInAlacritty(btn) {
 function agentComposerHtml(d) {
   if (!['claude', 'pi', 'pi-remote'].includes(d.source)) return '';
   return `<div class="composer-dock" id="composerDock">
-    <details class="lp-steps" id="lpSteps" hidden><summary><span class="lp-steps-sum"></span><button type="button" class="lp-abort" title="Stop this run. The session file keeps what already landed." hidden>abort</button></summary><div class="lp-steps-body"><div class="rc-blocks"></div></div></details>
-    <div class="live-pane" id="livePane" hidden><div class="lp-head" id="agentActivityText">&nbsp;</div><pre class="lp-out" id="lpOut"></pre></div>
+    <div class="live-strip" id="liveStrip" hidden>
+      <div class="ls-full" id="lsFull" hidden><div class="ls-blocks" id="lsBlocks"></div><button type="button" class="ls-livechip" id="lsChip" hidden>⤓ live</button></div>
+      <div class="ls-row">
+        <button type="button" class="ls-line" id="lsLine" aria-expanded="false" title="Open the full live stream of this run"><span id="lsSum"></span></button>
+        <button type="button" class="ls-abort" id="lsAbort" hidden title="Stop this run. The session file keeps what already landed.">abort</button>
+      </div>
+    </div>
   <div class="agent-compose" id="agentCompose">
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="1" placeholder="say the word…"></textarea>
@@ -7776,13 +7946,12 @@ function agentComposerHtml(d) {
   </div>`;
 }
 
-null
-// The live pane exists only while something streams: it appears when a send
+// The live strip exists only while something streams: it appears when a send
 // leaves and folds away when the run's final event lands the settled reply.
 function clearSendPending(key) {
   if (window._sendPendingKey !== key) return;
   window._sendPendingKey = null;
-  updateActivityLine();
+  renderRunCards();
 }
 // The sent prompt lands in the transcript at once — no reload needed to see
 // your own words. The settled refresh replaces this echo with the real record.
@@ -7805,8 +7974,8 @@ async function headlessSendFromComposer(btn) {
   if (!prompt) return errToast('type a prompt first');
   // The heartbeat answers the send instantly — the reader sees life
   // before the first run event arrives.
-  const act = $('agentActivityText');
-  if (act) act.textContent = '◌ sent — waiting for the model…';
+  if ($('lsSum')) setLiveText($('lsSum'), '◌ sent — waiting for the model…');
+  if ($('liveStrip')) $('liveStrip').hidden = false;
   const key = activeRel;
   if (prompt.startsWith('/')) {
     // pi executes its own commands over RPC (extensions, skills, templates).
@@ -7826,10 +7995,10 @@ async function headlessSendFromComposer(btn) {
     : (trace && trace.leaf !== trace.fileLeaf ? trace.leaf : null);
   btn.disabled = true;
   btn.textContent = 'starting…';
-  // Show the pane now: the heartbeat is already on it.
+  // Show the strip now: the heartbeat is already on it.
   window._sendPendingKey = key;
   window._sendPendingAt = Date.now();
-  if ($('livePane')) $('livePane').hidden = false;
+  if ($('liveStrip')) $('liveStrip').hidden = false;
   const images = [];
   for (const img of (window._agentImages || [])) images.push(await shrinkAgentImage(img));
   const payload = { id: key, prompt, node, models, images };
@@ -9129,7 +9298,6 @@ async function renderConv(scroll) {
   });
   $('view').querySelectorAll('.toolgroup').forEach(g =>
     g.addEventListener('toggle', () => toolGroupOpen.set(activeRel + '|' + g.dataset.gkey, g.open)));
-  updateActivityLine();
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.
@@ -9413,8 +9581,35 @@ async function mergeCompareGroup(row, btn) {
 // and scroll position stable while tokens land. The card never grabs focus
 // and only follows the bottom when the user is already pinned there.
 const activeRuns = new Map();   // jobId → latest run-event (with tail blocks)
-const runToolOpen = new Map();  // jobId + '/' + blockId → the user's fold choice
 const toolGroupOpen = new Map(); // conversation + group key → fold choice survives re-renders
+
+// Client-side run ledgers: the server prunes finished blocks from its tail
+// once the session file re-indexes, so the browser keeps its own append-only
+// copy per run. The open live strip renders from here — the full story.
+let liveOpen = false;
+const runLedgers = new Map(); // jobId → { key, order[], blocks: Map(id → block), done }
+
+function ledgerAbsorb(r) {
+  if (!Array.isArray(r.tail)) return;
+  let L = runLedgers.get(r.jobId);
+  if (!L) {
+    L = { key: r.key, order: [], blocks: new Map() };
+    runLedgers.set(r.jobId, L);
+    // Bounded memory: drop the oldest ledgers of other conversations.
+    if (runLedgers.size > 8) {
+      for (const [id, old] of runLedgers) {
+        if (runLedgers.size <= 8) break;
+        if (id !== r.jobId && !activeRuns.has(id)) runLedgers.delete(id);
+      }
+    }
+  }
+  L.statusText = r.statusText; L.model = r.model; L.startedAt = r.startedAt;
+  for (const b of r.tail) {
+    const id = String(b.id);
+    if (!L.blocks.has(id)) L.order.push(id);
+    L.blocks.set(id, b); // the newest snapshot wins; pruned blocks keep their last one
+  }
+}
 
 // The everything view: running tool calls render open, streaming.
 function runToolDefaultOpen() { return true; }
@@ -9429,15 +9624,6 @@ function fmtElapsed(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
   if (s < 60) return s + 's';
   return Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's';
-}
-
-// Streaming output pane: follow its own bottom only if it already was there.
-function setStickText(node, s) {
-  if (node._t === s) return;
-  const stick = node.scrollHeight - node.scrollTop - node.clientHeight < 30;
-  node._t = s;
-  node.textContent = s;
-  if (stick) node.scrollTop = node.scrollHeight;
 }
 
 function buildRunCard(r) {
@@ -9690,56 +9876,65 @@ function buildUiRequest(jobId, q) {
   return box;
 }
 
-function updateRunBlock(blocksHost, jobId, b) {
-  const key = String(b.id);
-  let el = blocksHost.querySelector(`[data-blk="${CSS.escape(key)}"]`);
-  if (b.kind === 'tool') {
-    if (!el) {
-      el = document.createElement('details');
-      el.className = 'rc-tool';
-      el.dataset.blk = key;
-      el.innerHTML = `<summary><span class="rc-tool-line"></span></summary><pre class="rc-args"></pre><pre class="rc-out"></pre>`;
-      const saved = runToolOpen.get(jobId + '/' + key);
-      // Tools claim only their folded line; the line itself streams the
-      // newest output, so open is always the reader's own choice.
-      el.open = saved !== undefined ? saved : false;
-      el.addEventListener('toggle', () => runToolOpen.set(jobId + '/' + key, el.open));
-      blocksHost.appendChild(el);
-    }
-    const phase = b.phase === 'done' ? (b.error ? '✗ failed' : '✓ done')
-      : b.phase === 'running' ? '● running' + (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '')
-      : b.phase === 'ready' ? '◌ queued' : '◌ call streaming in';
-    const hint = (b.args || '').replace(/\s+/g, ' ').slice(0, 60);
-    // While the tool runs, the folded line itself shows the newest output
-    // line — you see what bash is doing without expanding anything.
-    const tail = b.phase === 'running' && b.out ? (String(b.out).trim().split('\n').filter(x => x.trim()).pop() || '').slice(-70) : '';
-    setLiveText(el.querySelector('.rc-tool-line'), '⚙ ' + (b.name || 'tool') + ' · ' + phase + (hint ? ' · ' + hint : '') + (tail ? ' — ' + tail : ''));
-    const args = el.querySelector('.rc-args');
-    setLiveText(args, b.args || '');
-    args.hidden = !b.args;
-    const out = el.querySelector('.rc-out');
-    setStickText(out, b.out || '');
-    out.hidden = !b.out;
-  } else {
+const lsBlockFrozen = b => b.kind === 'tool' ? b.phase === 'done' : !!b.done;
+
+function lsActiveBlock(tail) {
+  // The newest block that is not frozen — the unit that streams right now.
+  for (let i = tail.length - 1; i >= 0; i--) if (!lsBlockFrozen(tail[i])) return tail[i];
+  return null;
+}
+
+// The folded line: steps · the active unit · the last streamed words.
+function lsSummary(r, L) {
+  const all = L ? [...L.blocks.values()] : (r.tail || []);
+  const steps = all.filter(lsBlockFrozen).length;
+  const b = lsActiveBlock(r.tail || []);
+  let now = '', water = '';
+  if (b && b.kind === 'tool') {
+    now = '⚙ ' + (b.name || 'tool') + (b.phase === 'running' && b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '');
+    water = b.out || b.args || '';
+  } else if (b && b.text) { now = '█ writing · ' + String(b.text).length + ' chars'; water = b.text; }
+  else if (b && b.think) { now = '◌ thinking · ' + b.think.length + ' chars'; water = b.think; }
+  else now = '◌ ' + (r.statusText || 'waiting for the model…');
+  water = water ? String(water).replace(/\s+/g, ' ').trim().slice(-70) : '';
+  return (steps ? steps + ' step' + (steps > 1 ? 's' : '') + ' · ' : '') + now + (water ? ' — ' + water : '');
+}
+
+// The glass wall: every block of the run, in full, append-only, patched in
+// place (text nodes only — selection and scroll survive every delta).
+function renderLsBlocks(L) {
+  const host = $('lsBlocks');
+  if (!host || !L) return;
+  const pin = host.scrollHeight - host.scrollTop - host.clientHeight < 40;
+  for (const id of L.order) {
+    const b = L.blocks.get(id);
+    let el = host.querySelector(`[data-blk="${CSS.escape(id)}"]`);
     if (!el) {
       el = document.createElement('div');
-      el.className = 'rc-textblk';
-      el.dataset.blk = key;
-      el.innerHTML = `<pre class="rc-think"></pre><pre class="rc-body"></pre>`;
-      blocksHost.appendChild(el);
+      el.className = 'ls-b';
+      el.dataset.blk = id;
+      el.innerHTML = b.kind === 'tool'
+        ? '<div class="ls-b-head"></div><pre class="ls-args"></pre><pre class="ls-out"></pre>'
+        : '<div class="ls-b-head"></div><pre class="ls-think"></pre><pre class="ls-text"></pre>';
+      host.appendChild(el);
     }
-    // Thinking stays a compact indicator: it ticks up while the model
-    // thinks, then yields to the answer.
-    const th = el.querySelector('.rc-think');
-    {
-      th.classList.add('rc-think-min');
-      setLiveText(th, b.think && !b.text ? '◌ thinking · ' + b.think.length + ' chars' : '');
+    const head = el.querySelector('.ls-b-head');
+    if (b.kind === 'tool') {
+      const phase = b.phase === 'done' ? (b.error ? '✗ failed' : '✓ done')
+        : b.phase === 'running' ? '● running' + (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '')
+        : b.phase === 'ready' ? '◌ queued' : '◌ call streaming in';
+      setLiveText(head, '⚙ ' + (b.name || 'tool') + ' · ' + phase);
+      setLiveText(el.querySelector('.ls-args'), b.args || '');
+      setLiveText(el.querySelector('.ls-out'), b.out || '');
+    } else {
+      setLiveText(head, b.done ? '❯ reply' : b.text ? '█ writing…' : b.think ? '◌ thinking…' : '◌ …');
+      setLiveText(el.querySelector('.ls-think'), b.think || '');
+      setLiveText(el.querySelector('.ls-text'), b.text || '');
     }
-    th.hidden = !th.textContent;
-    const body = el.querySelector('.rc-body');
-    setStickText(body, b.text || '');
-    body.hidden = !b.text;
   }
+  if (pin) host.scrollTop = host.scrollHeight;
+  const chip = $('lsChip');
+  if (chip) chip.hidden = pin;
 }
 
 function renderRunCards() {
@@ -9766,106 +9961,67 @@ function renderRunCards() {
       updateRunCustoms(card, r);
     }
   }
-  updateDockSteps(runs);
+  updateLiveStrip(runs);
   if ((cards.length || runs.length) && pinned) v.scrollTop = v.scrollHeight;
-  updateActivityLine();
 }
 
-// The dock's growing steps ledger: each FROZEN unit becomes a chip on one
-// centered line; open it for the boxes. Gone when no run is active — the
-// settled transcript's toolgroup lines take over.
-function updateDockSteps(runs) {
-  const el = $('lpSteps');
-  if (!el) return;
-  const abort = el.querySelector('.lp-abort');
-  if (!runs.length) { el.hidden = true; if (abort) abort.hidden = true; return; }
-  const r = runs[runs.length - 1];
-  const host = el.querySelector('.rc-blocks');
-  const frozen = (r.tail || []).filter(b => b.kind === 'tool' ? b.phase === 'done' : b.done);
-  for (const kid of [...host.children]) {
-    if (!frozen.some(b => String(b.id) === kid.dataset.blk)) kid.remove();
+// The live strip, both states. Runs on every run event and on the 1 Hz tick.
+function updateLiveStrip(runs) {
+  const strip = $('liveStrip');
+  if (!strip) return;
+  // E-ink: step about once a second instead of flickering per delta.
+  if (isEink() && runs.length && Date.now() - (window._lsLast || 0) < 1200) return;
+  window._lsLast = Date.now();
+  const pending = window._sendPendingKey === activeRel
+    && Date.now() - (window._sendPendingAt || 0) < 20000;
+  const live = runs.length > 0;
+  const r = live ? runs[runs.length - 1] : null;
+  // A finished run freezes on the open wall until the reader closes it.
+  let frozenL = null;
+  if (!live && liveOpen) {
+    for (const L of runLedgers.values()) if (L.key === activeRel && L.done) frozenL = L;
   }
-  for (const b of frozen) updateRunBlock(host, r.jobId, b);
-  if (abort) {
-    abort.hidden = false;
+  if (!live && !pending && !frozenL) {
+    strip.hidden = true;
+    for (const [id, L] of runLedgers) if (L.key === activeRel) runLedgers.delete(id);
+    return;
+  }
+  strip.hidden = false;
+  strip.classList.toggle('work', live);
+  const L = r ? runLedgers.get(r.jobId) : frozenL;
+  const sum = $('lsSum');
+  if (r) setLiveText(sum, lsSummary(r, L));
+  else if (frozenL) setLiveText(sum, '✓ run finished · ' + frozenL.blocks.size + ' unit' + (frozenL.blocks.size === 1 ? '' : 's') + ' — click to close');
+  else setLiveText(sum, '◌ sent — waiting for the model…');
+  const abort = $('lsAbort');
+  abort.hidden = !r;
+  if (r && abort.dataset.job !== r.jobId) {
+    abort.dataset.job = r.jobId;
     abort.disabled = false;
     abort.textContent = 'abort';
-    abort.onclick = async ev => {
-      ev.preventDefault(); ev.stopPropagation();
+    abort.onclick = async () => {
       abort.disabled = true;
       abort.textContent = 'aborting…';
       await postJson('/api/run/abort', { jobId: r.jobId });
     };
   }
-  // The bar stays visible for the WHOLE run — it carries the abort button.
-  el.hidden = false;
-  if (frozen.length) {
-    const labels = frozen.map(b => b.kind === 'tool'
-      ? (b.name || 'tool') + (b.error ? ' ✗' : '')
-      : (b.think && !b.text ? 'thinking' : 'reply'));
-    setLiveText(el.querySelector('.lp-steps-sum'),
-      `${frozen.length} step${frozen.length > 1 ? 's' : ''} · ` +
-      labels.slice(-8).join(' · ') + (labels.length > 8 ? ' · …' : ''));
-  } else {
-    setLiveText(el.querySelector('.lp-steps-sum'), '● ' + (r.statusText || 'working…'));
+  const full = $('lsFull');
+  full.hidden = !liveOpen;
+  const line = $('lsLine');
+  line.setAttribute('aria-expanded', String(liveOpen));
+  line.title = liveOpen ? 'Close the full stream' : 'Open the full live stream of this run';
+  line.onclick = () => {
+    liveOpen = !liveOpen;
+    renderRunCards();
+    if (liveOpen) { const h = $('lsBlocks'); if (h) h.scrollTop = h.scrollHeight; }
+  };
+  if (liveOpen) {
+    renderLsBlocks(L);
+    const host = $('lsBlocks');
+    const chip = $('lsChip');
+    host.onscroll = () => { chip.hidden = host.scrollHeight - host.scrollTop - host.clientHeight < 40; };
+    chip.onclick = () => { host.scrollTop = host.scrollHeight; chip.hidden = true; };
   }
-}
-
-// The reserved one-line heartbeat over the composer: whatever is active
-// right now — tool, thinking, writing — streams here. On e-ink it steps
-// about once a second instead of flickering.
-function updateActivityLine() {
-  const el = $('agentActivityText');
-  if (!el) return;
-  if (isEink() && Date.now() - (window._actLast || 0) < 1200) return;
-  window._actLast = Date.now();
-  const runs = [...activeRuns.values()].filter(r => r.key === activeRel);
-  // The pane shows only while something streams: an in-flight send or a
-  // live run. Otherwise it folds away and the transcript owns the screen.
-  const pending = window._sendPendingKey === activeRel
-    && Date.now() - (window._sendPendingAt || 0) < 20000;
-  const pane = $('livePane');
-  if (pane) pane.hidden = !(runs.length || pending);
-  if (!runs.length && pending) return; // the send heartbeat stays until the first run event
-  let text = '', flow = null; // null = keep the previous water on screen
-  if (runs.length) {
-    const r = runs[runs.length - 1];
-    const tail = r.tail || [];
-    // Find the ACTIVE unit: the newest block that is not frozen. The last
-    // block is often a queued call or an already-done unit; scanning
-    // backward finds the one that actually streams right now.
-    let b = null;
-    for (let i = tail.length - 1; i >= 0; i--) {
-      const x = tail[i];
-      const frozen = x.kind === 'tool' ? x.phase === 'done' : !!x.done;
-      if (!frozen) { b = x; break; }
-    }
-    if (b && b.kind === 'tool') {
-      text = '⚙ ' + (b.name || 'tool')
-        + (b.phase === 'running' ? (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '') : ' · call streaming in');
-      flow = (b.args ? b.args + '\n' : '') + (b.out || '');
-    } else if (b && b.kind === 'text' && b.text) {
-      text = '✍ writing · ' + String(b.text).length + ' chars';
-      flow = b.text;
-    } else if (b && b.kind === 'text' && b.think) {
-      // Reasoning streams as a counter, not as water: some models reason
-      // in floods (kimi k3), and the full stream is too loud.
-      text = '◌ thinking · ' + b.think.length + ' chars';
-      flow = '';
-    } else {
-      // The gap between units — or a provider that answers in one silent
-      // burst (claude-code API transport): keep the last flow visible and
-      // count the silence honestly, so a dead-looking pane never lies.
-      const quiet = window._lpT ? Math.round((Date.now() - window._lpT) / 1000) : 0;
-      text = '◌ ' + (r.statusText || 'waiting for the model…') + (quiet > 1 ? ' · ' + quiet + 's quiet' : '');
-    }
-  } else flow = ''; // no run: the pane drains
-  setLiveText(el, text || '\u00a0');
-  const out = $('lpOut');
-  if (out && flow !== null) setStickText(out, flow);
-  // Silence clock: reset whenever the pane's content actually moves.
-  const sigNow = text + '|' + (flow || '');
-  if (sigNow !== window._lpSig) { window._lpSig = sigNow; window._lpT = Date.now(); }
 }
 
 // Pair tool calls with their results (by id when present, else in order).
@@ -11113,6 +11269,7 @@ $('list').addEventListener('scroll', () => {
     const bucket = String(Math.floor(list.scrollLeft / Math.max(1, list.clientWidth / 2)));
     if (bucket === list.dataset.renderWindow) return;
     const sl = list.scrollLeft, st = list.scrollTop;
+    hideMarkPop();
     tab === 'notes' ? renderNotesTab() : render();
     list.scrollLeft = sl; list.scrollTop = st;
   });
@@ -11124,7 +11281,7 @@ $('list').addEventListener('wheel', e => {
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
     zoomBy(e.deltaY < 0 ? 1.25 : 0.8, e.clientX, e.clientY);
-  } else if ((ganttMode === 'h' || ganttMode === 'full') && !e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+  } else if ((ganttMode === 'h' || ganttMode === 'full') && e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
     e.preventDefault();
     $('list').scrollLeft += e.deltaY;
   }
@@ -11937,6 +12094,7 @@ document.addEventListener('keydown', e => {
     if (readOverlayOpen()) { closeReadingView(); return; }
     if (settingsOpen) { closeSettings(); return; }
     if (!$('jobsTray').hidden) return toggleJobs(false);
+    if (!$('markPop').hidden) { hideMarkPop(); return; }
     if (!$('filtersPop').hidden) { $('filtersPop').hidden = true; return; }
     if (!$('windowsPop').hidden) { toggleWindows(false); return; }
     if (!$('agentsPop').hidden) { toggleAgents(false); return; }
@@ -11970,6 +12128,19 @@ document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'Enter') {
     const run = $('agentRun'), ta = $('agentText');
     if (run && ta && ta.value.trim()) { e.preventDefault(); headlessSendFromComposer(run); return; }
+  }
+  // Home Gantt keys: Home/End jump to the oldest/now, PageUp/PageDown scroll
+  // rows, shift+PageUp/PageDown pans along the time axis.
+  if (viewKind === 'home' && ['Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
+    const list = $('list');
+    if (list.querySelector('.timeline')) {
+      e.preventDefault();
+      if (e.key === 'Home') jumpToStart();
+      else if (e.key === 'End') jumpToNow();
+      else if (e.shiftKey) list.scrollLeft += (e.key === 'PageDown' ? 1 : -1) * Math.max(200, list.clientWidth * 0.8);
+      else list.scrollTop += (e.key === 'PageDown' ? 1 : -1) * Math.max(200, list.clientHeight * 0.8);
+      return;
+    }
   }
   // Shift+tab cycles the reasoning level without composer focus (the focused
   // composer handles its own shift+tab).
@@ -12007,7 +12178,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   switch (e.key) {
-    case '/': e.preventDefault(); if (viewKind !== 'home') goHome(); $('q').focus(); break;
+    case '/': e.preventDefault(); if (viewKind !== 'home') goHome(); if ($('qwrap').checkVisibility()) $('q').focus(); break;
     case 'Enter': if (searchMode && viewKind === 'home' && openSearchSel()) e.preventDefault(); break;
     case 'ArrowDown': e.preventDefault(); if (searchMode && viewKind === 'home') moveSearchSel(1); else moveActive(1); break;
     case 'ArrowUp': e.preventDefault(); if (searchMode && viewKind === 'home') moveSearchSel(-1); else moveActive(-1); break;
@@ -12048,7 +12219,7 @@ document.addEventListener('keydown', e => {
       if (viewKind === 'conversation' && gotoMatch(-1)) e.preventDefault();
       break;
     case 'b': jumpToStart(); break;
-    case 't': e.preventDefault(); $('ganttDate').focus(); break;
+    case 't': if (!$('ganttBar').checkVisibility()) break; e.preventDefault(); $('ganttDate').focus(); break;
     case 'a': toggleAgents(); break;
     case '`': e.preventDefault(); setBarFold(!barFolded()); break;
     case 'w':
@@ -12194,8 +12365,10 @@ live.onmessage = ev => {
   if (d.type === 'run-event') {
     if (d.final) {
       if (window._sendPendingKey === d.key) window._sendPendingKey = null;
+      ledgerAbsorb(d);
+      const doneL = runLedgers.get(d.jobId);
+      if (doneL) doneL.done = true;
       activeRuns.delete(d.jobId);
-      for (const k of [...runToolOpen.keys()]) if (k.startsWith(d.jobId + '/')) runToolOpen.delete(k);
       // The run ended: perform the one full refresh now, after all live
       // thinking and tool changes stayed inside the fixed pane.
       if (d.key === activeRel && viewKind === 'conversation' && current) {
@@ -12217,7 +12390,7 @@ live.onmessage = ev => {
           if (v.scrollHeight - v.scrollTop - v.clientHeight < 200) renderConv('bottom');
         }
       }
-    } else activeRuns.set(d.jobId, d);
+    } else { activeRuns.set(d.jobId, d); ledgerAbsorb(d); }
     if (viewKind === 'conversation' && activeRel === d.key) renderRunCards();
     updateLiveBadges();
     renderAgentsPopSoon();

@@ -36,22 +36,22 @@
   --role-asst: var(--cyan);
   --role-tool: var(--text-faint);
 
-  /* Hosted terminal views use the active app theme, not a fixed palette. */
-  --ansi-0: #1c1c1c;
-  --ansi-1: #cc4444;
-  --ansi-2: #44aa44;
-  --ansi-3: #aaaa33;
-  --ansi-4: #4477cc;
-  --ansi-5: #aa44aa;
-  --ansi-6: #33aaaa;
-  --ansi-7: #cccccc;
-  --ansi-8: #666666;
-  --ansi-9: #ff6666;
-  --ansi-10: #66dd66;
-  --ansi-11: #eeee66;
-  --ansi-12: #6699ff;
-  --ansi-13: #ee66ee;
-  --ansi-14: #66eeee;
+  /* Hosted terminal views use the same hues as the app, not a second palette. */
+  --ansi-0: #101412;
+  --ansi-1: #c45a52;
+  --ansi-2: #3d9a58;
+  --ansi-3: #a89430;
+  --ansi-4: #4a72c8;
+  --ansi-5: #b06bc0;
+  --ansi-6: #2a9bb8;
+  --ansi-7: #dce3dd;
+  --ansi-8: #5f6a61;
+  --ansi-9: #f79d94;
+  --ansi-10: #7dd492;
+  --ansi-11: #d3ba54;
+  --ansi-12: #79a8ff;
+  --ansi-13: #dc9fe9;
+  --ansi-14: #53c8f1;
   --ansi-15: #ffffff;
   --term-selection: var(--cyan);
   --term-selection-ink: var(--accent-ink);
@@ -118,6 +118,24 @@
     --accent-strong: #005f21;
     --accent-ink: #ffffff;
     --ink: #8f281f;
+    --overlay: rgba(27, 33, 28, 0.35);
+    --overlay-strong: rgba(27, 33, 28, 0.45);
+    --ansi-0: #1b211c;
+    --ansi-1: #8a3832;
+    --ansi-2: #0f5a28;
+    --ansi-3: #816600;
+    --ansi-4: #315ea8;
+    --ansi-5: #894d97;
+    --ansi-6: #0076a0;
+    --ansi-7: #d2d8d3;
+    --ansi-8: #6a716b;
+    --ansi-9: #a7463e;
+    --ansi-10: #1d7d3e;
+    --ansi-11: #9a7a00;
+    --ansi-12: #4a74c0;
+    --ansi-13: #a35db3;
+    --ansi-14: #1a8ab8;
+    --ansi-15: #ffffff;
     color-scheme: light;
   }
 }
@@ -141,6 +159,24 @@
   --accent-strong: #005f21;
   --accent-ink: #ffffff;
   --ink: #8f281f;
+  --overlay: rgba(27, 33, 28, 0.35);
+  --overlay-strong: rgba(27, 33, 28, 0.45);
+  --ansi-0: #1b211c;
+  --ansi-1: #8a3832;
+  --ansi-2: #0f5a28;
+  --ansi-3: #816600;
+  --ansi-4: #315ea8;
+  --ansi-5: #894d97;
+  --ansi-6: #0076a0;
+  --ansi-7: #d2d8d3;
+  --ansi-8: #6a716b;
+  --ansi-9: #a7463e;
+  --ansi-10: #1d7d3e;
+  --ansi-11: #9a7a00;
+  --ansi-12: #4a74c0;
+  --ansi-13: #a35db3;
+  --ansi-14: #1a8ab8;
+  --ansi-15: #ffffff;
   color-scheme: light;
 }
 

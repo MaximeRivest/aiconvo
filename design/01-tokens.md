@@ -79,7 +79,11 @@ Contrast between surfaces is deliberately small. Borders do the work.
 `--accent` is an alias of `--green`. Use it for text and borders.
 Use `--accent-strong` + `--accent-ink` for fills (inverse video, primary
 buttons, checkboxes). In dark they equal the accent + near-black. In light
-they are a deeper green + white.
+they are a deeper green + white. A custom theme may set `--accent` to a
+brand or OS color and keep `--green` for success.
+
+Hosted terminal views use `--ansi-0` through `--ansi-15`. Built-in themes
+use the same hues as the app colors, so the terminal matches the UI.
 
 ### Source identity
 
@@ -152,7 +156,8 @@ Emoji stay out of the UI. Use this fixed ASCII/Unicode set instead:
 |---|---|
 | `❯` | prompt sigil for roles, expandable rows |
 | `●` | live session |
-| `█` | blinking cursor, progress fill |
+| `█` | writing, blinking cursor, progress fill |
+| `◌` | thinking, waiting |
 | `░` | progress empty |
 | `✓` | done, saved, note exists |
 | `✗` | error, failed |

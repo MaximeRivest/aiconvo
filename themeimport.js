@@ -114,6 +114,15 @@ function readAlacritty(file, depth = 0) {
     if (slot >= 0 && section === 'colors.normal') out.ansi[slot] = rgb;
     if (slot >= 0 && section === 'colors.bright') out.ansi[slot + 8] = rgb;
   }
+  // Omarchy keeps a named accent in colors.toml next to the palette.
+  try {
+    const colorsFile = path.join(path.dirname(file), 'colors.toml');
+    if (fs.existsSync(colorsFile)) {
+      const text = fs.readFileSync(colorsFile, 'utf8');
+      const acc = text.match(/^\s*accent\s*=\s*"?(#[0-9a-fA-F]{3,6})"?/m);
+      if (acc) out.accent = parseHex(acc[1]);
+    }
+  } catch {}
   return out;
 }
 
@@ -193,6 +202,8 @@ function readWal(file) {
     out.fg = parseHex(vars.foreground);
     out.selBg = parseHex(vars.selectionBackground);
     out.selFg = parseHex(vars.selectionForeground);
+    const accent = parseHex(vars.accent);
+    if (accent) out.accent = accent;
     for (let i = 0; i < 16; i++) out.ansi[i] = parseHex(vars['color' + i]);
     return out;
   }
@@ -228,7 +239,7 @@ function resolveWindowsAlacritty() {
 }
 
 function mergePalette(target, extra) {
-  for (const key of ['bg', 'fg', 'selBg', 'selFg']) if (extra[key]) target[key] = extra[key];
+  for (const key of ['bg', 'fg', 'selBg', 'selFg', 'accent']) if (extra[key]) target[key] = extra[key];
   extra.ansi.forEach((rgb, i) => { if (rgb) target.ansi[i] = rgb; });
 }
 
@@ -288,8 +299,9 @@ function buildTheme(palette, { id, name }) {
   const textDim = ensureContrast(mix(fg, bg, 0.3), bg, 4.5);
   const textFaint = ensureContrast(mix(fg, bg, 0.5), bg, 3);
 
-  // Filled controls: the accent as background with readable ink on top.
-  let accentStrong = green;
+  // Filled controls: the OS/theme accent when present, else ANSI green.
+  // --accent can differ from --green so success stays green.
+  let accentStrong = palette.accent ? ensureContrast(palette.accent, bg, 4.5) : green;
   let accentInk = contrast(bg, accentStrong) >= 4.5 ? bg
     : (contrast([0, 0, 0], accentStrong) >= contrast([255, 255, 255], accentStrong) ? [0, 0, 0] : [255, 255, 255]);
   accentInk = ensureContrast(accentInk, accentStrong, 4.5);
@@ -305,6 +317,7 @@ function buildTheme(palette, { id, name }) {
     '--text': toHex(text), '--text-dim': toHex(textDim), '--text-faint': toHex(textFaint),
     '--red': toHex(red), '--yellow': toHex(yellow), '--green': toHex(green),
     '--cyan': toHex(cyan), '--blue': toHex(blue), '--magenta': toHex(magenta),
+    ...(palette.accent ? { '--accent': toHex(accentStrong) } : {}),
     '--accent-strong': toHex(accentStrong), '--accent-ink': toHex(accentInk),
     '--term-selection': toHex(selBg), '--term-selection-ink': toHex(selFg),
     '--ink': toHex(ensureContrast(red, bg, 4.5)), '--ink-ai': 'var(--ink)', '--ink-halo': toHex(bg),
