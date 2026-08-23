@@ -186,12 +186,45 @@ function readFoot(file) {
 function readWal(file) {
   const data = JSON.parse(fs.readFileSync(file, 'utf8'));
   const out = { ansi: [] };
+  // pi theme files (~/.pi/agent/themes/*.json) keep the palette under "vars".
+  if (data.vars) {
+    const vars = data.vars;
+    out.bg = parseHex(vars.background);
+    out.fg = parseHex(vars.foreground);
+    out.selBg = parseHex(vars.selectionBackground);
+    out.selFg = parseHex(vars.selectionForeground);
+    for (let i = 0; i < 16; i++) out.ansi[i] = parseHex(vars['color' + i]);
+    return out;
+  }
   if (data.special) {
     out.bg = parseHex(data.special.background);
     out.fg = parseHex(data.special.foreground);
   }
   for (let i = 0; i < 16; i++) out.ansi[i] = parseHex((data.colors || {})['color' + i]);
   return out;
+}
+
+// The active pi theme, when it is a custom file with a full palette.
+// Built-in pi themes (dark/light) paint on the terminal background and
+// carry no palette, so they are not importable.
+function resolvePiTheme() {
+  try {
+    const settings = JSON.parse(fs.readFileSync(expand('~/.pi/agent/settings.json'), 'utf8'));
+    if (!settings.theme) return null;
+    return expand(`~/.pi/agent/themes/${settings.theme}.json`);
+  } catch { return null; }
+}
+
+// On WSL, the terminal usually runs on the Windows side: find an Alacritty
+// config under /mnt/c/Users/<name>/AppData/Roaming/alacritty.
+function resolveWindowsAlacritty() {
+  try {
+    for (const user of fs.readdirSync('/mnt/c/Users')) {
+      const file = path.join('/mnt/c/Users', user, 'AppData', 'Roaming', 'alacritty', 'alacritty.toml');
+      if (fs.existsSync(file)) return file;
+    }
+  } catch {}
+  return null;
 }
 
 function mergePalette(target, extra) {
@@ -203,8 +236,10 @@ function mergePalette(target, extra) {
 
 const SOURCES = [
   { id: 'omarchy', label: 'Omarchy / Hyprland theme', file: '~/.local/state/omarchy/current/theme/alacritty.toml', read: readAlacritty },
+  { id: 'pi', label: 'pi custom theme', resolve: resolvePiTheme, read: readWal },
   { id: 'wal', label: 'pywal / wallust', file: '~/.cache/wal/colors.json', read: readWal },
   { id: 'alacritty', label: 'Alacritty', file: '~/.config/alacritty/alacritty.toml', read: readAlacritty },
+  { id: 'alacritty-windows', label: 'Alacritty (Windows side, via WSL)', resolve: resolveWindowsAlacritty, read: readAlacritty },
   { id: 'kitty', label: 'kitty', file: '~/.config/kitty/kitty.conf', read: readKitty },
   { id: 'ghostty', label: 'Ghostty', file: '~/.config/ghostty/config', read: readGhostty },
   { id: 'foot', label: 'foot', file: '~/.config/foot/foot.ini', read: readFoot },
@@ -224,10 +259,10 @@ function paletteComplete(palette) {
 
 function detectSources() {
   return SOURCES.map(source => {
-    const file = expand(source.file);
+    const file = source.resolve ? source.resolve() : expand(source.file);
     let palette = null;
-    try { if (fs.existsSync(file)) palette = source.read(file); } catch {}
-    return { ...source, file, palette, ok: paletteComplete(palette) };
+    try { if (file && fs.existsSync(file)) palette = source.read(file); } catch {}
+    return { ...source, file: file || '(none found)', palette, ok: paletteComplete(palette) };
   });
 }
 

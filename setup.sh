@@ -50,12 +50,19 @@ UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"
 # The service PATH must reach node's bin dir (nvm installs pi there too).
 NODE_DIR="$(dirname "$(readlink -f "$NODE_BIN")")"
-# On WSL, agent terminals (alacritty) need the WSLg display sockets.
+# On WSL, agent terminals (alacritty) need the WSLg display sockets, and
+# Windows interop (powershell.exe for sound extensions) needs the interop
+# socket plus the Windows PowerShell dir on PATH.
 DISPLAY_LINES=""
+WIN_PATH=""
 if grep -qi microsoft /proc/version 2>/dev/null; then
   DISPLAY_LINES='Environment=DISPLAY=:0'
   # Force X11: with systemd on WSL, the WSLg wayland socket is not in
   # XDG_RUNTIME_DIR. Alacritty also needs libxkbcommon-x11-0 (apt).
+  if [ -S /run/WSL/1_interop ]; then
+    DISPLAY_LINES="${DISPLAY_LINES}"$'\n'"Environment=WSL_INTEROP=/run/WSL/1_interop"
+  fi
+  WIN_PATH=":/mnt/c/Windows/System32/WindowsPowerShell/v1.0:/mnt/c/Windows/System32"
 fi
 cat > "$UNIT_DIR/aiconvo.service" <<EOF
 [Unit]
@@ -64,7 +71,7 @@ Description=aiconvo conversation browser
 [Service]
 ExecStart=$NODE_BIN $REPO/server.js
 Environment=PORT=$PORT
-Environment=PATH=$HOME/.local/bin:$NODE_DIR:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=$HOME/.local/bin:$NODE_DIR:/usr/local/bin:/usr/bin:/bin$WIN_PATH
 $DISPLAY_LINES
 Restart=on-failure
 

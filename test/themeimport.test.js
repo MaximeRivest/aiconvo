@@ -72,6 +72,20 @@ test('kitty, ghostty, foot, and wal readers extract full palettes', () => {
   const wal = readWal(path.join(dir, 'colors.json'));
   assert.deepStrictEqual(wal.bg, parseHex('#101412'));
   assert.strictEqual(wal.ansi.filter(Boolean).length, 16);
+
+  // pi custom themes keep the same palette under "vars".
+  fs.writeFileSync(path.join(dir, 'pi-theme.json'), JSON.stringify({
+    name: 'x',
+    vars: {
+      background: '#120d08', foreground: '#d8c49a',
+      selectionBackground: '#3a2c1c', selectionForeground: '#f0e2bf',
+      ...Object.fromEntries(Array.from({ length: 16 }, (_, i) => ['color' + i, '#96637a'])),
+    },
+  }));
+  const pi = readWal(path.join(dir, 'pi-theme.json'));
+  assert.deepStrictEqual(pi.bg, parseHex('#120d08'));
+  assert.deepStrictEqual(pi.selFg, parseHex('#f0e2bf'));
+  assert.strictEqual(pi.ansi.filter(Boolean).length, 16);
 });
 
 test('a real dark terminal palette becomes a valid theme', () => {

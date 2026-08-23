@@ -21,8 +21,10 @@ Auto-detection tries these in order and uses the first complete one:
 | Source | File |
 |---|---|
 | Omarchy / Hyprland theme | `~/.local/state/omarchy/current/theme/alacritty.toml` |
+| pi custom theme | `~/.pi/agent/themes/<active>.json` (built-in dark/light carry no palette) |
 | pywal / wallust | `~/.cache/wal/colors.json` |
 | Alacritty | `~/.config/alacritty/alacritty.toml` (follows `import` chains) |
+| Alacritty on Windows (WSL) | `/mnt/c/Users/<name>/AppData/Roaming/alacritty/alacritty.toml` |
 | kitty | `~/.config/kitty/kitty.conf` (follows `include` lines) |
 | Ghostty | `~/.config/ghostty/config` |
 | foot | `~/.config/foot/foot.ini` |
