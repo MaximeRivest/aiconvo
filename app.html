@@ -245,12 +245,14 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 #view { order: 1; }
 #left { order: 2; width: 100%; height: var(--list-h, 220px); flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface-1); border-top: 1px solid var(--border); position: relative; }
-/* Project ordering buttons sit in the chart's top-left gutter cell. */
-#projSort { position: absolute; top: 2px; left: 8px; z-index: 6; display: flex; gap: 3px; }
+/* Project ordering buttons take the home button's spot on home. */
+#projSort { display: flex; gap: 3px; flex-shrink: 0; }
 #projSort[hidden] { display: none; }
-#projSort button { height: 15px; min-width: 20px; padding: 0 5px; border: 1px solid var(--border); border-radius: 0; background: var(--surface-2); color: var(--text-dim); font: 9px var(--font); }
-#projSort button:hover { color: var(--text); border-color: var(--border-strong); }
-#projSort button.on { color: var(--accent); border-color: var(--accent); }
+body:not(.home) #projSort { display: none !important; }
+body.home #brand { display: none !important; }
+#projSort button { height: 26px; min-width: 26px; padding: 0 7px; border-color: transparent; border-radius: 0; background: transparent; color: var(--text-dim); font: 12px var(--font); }
+#projSort button:hover { color: var(--text); background: var(--surface-2); }
+#projSort button.on { color: var(--accent); }
 /* gantt layout: left (vertical) */
 body.g-v main { flex-direction: row; }
 body.g-v #view { order: 2; }
@@ -854,6 +856,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .mpick .mp-row.on { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
 .mpick .mp-row.on b { font-weight: 700; }
 .mpick .mp-row.notready { opacity: .5; }
+.mpick .mp-addbtn { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-dim); font-weight: 700; }
+.mpick .mp-addbtn:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .mpick .mp-foot { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--surface-1); }
 /* the one model control: shows the selection, opens the picker */
 .model-pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); background: var(--surface-1); }
@@ -1459,6 +1463,7 @@ window.aiconvoSyncTheme();
 </head>
 <body class="home">
 <header>
+  <div id="projSort" hidden></div>
   <button id="brand" aria-label="Home">⌂</button>
   <button id="chProject" title="Open the project overview"></button>
   <button id="chNew" title="New conversation in this project — same model and thinking level, the project map in the system prompt, an empty composer">+</button>
@@ -1512,7 +1517,6 @@ window.aiconvoSyncTheme();
       <input id="ganttDate" type="date" title="Jump to a date (t)">
     </div>
     <div id="list"></div>
-    <div id="projSort" hidden></div>
     <div id="selbar" hidden>
       <span class="n"><span id="selCount">0</span> selected</span>
       <button id="copySel">copy</button>
@@ -3468,6 +3472,7 @@ function renderTimeline() {
   const showSort = viewKind === 'home' && pos && pos.type === 'project' && rows.length > 0;
   $('projSort').hidden = !showSort;
   if (showSort) { renderProjSortBtns(); ensureProjectStats(); }
+  applyProjectRowHl();
   scrollTimeline(list, st, sl);
 }
 
@@ -3682,7 +3687,7 @@ $('list').addEventListener('click', e => {
   if (!rel) return;
   if (item.classList.contains('tmark') && viewKind === 'home' && !e.shiftKey && !e.ctrlKey && !e.metaKey && e.target.type !== 'checkbox') {
     const pop = $('markPop');
-    if (!pop.hidden && pop.dataset.rel === rel) { hideMarkPop(); return open(rel); }
+    if (!pop.hidden && pop.dataset.rel === rel) return; // already showing: double click opens
     return showMarkPop(item, rel);
   }
   if (e.shiftKey || e.ctrlKey || e.metaKey || e.target.type === 'checkbox') {
@@ -3719,6 +3724,32 @@ function showMarkPop(item, rel) {
   if (y + pop.offsetHeight > window.innerHeight - 8) y = Math.max(8, r.top - pop.offsetHeight - 8);
   pop.style.left = x + 'px'; pop.style.top = y + 'px';
 }
+
+// Click a project label to light up its whole row; double click opens it.
+let rowHlProject = null;
+function toggleProjectRowHl(name) {
+  rowHlProject = rowHlProject === name ? null : name;
+  applyProjectRowHl();
+}
+function applyProjectRowHl() {
+  document.querySelectorAll('.project-row-label').forEach(el =>
+    el.classList.toggle('hl', el.dataset.project === rowHlProject));
+  for (const r of ((timelineGeom && timelineGeom.rows) || [])) {
+    const key = String(r.s._openKey || r.s.key || '');
+    if (!key) continue;
+    const el = document.querySelector(`.tmark[data-rel="${CSS.escape(key)}"]`);
+    if (el) el.classList.toggle('rowhl', (r.project || projectOf(r.s)) === rowHlProject);
+  }
+}
+
+// Double click: a project label opens the overview, a mark opens the conversation.
+$('list').addEventListener('dblclick', e => {
+  if (e.timeStamp < suppressClickUntil) return; // a rubber-band drag ended here
+  const label = e.target.closest('.project-row-label');
+  if (label) { rowHlProject = null; return showProjectOverview(label.dataset.project); }
+  const mark = e.target.closest('.tmark');
+  if (mark && viewKind === 'home' && mark.dataset.rel) { hideMarkPop(); return open(mark.dataset.rel); }
+});
 
 // ---- rubber-band selection on the timeline ----
 let timelineGeom = null;      // { rows, xFor } from the last timeline paint
@@ -7461,10 +7492,13 @@ async function postJsonMethod(url, method, body) {
 }
 const postJson = (url, body) => postJsonMethod(url, 'POST', body);
 
-// Floating model picker. opts: { multi, selected:Set of 'provider/model' }.
-// onPick receives [{ provider, modelId }].
+// Floating model picker. opts: { multi, selected:Set of 'provider/model',
+// pickReplaces }. onPick receives [{ provider, modelId }].
+// pickReplaces: a plain pick REPLACES the whole selection (the common "change
+// the model" move); the + button and shift+enter ADD to a parallel set.
 async function openModelPicker(anchor, opts, onPick) {
   document.querySelectorAll('.mpick').forEach(el => el.remove());
+  const replaces = !!(opts && opts.multi && opts.pickReplaces);
   const sel = new Set(opts && opts.selected ? opts.selected : []);
   const pop = document.createElement('div');
   pop.className = 'mpick';
@@ -7502,7 +7536,7 @@ async function openModelPicker(anchor, opts, onPick) {
     const s = Math.max(0, Math.round((Date.now() - (cat.fetchedAt || Date.now())) / 1000));
     return s < 90 ? s + 's ago' : Math.round(s / 60) + ' min ago';
   };
-  pop.innerHTML = `<div class="mp-top"><input type="search" class="mp-filter" placeholder="find a model${opts && opts.multi ? ' · enter toggles · ctrl+enter uses' : ''}">` +
+  pop.innerHTML = `<div class="mp-top"><input type="search" class="mp-filter" placeholder="find a model${replaces ? ' · enter switches · shift+enter adds' : opts && opts.multi ? ' · enter toggles · ctrl+enter uses' : ''}">` +
     `<button type="button" class="mp-all" title="Also show providers that are not signed in">all</button>` +
     `<button type="button" class="mp-refresh">↻</button></div>` +
     `<div class="mp-provs"></div>` +
@@ -7550,11 +7584,20 @@ async function openModelPicker(anchor, opts, onPick) {
       return head + `<button class="mp-row${sel.has(m.id) ? ' on' : ''}${ready.has(m.provider) ? '' : ' notready'}" data-mp="${esc(m.id)}" title="${ready.has(m.provider) ? '' : 'provider not authenticated · '}${esc(m.id)} · ${esc(m.contextLabel || '')} context${esc(fitLabel(m))}">` +
         `<span class="mp-check">${sel.has(m.id) ? '✓' : ''}</span><b>${esc(baseNameOf(m))}</b>` +
         `${variant ? `<span class="mp-tag${variant === 'free' ? ' free' : ''}">${esc(variant)}</span>` : ''}` +
-        `<span class="mp-ctx">${esc(m.contextLabel || '')}</span></button>`;
+        `<span class="mp-ctx">${esc(m.contextLabel || '')}</span>` +
+        `${replaces ? `<span class="mp-addbtn" role="button" title="${sel.has(m.id) ? 'remove from the parallel set' : 'add to the parallel set (fan-out)'}">${sel.has(m.id) ? '−' : '+'}</span>` : ''}</button>`;
     }).join('') || '<div class="mp-empty">no matching models</div>';
-    list.querySelectorAll('.mp-row').forEach(b => b.onclick = () => {
+    list.querySelectorAll('.mp-row').forEach(b => b.onclick = ev => {
       const id = b.dataset.mp;
+      const addHit = ev && ev.target && ev.target.closest && ev.target.closest('.mp-addbtn');
       if (opts && opts.multi) {
+        // In replace mode a plain pick means "switch to this one model".
+        // The + button (or shift+enter) grows the parallel set instead.
+        if (replaces && !addHit && !(ev && ev.shiftKey)) {
+          close();
+          const [provider, ...rest] = id.split('/');
+          return onPick([{ provider, modelId: rest.join('/') }]);
+        }
         sel.has(id) ? sel.delete(id) : sel.add(id);
         apply();
       } else {
@@ -7601,6 +7644,17 @@ async function openModelPicker(anchor, opts, onPick) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && opts && opts.multi) {
       e.preventDefault();
       if (sel.size) pop.querySelector('.mp-use').click();
+      return;
+    }
+    if (e.key === 'Enter' && e.shiftKey && opts && opts.multi) {
+      // Shift+enter toggles the highlighted model in the set, palette open.
+      e.preventDefault();
+      const vis = visibleRows();
+      const row = vis[hi >= 0 ? hi : 0];
+      if (!row) return;
+      const id = row.dataset.mp;
+      sel.has(id) ? sel.delete(id) : sel.add(id);
+      apply();
       return;
     }
     if (e.key === 'Enter') {
@@ -8015,6 +8069,9 @@ async function headlessSendFromComposer(btn) {
   if (key === activeRel && viewKind === 'conversation') echoUserPrompt(prompt);
   ta.value = '';
   autoGrowCompose();
+  // A slash command consumed the composer — bring back the parked draft.
+  if (prompt.startsWith('/')) restoreSlashDraft();
+  else window._slashDraft = null;
   window._agentImages = [];
   renderAgentThumbs();
   // The reply streams in below: rest the composer. Blur everywhere — on
@@ -8032,20 +8089,32 @@ async function headlessSendFromComposer(btn) {
 function fanModels() {
   return current && Array.isArray(current.selectedModels) ? current.selectedModels : [];
 }
+// A model change must survive a concurrent transcript refresh: a /api/session
+// fetch that was already in flight still carries the OLD selection and would
+// silently clobber the new one (common right after a fork, when update events
+// fire). open() compares timestamps and lets the newer local choice win.
+const modelTouchAt = new Map(); // conversation key → ms of the last local set
 async function setFanModels(list) {
   if (!current || !list.length) return errToast('pick at least one model');
+  const key = activeRel;
   const before = fanModels();
   current.selectedModels = list;
+  modelTouchAt.set(key, Date.now());
   renderModelStrip();
-  const out = await postJsonMethod('/api/conversation/models', 'PUT', { id: activeRel, models: list });
+  const out = await postJsonMethod('/api/conversation/models', 'PUT', { id: key, models: list });
   if (out.error) {
-    current.selectedModels = before;
-    renderModelStrip();
+    if (current && current.key === key) { current.selectedModels = before; renderModelStrip(); }
+    modelTouchAt.delete(key);
     return errToast('model selection failed: ' + out.error);
   }
-  current.selectedModels = out.models;
-  ctxMeterCache.delete(activeRel);
-  renderModelStrip();
+  // Stamp again at PUT completion: any fetch that left before this moment
+  // read the prefs file too early and must not override the choice.
+  modelTouchAt.set(key, Date.now());
+  if (current && current.key === key) {
+    current.selectedModels = out.models;
+    ctxMeterCache.delete(key);
+    renderModelStrip();
+  }
 }
 // The send button says what will happen: "send ×N" = the prompt fans out to
 // N models in parallel forks; the conversation's own model does not run.
@@ -8071,7 +8140,7 @@ function renderModelStrip() {
   host.innerHTML = `<button type="button" id="modelPick" class="model-pick" title="${list.length
     ? esc(list.map(m => m.provider + '/' + m.modelId).join('\n')) + '\nClick to change. One model runs once; several run in parallel.'
     : 'Pick the model for the next reply.'}">◇ <span class="mname">${label}</span> ▾</button>`;
-  $('modelPick').onclick = e => openModelPicker(e.currentTarget, { multi: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId)) }, picked => setFanModels(picked));
+  $('modelPick').onclick = e => openModelPicker(e.currentTarget, { multi: true, pickReplaces: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId)) }, picked => setFanModels(picked));
 }
 
 // ---- slash palette: pi's own commands, autocompleting like the TUI ----
@@ -8096,6 +8165,25 @@ async function sendSlashCmd(name) {
   if (run) return headlessSendFromComposer(run);
   const send = $('agentSend');
   if (send) return sendToAlacritty(send);
+}
+
+// The slash palette must never eat a draft. Opening the palette over typed
+// text parks the draft here; it returns when the palette closes or the
+// command has run.
+function saveSlashDraft(ta) {
+  if (window._slashDraft == null && ta.value && !ta.value.startsWith('/'))
+    window._slashDraft = { value: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+}
+function restoreSlashDraft() {
+  const d = window._slashDraft;
+  window._slashDraft = null;
+  const ta = $('agentText');
+  if (!d || !ta) return false;
+  ta.value = d.value;
+  try { ta.setSelectionRange(d.start, d.end); } catch {}
+  autoGrowCompose();
+  updateComposeMin();
+  return true;
 }
 
 function slashGroupOf(source) {
@@ -8125,6 +8213,7 @@ function pickSlash(i, fillOnly) {
 async function openSlashPalette() {
   const ta = $('agentText');
   if (!ta) return;
+  saveSlashDraft(ta);
   ta.value = '/';
   ta.focus();
   ta.setSelectionRange(1, 1);
@@ -8226,8 +8315,11 @@ function renderAgentThumbs() {
 
 async function addAgentFiles(files) {
   window._agentImages = window._agentImages || [];
+  // Snapshot: a FileList is live. Clearing the input mid-loop (or a GC'd
+  // DataTransfer) would drop every file after the first await.
+  const picked = [...(files || [])];
   try {
-    for (const file of files || []) {
+    for (const file of picked) {
       if (!file || (file.type && !String(file.type).startsWith('image/'))) continue;
       if (window._agentImages.length >= 8) break;
       window._agentImages.push(await fileToImage(file));
@@ -8960,7 +9052,7 @@ function wireAgentComposer() {
   };
   if (attach && files) {
     attach.onclick = () => files.click();
-    files.onchange = () => { addAgentFiles(files.files); files.value = ''; };
+    files.onchange = () => { const picked = [...files.files]; files.value = ''; addAgentFiles(picked); };
   }
   if (ta) {
     ta.oninput = () => {
@@ -8970,7 +9062,11 @@ function wireAgentComposer() {
         // hidden terminal, no keystroke streaming — the TUI adapter is
         // pi's own get_commands + prompt.
         if (v.startsWith('/')) updateSlashPop(ta);
-        else hideSlashPop();
+        else {
+          hideSlashPop();
+          // The slash was deleted: an emptied composer takes the draft back.
+          if (!v && window._slashDraft) restoreSlashDraft();
+        }
         return;
       }
       // Typing must NEVER implicitly open a terminal. Live slash keys spawn
@@ -8999,6 +9095,13 @@ function wireAgentComposer() {
     ta.onkeydown = e => {
       // Shift+tab cycles the reasoning level, TUI-style, even while typing.
       if (isPi && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleThinking(); return; }
+      // Escape with a parked draft always brings it back, pop open or not.
+      if (isPi && e.key === 'Escape' && window._slashDraft && ta.value.startsWith('/')) {
+        e.preventDefault();
+        hideSlashPop();
+        restoreSlashDraft();
+        return;
+      }
       if (isPi && window._slashOpen) {
         const n = (window._slashList || []).length;
         if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
@@ -9008,7 +9111,7 @@ function wireAgentComposer() {
           return;
         }
         if (e.key === 'Tab' && n) { e.preventDefault(); pickSlash(window._slashSel || 0, true); return; }
-        if (e.key === 'Escape') { e.preventDefault(); hideSlashPop(); if (ta.value === '/') ta.value = ''; return; }
+        if (e.key === 'Escape') { e.preventDefault(); hideSlashPop(); if (!restoreSlashDraft() && ta.value === '/') ta.value = ''; return; }
         if (e.key === 'Enter' && !e.shiftKey && n) {
           const token = ta.value.slice(1).split(/\s/)[0].toLowerCase();
           if (!(window._slashList || []).some(c => c.name.toLowerCase() === token)) {
@@ -9070,6 +9173,13 @@ function wireAgentComposer() {
         return;
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'm' || e.key === 'M')) {
+        // Ctrl+shift+m: the model picker, without leaving the keyboard.
+        // Type a name, enter switches the model, shift+enter adds one.
+        if (e.shiftKey) {
+          const pick = $('modelPick');
+          if (pick) { e.preventDefault(); pick.click(); }
+          return;
+        }
         const mic = $('agentMic');
         if (mic && !mic.hidden && !mic.disabled) { e.preventDefault(); mic.click(); }
         return;
@@ -10105,8 +10215,13 @@ async function open(rel, scroll) {
   // A file-watch refresh is not navigation. setRouteKind() resets #view to
   // the top before this fetch. Calling it here made the old transcript flash
   // at the top until the request finished, then jump back to the live tail.
+  const fetchStart = Date.now();
   const next = await (await fetch('/api/session?id=' + encodeURIComponent(rel))).json();
   if (seq !== conversationLoadSeq || rel !== activeRel) return;
+  // The user picked models after this fetch left: keep the local pick.
+  if ((modelTouchAt.get(rel) || 0) > fetchStart && current && current.key === rel
+      && Array.isArray(current.selectedModels) && current.selectedModels.length)
+    next.selectedModels = current.selectedModels;
   if (next.error) {
     $('view').innerHTML = `<div class="empty">this conversation is no longer available.<div class="hint">it may have been removed from disk.</div></div>`;
     current = null;
@@ -11848,7 +11963,8 @@ function helpNow() {
     sections.push({ label: 'model picker', keys: [
       ['type', 'filter models'],
       ['↑ ↓', 'highlight a model'],
-      ['enter', 'add / remove the highlighted model'],
+      ['enter', 'switch to the highlighted model'],
+      ['shift+enter', 'add / remove it in the parallel set'],
       ['ctrl+enter', 'use the selected models'],
       ['ctrl+r', 'refresh the list from pi'],
       ['esc', 'close'],
@@ -11874,6 +11990,7 @@ function helpNow() {
     else keys.push(['enter', 'new line'], ['ctrl+enter', 'open the terminal & send']);
     if (pi) keys.push(['ctrl+shift+enter', 'open the terminal & send']);
     if ($('agentMic') && !$('agentMic').hidden) keys.push(['ctrl+m', 'start / stop dictation']);
+    if (pi) keys.push(['ctrl+shift+m', 'change the model']);
     keys.push(['/', 'start a slash command'], ['esc', 'leave the composer']);
     sections.push({ label: pi ? 'composer · pi' : 'composer · claude', keys });
     return sections;
