@@ -419,15 +419,9 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .pfold-confirm { border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text); padding: var(--sp-2) var(--sp-3); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; font-size: var(--fs-meta); }
 .psection { margin: 0 0 var(--sp-4); }
 .psection > h3 { font-size: var(--fs-label); color: var(--text-faint); border-bottom: 1px solid var(--border); padding-bottom: 4px; margin: 0 0 8px; }
-/* mini gantt: the hero timeline of one project or epic (home visual language) */
-.mgantt { border: 1px solid var(--border); background: var(--surface-1); margin: 0 0 var(--sp-4); }
-.mg-lanes { position: relative; overflow: hidden; }
-.mg-lanes.scroll { overflow-y: auto; scrollbar-width: thin; }
+/* masthead: the project ridgeline — frameless, dateless, quiet */
+.mgantt { margin: 0 0 var(--sp-3); border-bottom: 1px solid var(--border); line-height: 0; }
 .mgantt .tmark { cursor: pointer; outline: none; }
-.mg-axis { position: relative; height: 15px; border-top: 1px solid var(--border); color: var(--text-faint); font-size: var(--fs-micro); overflow: hidden; }
-.mg-tick { position: absolute; top: 1px; transform: translateX(-50%); }
-.mg-tick.first { transform: none; }
-.mg-tick.last { transform: translateX(-100%); }
 /* redesigned project/epic panel */
 .pdesc .pidentity { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 4px; }
 .pdesc .psummary { margin: 0 0 var(--sp-3); max-width: 78ch; }
@@ -3533,14 +3527,15 @@ function renderMobileConversations() {
 }
 
 // Horizontal violin: message density becomes vertical thickness along the bar.
-function violinPath(x0, x1, cy, bins, fat = false) {
+// scale shrinks the amplitude for compressed charts (the project masthead).
+function violinPath(x0, x1, cy, bins, fat = false, scale = 1) {
   const n = Math.max(2, bins.length);
   const max = Math.max(1, ...bins);
   const span = Math.max(4, x1 - x0);
-  const width = fat ? 9 : 6;
+  const width = (fat ? 9 : 6) * scale;
   const pts = bins.map((v, i) => ({
     x: x0 + (i + .5) / n * span,
-    w: (fat ? 2.5 : 1.5) + width * Math.sqrt(v / max),
+    w: (fat ? 2.5 : 1.5) * scale + width * Math.sqrt(v / max),
   }));
   const top = pts.map(p => `${p.x},${cy - p.w}`).join(' L ');
   const bottom = [...pts].reverse().map(p => `${p.x},${cy + p.w}`).join(' L ');
@@ -6652,10 +6647,11 @@ function confirmFold(d, target, counts) {
   paint();
 }
 
-// ---- mini gantt: conversations of one project or epic over time ----
-// The hero section, drawn with the home timeline's visual language: a
-// duration line, a density violin per conversation, live dots, stroked
-// labels. Same .tmark classes, so every theme styles it for free.
+// ---- masthead: the project's history as a quiet ridgeline ----
+// The first element of the panel. No dates, no labels, no box — only the
+// home timeline's marks (duration lines + density violins + live dots),
+// compressed into at most 20% of the viewport. Silently clickable: hover
+// names a conversation, a click opens it. Art first, function inside.
 function miniGanttHtml(rows, color) {
   return `<div class="mgantt" data-mg-host></div>`;
 }
@@ -6669,51 +6665,44 @@ function wireMiniGantt(root, rows, color) {
     const b = Math.max(a, Date.parse(r.lastTs || r.firstTs || '') || 0);
     return { ...r, a, b };
   }).filter(r => r.a).sort((x, y) => x.a - y.a);
-  if (!items.length) { host.outerHTML = '<div class="empty" style="margin:8px 0">no conversations yet.</div>'; return; }
+  if (!items.length) { host.remove(); return; }
   const W = Math.max(320, host.clientWidth || 800);
   const t0 = items[0].a;
   const t1 = Math.max(now, ...items.map(i => i.b));
   const span = Math.max(t1 - t0, 3600000);
   const xFor = t => 4 + ((t - t0) / span) * (W - 8);
-  // Lane packing with a pixel gap wide enough for the label above the line.
+  // Tight lane packing — without labels a small time gap is enough.
   const laneEnds = [];
-  const gapT = span * (90 / W);
+  const gapT = span * (14 / W);
   for (const it of items) {
     let lane = laneEnds.findIndex(end => end + gapT <= it.a);
     if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-    laneEnds[lane] = Math.max(it.b, it.a + span * (24 / W));
+    laneEnds[lane] = Math.max(it.b, it.a + span * (10 / W));
     it.lane = lane;
   }
-  const laneH = 26, topPad = 4;
-  const chartH = topPad + laneEnds.length * laneH + 4;
+  // Height budget: at most 20vh. Lanes shrink to fit; violin amplitude
+  // shrinks with them, so a dense project becomes a ridgeline texture.
+  const budget = Math.max(56, Math.min(Math.round(window.innerHeight * 0.20), 190));
+  const laneH = Math.max(5, Math.min(24, Math.floor((budget - 10) / laneEnds.length)));
+  const scale = Math.max(0.3, Math.min(1, laneH / 22));
+  const chartH = 6 + laneEnds.length * laneH + 6;
   const marks = items.map(it => {
     const s = sessions.find(x => x.key === it.key) || it;
-    const x0 = xFor(it.a), x1 = Math.max(x0 + 6, xFor(it.b));
-    const cy = topPad + it.lane * laneH + laneH / 2 + 4;
+    const x0 = xFor(it.a), x1 = Math.max(x0 + 5, xFor(it.b));
+    const cy = 6 + it.lane * laneH + laneH / 2;
     const profile = s.densityChat || [];
     const bins = it.b > it.a && profile.length ? profile : [Math.max(1, ...(profile.length ? profile : [1]))];
     const live = isActive(s);
     const work = typeof isWorking === 'function' && isWorking(s);
-    const shortTitle = String(s.timelineTitle || it.title || '').slice(0, 12);
     const tip = `${it.title || it.key}\n${fmtDate(it.firstTs)} → ${fmtDate(it.lastTs)}${s.userCount ? `\n${s.userCount} user · ${s.assistantCount || 0} assistant` : ''}${work ? '\n● working now' : live ? '\n○ active in the last 5 min' : ''}`;
     return `<g class="tmark${live ? ' active' : ''}" data-mg="${esc(it.key)}" tabindex="0">
       <title>${esc(tip)}</title>
       <line class="duration" style="stroke:${color.stroke}" x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}"/>
-      <path class="violin" style="fill:${color.fill};stroke:${color.stroke}" d="${violinPath(x0, x1, cy, bins)}"/>
-      ${live || work ? `<circle class="livedot${work ? '' : ' idle'}" cx="${x1}" cy="${cy}" r="3.5"/>` : ''}
-      <text x="${x0}" y="${cy - 10}">${esc(shortTitle)}</text>
+      <path class="violin" style="fill:${color.fill};stroke:${color.stroke}" d="${violinPath(x0, x1, cy, bins, false, scale)}"/>
+      ${live || work ? `<circle class="livedot${work ? '' : ' idle'}" cx="${x1}" cy="${cy}" r="${Math.max(2.2, 3.5 * scale)}"/>` : ''}
     </g>`;
   }).join('');
-  const ticks = [];
-  for (let i = 0; i <= 5; i++) {
-    const t = t0 + (span * i) / 5;
-    const label = new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    ticks.push(`<span class="mg-tick${i === 0 ? ' first' : i === 5 ? ' last' : ''}" style="left:${i * 20}%">${esc(label)}</span>`);
-  }
-  const maxH = 260;
-  host.innerHTML = `<div class="mg-lanes${chartH > maxH ? ' scroll' : ''}" style="height:${Math.min(chartH, maxH)}px">
-    <svg width="${W}" height="${chartH}" viewBox="0 0 ${W} ${chartH}">${marks}</svg>
-  </div><div class="mg-axis">${ticks.join('')}</div>`;
+  host.innerHTML = `<svg width="${W}" height="${chartH}" viewBox="0 0 ${W} ${chartH}">${marks}</svg>`;
   host.querySelectorAll('[data-mg]').forEach(g => {
     g.onclick = () => open(g.dataset.mg);
     g.onkeydown = e => { if (e.key === 'Enter') open(g.dataset.mg); };
@@ -6780,6 +6769,7 @@ function renderProjectPanel(d) {
     .map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
   const docBtn = (kind, glyph, label) => `<button data-p-memory="${kind}" ${memory ? '' : 'disabled'} title="Open the ${label} document">${glyph} ${label}</button>`;
   $('view').innerHTML = `<div class="project-overview">
+    ${miniGanttHtml(heroRows)}
     <div class="phead" style="border-left-color:${color.fill}">
       <h2>❯ ${esc(d.project)}</h2>
       <div class="pmeta"><code>${esc(shortDir(d.cwd))}</code> · ${d.conversations} conversations · ${d.epics.length} epics · latest ${fmtDate(d.latestTs)}<button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}</div>
@@ -6787,7 +6777,6 @@ function renderProjectPanel(d) {
       ${(d.foldSuggestions || []).map((x, i) => `<div class="pfold-suggest">same project as <b>${esc(x.other)}</b>? <span class="dim">${esc(x.reason)}</span><button data-p-fold-accept="${i}" title="Fold ${esc(x.from)} into ${esc(x.into)}">⇄ fold</button><button class="ghost" data-p-fold-dismiss="${i}" title="Not the same project · stop suggesting this pair">✕</button></div>`).join('')}
       <div id="pFoldPanel" hidden></div>
     </div>
-    ${miniGanttHtml(heroRows)}
     <section class="psection pdesc">
       ${memory
         ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(o.summary || '(no overview summary yet)')}</p>`
@@ -11112,11 +11101,11 @@ async function showEpic(id, focusKey = activeRel) {
   const epicColor = d.project && d.project !== '?' ? projectColor(d.project) : { fill: 'var(--accent)', stroke: 'var(--accent)' };
   const docBtn = (kind, glyph, label) => `<button data-e-memory="${kind}" ${memory ? '' : 'disabled'} title="Open the epic ${label} document">${glyph} ${label}</button>`;
   $('view').innerHTML = `<div class="project-overview">
+    ${miniGanttHtml(heroRows)}
     <div class="phead" style="border-left-color:${d.project && d.project !== '?' ? projectColor(d.project).fill : 'var(--accent)'}">
       <h2>▸ ${esc(d.title || 'epic')}</h2>
       <div class="pmeta">epic in <b>${esc(d.project || '?')}</b> · ${d.sessions.length} conversations · updated ${fmtDate(d.updatedAt)}<button id="eStory" class="ghost pfoldbtn" title="The narrative story built for this epic">story</button><button id="eEvidence" class="ghost pfoldbtn" title="Every note and evidence card used to build this epic">evidence</button><button id="eRebuild" class="ghost pfoldbtn" title="Keep current conversations and add any selected conversations">${selected.size ? `add ${selected.size} selected + rebuild` : 'rebuild story'}</button></div>
     </div>
-    ${miniGanttHtml(heroRows)}
     <section class="psection pdesc">
       ${memory
         ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(o.summary || d.abstract || '')}</p>`
