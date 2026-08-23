@@ -3263,20 +3263,31 @@ function cleanEpicCandidates(profile, meta) {
 // Documents regenerate fresh from all leaves — no synthesis pass ever reads
 // its own previous output, so the prose cannot rot.
 const MEMORY_LEAVES_DIR = path.join(CACHE_DIR, 'memory-leaves');
-const LEAF_VERSION = 1;
+const LEAF_VERSION = 2; // v2: two focused calls, force+situation on intent, narrative abstracts
 
-const LEAF_EXTRACT_PROMPT =
-  'The attached file is one AI-assisted work conversation from a software project. Extract durable memory facts from it. ' +
+// Dialogue call: judgment work (abstract + intent candidates). It gets the
+// project primer for WEIGHING only — facts must come from this conversation.
+const LEAF_DIALOGUE_PROMPT =
+  'The attached file is the dialogue of one AI-assisted work conversation from a software project: numbered user messages, each with the assistant message immediately before it. ' +
+  'PROJECT CONTEXT, when present, tells you what the project is about — use it only to judge importance; extract facts only from THIS conversation. ' +
   'Reply with STRICT JSON only, no prose or code fence: ' +
-  '{"abstract":"2-3 sentences: what was attempted and what came out",' +
-  '"intent":[{"id":N,"kind":"vision|motivation|outcome|principle|constraint|preference|non-goal","confidence":0.0,"reason":"one line"}],' +
-  '"environment":[{"type":"setup|command|service|location|tooling|auth|caution","fact":"one line"}],' +
-  '"problems":[{"state":"open|resolved","fact":"one line"}]}. ' +
+  '{"abstract":"one narrative paragraph, 4-8 sentences",' +
+  '"intent":[{"id":N,"kind":"vision|motivation|outcome|principle|constraint|preference|non-goal","force":"reactive-fix|local-preference|considered-direction|core-drive","situation":"one line: what the user was reacting to","confidence":0.0,"reason":"one line"}]}. ' +
+  'abstract: tell what the user was trying to do and WHY, how the direction changed along the way, what actually came out, and what this conversation means for the project. Write it as an honest narrative, not a list. ' +
   'intent: select ONLY numbered user messages that reveal durable, implementation-independent user intent — vision, motivation, desired outcome or experience, values, product principles, durable constraints, trade-offs, explicit non-goals. ' +
-  'Routine commands, narrow implementation requests, status checks, and transient fixes are not intent. Use the exact ids from the input. ' +
+  'Judge the force honestly: a complaint while fixing a bug is a reactive-fix — select it only when it hints at a deeper durable want; an unprompted statement of direction or values is a considered-direction or core-drive. ' +
+  'Routine commands, narrow implementation requests, and status checks are not intent. Use the exact ids from the input. ' +
+  'An empty intent array is fine. Extract only what the conversation supports; do not invent.';
+
+// Tool call: extraction work (environment + problems) from the tool slice.
+const LEAF_TOOLS_PROMPT =
+  'The attached file lists the tool activity (commands, file edits, results, errors) and the final exchange of one AI-assisted work conversation from a software project. ' +
+  'Reply with STRICT JSON only, no prose or code fence: ' +
+  '{"environment":[{"type":"setup|command|service|location|tooling|auth|caution","fact":"one line"}],' +
+  '"problems":[{"state":"open|resolved","fact":"one line"}]}. ' +
   'environment: reusable setup facts only — commands that matter, services and addresses, important paths, tooling, authentication METHODS. NEVER output passwords, tokens, private keys, secret values, or copied credentials. ' +
   'problems: what broke and stayed open, and notable resolutions that changed the approach. ' +
-  'Empty arrays are fine. Extract only what the conversation supports; do not invent.';
+  'Empty arrays are fine. Extract only what the activity supports; do not invent.';
 
 function leafPathFor(key) {
   return path.join(MEMORY_LEAVES_DIR, key.replace(/[:\/\\]/g, '__') + '.json');
@@ -3301,18 +3312,34 @@ async function readLeaf(key) {
 function leafStateFor(entry, leaf) {
   if (!leaf) return 'missing';
   if (leaf.partial) return 'seeded'; // intent lane only (migrated from an old build)
+  if ((leaf.v || 1) < LEAF_VERSION) return 'stale'; // older extraction quality — re-extract on the next backfill
   return leaf.memoryHash && entry && leaf.memoryHash === entry.memoryHash ? 'fresh' : 'stale';
 }
 
-// One conversation -> one leaf. One model call when it fits; grouped calls
-// with a merged result otherwise. The verbatim intent quotes are attached
-// here from the transcript — the model only returns ids.
+// A small stable primer from the current manifest. It rides along in the
+// dialogue extraction so the classifier can weigh importance against the
+// project's real shape — the wisdom the whole-project classifier used to have.
+async function projectPrimerFor(project) {
+  try {
+    const manifest = JSON.parse(await fsp.readFile(projectMemoryPaths(project).manifest, 'utf8'));
+    const o = manifest.overview || {};
+    const parts = [o.identity, o.summary, o.purpose, manifest.coreIntent].filter(Boolean);
+    return parts.length ? clipped(parts.join(' · '), 1400) : '';
+  } catch { return ''; }
+}
+
+// One conversation -> one leaf. Two focused calls: dialogue (judgment) and
+// tools (extraction). Grouped calls with merged results when too big. The
+// verbatim intent quotes are attached here from the transcript — the model
+// only returns ids.
 async function extractLeaf(key) {
   const entry = index[key];
   if (!entry) throw new Error('unknown conversation: ' + key);
   const memoryHash = entry.memoryHash || null; // captured before the call: growth during the job leaves the leaf correctly stale
   const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
   const messages = data.messages || [];
+  const project = projectNameOf(entry.cwd);
+  const primer = await projectPrimerFor(project);
   const intentItems = [];
   let prevAssistant = '';
   messages.forEach((m, i) => {
@@ -3331,35 +3358,55 @@ async function extractLeaf(key) {
     : toolLines;
   const header = [
     `CONVERSATION ${key}`,
-    `Project: ${projectNameOf(entry.cwd)} · Directory: ${entry.cwd || '?'}`,
+    `Project: ${project} · Directory: ${entry.cwd || '?'}`,
     `Date: ${data.firstTs || entry.firstTs || '?'} -> ${data.lastTs || entry.lastTs || '?'}`,
     `Title: ${oneLine(data.title || entry.title, '(untitled)')}`,
-    '', '',
   ].join('\n');
-  const blocks = [
-    '=== USER MESSAGES (numbered, each with the assistant message immediately before it) ===',
-    ...intentItems.map(it => `[#${it.id}] ${it.ts || '?'}\nASSISTANT BEFORE: ${clipped(it.assistantBefore, 6000) || '(none)'}\nUSER: ${clipped(it.user, 12000)}`),
-    '=== TOOL ACTIVITY (chronological, clipped) ===',
-    ...(tools.length ? tools : ['(none)']),
-  ];
-  const budget = piTargetTokens() - 8000 - estimateInputTokens(header);
-  const groups = packTextBlocks(blocks, Math.max(20000, budget));
-  const results = await mapLimit(groups, 2, async (items, i) => {
-    const label = groups.length > 1 ? `SECTION ${i + 1}/${groups.length}\n\n` : '';
-    try { return modelJson(await runPi(header + label + items.join('\n\n'), LEAF_EXTRACT_PROMPT)); }
-    catch (e) { throw new Error(`leaf extraction failed (${key}): ${e.message}`); }
-  });
+  const runGrouped = async (head, blocks, prompt) => {
+    const budget = piTargetTokens() - 8000 - estimateInputTokens(head);
+    const groups = packTextBlocks(blocks, Math.max(20000, budget));
+    return mapLimit(groups, 2, async (items, i) => {
+      const label = groups.length > 1 ? `SECTION ${i + 1}/${groups.length}\n\n` : '';
+      try { return modelJson(await runPi(head + label + items.join('\n\n'), prompt)); }
+      catch (e) { throw new Error(`leaf extraction failed (${key}): ${e.message}`); }
+    });
+  };
+
+  // Call 1 — dialogue: abstract + intent candidates, with the project primer.
+  let dialogueResults = [];
+  if (intentItems.length) {
+    const dialogueHeader = header +
+      (primer ? `\nPROJECT CONTEXT (for judging importance only): ${primer}` : '') + '\n\n';
+    dialogueResults = await runGrouped(dialogueHeader, [
+      '=== USER MESSAGES (numbered, each with the assistant message immediately before it) ===',
+      ...intentItems.map(it => `[#${it.id}] ${it.ts || '?'}\nASSISTANT BEFORE: ${clipped(it.assistantBefore, 6000) || '(none)'}\nUSER: ${clipped(it.user, 12000)}`),
+    ], LEAF_DIALOGUE_PROMPT);
+  }
+
+  // Call 2 — tools: environment + problems, plus the final exchange as context.
+  let toolResults = [];
+  if (tools.length) {
+    const lastChat = messages.filter(m => m.role === 'user' || m.role === 'assistant').slice(-2)
+      .map(m => `${m.role}: ${clipped(m.text, 2000)}`);
+    toolResults = await runGrouped(header + '\n\n', [
+      '=== TOOL ACTIVITY (chronological, clipped) ===', ...tools,
+      '=== FINAL EXCHANGE ===', ...(lastChat.length ? lastChat : ['(none)']),
+    ], LEAF_TOOLS_PROMPT);
+  }
+
   const byId = new Map(intentItems.map(it => [it.id, it]));
   const seen = new Set();
   const intent = [];
-  for (const r of results) {
+  for (const r of dialogueResults) {
     for (const sel of Array.isArray(r.intent) ? r.intent : []) {
       const it = byId.get(Number(sel.id));
       if (!it || seen.has(it.id)) continue;
       seen.add(it.id);
       intent.push({
-        messageIndex: it.id, ts: it.ts, kind: oneLine(sel.kind, 'outcome'), confidence: Number(sel.confidence) || 0,
-        reason: oneLine(sel.reason, ''), user: clipped(it.user, 24000), assistantBefore: clipped(it.assistantBefore, 10000),
+        messageIndex: it.id, ts: it.ts, kind: oneLine(sel.kind, 'outcome'),
+        force: oneLine(sel.force, 'local-preference'), situation: oneLine(sel.situation, ''),
+        confidence: Number(sel.confidence) || 0, reason: oneLine(sel.reason, ''),
+        user: clipped(it.user, 24000), assistantBefore: clipped(it.assistantBefore, 10000),
       });
     }
   }
@@ -3369,10 +3416,10 @@ async function extractLeaf(key) {
     return out;
   };
   const environment = dedupe(
-    results.flatMap(r => stringFactRows(r.environment, 'type')), r => r.type + '\x00' + r.fact).slice(0, 60);
+    toolResults.flatMap(r => stringFactRows(r.environment, 'type')), r => r.type + '\x00' + r.fact).slice(0, 60);
   const problems = dedupe(
-    results.flatMap(r => stringFactRows(r.problems, 'state')), r => r.state + '\x00' + r.fact).slice(0, 40);
-  const abstract = results.map(r => oneLine(r.abstract, '')).filter(Boolean)
+    toolResults.flatMap(r => stringFactRows(r.problems, 'state')), r => r.state + '\x00' + r.fact).slice(0, 40);
+  const abstract = dialogueResults.map(r => oneLine(r.abstract, '')).filter(Boolean)
     .sort((a, b) => b.length - a.length)[0] || '';
   const leaf = {
     v: LEAF_VERSION, key, memoryHash, builtAt: Date.now(),
@@ -3437,13 +3484,47 @@ const PYRAMID_PARTIAL_SUFFIX = ' This is one chronological section of a larger p
 const PYRAMID_MERGE_SUFFIX = ' The attached file contains partial results from chronological sections of one project. Merge them into one result of the same JSON shape, without duplication; newer evidence wins on conflict.';
 
 const PYRAMID_OVERVIEW_PROMPT =
-  'The attached file lists dated abstracts for every conversation of one software project, oldest first. ' +
-  'Build a durable high-level view of the WHOLE project arc — purpose and vision must reflect the full history, not only recent work. ' +
+  'The attached file lists dated narrative abstracts for every conversation of one software project, oldest first. ' +
+  'Understand the WHOLE arc, then describe the project as it truly stands today. ' +
+  'Be honest and specific: if this is a prototype, an experiment, a personal daily tool, an abandoned spike, or a real product, say so plainly. ' +
+  'Trace the evolution: what it began as and what it became. When a newer direction clearly supersedes an older one, describe the current direction and drop the old one from purpose and vision. ' +
+  'When an older direction was never revoked, it still stands — keep it even if recent work went elsewhere. ' +
+  'Do not hedge, do not average conflicting evidence into vague prose, and do not pad lists. ' +
   'Also find coherent multi-session epic candidates not already covered by the listed existing epics. ' +
   'Reply with STRICT JSON only, no prose or code fence: ' +
-  '{"overview":{"summary":"2-4 sentences","purpose":"...","vision":"...","desiredOutcomes":["..."],"principles":["..."],"nonGoals":["..."]},' +
+  '{"overview":{"summary":"an honest paragraph: what this is, for whom, and where it truly stands","identity":"one line: prototype | experiment | personal daily tool | product | … with a qualifier","evolution":["began as X, became Y because Z"],"purpose":"...","vision":"...","desiredOutcomes":["..."],"principles":["..."],"nonGoals":["..."]},' +
   '"epicCandidates":[{"title":"max 70 chars","abstract":"2-4 sentences","reason":"...","sessionIds":["exact session id"]}]}. ' +
   'Epic candidates need at least two related sessions. Use only exact session ids from the input.';
+
+// Layer 1.5 — the global weighing pass. Per-conversation classifiers cannot
+// compare across sessions; this pass sees every candidate quote at once and
+// restores the cross-session judgment the old whole-project classifier had.
+const PYRAMID_WEIGH_PROMPT =
+  'The attached file lists candidate user-intent quotes from one software project, in chronological order with dates. ' +
+  'Weigh them AGAINST EACH OTHER to find what the user truly, durably wants. ' +
+  'For each quote judge: was the user just reacting to fix a momentary problem, or revealing a lasting goal? Does a later quote supersede it? Is it part of a repeated pattern across sessions? ' +
+  'Assign every id exactly one tier: ' +
+  '"core" — a deep drive, stated with force or returned to repeatedly; ' +
+  '"standing" — a durable direction never revoked; ' +
+  '"pattern" — weak alone but part of a clearly repeated preference; ' +
+  '"superseded" — a real direction later clearly replaced (name the replacing direction in the note); ' +
+  '"one-off" — a momentary reaction with no durable signal. ' +
+  'Be strict: when in doubt between one-off and anything higher, choose one-off. ' +
+  'Reply with STRICT JSON only, no prose or code fence: {"tiers":[{"id":"...","tier":"core|standing|pattern|superseded|one-off","note":"one line"}]}. Keep every input id.';
+
+const PYRAMID_WEIGH_MERGE_PROMPT =
+  'The attached file lists tier assignments for user-intent quotes, produced from chronological sections of the same project that could not see each other. ' +
+  'Produce the final assignment for every id: promote quotes that form cross-section repeated patterns, and mark quotes superseded when a later section clearly replaced their direction. ' +
+  'Reply with STRICT JSON only: {"tiers":[{"id":"...","tier":"core|standing|pattern|superseded|one-off","note":"one line"}]}. Keep every input id.';
+
+const PYRAMID_INTENT_PROMPT =
+  'The attached file contains user intent evidence for one software project: verbatim user quotes weighed into tiers (core, standing, pattern, superseded — momentary one-offs were already removed), in chronological order with dates. ' +
+  'Recover what the user truly wants: the deep goals that survive implementation changes. ' +
+  'Weigh the evidence — core and repeated quotes dominate; a quote stated once in reaction to a bug is weak; superseded quotes are history: report the CURRENT direction, and describe the old direction only under evolution when it explains the project. ' +
+  'Resolve repetition and evolution. Keep real tensions instead of forcing false agreement. ' +
+  'Be honest and plain: if the project is a prototype, an experiment, or a personal tool, say so. Do not hedge, do not average opposing signals into mush, and never turn current implementation details into goals. ' +
+  'Reply with STRICT JSON only, no prose or code fence: ' +
+  '{"coreIntent":"...","vision":"...","currentDirection":"where the work is truly pointed now and why","whatMatters":["..."],"desiredOutcomes":["..."],"principles":["..."],"constraints":["..."],"tensions":["..."],"nonGoals":["..."],"evolution":["wanted X, now wants Y because Z"],"openIntentQuestions":["..."]}.';
 
 const PYRAMID_ENV_PROMPT =
   'The attached file lists dated environment facts extracted from every conversation of one software project, oldest first. ' +
@@ -3455,6 +3536,7 @@ const PYRAMID_ENV_PROMPT =
 const PYRAMID_STATUS_PROMPT =
   'The attached file lists dated problem records (open or resolved) and the newest conversation abstracts for one software project, oldest first. ' +
   'Build the CURRENT status snapshot. A problem resolved later is not open. Finished work is not unfinished. Prefer the newest evidence. ' +
+  'Be specific and plain — name the real things, do not pad lists, and drop anything the newest evidence shows as done or abandoned. ' +
   'Reply with STRICT JSON only, no prose or code fence: ' +
   '{"recentFocus":["..."],"unfinished":["..."],"todos":["..."],"openQuestions":["..."]}.';
 
@@ -3473,6 +3555,94 @@ async function synthesizeLaneJson(header, blocks, prompt, emit, label, step, ste
 }
 
 const laneHashOf = items => crypto.createHash('sha256').update('lane-v1\x00' + JSON.stringify(items)).digest('hex').slice(0, 32);
+
+// Weigh all intent candidates against each other. Returns Map(id -> {tier, note}).
+async function weighIntentCandidates(project, overview, candidates, emit, step, steps) {
+  const tiers = new Map();
+  if (!candidates.length) return tiers;
+  const header = `PROJECT: ${project}\nCURRENT OVERVIEW: ${clipped(JSON.stringify(overview), 2000)}\n\n`;
+  const blocks = candidates.map(q => JSON.stringify({
+    id: q.id, date: String(q.ts || '?').slice(0, 10), kind: q.kind, force: q.force || null,
+    situation: q.situation || null, reason: q.reason || null, quote: clipped(q.user, 900),
+  }));
+  const budget = piTargetTokens() - 16000;
+  const groups = packTextBlocks(blocks, Math.max(20000, budget - estimateInputTokens(header)));
+  emit(`Weighing ${candidates.length} intent quotes${groups.length > 1 ? ` (${groups.length} sections)` : ''}…`, step, steps);
+  const partials = await mapLimit(groups, 2, async (items, i) => {
+    const label = groups.length > 1 ? `SECTION ${i + 1}/${groups.length}\n\n` : '';
+    return modelJson(await runPi(header + label + items.join('\n'), PYRAMID_WEIGH_PROMPT));
+  });
+  let rows = partials.flatMap(p => Array.isArray(p.tiers) ? p.tiers : []);
+  if (groups.length > 1) {
+    // Sections could not compare across each other — one cheap merge pass over
+    // the one-line assignments restores global consistency.
+    const compact = rows.map(t => JSON.stringify({ id: t.id, tier: t.tier, note: oneLine(t.note, '') }));
+    const merged = modelJson(await runPi(header + compact.join('\n'), PYRAMID_WEIGH_MERGE_PROMPT));
+    if (Array.isArray(merged.tiers) && merged.tiers.length) rows = merged.tiers;
+  }
+  const valid = new Set(['core', 'standing', 'pattern', 'superseded', 'one-off']);
+  for (const t of rows) {
+    if (!t || !valid.has(t.tier)) continue;
+    tiers.set(String(t.id), { tier: t.tier, note: oneLine(t.note, '') });
+  }
+  return tiers;
+}
+
+function renderPyramidOverviewDoc(project, profile, builtAt, sourceHash) {
+  const o = profile.overview || {};
+  return `# Project overview: ${project}\n\n**Abstract.** ${o.summary || ''}\n\n${projectDocMeta(project, builtAt, sourceHash)}\n\n## What this is\n\n${o.identity || '(not established)'}\n\n## Evolution\n\n${mdList(o.evolution, 'No direction changes found.')}\n\n## Purpose\n\n${o.purpose || '(not established)'}\n\n## Vision\n\n${o.vision || '(not established)'}\n\n## Desired outcomes\n\n${mdList(o.desiredOutcomes)}\n\n## Product principles\n\n${mdList(o.principles)}\n\n## Non-goals\n\n${mdList(o.nonGoals)}\n`;
+}
+
+const PYRAMID_TIER_LABELS = [
+  ['core', 'Core drives'], ['standing', 'Standing directions'],
+  ['pattern', 'Repeated patterns'], ['superseded', 'Superseded directions (historical)'],
+];
+
+function renderPyramidIntentDoc(project, intent, quotes, tiers, builtAt, sourceHash) {
+  const parts = [
+    `# Deep project intent: ${project}`, '',
+    `**Abstract.** ${intent.coreIntent || intent.vision || ''}`, '', projectDocMeta(project, builtAt, sourceHash), '',
+    '## Core intent', '', intent.coreIntent || '(not established)', '',
+    '## Vision', '', intent.vision || '(not established)', '',
+    '## Current direction', '', intent.currentDirection || '(not established)', '',
+    '## What matters', '', mdList(intent.whatMatters), '',
+    '## Desired outcomes', '', mdList(intent.desiredOutcomes), '',
+    '## Durable principles', '', mdList(intent.principles), '',
+    '## Durable constraints', '', mdList(intent.constraints), '',
+    '## Tensions and trade-offs', '', mdList(intent.tensions), '',
+    '## Non-goals', '', mdList(intent.nonGoals), '',
+    '## Evolution', '', mdList(intent.evolution, 'No superseded directions found.'), '',
+    '## Open intent questions', '', mdList(intent.openIntentQuestions), '',
+    '## Intent evidence', '',
+    'Verbatim user quotes, weighed against the whole project span. Momentary one-off reactions are omitted.', '',
+  ];
+  for (const [tier, label] of PYRAMID_TIER_LABELS) {
+    const rows = quotes.filter(q => (tiers.get(q.id) || {}).tier === tier);
+    if (!rows.length) continue;
+    parts.push(`### ${label}`, '');
+    for (const item of rows) {
+      const t = tiers.get(item.id) || {};
+      parts.push(`#### ${String(item.ts || '?').slice(0, 10)} — ${oneLine(item.title, '(untitled)')}`, '',
+        `- **Kind:** ${item.kind} · **Force:** ${item.force || '?'}${t.note ? ` · **Weighing:** ${t.note}` : ''}`);
+      if (item.situation) parts.push(`- **Situation:** ${item.situation}`);
+      parts.push(`- **Session:** \`${item.key}\` · message #${item.messageIndex}`, '',
+        quoteIntent(item.user), '');
+    }
+  }
+  return parts.join('\n');
+}
+
+function pyramidIntentBlock(item, tierInfo) {
+  const historical = tierInfo.tier === 'superseded';
+  return [
+    `=== INTENT EVIDENCE ${item.id} ===`,
+    `Date: ${item.ts || '?'}`,
+    `Tier: ${tierInfo.tier}${tierInfo.note ? ' — ' + tierInfo.note : ''}`,
+    `Kind: ${item.kind} · force: ${item.force || '?'} · situation: ${item.situation || '?'}`,
+    '', 'USER:', clipped(item.user, historical ? 1500 : 12000),
+    ...(historical ? [] : ['', 'ASSISTANT BEFORE:', clipped(item.assistantBefore, 4000) || '(none)']),
+  ].join('\n');
+}
 
 // Regenerate all four documents from the current leaves. Lanes whose input
 // set is unchanged skip their model call and keep the existing file.
@@ -3508,65 +3678,82 @@ async function regenerateProjectDocs(project, emit = () => {}) {
   const newestAbstracts = rows.slice(-12).map(r => `[${dated(r.leaf.span?.lastTs)}] ${r.leaf.title}: ${r.leaf.abstract || '(none)'}`);
 
   const laneHashes = {
-    overview: laneHashOf(abstractBlocks), intent: laneHashOf(intentSelected.map(q => q.id)),
+    overview: laneHashOf(abstractBlocks),
+    intent: laneHashOf(intentSelected.map(q => [q.id, q.force || '', q.kind])),
     environment: laneHashOf(envFacts), status: laneHashOf(problemFacts.concat(newestAbstracts)),
   };
   const skip = lane => prevHashes[lane] === laneHashes[lane] && fs.existsSync(paths[lane === 'status' ? 'status' : lane]);
 
-  // Overview first: it is cheap and feeds the intent synthesis as context.
+  // Overview first: it is cheap and feeds the weighing and the intent
+  // synthesis as context.
   const header = `PROJECT: ${project}\nEXISTING EPICS (do not duplicate):\n${JSON.stringify(meta.epics.map(e => ({ title: e.title, sessionIds: e.sessionIds })))}\n\n`;
   let profile = null;
   if (skip('overview') && prev && prev.overview) {
-    emit('Overview unchanged — keeping it.', 1, 5);
+    emit('Overview unchanged — keeping it.', 1, 6);
     profile = { overview: prev.overview, epicCandidates: (prev.candidates || []) };
   } else {
-    profile = await synthesizeLaneJson(header, abstractBlocks, PYRAMID_OVERVIEW_PROMPT, emit, 'Building the project overview', 1, 5);
+    profile = await synthesizeLaneJson(header, abstractBlocks, PYRAMID_OVERVIEW_PROMPT, emit, 'Building the project overview', 1, 6);
   }
   const overview = profile.overview || {};
 
-  let intent = null;
-  if (!skip('intent')) intent = await synthesizeProjectIntent(project, overview, intentSelected, emit);
-  else emit('Intent unchanged — keeping it.', 2, 5);
+  // Intent: weigh all candidates globally (layer 1.5), then synthesize from
+  // the surviving tiers. One-off reactions are dropped before synthesis so
+  // they cannot dilute the result.
+  let intent = null, tiers = new Map(), weighedQuotes = intentSelected;
+  if (!skip('intent')) {
+    tiers = await weighIntentCandidates(project, overview, intentSelected, emit, 2, 6);
+    weighedQuotes = intentSelected.filter(q => {
+      const t = tiers.get(q.id);
+      return t && t.tier !== 'one-off';
+    });
+    if (!weighedQuotes.length) weighedQuotes = intentSelected; // weighing failed or everything one-off: keep all rather than nothing
+    const intentBlocks = weighedQuotes.map(q => pyramidIntentBlock(q, tiers.get(q.id) || { tier: 'standing', note: '' }));
+    const intentHeader = `PROJECT: ${project}\nHIGH-LEVEL OVERVIEW:\n${clipped(JSON.stringify(overview), 2500)}\n\n`;
+    intent = await synthesizeLaneJson(intentHeader, intentBlocks, PYRAMID_INTENT_PROMPT, emit, `Synthesizing ${weighedQuotes.length} weighed intent quotes`, 3, 6);
+  } else emit('Intent unchanged — keeping it.', 3, 6);
 
   let environment = null, status = null;
   const envHeader = `PROJECT: ${project}\n\n`;
   await Promise.all([
     (async () => {
-      if (skip('environment')) return emit('Environment unchanged — keeping it.', 3, 5);
-      environment = await synthesizeLaneJson(envHeader, envFacts.length ? envFacts : ['(no environment facts yet)'], PYRAMID_ENV_PROMPT, emit, 'Building the environment document', 3, 5);
+      if (skip('environment')) return emit('Environment unchanged — keeping it.', 4, 6);
+      environment = await synthesizeLaneJson(envHeader, envFacts.length ? envFacts : ['(no environment facts yet)'], PYRAMID_ENV_PROMPT, emit, 'Building the environment document', 4, 6);
     })(),
     (async () => {
       if (skip('status')) return;
       const statusBlocks = ['=== PROBLEMS ===', ...(problemFacts.length ? problemFacts : ['(none)']), '=== NEWEST ABSTRACTS ===', ...newestAbstracts];
-      status = normalizeProjectStatus(await synthesizeLaneJson(envHeader, statusBlocks, PYRAMID_STATUS_PROMPT, emit, 'Building the status document', 3, 5));
+      status = normalizeProjectStatus(await synthesizeLaneJson(envHeader, statusBlocks, PYRAMID_STATUS_PROMPT, emit, 'Building the status document', 4, 6));
     })(),
   ]);
 
-  emit('Writing project memory documents…', 4, 5);
+  emit('Writing project memory documents…', 5, 6);
   const builtAt = Date.now();
   const sourceHash = projectSourceHash(meta);
   const candidates = cleanEpicCandidates(profile, meta);
   await fsp.mkdir(paths.dir, { recursive: true });
   const writes = [];
-  if (!skip('overview')) writes.push(fsp.writeFile(paths.overview, renderProjectOverviewDoc(project, profile, builtAt, sourceHash)));
-  if (intent) writes.push(fsp.writeFile(paths.intent, renderProjectIntentDoc(project, intent, intentSelected, builtAt, sourceHash)));
+  if (!skip('overview')) writes.push(fsp.writeFile(paths.overview, renderPyramidOverviewDoc(project, profile, builtAt, sourceHash)));
+  if (intent) writes.push(fsp.writeFile(paths.intent, renderPyramidIntentDoc(project, intent, weighedQuotes, tiers, builtAt, sourceHash)));
   if (environment) writes.push(fsp.writeFile(paths.environment, renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash)));
   if (status) writes.push(fsp.writeFile(paths.status, renderProjectStatusDoc(project, status, builtAt, sourceHash)));
   writes.push(fsp.writeFile(path.join(PROJECT_MEMORY_INPUTS_DIR, projectMemorySlug(project) + '-pyramid.json'), JSON.stringify({
     project, builtAt, sourceHash, laneHashes, leaves: rows.map(r => ({ key: r.key, state: leafStateFor(r.entry, r.leaf) })),
-    intentQuotes: intentSelected.length, envFacts: envFacts.length, problems: problemFacts.length,
+    intentQuotes: intentSelected.length, weighedQuotes: weighedQuotes.length,
+    tiers: [...tiers.entries()].map(([id, t]) => ({ id, ...t })),
+    envFacts: envFacts.length, problems: problemFacts.length,
   })));
   await Promise.all(writes);
   const manifest = {
     project, builtAt, sourceHash, conversations: rows.length,
     classifiedMessages: prev && prev.classifiedMessages || 0,
     selectedIntentMessages: intentSelected.length,
+    coreIntent: (intent && intent.coreIntent) || (prev && prev.coreIntent) || null,
     overview: profile.overview || (prev && prev.overview) || {}, candidates,
     paths: { overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status, inputs: paths.inputs },
-    pyramid: { v: 1, builtAt, laneHashes, leafCount: rows.length, seededLeaves: rows.filter(r => r.leaf.partial).length },
+    pyramid: { v: 2, builtAt, laneHashes, leafCount: rows.length, seededLeaves: rows.filter(r => r.leaf.partial).length },
   };
   await fsp.writeFile(paths.manifest, JSON.stringify(manifest));
-  emit('Project memory saved.', 5, 5);
+  emit('Project memory saved.', 6, 6);
   return manifest;
 }
 

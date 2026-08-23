@@ -31,11 +31,13 @@ Two hard rules follow:
 ## The pyramid
 
 ```text
-layer 2   deep intent · environment · status · overview      (regenerated docs)
-             ▲              ▲            ▲         ▲
-layer 1   intent quotes · env facts · problems · abstract    (per-conversation leaf, cached)
-             ▲              ▲            ▲         ▲
-layer 0   raw transcript (immutable once the conversation settles)
+layer 2    deep intent · environment · status · overview     (regenerated docs)
+              ▲              ▲            ▲         ▲
+layer 1.5  global weighing of intent quotes (tiers)          (cheap, whole-span, cached)
+              ▲
+layer 1    intent quotes · env facts · problems · abstract   (per-conversation leaf, cached)
+              ▲              ▲            ▲         ▲
+layer 0    raw transcript (immutable once the conversation settles)
 ```
 
 ### Layer 0 — raw transcripts
@@ -49,12 +51,13 @@ One background job per settled conversation produces one leaf file. The leaf
 is JSON, small, dated, and typed. It contains four lanes, each extracted from
 the transcript slice that carries that information:
 
-| Lane | Reads | Produces |
+Extraction uses **two focused calls** (leaf v2), split by channel so judgment
+work and extraction work never share one prompt:
+
+| Call | Reads | Produces |
 | --- | --- | --- |
-| `intent` | user messages + the assistant message before each | selected quotes with kind, confidence, reason (same classifier as today, minus the overview dependency) |
-| `environment` | tool calls, commands, and command outputs | dated facts: setup steps, commands, services, paths, tooling, auth methods, cautions |
-| `problems` | failure/retry loops, abort markers, final states | what broke, what was resolved, what stayed open |
-| `abstract` | first and last user/assistant messages | 2–3 lines: what was attempted, what came out |
+| dialogue | user messages + the assistant message before each, plus a short **project primer** (current overview + core intent, for judging importance only) | `abstract`: one honest narrative paragraph (what was attempted, why, direction changes, outcome) · `intent`: selected quotes with kind, **force** (reactive-fix → core-drive), **situation** (what the user was reacting to), confidence, reason |
+| tools | tool calls, commands, results, errors, final exchange | `environment`: dated setup facts · `problems`: open/resolved records |
 
 Leaf shape:
 
@@ -77,15 +80,37 @@ Rules:
 - Leaves live under `~/.cache/aiconvo/memory-leaves/<session-key>.json`.
 - Leaves are keyed by **conversation, not project**. Project folds regroup
   conversations; the leaves follow without any rebuild.
-- Extraction context is minimal and stable: project name, cwd, title, dates.
-  No generated document is ever an extraction input, so a leaf never needs a
-  rebuild when documents change.
+- The project primer is context for weighing only — quotes stay verbatim
+  facts, so primer drift cannot rot the evidence. A leaf is never rebuilt
+  because documents changed.
+- A version bump (`LEAF_VERSION`) marks all older leaves stale, so quality
+  upgrades roll out through the normal backfill.
 - A leaf is stale only when `memoryHash` moved (the conversation grew). Then
   the leaf is re-extracted whole. Old, settled conversations never re-run.
 - One conversation = one model call (all four lanes in one strict-JSON
   response). Measured cost: ~10–40k input tokens per conversation.
 - Notes are **out of the memory path**. They remain a human-readable artifact
   built on demand, but no document depends on their existence.
+
+### Layer 1.5 — global weighing of intent quotes
+
+Per-conversation classifiers cannot compare across sessions; alone they
+over-select and cannot tell a momentary reaction from a durable drive. One
+cheap pass reads **all** candidate quotes together (clipped, ~900 chars each)
+and assigns every quote a tier:
+
+| Tier | Meaning | In synthesis |
+| --- | --- | --- |
+| `core` | deep drive, forceful or returned to repeatedly | dominates |
+| `standing` | durable direction never revoked | full weight |
+| `pattern` | weak alone, clearly repeated preference | supporting |
+| `superseded` | real direction later replaced (note names the replacement) | history: feeds "evolution", clipped |
+| `one-off` | momentary reaction, no durable signal | **dropped before synthesis** |
+
+When the quote set exceeds one context, chronological sections are weighed in
+parallel and a final merge pass over the one-line assignments restores global
+consistency. The weighing result is cached with the intent lane hash and in
+the pyramid inputs snapshot.
 
 ### Layer 2 — documents: fresh full-span synthesis
 
@@ -95,10 +120,15 @@ lane, across all leaves of the project, ordered by date:
 
 | Document | Input | Synthesis rule |
 | --- | --- | --- |
-| `intent.md` | all `intent` quotes | today's synthesis prompt, unchanged: keep tensions, ignore implementation. Verbatim quotes appended as evidence |
+| `intent.md` | weighed quotes (tiers core/standing/pattern full, superseded clipped) | weigh by tier and recurrence; report the CURRENT direction; superseded directions go to an explicit "evolution" section; evidence appendix grouped by tier |
 | `environment.md` | all `environment` facts | newest evidence wins; unresolved conflicts go to cautions; never output secret values |
 | `status.md` | all `problems` facts + the newest abstracts | snapshot of open items and recent focus; resolved items disappear |
-| `overview.md` | all `abstract` lines on the full timeline | purpose, vision, outcomes, principles, non-goals — written from the whole arc, not from recent work |
+| `overview.md` | all narrative abstracts on the full timeline | honest identity ("prototype / experiment / daily tool / product"), explicit evolution ("began as X, became Y"), purpose and vision from the whole arc |
+
+All synthesis prompts share three honesty rules: say what the project truly
+is; newer direction supersedes older only when clearly replaced — unrevoked
+directions still stand; never hedge or average conflicting evidence into
+vague prose.
 
 Rules:
 
