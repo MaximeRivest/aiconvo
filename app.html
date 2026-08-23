@@ -7982,6 +7982,7 @@ function convHead(d) {
 // the visible trace against the serving model's window, plus real cost.
 // Context is trace-scoped; cost also counts the other branches.
 const ctxMeterCache = new Map();
+const thinkVersions = new Map(); // local reasoning changes invalidate older context reads
 async function refreshCtxMeter(d) {
   const el = $('ctxMeter');
   if (!el || !d) return;
@@ -7996,10 +7997,15 @@ async function refreshCtxMeter(d) {
     return paintCtxMeter(el, hit.data);
   }
   try {
+    // A reasoning click can finish while this request is in flight. Keep its
+    // version so an older response cannot roll the button back.
+    const thinkVersion = thinkVersions.get(d.key) || 0;
     const r = await fetch('/api/conversation/context?id=' + encodeURIComponent(d.key)
       + (leaf ? '&leaf=' + encodeURIComponent(leaf) : ''));
     if (!r.ok) { el.hidden = true; return; }
     const data = await r.json();
+    if ((thinkVersions.get(d.key) || 0) !== thinkVersion && thinkLevels.has(d.key))
+      data.thinking = thinkLevels.get(d.key);
     ctxMeterCache.set(d.key, { sig, data });
     if (data && data.thinking) thinkLevels.set(d.key, data.thinking);
     if (data && data.mode) convModes.set(d.key, data.mode);
@@ -8020,13 +8026,19 @@ function paintThinkBtn() {
   btn.textContent = '∴ ' + (lvl || '?');
   btn.title = (lvl
     ? 'Reasoning for the next reply: ' + lvl + '.'
-    : 'Reasoning level not known yet.') + ' Click or shift+tab to cycle.';
+    : 'Reasoning level not known yet.') + ' Click, Alt+R, or Shift+Tab to cycle.';
   btn.hidden = false;
 }
 async function cycleThinking() {
   const key = activeRel;
-  if (!key || !$('agentThink') || window._thinkBusy) return;
+  const btn = $('agentThink');
+  if (!key || !btn || window._thinkBusy) return;
   window._thinkBusy = true;
+  // Invalidate context reads that started before this operation. Show the
+  // press immediately; paintThinkBtn() restores the settled value below.
+  thinkVersions.set(key, (thinkVersions.get(key) || 0) + 1);
+  btn.disabled = true;
+  btn.textContent = '∴ …';
   try {
     const payload = { id: key, level: 'cycle' };
     let out = await postJson('/api/conversation/thinking', payload);
@@ -8038,13 +8050,19 @@ async function cycleThinking() {
     if (!out) return;
     if (out.error) return errToast('reasoning change failed: ' + out.error);
     thinkLevels.set(key, out.level);
+    // Stamp completion too. A context request could start after the click,
+    // but before pi wrote the new setting.
+    thinkVersions.set(key, (thinkVersions.get(key) || 0) + 1);
     // The ctx-meter cache carries the old level; refresh it so a repaint
     // does not roll the button back.
     const hit = ctxMeterCache.get(key);
     if (hit && hit.data) hit.data.thinking = out.level;
-    paintThinkBtn();
+    if (key === activeRel) paintThinkBtn();
     toast('reasoning: ' + out.level);
-  } finally { window._thinkBusy = false; }
+  } finally {
+    window._thinkBusy = false;
+    if (key === activeRel) { const now = $('agentThink'); if (now) now.disabled = false; paintThinkBtn(); }
+  }
 }
 
 // ---- prompt mode (modes extension) ----
@@ -8060,7 +8078,7 @@ function paintModeBtn() {
   btn.textContent = '▣ ' + ((m && m.key) || 'mode');
   btn.title = (m
     ? 'Prompt mode for the next reply: ' + (m.label || m.key) + '.'
-    : 'Prompt mode (modes extension).') + ' Click to switch, edit, or create modes.';
+    : 'Prompt mode (modes extension).') + ' Click or Alt+O to switch, edit, or create modes.';
   btn.hidden = false;
 }
 // Switching runs pi's own /mode command over RPC — the modes extension
@@ -8527,7 +8545,7 @@ function renderModelStrip() {
     : 'choose model';
   host.innerHTML = `<button type="button" id="modelPick" class="model-pick" title="${list.length
     ? esc(list.map(m => m.provider + '/' + m.modelId).join('\n')) + '\nClick to change. One model runs once; several run in parallel.'
-    : 'Pick the model for the next reply.'}">◇ <span class="mname">${label}</span> ▾</button>`;
+    : 'Pick the model for the next reply.'}\nAlt+M opens this picker.">◇ <span class="mname">${label}</span> ▾</button>`;
   $('modelPick').onclick = e => openModelPicker(e.currentTarget, { multi: true, pickReplaces: true, selected: new Set(list.map(m => m.provider + '/' + m.modelId)) }, picked => setFanModels(picked));
 }
 
@@ -12451,7 +12469,7 @@ function helpNow() {
     else keys.push(['enter', 'new line'], ['ctrl+enter', 'open the terminal & send']);
     if (pi) keys.push(['ctrl+shift+enter', 'open the terminal & send']);
     if ($('agentMic') && !$('agentMic').hidden) keys.push(['ctrl+m', 'start / stop dictation']);
-    if (pi) keys.push(['ctrl+shift+m', 'change the model']);
+    if (pi) keys.push(['alt+m', 'change the model'], ['alt+o', 'change the mode'], ['alt+r', 'cycle reasoning']);
     keys.push(['/', 'start a slash command'], ['esc', 'leave the composer']);
     sections.push({ label: pi ? 'composer · pi' : 'composer · claude', keys });
     return sections;
@@ -12479,7 +12497,9 @@ function helpNow() {
     return sections;
   }
   if (ae && ae.closest && ae.closest('input, select, textarea, [contenteditable="true"]')) {
-    sections.push({ label: 'typing', keys: [['esc', 'leave the field — then the shortcuts are live']] });
+    const keys = [['esc', 'leave the field — then the other shortcuts are live']];
+    if ($('modelPick')) keys.unshift(['alt+m', 'model'], ['alt+o', 'mode'], ['alt+r', 'reasoning']);
+    sections.push({ label: 'typing', keys });
     return sections;
   }
 
@@ -12527,7 +12547,10 @@ function helpNow() {
     keys.push(['T', 'tree — walk branches, forks, and parallel replies']);
     if ($('agentMic') && !$('agentMic').hidden) keys.push(['m', 'start / stop dictation']);
     if ($('modelStrip')) keys.push(
-      ['shift+m', 'models for the next reply: one run or parallel runs'],
+      ['alt+m', 'model picker — works from any field'],
+      ['alt+o', 'mode picker — works from any field'],
+      ['alt+r / shift+tab', 'cycle reasoning'],
+      ['shift+m', 'model picker (older shortcut)'],
       ['ctrl+enter', 'send the draft — focused or not; 2+ model chips fan out'],
       ['ctrl+shift+enter', 'send in the terminal — one model only, refuses with 2+ chips']);
     keys.push(['z', 'zen — hide everything but the words'], ['c', 'copy as markdown'], ['e', 'export'], ['d', 'distill / open note'], ['p', 'project overview']);
@@ -12698,6 +12721,18 @@ document.addEventListener('keydown', e => {
     const ta = $('agentText');
     if (!inField && ta) ta.focus();
     return;
+  }
+  // Composer controls stay one chord away, including while the user types.
+  // Use code, not key, so keyboard layout and Alt characters do not matter.
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.repeat) {
+    const control = { KeyM: $('modelPick'), KeyO: $('agentMode'), KeyR: $('agentThink') }[e.code];
+    if (control) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.code === 'KeyR') cycleThinking();
+      else control.click();
+      return;
+    }
   }
   if (inField) return;
   // Ctrl+Enter sends the drafted prompt without the composer focused — the
