@@ -576,6 +576,18 @@ async function piSetThinking(target, level) {
 // Start a new pi session in cwd and keep it in the pool.
 async function piBeginWarm(target) {
   const S = await createS({ cwd: target.cwd, env: target.env, extraArgs: target.extraArgs });
+  // pi buffers a new session in memory until the FIRST assistant reply
+  // (SessionManager._persist checks hasAssistant), so a silent start never
+  // creates the file and the server aborts with "pi did not write the
+  // session file". Force the initial flush: _rewriteFile opens with "w"
+  // and later appends key off flushed=true, so this is safe and durable.
+  try {
+    const sm = S.session.sessionManager;
+    if (sm && sm.flushed === false && typeof sm._rewriteFile === 'function') {
+      sm._rewriteFile();
+      sm.flushed = true;
+    }
+  } catch {}
   armIdle(S);
   return { file: S.file, sessionId: S.session.sessionId, pid: process.pid, engine: 'sdk' };
 }
