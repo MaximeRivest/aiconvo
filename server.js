@@ -1073,6 +1073,17 @@ async function conversationContextResponse(key, leafId) {
     seen.add(n.id);
     chain.push(n);
   }
+  // Setting entries (model/thinking changes) hang BELOW the last message box
+  // until the next reply arrives. Without this tail the meter reports the old
+  // value right after a switch, and the UI rolls the control back.
+  if (leaf) {
+    const settingKids = new Map(); // parent id → newest setting-only child
+    for (const n of all) if ((n.modelChange || n.thinkingChange) && n.parent) settingKids.set(n.parent, n);
+    for (let tip = settingKids.get(leaf.id); tip && !seen.has(tip.id); tip = settingKids.get(tip.id)) {
+      seen.add(tip.id);
+      chain.unshift(tip); // nearest links come first
+    }
+  }
   // The newest assistant usage on the trace = the tokens the next turn carries.
   const lastUsed = chain.find(n => n.role === 'assistant' && n.ctx) || null;
   // The model that serves the next turn: the nearest model_change entry wins,
