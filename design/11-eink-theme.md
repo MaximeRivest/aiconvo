@@ -33,6 +33,11 @@ in localStorage (`aiconvo.theme`).
    - Disabled buttons → dashed border, not faded.
 5. **Dim text stays black.** Hierarchy comes from font size and weight
    only. Grey small text is the worst offender on e-ink.
+6. **Scrolling, not pages** *(2026-08-23)*. An earlier build paginated
+   the transcript. The AINOTE 2 panel scrolls with clean partial
+   refresh, so the pager is gone: e-ink scrolls like every other theme.
+   Activity still shows as discrete state flips (steady `█`, ~1 s
+   steps), never as sweeps.
 
 ## Terminal view
 

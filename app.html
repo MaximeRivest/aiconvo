@@ -57,13 +57,6 @@ try {
 .livedot.idle { fill: var(--surface-1); stroke: var(--live); }
 :root[data-theme-mode="binary"] .livedot { fill: var(--text); stroke: var(--bg); }
 :root[data-theme-mode="binary"] .livedot.idle { fill: var(--bg); stroke: var(--text); }
-/* Binary transcript pagination replaces scrolling. */
-#view.paged { display: flex; flex-direction: column; overflow: hidden; padding-bottom: var(--sp-2); }
-#view.paged .convhead { flex-shrink: 0; }
-#view.paged .transcript { flex: 1; min-height: 0; overflow-y: auto; }
-#pager { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 3px 8px; border-top: 1px solid var(--border); background: var(--surface-1); font-size: var(--fs-micro); color: var(--text-dim); flex-shrink: 0; }
-#pager button { height: 24px; padding: 0 10px; font-size: 12px; }
-#pager #pgInfo { white-space: nowrap; }
 /* ---- base ---- */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -177,7 +170,7 @@ body.windows-over { overflow: hidden; }
 .win-thumb { position: relative; overflow: hidden; height: 160px; background: var(--bg); border-bottom: 1px solid var(--border); pointer-events: none; }
 .win-thumb-empty { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: var(--fs-label); }
 .win-mini { position: absolute; top: 0; left: 0; width: 400%; height: 400%; transform: scale(0.25); transform-origin: top left; overflow: hidden; pointer-events: none; }
-.win-mini .agent-compose, .win-mini #pager, .win-mini #tabs, .win-mini #ganttBar, .win-mini #ganttResize, .win-mini #selShown { display: none !important; }
+.win-mini .agent-compose, .win-mini #tabs, .win-mini #ganttBar, .win-mini #ganttResize, .win-mini #selShown { display: none !important; }
 .win-mini .composer-dock { position: static !important; }
 .win-card-foot { display: flex; gap: 8px; align-items: center; padding: 8px 10px; min-height: 40px; }
 .win-mark { flex: 0 0 14px; font-weight: 700; color: var(--accent); }
@@ -1886,7 +1879,7 @@ function winLabel() {
 function emptyWin(hash, kind, title, tabName) {
   return {
     id: winNewId(), hash: hash || '', kind: kind || 'home', title: title || 'home',
-    tab: tabName || 'conv', draft: null, images: [], scrollView: 0, scrollList: 0, einkPage: -1,
+    tab: tabName || 'conv', draft: null, images: [], scrollView: 0, scrollList: 0,
     previewHTML: '', previewHome: true,
   };
 }
@@ -1916,7 +1909,6 @@ function captureWinDraft(w) {
   w.images = (window._agentImages || []).slice();
   w.scrollView = $('view') ? $('view').scrollTop : 0;
   w.scrollList = $('list') ? $('list').scrollTop : 0;
-  if (typeof einkPage === 'number') w.einkPage = einkPage;
 }
 
 function captureWin(w) {
@@ -2124,7 +2116,6 @@ function newWindow() {
   window._agentImages = [];
   const ta = $('agentText');
   if (ta) ta.value = '';
-  if (typeof einkPage === 'number') einkPage = -1;
   goHome();
   setTab('conv');
   renderWinBtn();
@@ -2179,7 +2170,6 @@ function restoreWinPending() {
   if (ta) renderAgentThumbs();
   if (p.scrollView && $('view') && viewKind !== 'home') $('view').scrollTop = p.scrollView;
   if (p.scrollList && $('list')) $('list').scrollTop = p.scrollList;
-  if (typeof p.einkPage === 'number') einkPage = p.einkPage;
   syncActiveWin();
   renderWinBtn();
   return true;
@@ -2205,7 +2195,7 @@ function switchWindow(id) {
   winSwitching = true;
   winPending = {
     draft: target.draft, images: target.images, scrollView: target.scrollView,
-    scrollList: target.scrollList, einkPage: target.einkPage,
+    scrollList: target.scrollList,
     expectComposer: target.kind === 'conversation',
   };
   window._agentImages = (target.images || []).slice();
@@ -2239,7 +2229,7 @@ function closeWindow(id) {
   winSwitching = true;
   winPending = {
     draft: next.draft, images: next.images, scrollView: next.scrollView,
-    scrollList: next.scrollList, einkPage: next.einkPage,
+    scrollList: next.scrollList,
     expectComposer: next.kind === 'conversation',
   };
   window._agentImages = (next.images || []).slice();
@@ -2257,7 +2247,7 @@ function initWindows() {
     if (d && Array.isArray(d.list) && d.list.length) {
       winList = d.list.map(w => ({
         id: w.id, hash: w.hash || '', kind: w.kind || 'home', title: w.title || 'home',
-        tab: w.tab || 'conv', draft: null, images: [], scrollView: 0, scrollList: 0, einkPage: -1,
+        tab: w.tab || 'conv', draft: null, images: [], scrollView: 0, scrollList: 0,
         previewHTML: '', previewHome: w.kind === 'home',
       }));
       winActive = d.active && winList.some(w => w.id === d.active) ? d.active : winList[0].id;
@@ -2467,7 +2457,7 @@ function selectTheme(t, repaint = true) {
   refreshMermaidTheme();
   if (!repaint) return;
   renderTabList();
-  if (current && $('conversationTranscript')) { einkPage = -1; renderConv(); }
+  if (current && $('conversationTranscript')) renderConv();
 }
 
 // ---- mermaid diagrams (```mermaid fences, everywhere markdown renders) ----
@@ -3114,7 +3104,6 @@ function gotoMatch(dir) {
     : (matchIdx + dir + marks.length) % marks.length;
   const mk = marks[matchIdx];
   mk.classList.add('cur');
-  if (isEink() && $('pager')) paginateTranscript('stay', mk.closest('.msg'));
   mk.scrollIntoView({ block: 'center' });
   updateMatchHud(marks.length);
   return true;
@@ -7103,77 +7092,16 @@ function foldLongMessages() {
     btn.onclick = () => {
       el.classList.remove('folded');
       btn.remove();
-      if ($('pager')) paginateTranscript('stay', el);
     };
     el.appendChild(btn);
   }
 }
 
-// ---- e-ink transcript pagination (design/11-eink-theme.md) ----
-// Pages replace scrolling: each page fills the view once. Page -1 means
-// 'follow the last page', so a live conversation keeps tailing.
-let einkPage = -1;
-let pgResizeT;
+// ---- e-ink helpers ----
+// E-ink scrolls like every other theme now (the AINOTE panel handles
+// partial-refresh scrolling well); tokens.css already removes all motion
+// for binary mode, so activity reads as discrete state flips, not sweeps.
 const isEink = () => themeMode() === 'binary';
-
-function paginateTranscript(target = 'bottom', keepEl = null) {
-  const view = $('view'), t = $('conversationTranscript');
-  if (!view || !t || !isEink() || !t.children.length) return false;
-  view.classList.add('paged');
-  const kids = [...t.children];
-  for (const k of kids) k.style.display = ''; // hidden pages measure 0: show all first
-  const headH = view.querySelector('.convhead') ? view.querySelector('.convhead').offsetHeight : 0;
-  const comp = view.querySelector('.agent-compose');
-  const budget = Math.max(160, view.clientHeight - headH - (comp ? comp.offsetHeight : 0) - 56);
-  const pages = [[]];
-  let h = 0;
-  for (const k of kids) {
-    const kh = k.offsetHeight + 1;
-    if (h + kh > budget && pages[pages.length - 1].length) { pages.push([]); h = 0; }
-    pages[pages.length - 1].push(k);
-    h += kh;
-  }
-  let cur;
-  const mk = t.querySelector('mark');
-  if (target === 'stay' && keepEl) {
-    // An expand/collapse must never hide the message it changed.
-    const p = pages.findIndex(pg => pg.includes(keepEl));
-    cur = p >= 0 ? p : (einkPage >= 0 && einkPage < pages.length ? einkPage : pages.length - 1);
-  }
-  else if (target === 'mark' && mk) cur = pages.findIndex(p => p.includes(mk.closest('.msg')));
-  else if (target === 'top') cur = 0;
-  else if (einkPage >= 0 && einkPage < pages.length) cur = einkPage;
-  else cur = pages.length - 1;
-  if (cur < 0) cur = pages.length - 1;
-  einkPage = cur === pages.length - 1 ? -1 : cur; // the last page follows new messages
-  const onPage = new Set(pages[cur]);
-  kids.forEach(k => { k.style.display = onPage.has(k) ? '' : 'none'; });
-  const before = pages.slice(0, cur).reduce((n, p) => n + p.length, 0);
-  $('pager') && $('pager').remove();
-  const pager = document.createElement('div');
-  pager.id = 'pager';
-  pager.innerHTML = `<button id="pgPrev" ${cur === 0 ? 'disabled' : ''}>‹</button>` +
-    `<span id="pgInfo">${before + 1}–${before + pages[cur].length} of ${kids.length} · page ${cur + 1}/${pages.length}</span>` +
-    `<button id="pgNext" ${cur === pages.length - 1 ? 'disabled' : ''}>›</button>` +
-    (einkPage !== -1 ? `<button id="pgNewest" class="ghost">newest</button>` : '');
-  t.after(pager);
-  $('pgPrev').onclick = () => { einkPage = Math.max(0, cur - 1); paginateTranscript('stay'); };
-  $('pgNext').onclick = () => { einkPage = cur + 1; paginateTranscript('stay'); };
-  if ($('pgNewest')) $('pgNewest').onclick = () => { einkPage = -1; paginateTranscript('stay'); };
-  return true;
-}
-
-// Re-pagination keeps pace with window resizes.
-addEventListener('resize', () => {
-  if (!$('pager')) return;
-  clearTimeout(pgResizeT);
-  pgResizeT = setTimeout(() => paginateTranscript('stay'), 200);
-});
-// Other views replace #view wholesale: drop the stale paged layout then.
-new MutationObserver(() => {
-  const v = $('view');
-  if (v.classList.contains('paged') && !$('conversationTranscript')) v.classList.remove('paged');
-}).observe($('view'), { childList: true });
 
 // ---- phone chrome auto-hide (design: reading owns the screen) ----
 // Scrolling down hides the header; scrolling up, or the top,
@@ -7345,7 +7273,6 @@ $('view').addEventListener('click', async e => {
   trunc.hidden = expand;
   full.hidden = !expand;
   e.target.textContent = expand ? '▴ show less' : e.target.dataset.more;
-  if ($('pager')) paginateTranscript('stay', msg); // heights changed: rebuild, keep this message visible
 });
 
 // ---- transcript editing ----
@@ -9547,8 +9474,6 @@ async function renderConv(scroll) {
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.
-  // On e-ink the transcript is paginated instead of scrolled.
-  $('view').classList.remove('paged');
   const hitEl = typeof scroll === 'string' && scroll.startsWith('hit:')
     ? $('view').querySelector(`.msg[data-i="${CSS.escape(scroll.slice(4))}"]`) : null;
   if (hitEl) {
@@ -9561,9 +9486,7 @@ async function renderConv(scroll) {
   const mk = $('view').querySelector('mark');
   const pillEl = typeof scroll === 'string' && scroll.startsWith('pill:')
     ? $('view').querySelector(`.branchpill[data-eid="${CSS.escape(scroll.slice(5))}"]`) : null;
-  const keepEl = hitEl || pillEl;
-  const pageTarget = scroll === 'top' ? 'top' : scroll === 'bottom' ? 'bottom' : mk ? 'mark' : 'bottom';
-  if (!paginateTranscript(keepEl ? 'stay' : pageTarget, keepEl)) {
+  {
     // Land on the first marked term inside the hit message: a long message
     // centers its match, not its middle.
     if (hitEl) (hitEl.querySelector('mark') || hitEl).scrollIntoView({ block: 'center' });
@@ -10344,7 +10267,6 @@ async function open(rel, scroll) {
     // it into the next one (a leaked flag streams every keystroke to a PTY).
     window._agentLiveOn = false;
     window._agentLiveText = '';
-    einkPage = -1; // a fresh conversation lands on the last page
     setRoute('conversation', encodeURIComponent(rel), convCrumbs(rel));
     render();
   }
@@ -12290,9 +12212,6 @@ function helpNow() {
     ] });
     return sections;
   }
-  if ($('pager')) {
-    sections.push({ label: 'pages', keys: [['[ ] / pgup pgdn', 'previous / next page']] });
-  }
   if ($('fgRoot')) {
     sections.push({ label: 'file timeline', keys: [
       ['+ − 0', 'zoom in / out / reset'],
@@ -12496,11 +12415,12 @@ document.addEventListener('keydown', e => {
   if (quickFileKeydown(e)) return;
   if (filePickKeydown(e)) return;
   if (treeKeydown(e)) return;
-  // E-ink transcript pages: brackets and PageUp/PageDown turn pages.
-  if ($('pager') && (e.key === '[' || e.key === ']' || e.key === 'PageUp' || e.key === 'PageDown')) {
+  // Brackets and PageUp/PageDown move the transcript by nearly one screen.
+  if ($('conversationTranscript') && (e.key === '[' || e.key === ']' || e.key === 'PageUp' || e.key === 'PageDown')) {
     e.preventDefault();
-    const btn = $((e.key === ']' || e.key === 'PageDown') ? 'pgNext' : 'pgPrev');
-    if (btn && !btn.disabled) btn.click();
+    const v = $('view');
+    const dir = (e.key === ']' || e.key === 'PageDown') ? 1 : -1;
+    v.scrollBy({ top: dir * Math.max(120, v.clientHeight * 0.9), behavior: isEink() ? 'auto' : 'smooth' });
     return;
   }
   if ($('fgRoot') && ['+', '=', '-', '_', '0', 'n', 'b'].includes(e.key)) {
