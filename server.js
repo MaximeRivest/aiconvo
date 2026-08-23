@@ -112,10 +112,19 @@ function projectNameOf(cwd) {
 let index = {};
 try { index = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf8')); } catch { index = {}; }
 
+// Atomic write: temp file + rename. Two processes (live server plus a
+// scratch/test instance, or two LAN machines on one share) can otherwise
+// interleave writes to the same cache file and corrupt its JSON.
+async function writeFileAtomic(p, data) {
+  const tmp = p + '.tmp-' + process.pid + '-' + Math.random().toString(36).slice(2, 8);
+  await fsp.writeFile(tmp, data);
+  await fsp.rename(tmp, p);
+}
+
 function saveIndexSoon() {
   clearTimeout(saveIndexSoon.t);
   saveIndexSoon.t = setTimeout(() => {
-    fs.writeFile(INDEX_FILE, JSON.stringify(index), () => {});
+    writeFileAtomic(INDEX_FILE, JSON.stringify(index)).catch(() => {});
   }, 500);
 }
 
@@ -530,7 +539,7 @@ async function indexFile(source, relPath, stat) {
     };
     index[key] = entry;
     scheduleProjectFoldRefresh(meta.cwd);
-    await fsp.writeFile(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages, entryParents }));
+    await writeFileAtomic(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages, entryParents }));
     saveIndexSoon();
     broadcast({ type: 'update', key, ...entry });
     markLeafDirty(key, prev, entry, stat.mtimeMs);
@@ -3262,7 +3271,7 @@ async function extractLeaf(key) {
     abstract, intent, environment, problems,
   };
   await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true });
-  await fsp.writeFile(leafPathFor(key), JSON.stringify(leaf));
+  await writeFileAtomic(leafPathFor(key), JSON.stringify(leaf));
   memoryLeafCache.delete(key);
   return leaf;
 }
@@ -3305,7 +3314,7 @@ async function seedLeavesFromSnapshots() {
         })),
       };
       await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true });
-      await fsp.writeFile(leafPathFor(key), JSON.stringify(leaf));
+      await writeFileAtomic(leafPathFor(key), JSON.stringify(leaf));
       made++;
     }
   }
@@ -3619,11 +3628,11 @@ async function regenerateDocsCore({ label, entries, paths, existingEpics, discov
   const candidates = discoverCandidates ? cleanEpicCandidates(profile, { entries, epics: existingEpics }) : [];
   await fsp.mkdir(paths.dir, { recursive: true });
   const writes = [];
-  if (!skip('overview')) writes.push(fsp.writeFile(paths.overview, renderPyramidOverviewDoc(project, profile, builtAt, sourceHash)));
-  if (intent) writes.push(fsp.writeFile(paths.intent, renderPyramidIntentDoc(project, intent, weighedQuotes, tiers, builtAt, sourceHash)));
-  if (environment) writes.push(fsp.writeFile(paths.environment, renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash)));
-  if (status) writes.push(fsp.writeFile(paths.status, renderProjectStatusDoc(project, status, builtAt, sourceHash)));
-  writes.push(fsp.writeFile(inputsPath, JSON.stringify({
+  if (!skip('overview')) writes.push(writeFileAtomic(paths.overview, renderPyramidOverviewDoc(project, profile, builtAt, sourceHash)));
+  if (intent) writes.push(writeFileAtomic(paths.intent, renderPyramidIntentDoc(project, intent, weighedQuotes, tiers, builtAt, sourceHash)));
+  if (environment) writes.push(writeFileAtomic(paths.environment, renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash)));
+  if (status) writes.push(writeFileAtomic(paths.status, renderProjectStatusDoc(project, status, builtAt, sourceHash)));
+  writes.push(writeFileAtomic(inputsPath, JSON.stringify({
     project, builtAt, sourceHash, laneHashes, leaves: rows.map(r => ({ key: r.key, state: leafStateFor(r.entry, r.leaf) })),
     intentQuotes: intentSelected.length, weighedQuotes: weighedQuotes.length,
     tiers: [...tiers.entries()].map(([id, t]) => ({ id, ...t })),
@@ -3639,7 +3648,7 @@ async function regenerateDocsCore({ label, entries, paths, existingEpics, discov
     paths: { overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status, inputs: inputsPath },
     pyramid: { v: 2, builtAt, laneHashes, leafCount: rows.length, seededLeaves: rows.filter(r => r.leaf.partial).length },
   };
-  await fsp.writeFile(paths.manifest, JSON.stringify(manifest));
+  await writeFileAtomic(paths.manifest, JSON.stringify(manifest));
   emit('Project memory saved.', 6, 6);
   return manifest;
 }
