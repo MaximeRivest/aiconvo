@@ -47,6 +47,29 @@ To use it from a tablet on the same local network, set `AICONVO_LAN=1` (the user
 
 Install the Android APK from `android/app/build/outputs/apk/debug/app-debug.apk`. It detects iFLYTEK hardware and keeps the wide binary e-ink UI. Phones use a separate touch layout: project cards and recent work replace the home Gantt, tabs move to the bottom, conversations use a fixed compose dock, and file diffs switch between full-screen file tree and stacked comparison. The native microphone writes live and final Parakeet transcripts directly into the compose box without opening the keyboard. On first launch, enter the laptop address and token `4148`. Terminals still start on the laptop. Rebuild with `cd android && ./gradlew assembleDebug`. See `design/23-phone-layout.md`.
 
+## Custom themes
+
+User themes live in `~/.config/aiconvo/themes/<theme-id>.css`. The fastest
+path: import your terminal or Hyprland (Omarchy) color scheme directly:
+
+```bash
+node themeimport.js          # auto-detects alacritty/kitty/ghostty/foot/pywal
+```
+
+Or copy `design/theme-template.css`, rename its selector to match the file
+name, and refresh the app. Valid themes appear in the theme selector.
+
+Validate a theme before use:
+
+```bash
+node test/theme-check.js ~/.config/aiconvo/themes/my-theme.css
+```
+
+The theme contract, tokens, modes, and metadata are in
+`design/25-themes.md`. The importer and a ready-made prompt for coding
+agents are in `design/26-theme-import.md`. `design/tokens.css` is the
+built-in runtime source.
+
 ## What it does
 
 - Scans three sources: `~/.claude/projects`, `~/.pi/agent/sessions`, and `~/.pi/remote/sessions` (subagent transcripts are skipped). Add more folders in the `SOURCES` map in `server.js`.
