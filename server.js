@@ -17,6 +17,7 @@ const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const settingsLib = require('./settings.js');
 const { openSearchIndex, SearchIndex } = require('./searchindex.js');
 const foldsLib = require('./projectfolds.js');
+const themesLib = require('./themes.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
@@ -2186,6 +2187,7 @@ const TREES_DIR = path.join(CACHE_DIR, 'trees');
 fs.mkdirSync(TREES_DIR, { recursive: true });
 const treePathFor = key => path.join(TREES_DIR, key.replace(/[:\/\\]/g, '__') + '.json');
 const SETTINGS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'settings.json');
+const THEMES_DIR = themesLib.defaultThemeDir(os.homedir());
 const PI_SETTINGS_FILE = path.join(os.homedir(), '.pi', 'agent', 'settings.json');
 const PI_AUTH_FILE = path.join(os.homedir(), '.pi', 'agent', 'auth.json');
 const PI_MODELS_FILE = path.join(os.homedir(), '.pi', 'agent', 'models.json');
@@ -6954,9 +6956,18 @@ const server = http.createServer(async (req, res) => {
         return res.end(lanLoginPage());
       }
     }
+    if (u.pathname === '/manifest.webmanifest') {
+      const manifest = JSON.parse(await fsp.readFile(path.join(__dirname, 'manifest.webmanifest'), 'utf8'));
+      const tokens = await fsp.readFile(path.join(__dirname, 'design', 'tokens.css'), 'utf8');
+      const colors = themesLib.manifestThemeColors(u.searchParams.get('theme') || '', tokens, THEMES_DIR);
+      manifest.background_color = colors.backgroundColor;
+      manifest.theme_color = colors.themeColor;
+      res.writeHead(200, { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-store' });
+      return res.end(JSON.stringify(manifest));
+    }
     const staticFile = {
-      '/manifest.webmanifest': { file: 'manifest.webmanifest', type: 'application/manifest+json', cache: 'no-store' },
       '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-store' },
+      '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-store' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400' },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400' },
       '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400' },
@@ -6972,6 +6983,16 @@ const server = http.createServer(async (req, res) => {
       // can keep serving a stale app.html after the file changes on disk.
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(await fsp.readFile(path.join(__dirname, 'app.html')));
+    } else if (u.pathname === '/api/themes') {
+      const themes = themesLib.readCustomThemes(THEMES_DIR);
+      json(res, 200, {
+        directory: THEMES_DIR,
+        themes: themes.valid.map(({ id, name, scheme, mode, motion }) => ({ id, name, scheme, mode, motion })),
+        invalid: themes.invalid.map(({ id, file, errors }) => ({ id, file, errors })),
+      });
+    } else if (u.pathname === '/api/themes.css') {
+      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(themesLib.bundleCustomThemes(THEMES_DIR));
     } else if (u.pathname === '/api/sessions') {
       const fam = familyGroups();
       const list = Object.entries(index).map(([key, e]) => {

@@ -21,7 +21,7 @@ The palette is computed, not picked. Four rules:
 
 Theme mapping:
 
-- Dark theme: accents at `L = 0.75` on dark neutrals. Contrast 8.3–9.2:1.
+- Dark theme: accents near `L = 0.78` on dark neutrals. Contrast 8.3–9.2:1.
 - Light theme: accents at `L = 0.52` on light neutrals. Contrast 4.7–5.4:1.
   Same hues, same chroma. Only lightness mirrors.
 - Fills (inverse video, primary buttons) use `--accent-strong`, not
@@ -48,12 +48,12 @@ The rules behind the tokens:
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--bg` | `#0a0d0a` | `#f2f6f3` | App background. |
-| `--surface-1` | `#101411` | `#eaeeea` | Header, list pane, drawers. |
-| `--surface-2` | `#161b17` | `#dfe4e0` | Hover, inputs, cards. |
-| `--surface-3` | `#1e231f` | `#d2d8d3` | Subtle emphasis, progress tracks. |
-| `--border` | `#292e2a` | `#c3c9c4` | Hairlines everywhere. |
-| `--border-strong` | `#3d433e` | `#9aa09b` | Hover borders, separators. |
+| `--bg` | `#101412` | `#f2f6f3` | App background. |
+| `--surface-1` | `#171c19` | `#eaeeea` | Header, list pane, drawers. |
+| `--surface-2` | `#1f2521` | `#dfe4e0` | Hover, inputs, cards. |
+| `--surface-3` | `#272e2a` | `#d2d8d3` | Subtle emphasis, progress tracks. |
+| `--border` | `#343c36` | `#c3c9c4` | Hairlines everywhere. |
+| `--border-strong` | `#4d564f` | `#9aa09b` | Hover borders, separators. |
 
 Contrast between surfaces is deliberately small. Borders do the work.
 
@@ -61,19 +61,20 @@ Contrast between surfaces is deliberately small. Borders do the work.
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--text` | `#c8d0c9` | `#1b211c` | Primary. |
-| `--text-dim` | `#808982` | `#525953` | Metadata, paths, counts. |
-| `--text-faint` | `#474e48` | `#6a716b` | Placeholders, disabled, tool labels. |
+| `--text` | `#dce3dd` | `#1b211c` | Primary. |
+| `--text-dim` | `#98a29a` | `#525953` | Metadata, paths, counts. |
+| `--text-faint` | `#5f6a61` | `#6a716b` | Placeholders, disabled, tool labels. |
 
 ### ANSI colors (dark | light)
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--green` | `#6cc581` | `#1d7d3e` | Accent, live, success, user role, pi source. |
-| `--cyan` | `#33beeb` | `#0076a0` | Assistant role, info, links inside prose. |
-| `--yellow` | `#c8ad3f` | `#816600` | Search highlight text, warnings, claude source. |
-| `--red` | `#f58c81` | `#a7463e` | Errors, failed jobs. |
-| `--magenta` | `#d292e1` | `#894d97` | pi-remote source, epic identity. |
+| `--green` | `#7dd492` | `#1d7d3e` | Accent, live, success, user role, pi source. |
+| `--cyan` | `#53c8f1` | `#0076a0` | Assistant role, info, links inside prose. |
+| `--blue` | `#79a8ff` | `#315ea8` | ANSI blue and imported terminal themes. |
+| `--yellow` | `#d3ba54` | `#816600` | Search highlight text, warnings, claude source. |
+| `--red` | `#f79d94` | `#a7463e` | Errors, failed jobs. |
+| `--magenta` | `#dc9fe9` | `#894d97` | pi-remote source, epic identity. |
 
 `--accent` is an alias of `--green`. Use it for text and borders.
 Use `--accent-strong` + `--accent-ink` for fills (inverse video, primary
@@ -107,7 +108,7 @@ One stack: `--font: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace`.
 - Role labels are lowercase with a sigil: `user ❯`, `assistant ❯`, `$ bash`.
   No uppercase, no letter-spacing. Mono does not need it.
 - Weight contrast replaces size contrast: titles 700, body 400, meta dim.
-- Reading column max width: 780 px.
+- Reading column max width: 1080 px.
 
 ## Spacing
 
@@ -128,10 +129,12 @@ Dense 8-point grid: `--sp-1: 4` `--sp-2: 8` `--sp-3: 12` `--sp-4: 16` `--sp-6: 2
 
 ## Theming mechanics
 
+- `design/tokens.css` is the runtime source. `app.html` loads it from `/tokens.css`.
 - Dark is the default. Light activates via `prefers-color-scheme: light`.
 - Manual override: `<html data-theme="light">` or `"dark"`.
+- User themes live in `~/.config/aiconvo/themes`. See `25-themes.md`.
 - Components must never reference theme-specific hex values. Tokens only.
-  If a component needs a new color, add a token to both themes first.
+  If a component needs a new color, add a token to all built-in themes first.
 
 ## Motion
 

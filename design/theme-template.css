@@ -1,0 +1,49 @@
+/* aiconvo-theme
+name: Theme Template
+scheme: dark
+mode: color
+motion: full
+*/
+:root[data-theme="theme-template"] {
+  --bg: #101412;
+  --surface-1: #171c19;
+  --surface-2: #1f2521;
+  --surface-3: #272e2a;
+  --border: #343c36;
+  --border-strong: #4d564f;
+  --text: #dce3dd;
+  --text-dim: #98a29a;
+  --text-faint: #6f7a71;
+
+  --red: #f79d94;
+  --yellow: #d3ba54;
+  --green: #7dd492;
+  --cyan: #53c8f1;
+  --blue: #79a8ff;
+  --magenta: #dc9fe9;
+  --accent-strong: #7dd492;
+  --accent-ink: #0a130c;
+
+  --ansi-0: #1c1c1c;
+  --ansi-1: #cc4444;
+  --ansi-2: #44aa44;
+  --ansi-3: #aaaa33;
+  --ansi-4: #4477cc;
+  --ansi-5: #aa44aa;
+  --ansi-6: #33aaaa;
+  --ansi-7: #cccccc;
+  --ansi-8: #666666;
+  --ansi-9: #ff6666;
+  --ansi-10: #66dd66;
+  --ansi-11: #eeee66;
+  --ansi-12: #6699ff;
+  --ansi-13: #ee66ee;
+  --ansi-14: #66eeee;
+  --ansi-15: #ffffff;
+
+  --term-selection: var(--cyan);
+  --term-selection-ink: #0a130c;
+  --ink: #c0392b;
+  --ink-ai: var(--ink);
+  --ink-halo: #ffffff;
+}

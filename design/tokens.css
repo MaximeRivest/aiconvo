@@ -1,18 +1,8 @@
-/* aiconvo design tokens — terminal-native with brutalist edges.
-   Drop-in replacement for the :root block in app.html.
+/* aiconvo design tokens — runtime source of truth.
+   Components in app.html use these properties. Custom themes override only
+   color properties from ~/.config/aiconvo/themes/<id>.css. */
 
-   Palette derived in OKLCH (see 01-tokens.md for the theory):
-   - all chromatic colors: C = 0.13, hues spread ~equidistant (27 95 150 225 320)
-   - dark theme:  L = 0.75 on tinted neutrals
-   - light theme: L = 0.52 (accents), neutrals mirrored to L >= 0.83
-   - every accent passes WCAG AA (>= 4.5:1) against its theme background
-*/
-
-/* ---- dark (default) ---- */
 :root {
-  /* surfaces: dark gray, tinted toward the accent hue (150).
-     Lifted from near-black: pitch-black grounds crush the surface steps
-     and strain the eyes — the ramp now starts at L ~0.18. */
   --bg: #101412;
   --surface-1: #171c19;
   --surface-2: #1f2521;
@@ -20,70 +10,94 @@
   --border: #343c36;
   --border-strong: #4d564f;
 
-  /* text — brighter than before; faint text stays readable (AA on bg) */
   --text: #dce3dd;
   --text-dim: #98a29a;
   --text-faint: #5f6a61;
 
-  /* ANSI set, L .78 C .13 */
+  --red: #f79d94;
+  --yellow: #d3ba54;
   --green: #7dd492;
   --cyan: #53c8f1;
-  --yellow: #d3ba54;
-  --red: #f79d94;
+  --blue: #79a8ff;
   --magenta: #dc9fe9;
 
-  /* semantic aliases */
   --accent: var(--green);
-  --accent-strong: #7dd492;     /* fills: inverse video, primary buttons */
-  --accent-ink: #0a130c;        /* text on accent fills */
+  --accent-strong: #7dd492;
+  --accent-ink: #0a130c;
   --live: var(--green);
   --success: var(--green);
   --warn: var(--yellow);
   --danger: var(--red);
 
-  /* source identity (squares + labels only) */
   --src-claude: var(--yellow);
   --src-pi: var(--green);
   --src-pi-remote: var(--magenta);
-
-  /* transcript roles */
   --role-user: var(--green);
   --role-asst: var(--cyan);
   --role-tool: var(--text-faint);
 
-  /* one font: mono. Everything. */
+  /* Hosted terminal views use the active app theme, not a fixed palette. */
+  --ansi-0: #1c1c1c;
+  --ansi-1: #cc4444;
+  --ansi-2: #44aa44;
+  --ansi-3: #aaaa33;
+  --ansi-4: #4477cc;
+  --ansi-5: #aa44aa;
+  --ansi-6: #33aaaa;
+  --ansi-7: #cccccc;
+  --ansi-8: #666666;
+  --ansi-9: #ff6666;
+  --ansi-10: #66dd66;
+  --ansi-11: #eeee66;
+  --ansi-12: #6699ff;
+  --ansi-13: #ee66ee;
+  --ansi-14: #66eeee;
+  --ansi-15: #ffffff;
+  --term-selection: var(--cyan);
+  --term-selection-ink: var(--accent-ink);
+
+  --ink: #c0392b;
+  --ink-ai: var(--ink);
+  --ink-halo: #ffffff;
+  --overlay: rgba(0, 0, 0, 0.45);
+  --overlay-strong: rgba(10, 10, 14, 0.50);
+  --shadow-color: rgba(0, 0, 0, 0.35);
+  --shadow-soft: rgba(0, 0, 0, 0.25);
+
+  /* Project identity keeps a stable hash hue. Themes control its weight. */
+  --project-fill-s: 62%;
+  --project-fill-l: 44%;
+  --project-stroke-s: 78%;
+  --project-stroke-l: 68%;
+  --project-gray-base: 60;
+  --project-gray-step: 7;
+  --project-gray-stroke-offset: 30;
+
+  /* Runtime capabilities. JS copies these values to data attributes. */
+  --theme-mode: color;
+  --theme-motion: 1;
+
   --font: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
   --fs-title: 15px;
   --fs-body: 13px;
   --fs-label: 12px;
   --fs-meta: 12px;
   --fs-micro: 11px;
-
-  /* spacing (8pt grid, dense) */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
   --sp-6: 24px;
-
-  /* brutalist edges */
   --r: 0;
   --r-sm: 2px;
   --shadow: none;
-
-  /* layout */
   --list-w: 400px;
-  --read-max: 780px;
+  --read-max: 1080px;
   --header-h: 44px;
-
-  /* motion */
   --t: 60ms linear;
-
   color-scheme: dark;
 }
 
-/* ---- light ---- */
-/* Same hues, same chroma. Lightness mirrored. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --bg: #f2f6f3;
@@ -92,27 +106,22 @@
     --surface-3: #d2d8d3;
     --border: #c3c9c4;
     --border-strong: #9aa09b;
-
     --text: #1b211c;
     --text-dim: #525953;
     --text-faint: #6a716b;
-
+    --red: #a7463e;
+    --yellow: #816600;
     --green: #1d7d3e;
     --cyan: #0076a0;
-    --yellow: #816600;
-    --red: #a7463e;
+    --blue: #315ea8;
     --magenta: #894d97;
-
     --accent-strong: #005f21;
     --accent-ink: #ffffff;
-
-    --role-tool: var(--text-faint);
-
+    --ink: #8f281f;
     color-scheme: light;
   }
 }
 
-/* manual override: <html data-theme="light"> or "dark" */
 :root[data-theme="light"] {
   --bg: #f2f6f3;
   --surface-1: #eaeeea;
@@ -120,60 +129,25 @@
   --surface-3: #d2d8d3;
   --border: #c3c9c4;
   --border-strong: #9aa09b;
-
   --text: #1b211c;
   --text-dim: #525953;
   --text-faint: #6a716b;
-
+  --red: #a7463e;
+  --yellow: #816600;
   --green: #1d7d3e;
   --cyan: #0076a0;
-  --yellow: #816600;
-  --red: #a7463e;
+  --blue: #315ea8;
   --magenta: #894d97;
-
   --accent-strong: #005f21;
   --accent-ink: #ffffff;
-
+  --ink: #8f281f;
   color-scheme: light;
 }
+
 :root[data-theme="dark"] {
   color-scheme: dark;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
-}
-
-/* ---- e-ink: binary black/white (design/11-eink-theme.md) ----
-   Every color is #000 or #fff. No greys, no opacity, no motion.
-   Meaning moves from color to shape, weight, and glyphs. */
-:root[data-theme="eink"] {
-  --bg: #fff;
-  --surface-1: #fff;
-  --surface-2: #fff;
-  --surface-3: #fff;
-  --border: #000;
-  --border-strong: #000;
-  --text: #000;
-  --text-dim: #000;
-  --text-faint: #000;
-  --green: #000;
-  --cyan: #000;
-  --yellow: #000;
-  --red: #000;
-  --magenta: #000;
-  --accent: #000;
-  --accent-strong: #000;
-  --accent-ink: #fff;
-  --live: #000;
-  --success: #000;
-  --warn: #000;
-  --danger: #000;
-  color-scheme: light;
-}
-
-/* ---- grayscale: the light ramp with C=0 (design/12-grayscale-theme.md) ----
-   Semantic colors are lightness steps: the more urgent, the darker. */
 :root[data-theme="gray"] {
   --bg: #f5f5f5;
   --surface-1: #ededed;
@@ -186,11 +160,96 @@
   --text-faint: #6f6f6f;
   --green: #555555;
   --cyan: #484848;
+  --blue: #414141;
   --yellow: #696969;
   --red: #2e2e2e;
   --magenta: #636363;
-  --accent: var(--green);
   --accent-strong: #292929;
   --accent-ink: #ffffff;
+  --ansi-0: #202020;
+  --ansi-1: #383838;
+  --ansi-2: #505050;
+  --ansi-3: #686868;
+  --ansi-4: #484848;
+  --ansi-5: #606060;
+  --ansi-6: #585858;
+  --ansi-7: #d0d0d0;
+  --ansi-8: #707070;
+  --ansi-9: #303030;
+  --ansi-10: #484848;
+  --ansi-11: #606060;
+  --ansi-12: #404040;
+  --ansi-13: #585858;
+  --ansi-14: #505050;
+  --ansi-15: #ffffff;
+  --ink: #1f1f1f;
+  --ink-ai: #1f1f1f;
+  --theme-mode: gray;
   color-scheme: light;
+}
+
+:root[data-theme="eink"] {
+  --bg: #ffffff;
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
+  --surface-3: #ffffff;
+  --border: #000000;
+  --border-strong: #000000;
+  --text: #000000;
+  --text-dim: #000000;
+  --text-faint: #000000;
+  --red: #000000;
+  --yellow: #000000;
+  --green: #000000;
+  --cyan: #000000;
+  --blue: #000000;
+  --magenta: #000000;
+  --accent: #000000;
+  --accent-strong: #000000;
+  --accent-ink: #ffffff;
+  --live: #000000;
+  --success: #000000;
+  --warn: #000000;
+  --danger: #000000;
+  --ansi-0: #000000;
+  --ansi-1: #000000;
+  --ansi-2: #000000;
+  --ansi-3: #000000;
+  --ansi-4: #000000;
+  --ansi-5: #000000;
+  --ansi-6: #000000;
+  --ansi-7: #000000;
+  --ansi-8: #000000;
+  --ansi-9: #000000;
+  --ansi-10: #000000;
+  --ansi-11: #000000;
+  --ansi-12: #000000;
+  --ansi-13: #000000;
+  --ansi-14: #000000;
+  --ansi-15: #000000;
+  --term-selection: #000000;
+  --term-selection-ink: #ffffff;
+  --ink: #000000;
+  --ink-ai: #000000;
+  --ink-halo: #ffffff;
+  --read-max: none;
+  --t: 0ms linear;
+  --theme-mode: binary;
+  --theme-motion: 0;
+  color-scheme: light;
+}
+
+:root[data-theme-motion="none"] *,
+:root[data-theme-motion="none"] *::before,
+:root[data-theme-motion="none"] *::after {
+  animation: none !important;
+  transition: none !important;
+  box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

@@ -3,132 +3,70 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="">
+<meta name="color-scheme" content="dark light">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="aiconvo">
 <title>aiconvo</title>
-<link rel="manifest" href="/manifest.webmanifest">
+<link id="appManifest" rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/tokens.css">
 <script>
 // Apply the saved theme before first paint (no flash). '' = follow the OS.
-try { const t = localStorage.getItem('aiconvo.theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
+try {
+  const t = localStorage.getItem('aiconvo.theme');
+  if (t) document.documentElement.dataset.theme = t;
+  const manifestTheme = t || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  document.getElementById('appManifest').href = `/manifest.webmanifest?theme=${encodeURIComponent(manifestTheme)}`;
+} catch {}
 </script>
 <style>
-/* ---- design tokens (design/tokens.css — keep in sync) ---- */
-:root {
-  --bg: #101412; --surface-1: #171c19; --surface-2: #1f2521; --surface-3: #272e2a;
-  --border: #343c36; --border-strong: #4d564f;
-  --text: #dce3dd; --text-dim: #98a29a; --text-faint: #5f6a61;
-  --green: #7dd492; --cyan: #53c8f1; --yellow: #d3ba54; --red: #f79d94; --magenta: #dc9fe9;
-  --accent: var(--green);
-  --accent-strong: #7dd492; --accent-ink: #0a130c;
-  --live: var(--green); --success: var(--green); --warn: var(--yellow); --danger: var(--red);
-  --src-claude: var(--yellow); --src-pi: var(--green); --src-pi-remote: var(--magenta);
-  --role-user: var(--green); --role-asst: var(--cyan); --role-tool: var(--text-faint);
-  --font: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
-  --fs-title: 15px; --fs-body: 13px; --fs-label: 12px; --fs-meta: 12px; --fs-micro: 11px;
-  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
-  --r: 0; --r-sm: 2px; --shadow: none;
-  --list-w: 400px; --read-max: 1080px; --header-h: 44px;
-  --t: 60ms linear;
-  color-scheme: dark;
-}
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #f2f6f3; --surface-1: #eaeeea; --surface-2: #dfe4e0; --surface-3: #d2d8d3;
-    --border: #c3c9c4; --border-strong: #9aa09b;
-    --text: #1b211c; --text-dim: #525953; --text-faint: #6a716b;
-    --green: #1d7d3e; --cyan: #0076a0; --yellow: #816600; --red: #a7463e; --magenta: #894d97;
-    --accent-strong: #005f21; --accent-ink: #ffffff;
-    color-scheme: light;
-  }
-}
-:root[data-theme="light"] {
-  --bg: #f2f6f3; --surface-1: #eaeeea; --surface-2: #dfe4e0; --surface-3: #d2d8d3;
-  --border: #c3c9c4; --border-strong: #9aa09b;
-  --text: #1b211c; --text-dim: #525953; --text-faint: #6a716b;
-  --green: #1d7d3e; --cyan: #0076a0; --yellow: #816600; --red: #a7463e; --magenta: #894d97;
-  --accent-strong: #005f21; --accent-ink: #ffffff;
-  color-scheme: light;
-}
-/* ---- grayscale: the light ramp with chroma removed (design/12-grayscale-theme.md) ----
-   Semantic colors become lightness steps: the more urgent, the darker. */
-:root[data-theme="gray"] {
-  --bg: #f5f5f5; --surface-1: #ededed; --surface-2: #e3e3e3; --surface-3: #d6d6d6;
-  --border: #c7c7c7; --border-strong: #9e9e9e;
-  --text: #1f1f1f; --text-dim: #575757; --text-faint: #6f6f6f;
-  --green: #555555; --cyan: #484848; --yellow: #696969; --red: #2e2e2e; --magenta: #636363;
-  --accent: var(--green); --accent-strong: #292929; --accent-ink: #ffffff;
-  color-scheme: light;
-}
-:root[data-theme="gray"] #ganttDate { color-scheme: light; }
-/* ---- e-ink: binary black/white, no greys, no motion (design/11-eink-theme.md) ---- */
-:root[data-theme="eink"] {
-  --bg: #fff; --surface-1: #fff; --surface-2: #fff; --surface-3: #fff;
-  --border: #000; --border-strong: #000;
-  --text: #000; --text-dim: #000; --text-faint: #000;
-  --green: #000; --cyan: #000; --yellow: #000; --red: #000; --magenta: #000;
-  --accent: #000; --accent-strong: #000; --accent-ink: #fff;
-  --live: #000; --success: #000; --warn: #000; --danger: #000;
-  --read-max: none;
-  color-scheme: light;
-}
-:root[data-theme="eink"] *, :root[data-theme="eink"] *::before, :root[data-theme="eink"] *::after {
-  animation: none !important; transition: none !important; box-shadow: none !important;
-}
-/* opacity paints grey on e-ink: everything is fully solid */
-:root[data-theme="eink"] .tmark .duration, :root[data-theme="eink"] .tmark .violin,
-:root[data-theme="eink"] .tmark.note .violin, :root[data-theme="eink"] .item.active .meta,
-:root[data-theme="eink"] .item.active .snip { opacity: 1; }
-:root[data-theme="eink"] button:disabled { opacity: 1; border-style: dashed; color: #000; }
-:root[data-theme="eink"] .branchblock .msg { opacity: 1; }
-/* hover has no surface tint to show: use underline, never a black flash */
-:root[data-theme="eink"] button:hover, :root[data-theme="eink"] #brand:hover,
-:root[data-theme="eink"] #ticker:hover, :root[data-theme="eink"] #winBtn:hover { background: transparent; color: #000; text-decoration: underline; }
-:root[data-theme="eink"] .win-card:hover { background: #fff; text-decoration: none; }
-:root[data-theme="eink"] .win-card.on { background: #fff; color: #000; border-width: 2px; }
-:root[data-theme="eink"] .win-card.on .win-card-foot { background: #000; color: #fff; }
-:root[data-theme="eink"] .win-card.on .win-sub, :root[data-theme="eink"] .win-card.on .win-mark { color: #fff; }
-:root[data-theme="eink"] .win-card.win-new-card:hover { background: #fff; }
-:root[data-theme="eink"] button.primary:hover { background: #000; color: #fff; filter: none; text-decoration: none; }
-:root[data-theme="eink"] .ag-row:hover, :root[data-theme="eink"] .item:hover,
-:root[data-theme="eink"] .msgrow:hover { background: transparent; }
-/* note marks: hollow, so they still differ from solid conversation marks */
-:root[data-theme="eink"] .tmark.note .violin { fill: #fff !important; stroke: #000 !important; }
-/* highlight and code without color */
-:root[data-theme="eink"] mark { color: #000; font-weight: 700; text-decoration: underline; }
-:root[data-theme="eink"] code, :root[data-theme="eink"] a { color: #000; }
-:root[data-theme="eink"] a { text-decoration: underline; }
-:root[data-theme="eink"] #ganttDate { color-scheme: light; }
-:root[data-theme="eink"] .agent-live-dock button { min-height: 44px; min-width: 44px; }
-:root[data-theme="eink"] .agent-live-dock textarea { font-size: 16px; border-width: 2px; }
-/* e-ink Gantt states without color or motion: hatched selection, dashed frame
-   for the open conversation, solid dot for live sessions. */
-:root[data-theme="eink"] .tmark.selected .violin { fill: url(#selHatch) !important; stroke: #000 !important; }
+/* Design tokens load from /tokens.css. Binary-theme behavior stays here. */
+/* Opacity paints gray on binary displays. Keep all content solid. */
+:root[data-theme-mode="binary"] .tmark .duration, :root[data-theme-mode="binary"] .tmark .violin,
+:root[data-theme-mode="binary"] .tmark.note .violin, :root[data-theme-mode="binary"] .item.active .meta,
+:root[data-theme-mode="binary"] .item.active .snip { opacity: 1; }
+:root[data-theme-mode="binary"] button:disabled { opacity: 1; border-style: dashed; color: var(--text); }
+:root[data-theme-mode="binary"] .branchblock .msg { opacity: 1; }
+/* A binary theme uses shape and decoration instead of surface tints. */
+:root[data-theme-mode="binary"] button:hover, :root[data-theme-mode="binary"] #brand:hover,
+:root[data-theme-mode="binary"] #ticker:hover, :root[data-theme-mode="binary"] #winBtn:hover { background: transparent; color: var(--text); text-decoration: underline; }
+:root[data-theme-mode="binary"] .win-card:hover { background: var(--bg); text-decoration: none; }
+:root[data-theme-mode="binary"] .win-card.on { background: var(--bg); color: var(--text); border-width: 2px; }
+:root[data-theme-mode="binary"] .win-card.on .win-card-foot { background: var(--text); color: var(--bg); }
+:root[data-theme-mode="binary"] .win-card.on .win-sub, :root[data-theme-mode="binary"] .win-card.on .win-mark { color: var(--bg); }
+:root[data-theme-mode="binary"] .win-card.win-new-card:hover { background: var(--bg); }
+:root[data-theme-mode="binary"] button.primary:hover { background: var(--text); color: var(--bg); filter: none; text-decoration: none; }
+:root[data-theme-mode="binary"] .ag-row:hover, :root[data-theme-mode="binary"] .item:hover,
+:root[data-theme-mode="binary"] .msgrow:hover { background: transparent; }
+:root[data-theme-mode="binary"] .tmark.note .violin { fill: var(--bg) !important; stroke: var(--text) !important; }
+:root[data-theme-mode="binary"] mark { color: var(--text); font-weight: 700; text-decoration: underline; }
+:root[data-theme-mode="binary"] code, :root[data-theme-mode="binary"] a { color: var(--text); }
+:root[data-theme-mode="binary"] a { text-decoration: underline; }
+:root[data-theme-mode="binary"] #ganttDate { color-scheme: light; }
+:root[data-theme-mode="binary"] .agent-live-dock button { min-height: 44px; min-width: 44px; }
+:root[data-theme-mode="binary"] .agent-live-dock textarea { font-size: 16px; border-width: 2px; }
+/* Binary Gantt states use a hatch, a dashed frame, and solid live dots. */
+:root[data-theme-mode="binary"] .tmark.selected .violin { fill: url(#selHatch) !important; stroke: var(--text) !important; }
 .activeframe { display: none; }
-:root[data-theme="eink"] .activeframe { display: block; fill: none; stroke: #000; stroke-width: 1.5; stroke-dasharray: 4 3; }
+:root[data-theme-mode="binary"] .activeframe { display: block; fill: none; stroke: var(--text); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .livedot { fill: var(--live); stroke: var(--surface-1); stroke-width: 1.5; }
 .livedot.idle { fill: var(--surface-1); stroke: var(--live); }
-:root[data-theme="eink"] .livedot { fill: #000; stroke: #fff; }
-:root[data-theme="eink"] .livedot.idle { fill: #fff; stroke: #000; }
-/* conversation header: static working/recent badge, patched in place */
+:root[data-theme-mode="binary"] .livedot { fill: var(--text); stroke: var(--bg); }
+:root[data-theme-mode="binary"] .livedot.idle { fill: var(--bg); stroke: var(--text); }
 .ch-live { font-size: var(--fs-micro); color: var(--live); border: 1px solid var(--live); padding: 1px 6px; white-space: nowrap; }
 .ch-live:not(.work) { color: var(--text-dim); border-color: var(--border-strong); }
-:root[data-theme="eink"] .ch-live.work { background: #000; color: #fff; border-color: #000; }
-/* e-ink transcript pagination: pages replace scrolling */
+:root[data-theme-mode="binary"] .ch-live.work { background: var(--text); color: var(--bg); border-color: var(--text); }
+/* Binary transcript pagination replaces scrolling. */
 #view.paged { display: flex; flex-direction: column; overflow: hidden; padding-bottom: var(--sp-2); }
 #view.paged .convhead { flex-shrink: 0; }
 #view.paged .transcript { flex: 1; min-height: 0; overflow-y: auto; }
 #pager { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 3px 8px; border-top: 1px solid var(--border); background: var(--surface-1); font-size: var(--fs-micro); color: var(--text-dim); flex-shrink: 0; }
 #pager button { height: 24px; padding: 0 10px; font-size: 12px; }
 #pager #pgInfo { white-space: nowrap; }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
-}
-
 /* ---- base ---- */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -171,10 +109,10 @@ mark { background: none; color: var(--warn); font-weight: 700; }
 .sr-role { flex: 0 0 56px; color: var(--text-dim); font-size: var(--fs-meta); text-align: right; }
 .sr-snip { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 .sr-flag { color: var(--text-faint); font-size: var(--fs-meta); flex: 0 0 auto; }
-:root[data-theme="eink"] .sr-group, :root[data-theme="eink"] .sr-head { border-color: #000; }
+:root[data-theme-mode="binary"] .sr-group, :root[data-theme-mode="binary"] .sr-head { border-color: var(--text); }
 .msg.hit-flash { outline: 2px solid var(--warn); outline-offset: -2px; }
 .sr-hit.sel { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
-:root[data-theme="eink"] .sr-hit.sel { box-shadow: inset 4px 0 0 #000; }
+:root[data-theme-mode="binary"] .sr-hit.sel { box-shadow: inset 4px 0 0 var(--text); }
 .sr-chips { display: flex; gap: 4px; flex-wrap: wrap; }
 .sr-chip { border: 1px solid var(--border); background: var(--surface-1); padding: 2px 10px; cursor: pointer; font-size: var(--fs-meta); color: var(--text-dim); }
 .sr-chip:hover { background: var(--surface-2); }
@@ -292,7 +230,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 #crumb button:hover { text-decoration: underline; background: transparent; }
 #crumb .sep { color: var(--text-faint); }
 #crumb .here { color: var(--text); font-weight: 700; padding: 0 4px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
-#crumbSibs { position: absolute; top: 100%; left: 0; z-index: 70; background: var(--bg); border: 1px solid var(--border-strong); max-height: 60vh; overflow-y: auto; min-width: 300px; max-width: 480px; box-shadow: 0 4px 18px rgba(0,0,0,.35); }
+#crumbSibs { position: absolute; top: 100%; left: 0; z-index: 70; background: var(--bg); border: 1px solid var(--border-strong); max-height: 60vh; overflow-y: auto; min-width: 300px; max-width: 480px; box-shadow: 0 4px 18px var(--shadow-color); }
 #crumbSibs .sib { display: block; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; }
 #crumbSibs .sib:hover { background: var(--surface-2); }
 #crumbSibs .sib.on { border-left: 3px solid var(--accent); }
@@ -493,8 +431,8 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .diff-body td { padding: 1px 6px; vertical-align: top; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
 .diff-body td.old { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .diff-body td.new { color: var(--success); background: color-mix(in srgb, var(--success) 9%, transparent); }
-:root[data-theme="eink"] .diff-body td.old, :root[data-theme="eink"] .diff-body td.new { color: #000; background: #fff; }
-:root[data-theme="eink"] .diff-body td.old { text-decoration: line-through; }
+:root[data-theme-mode="binary"] .diff-body td.old, :root[data-theme-mode="binary"] .diff-body td.new { color: var(--text); background: var(--bg); }
+:root[data-theme-mode="binary"] .diff-body td.old { text-decoration: line-through; }
 .diff-body td.gap { text-align: center; color: var(--text-faint); background: var(--surface-1); }
 /* Git-weaved file Gantt: one sticky row label, AI marks above Git marks. */
 .file-gantt-view { margin: 0 auto; min-width: 0; }
@@ -530,9 +468,9 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .fg-work { position: absolute; right: 2px; top: 4px; bottom: 4px; width: 3px; background: var(--warn); z-index: 2; }
 .fg-empty { padding: 30px; color: var(--text-dim); }
 .git-card pre { margin: 0; padding: 10px; max-height: 65vh; overflow: auto; white-space: pre; font: 11px/1.45 var(--font); }
-:root[data-theme="eink"] .fg-mark { background: #fff; color: #000; border: 2px solid #000; }
-:root[data-theme="eink"] .fg-mark.git { background: #000; }
-:root[data-theme="eink"] .fg-link { border-color: #000 !important; }
+:root[data-theme-mode="binary"] .fg-mark { background: var(--bg); color: var(--text); border: 2px solid var(--text); }
+:root[data-theme-mode="binary"] .fg-mark.git { background: var(--text); }
+:root[data-theme-mode="binary"] .fg-link { border-color: var(--text) !important; }
 /* Whole-file time comparison opened from one file-Gantt row. */
 .fg-label[data-fg-file] { border: 0; border-radius: 0; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
 .fg-label[data-fg-file]:hover, .fg-label[data-fg-file].on { background: var(--accent-strong); color: var(--accent-ink); }
@@ -557,7 +495,7 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .fi-columns.reading .fi-cell .code { padding: 1px 14px; max-width: 96ch; }
 .fi-cell { display: grid; grid-template-columns: 44px minmax(0, 1fr); min-width: 0; min-height: 18px; overflow: hidden; }
 .fi-diff-row.changed .fi-cell + .fi-cell { border-left: 1px solid var(--border); }
-:root[data-theme="eink"] .fi-diff-row.changed .fi-cell + .fi-cell { border-left: 2px solid #000; }
+:root[data-theme-mode="binary"] .fi-diff-row.changed .fi-cell + .fi-cell { border-left: 2px solid var(--text); }
 .fi-cell .ln { padding: 1px 6px; color: var(--text-faint); text-align: right; user-select: none; background: var(--surface-1); cursor: pointer; }
 .fi-cell .ln:hover { color: var(--text); font-weight: 700; }
 .fi-cell .code { display: block; min-width: 0; padding: 1px 7px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -573,11 +511,11 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .sx-md-q { display: inline-block; min-width: 100%; box-sizing: border-box; border-left: 3px solid var(--border-strong); padding-left: 6px; color: var(--text-dim); }
 .fi-cell .code code { font: inherit; border: 1px solid var(--border); padding: 0 3px; }
 .fi-cell .code a { color: inherit; text-decoration: underline; }
-:root[data-theme="eink"] .sx-k, :root[data-theme="eink"] .sx-t, :root[data-theme="eink"] .sx-n, :root[data-theme="eink"] .sx-md-h { color: #000; font-weight: 700; }
-:root[data-theme="eink"] .sx-s { color: #000; text-decoration: underline; }
-:root[data-theme="eink"] .sx-c { color: #000; font-style: italic; font-weight: 400; }
-:root[data-theme="eink"] .sx-md-q { color: #000; border-left: 3px solid #000; }
-:root[data-theme="eink"] .fi-cell.new-change .sx-s { text-decoration: none; font-style: italic; }
+:root[data-theme-mode="binary"] .sx-k, :root[data-theme-mode="binary"] .sx-t, :root[data-theme-mode="binary"] .sx-n, :root[data-theme-mode="binary"] .sx-md-h { color: var(--text); font-weight: 700; }
+:root[data-theme-mode="binary"] .sx-s { color: var(--text); text-decoration: underline; }
+:root[data-theme-mode="binary"] .sx-c { color: var(--text); font-style: italic; font-weight: 400; }
+:root[data-theme-mode="binary"] .sx-md-q { color: var(--text); border-left: 3px solid var(--text); }
+:root[data-theme-mode="binary"] .fi-cell.new-change .sx-s { text-decoration: none; font-style: italic; }
 .fi-cell.old-change { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); border-left: 3px dashed var(--danger); }
 .fi-cell.new-change { color: var(--success); background: color-mix(in srgb, var(--success) 9%, transparent); border-left: 3px solid var(--success); }
 .fi-cell.old-change .ln::before { content: '−'; margin-right: 4px; font-weight: 700; }
@@ -612,9 +550,9 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .ff-tree .ff-file.changed .ff-state { color: var(--accent); }
 .ff-tree .ff-file:hover, .ff-tree .ff-file.on { background: var(--accent-strong); color: var(--accent-ink); }
 .ff-tree .ff-file.on .ff-state, .ff-tree .ff-file.on .ff-lines { color: var(--accent-ink); }
-:root[data-theme="eink"] .ff-tree .ff-file.changed { border-left: 4px double #000; text-decoration: underline; }
-:root[data-theme="eink"] .ff-tree .ff-file.changed .ff-state, :root[data-theme="eink"] .ff-tree .ff-file.changed .ff-lines { color: #000; }
-:root[data-theme="eink"] .ff-tree .ff-file.on .ff-state, :root[data-theme="eink"] .ff-tree .ff-file.on .ff-lines { color: #fff; }
+:root[data-theme-mode="binary"] .ff-tree .ff-file.changed { border-left: 4px double var(--text); text-decoration: underline; }
+:root[data-theme-mode="binary"] .ff-tree .ff-file.changed .ff-state, :root[data-theme-mode="binary"] .ff-tree .ff-file.changed .ff-lines { color: var(--text); }
+:root[data-theme-mode="binary"] .ff-tree .ff-file.on .ff-state, :root[data-theme-mode="binary"] .ff-tree .ff-file.on .ff-lines { color: var(--bg); }
 .ff-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .ff-timeline { flex: 0 0 auto; padding: 8px 12px 10px; border-bottom: 1px solid var(--border-strong); background: var(--surface-1); }
 .ff-track { position: relative; height: 38px; margin: 0 8px 6px; border-bottom: 1px solid var(--border-strong); cursor: crosshair; touch-action: none; }
@@ -675,18 +613,18 @@ body.file-full .file-inspector .fi-head, body.file-full .file-inspector .fi-trut
 body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .ff-loading { padding: 30px; color: var(--text-dim); }
 @media (max-width: 1100px) { .ff-layout { grid-template-columns: 230px minmax(0, 1fr); } }
-:root[data-theme="eink"] .fi-cell.old-change, :root[data-theme="eink"] .fi-cell.new-change { color: #000; background: #fff; }
-:root[data-theme="eink"] .fi-cell.old-change { border-left: 4px dashed #000; }
-:root[data-theme="eink"] .fi-cell.old-change .code { text-decoration: line-through; }
-:root[data-theme="eink"] .fi-cell.new-change { border-left: 4px double #000; }
-:root[data-theme="eink"] .fi-cell.new-change .code { font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; }
-:root[data-theme="eink"] .ff-point { background: #fff; border: 2px solid #000; }
-:root[data-theme="eink"] .ff-point.git { background: #000; }
-:root[data-theme="eink"] .ff-point.current { background: #000; border: 0; }
-:root[data-theme="eink"] .ff-point.boundary { background: #fff; border: 2px double #000; }
-:root[data-theme="eink"] .ff-key { --key-color: #000; }
-:root[data-theme="eink"] .ff-key.old::before { background: #fff; }
-:root[data-theme="eink"] .ff-key.new::before { background: #000; }
+:root[data-theme-mode="binary"] .fi-cell.old-change, :root[data-theme-mode="binary"] .fi-cell.new-change { color: var(--text); background: var(--bg); }
+:root[data-theme-mode="binary"] .fi-cell.old-change { border-left: 4px dashed var(--text); }
+:root[data-theme-mode="binary"] .fi-cell.old-change .code { text-decoration: line-through; }
+:root[data-theme-mode="binary"] .fi-cell.new-change { border-left: 4px double var(--text); }
+:root[data-theme-mode="binary"] .fi-cell.new-change .code { font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; }
+:root[data-theme-mode="binary"] .ff-point { background: var(--bg); border: 2px solid var(--text); }
+:root[data-theme-mode="binary"] .ff-point.git { background: var(--text); }
+:root[data-theme-mode="binary"] .ff-point.current { background: var(--text); border: 0; }
+:root[data-theme-mode="binary"] .ff-point.boundary { background: var(--bg); border: 2px double var(--text); }
+:root[data-theme-mode="binary"] .ff-key { --key-color: var(--text); }
+:root[data-theme-mode="binary"] .ff-key.old::before { background: var(--bg); }
+:root[data-theme-mode="binary"] .ff-key.new::before { background: var(--text); }
 .blame-view { max-width: var(--read-max); margin: 0 auto; }
 .blame-head { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; background: var(--bg); border-bottom: 1px solid var(--border); padding: var(--sp-2) 0; margin-bottom: var(--sp-2); }
 .blame-head h2 { margin: 0 0 2px; font-size: var(--fs-title); }
@@ -708,8 +646,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .blame-line .txt { white-space: pre-wrap; word-break: break-word; }
 .blame-line.unowned { cursor: default; }
 .blame-line.unowned .txt { color: var(--text-dim); }
-:root[data-theme="eink"] .blame-line .bar { background: #000 !important; }
-:root[data-theme="eink"] .blame-line.a0 .age, :root[data-theme="eink"] .blame-line.a1 .age { font-weight: 700; color: #000; }
+:root[data-theme-mode="binary"] .blame-line .bar { background: var(--text) !important; }
+:root[data-theme-mode="binary"] .blame-line.a0 .age, :root[data-theme-mode="binary"] .blame-line.a1 .age { font-weight: 700; color: var(--text); }
 .empty { color: var(--text-dim); text-align: center; margin-top: 60px; }
 .empty .hint { color: var(--text-faint); font-size: var(--fs-meta); }
 
@@ -741,7 +679,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.folded { max-height: 100vh; overflow: hidden; position: relative; padding-bottom: 34px; }
 .msg.folded::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 72px; background: linear-gradient(transparent, var(--bg)); pointer-events: none; }
 .msg.user.folded::after { background: linear-gradient(transparent, var(--surface-1)); }
-:root[data-theme="eink"] .msg.folded::after { background: #fff; height: 24px; }
+:root[data-theme-mode="binary"] .msg.folded::after { background: var(--bg); height: 24px; }
 .msg .unfold { position: absolute; right: 14px; bottom: 6px; z-index: 1; height: 20px; padding: 0 6px; border: 0; background: transparent; color: var(--text-faint); font-size: 11px; cursor: pointer; }
 .msg .unfold:hover { color: var(--text); text-decoration: underline; background: transparent; }
 /* model-change bar: a quiet rule line where the serving model switches */
@@ -793,13 +731,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
 .rc-body { color: var(--text); } /* message-size text, inherited — not widget-size */
 /* extension view: a modal takeover, not a black box in the chat */
-.rc-cv { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; background: rgba(10, 10, 14, .5); }
-.rc-cv-card { width: fit-content; min-width: min(420px, 94vw); max-width: 96vw; max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0, 0, 0, .35); overflow: hidden; }
+.rc-cv { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; background: var(--overlay-strong); }
+.rc-cv-card { width: fit-content; min-width: min(420px, 94vw); max-width: 96vw; max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); overflow: hidden; }
 .rc-cv-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border-strong); color: var(--text-dim); font-size: var(--fs-micro); }
 .rc-cv-head strong { color: var(--accent); font-weight: 600; }
 .rc-cv-head span { flex: 1; }
 .rc-cv-close { background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 2px 9px; font: inherit; font-size: var(--fs-micro); }
-.rc-cv-close:hover { color: var(--red, #f66); border-color: var(--red, #f66); }
+.rc-cv-close:hover { color: var(--red); border-color: var(--red); }
 /* The host renders views at 100 columns: size the panel to exactly 100ch so
    no horizontal scrollbar appears; on narrow screens shrink the font instead
    (min 8px, then horizontal pan is the fallback). Tight line-height keeps
@@ -807,17 +745,17 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .rc-cv-screen { flex: 1; min-height: 0; width: calc(100ch + 32px); max-width: calc(96vw - 34px); background: var(--bg); color: var(--text); margin: 0; padding: 12px 16px; font-family: ui-monospace, "Cascadia Mono", Menlo, monospace; font-size: min(14px, max(8px, calc((96vw - 44px) / 62))); line-height: 1.2; letter-spacing: 0; overflow-y: auto; overflow-x: hidden; white-space: pre; outline: none; caret-color: transparent; cursor: default; }
 .rc-cv-screen:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 /* command palette: grouped, filtered, floats above the composer */
-.slash-pop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; max-height: 340px; overflow: auto; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0, 0, 0, .35); z-index: 40; }
+.slash-pop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; max-height: 340px; overflow: auto; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); z-index: 40; }
 .slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 8px 10px; }
 .slash-group { color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; padding: 8px 10px 2px; }
 .slash-row { display: flex; gap: 12px; align-items: baseline; padding: 5px 10px; cursor: pointer; }
-.slash-row:hover { background: var(--surface-2, rgba(127, 127, 127, .12)); }
+.slash-row:hover { background: var(--surface-2); }
 .slash-row.sel { background: var(--accent); }
-.slash-row.sel .slash-name, .slash-row.sel .slash-desc { color: var(--bg, #fff); }
+.slash-row.sel .slash-name, .slash-row.sel .slash-desc { color: var(--accent-ink); }
 .slash-name { color: var(--accent); font-weight: 600; font-size: var(--fs-micro); white-space: nowrap; }
 .slash-desc { color: var(--text-dim); font-size: var(--fs-micro); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-kill { flex: none; background: none; border: 1px solid var(--border-strong); color: var(--text-dim); cursor: pointer; padding: 2px 7px; font: inherit; font-size: var(--fs-micro); }
-.ag-kill:hover { color: var(--red, #f66); border-color: var(--red, #f66); }
+.ag-kill:hover { color: var(--red); border-color: var(--red); }
 .rc-notice { color: var(--text-dim); font-size: var(--fs-micro); margin: 2px 0; }
 .rc-widget { color: var(--text-dim); font-size: 11px; margin: 4px 0; border-left: 2px solid var(--border-strong); padding-left: 8px; white-space: pre-wrap; }
 .rc-dialog { border: 1px solid var(--accent); padding: 8px; margin: 6px 0; }
@@ -843,9 +781,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* launcher mode row + overlays (mode manager, mode form, context confirm) */
 .pmoderow { display: flex; gap: 6px; align-items: center; }
 .pmoderow select { flex: 1 1 auto; min-width: 0; }
-.pmodewarn { color: var(--warn, #b8860b); }
-.mode-manage, .mode-form, .ctx-confirm { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); padding: 16px; }
-.mm-card, .mf-card, .cc-card { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 8px; padding: 12px; width: min(680px, 94vw); max-height: 90vh; }
+.pmodewarn { color: var(--warn); }
+.mode-manage, .mode-form, .ctx-confirm { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: var(--overlay); padding: 16px; }
+.mm-card, .mf-card, .cc-card { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); display: flex; flex-direction: column; gap: 8px; padding: 12px; width: min(680px, 94vw); max-height: 90vh; }
 .mm-head { display: flex; align-items: baseline; gap: 10px; }
 .mm-head b { flex: 0 0 auto; }
 .mm-head .hint, .mm-head span { flex: 1 1 auto; }
@@ -854,7 +792,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .mm-row .mm-info { flex: 1 1 auto; min-width: 0; }
 .mm-btns { display: flex; gap: 4px; flex: 0 0 auto; }
 .mm-foot, .cc-foot, .mf-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
-.mf-foot .mf-err { flex: 1 1 auto; color: var(--warn, #b8860b); }
+.mf-foot .mf-err { flex: 1 1 auto; color: var(--warn); }
 .mf-body { overflow: auto; display: flex; flex-direction: column; gap: 6px; }
 .mf-pair { display: flex; gap: 8px; }
 .mf-pair > * { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
@@ -864,9 +802,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .cc-text { width: 100%; height: 42vh; resize: vertical; white-space: pre; overflow-wrap: normal; overflow-x: auto; font-family: ui-monospace, monospace; font-size: 12.5px; line-height: 1.45; }
 .cc-first { border-left: 3px solid var(--border-strong); padding-left: 8px; }
 .cc-foot { justify-content: space-between; }
-.cc-bigwarn { color: var(--warn, #b8860b); border: 1px solid var(--warn, #b8860b); padding: 4px 8px; }
+.cc-bigwarn { color: var(--warn); border: 1px solid var(--warn); padding: 4px 8px; }
 /* ---- model picker: one quiet paper panel ---- */
-.mpick { position: fixed; z-index: 60; width: 460px; max-width: calc(100vw - 16px); max-height: 480px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 8px 28px rgba(0,0,0,.28); }
+.mpick { position: fixed; z-index: 60; width: 460px; max-width: calc(100vw - 16px); max-height: 480px; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 8px 28px var(--shadow-color); }
 .mpick > * { flex: 0 0 auto; }  /* only the list may grow or shrink */
 .mp-loading, .mp-empty { padding: 20px; color: var(--text-dim); text-align: center; }
 .mpick .mp-top { display: flex; gap: 6px; align-items: center; padding: 10px 10px 8px; }
@@ -1144,7 +1082,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-mic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: square; }
 .agent-mic.recording { color: var(--accent-ink); background: var(--accent-strong); border-color: var(--accent-strong); }
 .agent-mic.transcribing { border-style: double; }
-:root[data-theme="eink"] .agent-mic.recording { color: #fff; background: #000; border-color: #000; }
+:root[data-theme-mode="binary"] .agent-mic.recording { color: var(--bg); background: var(--text); border-color: var(--text); }
 .agent-bar { flex-direction: row; align-items: center; }
 .overlay.agent-overlay {
   z-index: 55; padding: 8px; align-items: stretch; justify-content: stretch;
@@ -1157,14 +1095,14 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-dialog h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; flex: 0 0 auto; }
 .agent-dialog h3 span { color: var(--text-dim); font-weight: 400; font-size: var(--fs-meta); }
 .agent-pane { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; overflow: hidden; margin: 0; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: 14px/1.05 var(--font); white-space: pre; word-break: normal; touch-action: none; overscroll-behavior: none; }
-.agent-pane .term-sel { background: var(--cyan); color: #fff; }
+.agent-pane .term-sel { background: var(--term-selection); color: var(--term-selection-ink); }
 .agent-pane .term-acc { color: var(--cyan); font-weight: 700; }
 .agent-pane .term-dim { color: var(--text-faint); }
 .agent-pane .term-rev { background: var(--text); color: var(--bg); }
-:root[data-theme="eink"] .agent-pane .term-sel,
-:root[data-theme="eink"] .agent-pane .term-rev { background: #000; color: #fff; }
-:root[data-theme="eink"] .agent-pane .term-acc { color: #000; font-weight: 700; text-decoration: underline; }
-:root[data-theme="eink"] .agent-pane .term-dim { color: #000; }
+:root[data-theme-mode="binary"] .agent-pane .term-sel,
+:root[data-theme-mode="binary"] .agent-pane .term-rev { background: var(--text); color: var(--bg); }
+:root[data-theme-mode="binary"] .agent-pane .term-acc { color: var(--text); font-weight: 700; text-decoration: underline; }
+:root[data-theme-mode="binary"] .agent-pane .term-dim { color: var(--text); }
 .agent-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2); flex: 0 0 auto; }
 .agent-choices:empty { display: none; }
 .agent-dialog textarea { flex: 0 0 auto; }
@@ -1213,13 +1151,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 #navHud .nh-row .nh-meta { color: var(--text-faint); flex-shrink: 0; }
 #navHud .nh-row.on { color: var(--text); font-weight: 600; }
 #navHud .nh-row.on .nh-dir { color: var(--accent); }
-:root[data-theme="eink"] #navHud { background: #fff; border: 2px solid #000; color: #000; }
+:root[data-theme-mode="binary"] #navHud { background: var(--bg); border: 2px solid var(--text); color: var(--text); }
 #helpMini .hm-head { display: flex; align-items: center; gap: 8px; color: var(--text-faint); margin-bottom: 2px; }
 #helpMini .hm-head b { font-weight: 600; color: var(--text-dim); margin-right: auto; }
 #helpMini .hm-head button { border: 0; background: transparent; color: var(--text-faint); padding: 0 2px; cursor: pointer; font-size: var(--fs-micro); }
 #helpMini td { padding: 1px 4px 1px 0; vertical-align: top; }
 #helpMini td:first-child { color: var(--text-faint); white-space: nowrap; }
-:root[data-theme="eink"] #helpMini { background: #fff; border: 2px solid #000; color: #000; }
+:root[data-theme-mode="binary"] #helpMini { background: var(--bg); border: 2px solid var(--text); color: var(--text); }
 .win-card:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---- reading view (r: the last message, comfortable to read) ---- */
@@ -1230,7 +1168,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 #readBar .rb-keys { margin-left: auto; color: var(--text-faint); white-space: nowrap; }
 #readBody { flex: 1; overflow: auto; padding: 28px 20px 40vh; outline: none; }
 #readBody > .md { max-width: var(--read-max); margin: 0 auto; font-size: 15px; line-height: 1.65; }
-:root[data-theme="eink"] #readOverlay { border: 0; }
+:root[data-theme-mode="binary"] #readOverlay { border: 0; }
 
 /* ---- modal (epic name, shortcuts) ---- */
 .overlay { position: fixed; inset: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 70%, transparent); display: flex; align-items: flex-start; justify-content: center; padding-top: 20vh; }
@@ -1307,7 +1245,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   body.home #list { touch-action: pan-x pan-y; }
   body.home #gRecenter { display: flex; }
   /* the tab switcher floats in the corner instead of owning a full-width bar */
-  #tabs { position: fixed; left: auto; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 35; width: auto; height: auto; padding: 2px; background: var(--surface-1); border: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); box-shadow: 0 2px 12px rgba(0,0,0,.3); }
+  #tabs { position: fixed; left: auto; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 35; width: auto; height: auto; padding: 2px; background: var(--surface-1); border: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); box-shadow: 0 2px 12px var(--shadow-color); }
   #tabs button[data-tab] { height: 34px; min-height: 34px; min-width: 0; padding: 0 8px; font-size: 11px; }
   /* the search collapses to one magnifier button; tap toggles the field */
   #qBtn { display: inline-flex; }
@@ -1437,7 +1375,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .agent-live-dock button { min-width: 48px; }
 
   /* model picker becomes a bottom sheet */
-  .mpick { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; max-height: 72dvh; box-shadow: 0 -6px 24px rgba(0,0,0,.25); }
+  .mpick { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; max-height: 72dvh; box-shadow: 0 -6px 24px var(--shadow-soft); }
   .mpick .mp-filter { height: 42px; font-size: 16px; }
   .mpick .mp-row { min-height: 42px; }
   .mpick .mp-foot button { min-height: 44px; }
@@ -1477,10 +1415,28 @@ body.zen:not(.home) .msg { border-bottom: 0; padding: 14px 0; }
 body.zen:not(.home) .msg.user { border-left: 2px solid var(--border-strong); padding-left: 14px; }
 #zenExit { display: none; }
 /* recenter on now — the one Google-Maps-style control on the phone chart */
-#gRecenter { display: none; position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 40; width: 46px; height: 46px; min-height: 46px; align-items: center; justify-content: center; border: 1px solid var(--border-strong); background: var(--surface-1); font-size: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.3); }
+#gRecenter { display: none; position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 40; width: 46px; height: 46px; min-height: 46px; align-items: center; justify-content: center; border: 1px solid var(--border-strong); background: var(--surface-1); font-size: 20px; box-shadow: 0 2px 12px var(--shadow-color); }
 body.zen:not(.home) #zenExit { display: block; position: fixed; top: 6px; right: 10px; z-index: 60; border: 0; background: transparent; color: var(--text-faint); font-size: var(--fs-micro); height: auto; padding: 2px 6px; }
 #zenExit:hover { color: var(--text); background: transparent; }
 </style>
+<link id="customThemeSheet" rel="stylesheet" href="/api/themes.css">
+<style id="customThemeRuntime"></style>
+<script>
+// The blocking theme sheets are loaded. Copy CSS capabilities to attributes
+// before body paint, then update browser and PWA chrome from the active bg.
+window.aiconvoSyncTheme = function () {
+  const root = document.documentElement;
+  const style = getComputedStyle(root);
+  const mode = style.getPropertyValue('--theme-mode').trim() || 'color';
+  const motion = style.getPropertyValue('--theme-motion').trim() === '0' ? 'none' : 'full';
+  root.dataset.themeMode = mode;
+  root.dataset.themeMotion = motion;
+  const bg = style.getPropertyValue('--bg').trim();
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta && bg) meta.content = bg;
+};
+window.aiconvoSyncTheme();
+</script>
 </head>
 <body class="home">
 <header>
@@ -1517,6 +1473,7 @@ body.zen:not(.home) #zenExit { display: block; position: fixed; top: 6px; right:
     <option value="light">light</option>
     <option value="gray">grayscale</option>
     <option value="eink">e-ink (black/white)</option>
+    <optgroup id="customThemeOptions" label="custom themes" hidden></optgroup>
   </select>
 </div>
 <main>
@@ -2481,15 +2438,72 @@ $('qBtn').onclick = () => {
   else $('q').blur();
 };
 
-$('themeSel').value = localStorage.getItem('aiconvo.theme') || '';
-$('themeSel').onchange = () => {
-  const t = $('themeSel').value;
+const BUILTIN_THEMES = new Set(['dark', 'light', 'gray', 'eink']);
+function themeToken(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function themeMode() { return document.documentElement.dataset.themeMode || themeToken('--theme-mode') || 'color'; }
+function themeNumber(name, fallback) {
+  const n = parseFloat(themeToken(name));
+  return Number.isFinite(n) ? n : fallback;
+}
+function syncActiveTheme() {
+  if (window.aiconvoSyncTheme) window.aiconvoSyncTheme();
+  const selected = document.documentElement.dataset.theme
+    || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  const href = `/manifest.webmanifest?theme=${encodeURIComponent(selected)}`;
+  if ($('appManifest').getAttribute('href') !== href) $('appManifest').setAttribute('href', href);
+}
+function selectTheme(t, repaint = true) {
   try { t ? localStorage.setItem('aiconvo.theme', t) : localStorage.removeItem('aiconvo.theme'); } catch {}
   if (t) document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
-  renderTabList(); // repaint the Gantt: project colors collapse to black on e-ink
-  if (current && $('conversationTranscript')) { einkPage = -1; renderConv(); } // pagination on/off
-};
+  syncActiveTheme();
+  if (!repaint) return;
+  renderTabList();
+  if (current && $('conversationTranscript')) { einkPage = -1; renderConv(); }
+}
+async function loadCustomThemes() {
+  try {
+    const [catalog, css] = await Promise.all([
+      fetch('/api/themes', { cache: 'no-store' }).then(r => r.json()),
+      fetch('/api/themes.css', { cache: 'no-store' }).then(r => r.text()),
+    ]);
+    $('customThemeRuntime').textContent = css;
+    $('customThemeSheet').disabled = true; // runtime copy can now refresh or remove themes
+    const group = $('customThemeOptions');
+    group.textContent = '';
+    for (const theme of (catalog.themes || [])) {
+      const option = document.createElement('option');
+      option.value = theme.id;
+      option.textContent = theme.name;
+      option.title = `${theme.scheme} · ${theme.mode} · motion ${theme.motion}`;
+      group.appendChild(option);
+    }
+    group.hidden = !group.children.length;
+    const saved = localStorage.getItem('aiconvo.theme') || '';
+    if (saved && !BUILTIN_THEMES.has(saved) && !(catalog.themes || []).some(t => t.id === saved)) {
+      const option = document.createElement('option');
+      option.value = saved;
+      option.textContent = `${saved} (missing or invalid)`;
+      option.disabled = true;
+      group.hidden = false;
+      group.appendChild(option);
+    }
+    $('themeSel').value = saved;
+    syncActiveTheme();
+    if ((catalog.invalid || []).length) console.warn('Invalid custom themes:', catalog.invalid);
+  } catch (error) {
+    console.warn('Could not load custom themes:', error);
+  }
+}
+$('themeSel').value = localStorage.getItem('aiconvo.theme') || '';
+$('themeSel').onchange = () => selectTheme($('themeSel').value);
+$('themeSel').onfocus = () => loadCustomThemes();
+loadCustomThemes();
+try {
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (!document.documentElement.dataset.theme) syncActiveTheme();
+  });
+} catch {}
 document.addEventListener('click', e => {
   if (!$('filtersPop').hidden && !e.target.closest('#filtersPop')) $('filtersPop').hidden = true;
   if (!$('agentsPop').hidden && !e.target.closest('#agentsPop')) toggleAgents(false);
@@ -3105,20 +3119,24 @@ async function quickFold(from, into) {
 }
 
 function projectColor(project) {
-  const t = document.documentElement.dataset.theme;
-  // E-ink is binary: every project paints black (design/11-eink-theme.md).
-  if (t === 'eink') return { fill: '#000', stroke: '#000' };
-  // Grayscale: projects become grey tones (design/12-grayscale-theme.md).
+  const mode = themeMode();
+  if (mode === 'binary') {
+    const ink = themeToken('--text');
+    return { fill: ink, stroke: ink };
+  }
   let hash = 2166136261;
   for (const c of project) { hash ^= c.charCodeAt(0); hash = Math.imul(hash, 16777619); }
-  if (t === 'gray') {
-    const fillL = [60, 67, 74, 81][(hash >>> 0) % 4];
-    return { fill: `hsl(0 0% ${fillL}%)`, stroke: `hsl(0 0% ${fillL - 30}%)` };
+  if (mode === 'gray') {
+    const base = themeNumber('--project-gray-base', 60);
+    const step = themeNumber('--project-gray-step', 7);
+    const offset = themeNumber('--project-gray-stroke-offset', 30);
+    const fillL = base + ((hash >>> 0) % 4) * step;
+    return { fill: `hsl(0 0% ${fillL}%)`, stroke: `hsl(0 0% ${fillL - offset}%)` };
   }
   const hue = ((hash >>> 0) * 137.508) % 360;
   return {
-    fill: `hsl(${hue.toFixed(0)} 62% 44%)`,
-    stroke: `hsl(${hue.toFixed(0)} 78% 68%)`,
+    fill: `hsl(${hue.toFixed(0)} ${themeToken('--project-fill-s')} ${themeToken('--project-fill-l')})`,
+    stroke: `hsl(${hue.toFixed(0)} ${themeToken('--project-stroke-s')} ${themeToken('--project-stroke-l')})`,
   };
 }
 
@@ -3409,8 +3427,8 @@ function renderTimeline() {
     }).join('');
   }
   const notes = noteHits.length ? `<div class="timeline-note-hits">${noteHits.map(s => `<div class="item" data-note="${esc(s.file)}"><div><div class="title"><span class="note-sig">✓</span> ${esc(s.title)}</div><div class="snip">${esc(s.snippet || '')}</div></div></div>`).join('')}</div>` : '';
-  // The hatch pattern paints selected violins on 1-bit e-ink themes.
-  const defs = `<defs><pattern id="selHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="#fff"/><line x1="0" y1="0" x2="0" y2="5" stroke="#000" stroke-width="1.6"/></pattern></defs>`;
+  // The hatch pattern paints selected violins on binary themes.
+  const defs = `<defs><pattern id="selHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="var(--bg)"/><line x1="0" y1="0" x2="0" y2="5" stroke="var(--text)" stroke-width="1.6"/></pattern></defs>`;
   list.innerHTML = notes + (rows.length ? `<div class="timeline" style="width:${chartW}px;height:${chartH}px">${projectLabelsHtml(pos)}${svgTagFor(list, chartW, chartH)}${defs}${daysSvg}${nowLine}${marks}${glyphs}</svg></div>` : `<div class="empty">${searchMode ? 'no matches. try different words.' : 'no conversations match.'}</div>`);
   scrollTimeline(list, st, sl);
 }
@@ -4426,7 +4444,7 @@ const fileInk = {
   live(a, b) {
     if (!this.ctx || !a || !b) return;
     this.ctx.lineCap = 'round'; this.ctx.lineJoin = 'round';
-    this.ctx.strokeStyle = document.documentElement.dataset.theme === 'eink' ? '#000' : '#c0392b';
+    this.ctx.strokeStyle = themeToken('--ink');
     this.ctx.lineWidth = 2;
     this.ctx.beginPath(); this.ctx.moveTo(a.x, a.y); this.ctx.lineTo(b.x, b.y); this.ctx.stroke();
   },
@@ -4492,17 +4510,17 @@ const fileInk = {
   stroke(ctx, pts, erase, ai, halo) {
     const pts2 = pts.map(pt => this.screen(pt)).filter(Boolean);
     if (pts2.length < 2) return;
-    const eink = document.documentElement.dataset.theme === 'eink';
+    const binary = isEink();
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     if (erase) return;
-    if (halo && !ai && eink) {
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; ctx.beginPath();
+    if (halo && !ai && binary) {
+      ctx.strokeStyle = themeToken('--ink-halo'); ctx.lineWidth = 5; ctx.beginPath();
       ctx.moveTo(pts2[0].x, pts2[0].y);
       for (let i = 1; i < pts2.length; i++) ctx.lineTo(pts2[i].x, pts2[i].y);
       ctx.stroke();
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+      ctx.strokeStyle = themeToken('--ink'); ctx.lineWidth = 2;
     } else {
-      ctx.strokeStyle = ai ? '#c0392b' : (eink ? '#000' : '#c0392b');
+      ctx.strokeStyle = themeToken(ai ? '--ink-ai' : '--ink');
       ctx.lineWidth = ai ? 2.6 : 2.2;
     }
     ctx.beginPath();
@@ -4543,7 +4561,7 @@ const fileInk = {
     const out = document.createElement('canvas');
     out.width = w; out.height = h;
     const ctx = out.getContext('2d');
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = themeToken('--bg'); ctx.fillRect(0, 0, w, h);
     ctx.save(); ctx.scale(scale, scale);
     const host = this.canvas.getBoundingClientRect();
     ctx.font = '11px ui-monospace, Menlo, monospace';
@@ -4556,12 +4574,12 @@ const fileInk = {
       const text = line.changed
         ? ((line.oldText !== null ? '- ' + line.oldText : '') + (line.oldText !== null && line.newText !== null ? '  |  ' : '') + (line.newText !== null ? '+ ' + line.newText : ''))
         : String(line.newText || line.oldText || '');
-      ctx.fillStyle = line.changed ? '#7a1f1f' : '#111';
+      ctx.fillStyle = themeToken(line.changed ? '--danger' : '--text');
       ctx.fillText(text.replace(/\s+/g, ' ').slice(0, 220), x + 4, y + 2);
     }
     for (const stroke of this.strokes) this.stroke(ctx, stroke.pts, stroke.erase, true);
     ctx.restore();
-    ctx.fillStyle = '#000'; ctx.font = '12px ui-monospace, Menlo, monospace';
+    ctx.fillStyle = themeToken('--text'); ctx.font = '12px ui-monospace, Menlo, monospace';
     ctx.fillText((meta.relativePath || meta.path) + ' · lines ' + meta.fromLine + '-' + meta.toLine + ' · page ' + meta.page + '/' + meta.pages, 8, 8);
     return { meta, dataUrl: out.toDataURL('image/png') };
   },
@@ -7063,7 +7081,7 @@ function foldLongMessages() {
 // 'follow the last page', so a live conversation keeps tailing.
 let einkPage = -1;
 let pgResizeT;
-const isEink = () => document.documentElement.dataset.theme === 'eink';
+const isEink = () => themeMode() === 'binary';
 
 function paginateTranscript(target = 'bottom', keepEl = null) {
   const view = $('view'), t = $('conversationTranscript');
@@ -9429,8 +9447,7 @@ function buildRunCard(r) {
 // the panel go back as raw terminal data. This is the full pi experience
 // for extension views — without a terminal emulator.
 function ansiToHtml(s, clearBg) {
-  const P = ['#1c1c1c', '#cc4444', '#44aa44', '#aaaa33', '#4477cc', '#aa44aa', '#33aaaa', '#cccccc',
-             '#666666', '#ff6666', '#66dd66', '#eeee66', '#6699ff', '#ee66ee', '#66eeee', '#ffffff'];
+  const P = Array.from({ length: 16 }, (_, i) => themeToken(`--ansi-${i}`));
   let out = '';
   const st = { b: false, d: false, i: false, u: false, inv: false, fg: null, bg: null, bgKey: null };
   const span = t => {
@@ -9442,7 +9459,7 @@ function ansiToHtml(s, clearBg) {
     let fg = st.fg, bg = st.bg;
     // The extension's panel fill becomes the modal's own background.
     if (clearBg && st.bgKey === clearBg) bg = null;
-    if (st.inv) { const x = fg || '#cccccc'; fg = bg || '#1c1c1c'; bg = x; }
+    if (st.inv) { const x = fg || themeToken('--text'); fg = bg || themeToken('--bg'); bg = x; }
     if (fg) css.push('color:' + fg);
     if (bg) css.push('background:' + bg);
     if (st.b) css.push('font-weight:bold');
