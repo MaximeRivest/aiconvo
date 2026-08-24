@@ -2857,11 +2857,22 @@ async function renderAgentsPop(refetch) {
     `<span class="ag-dir">${esc(shortDir((s && s.cwd) || ''))}</span></span>` +
     `<span class="ag-age">${esc(status)}</span>` +
     kill(pid, s && (s.timelineTitle || s.title)) + `</div>`;
-  const webKeys = new Set([...activeRuns.values()].map(r => r.key));
-  const webRuns = [...activeRuns.values()].map(r => {
-    const p = procByKey.get(r.key);
-    const status = ((r.model || '').split('/').pop() || 'session model').slice(0, 16) + ' · ' + (r.statusText || 'working…').slice(0, 24);
-    return row(byKey(r.key), r.key, status, p && p.pid);
+  const webKeys = new Set([...activeRuns.values()].map(r => r.fanoutRootKey || r.key));
+  const webGroups = new Map();
+  for (const r of activeRuns.values()) {
+    const id = r.fanoutId || r.jobId;
+    if (!webGroups.has(id)) webGroups.set(id, []);
+    webGroups.get(id).push(r);
+  }
+  const webRuns = [...webGroups.values()].map(rs => {
+    const first = rs[0], key = first.fanoutRootKey || first.key;
+    // Child RPC processes belong to this one parallel turn. Claim them so
+    // they do not reappear as separate "other agents" rows below.
+    for (const r of rs) { const p = procByKey.get(r.key); if (p) shownPids.add(p.pid); }
+    const status = first.fanoutId
+      ? rs.length + ' models · ' + rs.filter(r => r.status === 'running').length + ' working'
+      : ((first.model || '').split('/').pop() || 'session model').slice(0, 16) + ' · ' + (first.statusText || 'working…').slice(0, 24);
+    return row(byKey(key), key, status, null);
   });
   const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) }));
   const termWork = termRows.filter(t => t.s && isActive(t.s));
@@ -10123,6 +10134,12 @@ async function renderConv(scroll) {
     else if (pillEl) pillEl.scrollIntoView({ block: 'center' });
     else if (scroll === 'top') $('view').scrollTop = 0;
     else if (scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
+    else if (scroll === 'compare') {
+      const comparisons = [...$('view').querySelectorAll('.cmpblock')];
+      const cmp = comparisons[comparisons.length - 1];
+      if (cmp) { cmp.open = true; cmp.scrollIntoView({ block: 'center' }); }
+      else $('view').scrollTop = $('view').scrollHeight;
+    }
     else if (mk) mk.scrollIntoView({ block: 'center' });
     else $('view').scrollTop = $('view').scrollHeight;
   }
@@ -13308,7 +13325,9 @@ live.onmessage = ev => {
         if (activeRel === root && current) refreshCtxMeter(current);
         const group = [...runLedgers.values()].filter(L => L.fanoutId === d.fanoutId);
         if (group.length >= (d.fanoutCount || 2) && group.every(L => L.done)) {
-          if (activeRel === root && viewKind === 'conversation' && current) open(root, 'bottom');
+          // The comparison is the destination. Even if the reader opened the
+          // tree while models worked, return to the expanded side-by-side row.
+          if (activeRel === root && current) open(root, 'compare');
         }
       } else if (activeRel && d.key !== activeRel) {
         compareCache.delete(activeRel);
@@ -13384,6 +13403,14 @@ live.onmessage = ev => {
     return;
   }
   if (d.type !== 'update') return;
+  // Fan-out fork files are temporary backing storage. They must not create
+  // session rows, ticker noise, or recent-agent rows.
+  if (d.hiddenFanout) {
+    const i = sessions.findIndex(s => s.key === d.key);
+    if (i >= 0) { sessions.splice(i, 1); if (!searchMode && tab === 'conv') applyFilter(); }
+    updateLiveBadges(); renderAgentsPopSoon();
+    return;
+  }
   relatedCache.delete(d.key);
   compareCache.delete(d.key);
   ctxMeterCache.delete(d.key);

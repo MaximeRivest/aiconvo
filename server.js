@@ -521,6 +521,13 @@ async function indexFile(source, relPath, stat) {
       sessionId: meta.sessionId,
       rootId: meta.rootId,
       parentSession: meta.parentSession,
+      // Parallel generation forks are implementation storage, not standalone
+      // conversations. Preserve their hidden group identity across re-indexes.
+      hiddenFanout: prev && prev.hiddenFanout || undefined,
+      fanoutId: prev && prev.fanoutId || undefined,
+      fanoutRootKey: prev && prev.fanoutRootKey || undefined,
+      fanoutNode: prev && prev.fanoutNode || undefined,
+      fanoutIndex: prev && prev.fanoutIndex != null ? prev.fanoutIndex : undefined,
       cwd: meta.cwd,
       gitBranch: meta.gitBranch,
       title: manualTitle && manualTitle.fullTitle ? manualTitle.fullTitle : fullTitle,
@@ -1950,6 +1957,17 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
 // Fan out one prompt to several models: one pi-native fork per model, then
 // parallel runs on the separate files. The family tree shows them as
 // sibling branches of the same node.
+function markFanoutFork(key, fanout) {
+  const e = index[key];
+  if (!e) return;
+  Object.assign(e, { hiddenFanout: true, fanoutId: fanout.id, fanoutRootKey: fanout.rootKey,
+    fanoutNode: fanout.node, fanoutIndex: fanout.index });
+  saveIndexSoon();
+  // Correct the eager indexNewSessionFile update: clients remove this
+  // temporary backing conversation as soon as its group identity is known.
+  broadcast({ type: 'update', key, ...e });
+}
+
 async function startFanOut(key, { node, models, message, images, force }) {
   if (!Array.isArray(models) || models.length < 2) throw new Error('fan-out needs two or more models');
   const runs = [];
@@ -1959,6 +1977,7 @@ async function startFanOut(key, { node, models, message, images, force }) {
     const forked = await forkSession(key, node); // sequential: each fork locks the source briefly
     saveConversationModels(forked.key, [m]);
     const fanout = { id: fanoutId, rootKey: key, node: node || null, index, count: models.length };
+    markFanoutFork(forked.key, fanout);
     const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force, fanout });
     runs.push({ key: forked.key, jobId: job.id, model: m.provider + '/' + m.modelId,
       fanoutId, fanoutRootKey: key, fanoutNode: node || null, fanoutIndex: index, fanoutCount: models.length });
@@ -2659,7 +2678,7 @@ function runPi(fileContent, prompt, onChunk) {
   return new Promise((resolve, reject) => {
     const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
     fs.writeFileSync(tmp, fileContent);
-    const child = execFile('pi', [...piArgs(), '@' + tmp, prompt], { maxBuffer: 64 * 1024 * 1024, timeout: 600000 },
+    const child = execFile('pi', [...piArgs(), '@' + tmp, prompt], { maxBuffer: 64 * 1024 * 1024, timeout: 1800000 },
       (err, stdout, stderr) => {
         fs.unlink(tmp, () => {});
         if (err) reject(new Error(stderr.trim() || err.message));
@@ -3597,7 +3616,11 @@ async function weighIntentCandidates(project, overview, candidates, emit, step, 
     id: q.id, date: String(q.ts || '?').slice(0, 10), kind: q.kind, force: q.force || null,
     situation: q.situation || null, reason: q.reason || null, quote: clipped(q.user, 900),
   }));
-  const budget = piTargetTokens() - 16000;
+  // Output scales with quote count here (one tier row per quote), so a large
+  // context is a trap: one 800-quote call times out on generation. Cap each
+  // section well below the context budget to keep every call fast; the merge
+  // pass below restores cross-section consistency.
+  const budget = Math.min(35000, piTargetTokens() - 16000);
   const groups = packTextBlocks(blocks, Math.max(20000, budget - estimateInputTokens(header)));
   emit(`Weighing ${candidates.length} intent quotes${groups.length > 1 ? ` (${groups.length} sections)` : ''}…`, step, steps);
   const partials = await mapLimit(groups, 2, async (items, i) => {
@@ -7940,8 +7963,10 @@ const server = http.createServer(async (req, res) => {
       }));
       json(res, 200, { stats });
     } else if (u.pathname === '/api/sessions') {
-      const fam = familyGroups();
-      const list = Object.entries(index).map(([key, e]) => {
+      // Temporary fan-out files do not enlarge the visible fork family.
+      const visibleEntries = Object.entries(index).filter(([, e]) => !e.hiddenFanout);
+      const fam = groupFamilies(visibleEntries, keyForSessionPath);
+      const list = visibleEntries.map(([key, e]) => {
         const f = fam.get(key);
         // family fields appear only on multi-member families: less payload.
         return f && f.size > 1 ? { key, ...e, family: f.primary, familySize: f.size } : { key, ...e };
@@ -8313,7 +8338,12 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/tree') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
-      json(res, 200, await sessionTreeFor(key));
+      const tree = await sessionTreeFor(key);
+      // Parallel opinions belong in the comparison stage, not as durable
+      // fork branches in the navigation tree.
+      tree.nodes = tree.nodes.filter(n => !(index[n.key] && index[n.key].hiddenFanout));
+      tree.family = tree.family.filter(f => !(index[f.key] && index[f.key].hiddenFanout));
+      json(res, 200, tree);
     } else if (u.pathname === '/api/conversation/context') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
