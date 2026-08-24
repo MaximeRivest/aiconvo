@@ -1116,6 +1116,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .treebar button:hover, .treebar button:focus { background: none; color: var(--accent); text-decoration: underline; outline: none; }
 .treebar .k { display: inline-block; margin-right: 5px; padding: 0 4px; border: 1px solid var(--border-strong); color: var(--text-faint); font-size: 10px; }
 .msg.jump { outline: 2px solid var(--accent); }
+/* the fresh branch point: a standing orange ring — the path ends here and
+   the composer below continues from it */
+.msg.branchmark { outline: 2px solid var(--accent); outline-offset: 3px; }
 .nhead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; border: 1px solid var(--border); background: var(--surface-1); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3); }
 .nhead h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-title); }
 .nhead .abstract { color: var(--text); margin: 0 0 var(--sp-2); }
@@ -11497,10 +11500,11 @@ async function branchFrom(key, n, btn) {
     const res = await fetch('/api/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
     const d = await res.json();
     if (d.error) throw new Error(d.error);
-    // Stay in the tree and repaint: the ● here marker must be SEEN moving.
-    // Enter then reads the new path; the composer continues from it.
-    await showTree(key);
-    toast('the ● here marker moved — enter reads, the composer continues from here');
+    // Land IN the conversation: the branch point wears a standing orange
+    // ring, the composer sits right below it — the path ends here. The old
+    // continuation is one folded ⤓ other-branch line.
+    await openAfterBranch(key);
+    toast('branched — the conversation ends here now; write to continue');
   } catch (e) {
     btn.disabled = false;
     btn.textContent = old;
@@ -11528,6 +11532,23 @@ async function editFrom(key, n, btn) {
     btn.textContent = 'edit';
     errToast(e.message || 'the edit fork failed');
   }
+}
+
+// After a branch: open at the bottom, ring the last on-path message (the
+// box just branched after — folded other-branch details do not count), and
+// put the caret in the composer.
+async function openAfterBranch(key) {
+  await open(key, 'bottom');
+  requestAnimationFrame(() => {
+    const t = $('conversationTranscript');
+    const last = t ? [...t.querySelectorAll(':scope > .msg')].pop() : null;
+    if (last) {
+      last.classList.add('branchmark');
+      last.scrollIntoView({ block: 'nearest' });
+    }
+    const ta = $('agentText');
+    if (ta) ta.focus({ preventScroll: true });
+  });
 }
 
 async function openAtTs(key, ts) {
