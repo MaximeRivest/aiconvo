@@ -1916,6 +1916,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
       fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
       fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
+    maybeSettleFanout(job);
   };
   // The full run holds the file lock. Fire and forget: the caller gets the job.
   withSessionOp(sessionPath, async () => {
@@ -1983,6 +1984,108 @@ async function startFanOut(key, { node, models, message, images, force }) {
       fanoutId, fanoutRootKey: key, fanoutNode: node || null, fanoutIndex: index, fanoutCount: models.length });
   }
   return runs;
+}
+
+// Reintegration: after every model of a fan-out settles, the fork files fold
+// back into the parent as real in-file sibling branches — pi entries carry
+// id/parentId, and the forks share the parent's chain verbatim, so their new
+// entries (prompt, work, reply) attach cleanly. The duplicate prompt copies
+// collapse onto one canonical prompt entry; each reply chain reparents onto
+// it and becomes one branch. The fork files retire as .merged (bytes kept,
+// never indexed). Result: ONE conversation that holds every opinion as a
+// branch — no session-list, agent-menu, or tree pollution survives.
+async function reintegrateFanout(rootKey, fanoutId) {
+  const entry = index[rootKey];
+  if (!entry) return false;
+  const rootPath = absPathForKey(rootKey);
+  // Never interleave with a live writer on the parent. The sweep retries later.
+  if (findRunningConversation(rootKey) || headlessRuns.has(rootPath)) return false;
+  const forks = Object.entries(index)
+    .filter(([, e]) => e.hiddenFanout && e.fanoutId === fanoutId)
+    .sort((a, b) => (a[1].fanoutIndex || 0) - (b[1].fanoutIndex || 0));
+  if (!forks.length) return false;
+  return withSessionOp(rootPath, async () => {
+    stopAnyWarmSession(rootPath);
+    const rootRaw = await fsp.readFile(rootPath, 'utf8');
+    const have = new Set();
+    for (const line of rootRaw.split('\n')) {
+      if (!line.trim()) continue;
+      try { const d = JSON.parse(line); if (d.id) have.add(d.id); } catch {}
+    }
+    let canonicalPrompt = null; // { id, text, parent } — the shared fan-out prompt
+    const out = [];
+    for (const [k] of forks) {
+      const absF = absPathForKey(k);
+      stopAnyWarmSession(absF);
+      let raw;
+      try { raw = await fsp.readFile(absF, 'utf8'); } catch { continue; }
+      const idMap = new Map(); // dropped duplicate prompt id → canonical id
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        let d;
+        try { d = JSON.parse(line); } catch { continue; }
+        if (!d.id || d.type === 'session' || have.has(d.id)) continue;
+        if (d.parentId && idMap.has(d.parentId)) d.parentId = idMap.get(d.parentId);
+        if (d.type === 'message' && d.message && d.message.role === 'user') {
+          const text = textOf(d.message.content);
+          if (canonicalPrompt && canonicalPrompt.text === text && canonicalPrompt.parent === (d.parentId || null)) {
+            idMap.set(d.id, canonicalPrompt.id);
+            continue;
+          }
+          if (!canonicalPrompt) canonicalPrompt = { id: d.id, text, parent: d.parentId || null };
+        }
+        have.add(d.id);
+        out.push(JSON.stringify(d));
+      }
+    }
+    if (out.length) {
+      const nl = !rootRaw || rootRaw.endsWith('\n') ? '' : '\n';
+      await fsp.appendFile(rootPath, nl + out.join('\n') + '\n');
+    }
+    // Retire the scaffolding. Bytes stay on disk as .merged for recovery;
+    // the scanner and watcher only see .jsonl files.
+    for (const [k] of forks) {
+      const absF = absPathForKey(k);
+      try { await fsp.rename(absF, absF + '.merged'); } catch {}
+      delete index[k];
+      fsp.unlink(cachePathFor(k)).catch(() => {});
+      if (searchIdx) try { searchIdx.removeConversation(k); } catch {}
+    }
+    saveIndexSoon();
+    try { await indexFile(entry.source, rootKey.slice(entry.source.length + 1), await fsp.stat(rootPath)); }
+    catch (e) { console.error('post-reintegration reindex failed:', e.message); }
+    return true;
+  });
+}
+
+// Called after every fan-out child's final event: when the whole group is
+// settled, fold the branches home and tell every client where to look.
+async function maybeSettleFanout(job) {
+  if (!job.fanoutId) return;
+  const group = [...agentRunJobs.values()].filter(j => j.fanoutId === job.fanoutId);
+  if (group.length < (job.fanoutCount || 2)) return;
+  if (group.some(j => j.status === 'running')) return;
+  try {
+    const ok = await reintegrateFanout(job.fanoutRootKey, job.fanoutId);
+    if (ok) broadcast({ type: 'fanout-settled', key: job.fanoutRootKey, fanoutId: job.fanoutId });
+  } catch (e) { console.error('fan-out reintegration failed:', job.fanoutId, e.message); }
+}
+
+// Server restart safety net: hidden fork groups whose runs died with the
+// old process would linger invisible forever. Fold them home at boot.
+async function sweepOrphanFanouts() {
+  const groups = new Map();
+  for (const e of Object.values(index)) {
+    if (e.hiddenFanout && e.fanoutId && e.fanoutRootKey) groups.set(e.fanoutId, e.fanoutRootKey);
+  }
+  for (const [fanoutId, rootKey] of groups) {
+    if ([...agentRunJobs.values()].some(j => j.fanoutId === fanoutId && j.status === 'running')) continue;
+    if (!index[rootKey]) continue;
+    try {
+      const ok = await reintegrateFanout(rootKey, fanoutId);
+      if (ok) broadcast({ type: 'fanout-settled', key: rootKey, fanoutId });
+    } catch (e) { console.error('fan-out sweep failed:', fanoutId, e.message); }
+  }
 }
 
 // One assistant answer per direct child of node (fan-out is usually
@@ -3565,8 +3668,9 @@ const PYRAMID_WEIGH_PROMPT =
 
 const PYRAMID_WEIGH_MERGE_PROMPT =
   'The attached file lists tier assignments for user-intent quotes, produced from chronological sections of the same project that could not see each other. ' +
-  'Produce the final assignment for every id: promote quotes that form cross-section repeated patterns, and mark quotes superseded when a later section clearly replaced their direction. ' +
-  'Reply with STRICT JSON only: {"tiers":[{"id":"...","tier":"core|standing|pattern|superseded|one-off","note":"one line"}]}. Keep every input id.';
+  'Find cross-section corrections: promote quotes that form cross-section repeated patterns, and mark quotes superseded when a later section clearly replaced their direction. ' +
+  'Reply with STRICT JSON only, listing ONLY the ids whose tier you change — never repeat unchanged rows: ' +
+  '{"changes":[{"id":"...","tier":"core|standing|pattern|superseded|one-off","note":"one line"}]}. If nothing changes, reply {"changes":[]}.';
 
 const PYRAMID_INTENT_PROMPT =
   'The attached file contains user intent evidence for one software project: verbatim user quotes weighed into tiers (core, standing, pattern, superseded — momentary one-offs were already removed), in chronological order with dates. ' +
@@ -3633,7 +3737,13 @@ async function weighIntentCandidates(project, overview, candidates, emit, step, 
     // the one-line assignments restores global consistency.
     const compact = rows.map(t => JSON.stringify({ id: t.id, tier: t.tier, note: oneLine(t.note, '') }));
     const merged = await runPiJson(header + compact.join('\n'), PYRAMID_WEIGH_MERGE_PROMPT);
-    if (Array.isArray(merged.tiers) && merged.tiers.length) rows = merged.tiers;
+    // Delta merge: section tiers are the baseline; the model returns only the
+    // rows it corrects. This keeps the output tiny regardless of project size
+    // (a full rewrite of 800+ rows can exceed the provider output cap).
+    const changes = Array.isArray(merged.changes) ? merged.changes : Array.isArray(merged.tiers) ? merged.tiers : [];
+    const byId = new Map(rows.map(t => [String(t.id), t]));
+    for (const c of changes) if (c && c.id != null && byId.has(String(c.id))) byId.set(String(c.id), c);
+    rows = [...byId.values()];
   }
   const valid = new Set(['core', 'standing', 'pattern', 'superseded', 'one-off']);
   for (const t of rows) {
@@ -8887,6 +8997,7 @@ const server = http.createServer(async (req, res) => {
       } catch { json(res, 404, { error: 'note file missing' }); }
     } else if (u.pathname === '/api/rescan' && req.method === 'POST') {
       await fullScan();
+      sweepOrphanFanouts();
       await refreshProjectFolds().catch(() => {});
       syncSearchIndex();
       json(res, 200, { ok: true, count: Object.keys(index).length });
@@ -8971,6 +9082,7 @@ server.listen(PORT, HOST, () => {
   }
   fullScan().then(() => {
     watch(); watchNotes();
+    sweepOrphanFanouts();
     refreshProjectFolds().catch(() => {})
       .then(() => syncSearchIndex())
       .then(() => scheduleSemanticSync(2000));

@@ -13300,6 +13300,15 @@ live.onmessage = ev => {
     }
     return;
   }
+  if (d.type === 'fanout-settled') {
+    // The parallel opinions now live INSIDE the parent conversation as real
+    // sibling branches; the fork files are gone. Land on the comparison.
+    compareCache.delete(d.key);
+    relatedCache.delete(d.key);
+    ctxMeterCache.delete(d.key);
+    if (activeRel === d.key && current) open(d.key, 'compare');
+    return;
+  }
   if (d.type === 'run-event') {
     if (d.final) {
       if (window._sendPendingKey === d.key || window._sendPendingKey === d.fanoutRootKey) window._sendPendingKey = null;
@@ -13320,15 +13329,11 @@ live.onmessage = ev => {
       // stable; refresh the settled comparison only after the whole group ends.
       const root = d.fanoutRootKey;
       if (root) {
+        // Navigation waits for 'fanout-settled': the server first folds the
+        // fork branches back into the parent file, then says where to look.
         compareCache.delete(root);
         ctxMeterCache.delete(root);
         if (activeRel === root && current) refreshCtxMeter(current);
-        const group = [...runLedgers.values()].filter(L => L.fanoutId === d.fanoutId);
-        if (group.length >= (d.fanoutCount || 2) && group.every(L => L.done)) {
-          // The comparison is the destination. Even if the reader opened the
-          // tree while models worked, return to the expanded side-by-side row.
-          if (activeRel === root && current) open(root, 'compare');
-        }
       } else if (activeRel && d.key !== activeRel) {
         compareCache.delete(activeRel);
         ctxMeterCache.delete(activeRel);
