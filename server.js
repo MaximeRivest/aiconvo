@@ -1701,7 +1701,9 @@ function runEventForwarder(job) {
     }
     lastPush = now;
     broadcast({ type: 'run-event', jobId: job.id, key: job.key, status: job.status,
-      statusText: job.statusText, model: job.model, startedAt: job.startedAt, tail: blocks.map(slim),
+      statusText: job.statusText, model: job.model, startedAt: job.startedAt,
+      fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
+      fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, tail: blocks.map(slim),
       uiRequests: job.uiRequests || [], notices: job.notices || [],
       extStatus: job.extStatus ? Object.values(job.extStatus).join(' · ') : '',
       widgets: job.widgets || null, customViews: job.customViews || null });
@@ -1845,7 +1847,7 @@ function runEventForwarder(job) {
 
 // Start one headless run on a conversation. node (optional): continue from
 // that entry — an in-file pi branch anchor moves the leaf there first.
-async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue }) {
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
   if (!String(message || '').trim()) throw new Error('empty prompt');
@@ -1885,6 +1887,10 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     title: (provider && modelId ? modelId + ' · ' : '') + (images && images.length ? '[' + images.length + ' img] ' : '') + String(message).replace(/\s+/g, ' ').slice(0, 60),
     status: 'running', statusText: 'starting', startedAt: Date.now(),
     model: provider && modelId ? provider + '/' + modelId : null,
+    ...(fanout ? {
+      fanoutId: fanout.id, fanoutRootKey: fanout.rootKey, fanoutNode: fanout.node,
+      fanoutIndex: fanout.index, fanoutCount: fanout.count,
+    } : {}),
   };
   agentRunJobs.set(job.id, job);
   jobChanged(job);
@@ -1900,7 +1906,9 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
     endLiveRunTail(job.id);
     jobChanged(job);
-    broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, final: true });
+    broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
+      fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
+      fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
   };
   // The full run holds the file lock. Fire and forget: the caller gets the job.
   withSessionOp(sessionPath, async () => {
@@ -1945,11 +1953,15 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
 async function startFanOut(key, { node, models, message, images, force }) {
   if (!Array.isArray(models) || models.length < 2) throw new Error('fan-out needs two or more models');
   const runs = [];
-  for (const m of models) {
+  const fanoutId = 'fan:' + crypto.randomUUID().slice(0, 8);
+  for (let index = 0; index < models.length; index++) {
+    const m = models[index];
     const forked = await forkSession(key, node); // sequential: each fork locks the source briefly
     saveConversationModels(forked.key, [m]);
-    const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force });
-    runs.push({ key: forked.key, jobId: job.id, model: m.provider + '/' + m.modelId });
+    const fanout = { id: fanoutId, rootKey: key, node: node || null, index, count: models.length };
+    const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force, fanout });
+    runs.push({ key: forked.key, jobId: job.id, model: m.provider + '/' + m.modelId,
+      fanoutId, fanoutRootKey: key, fanoutNode: node || null, fanoutIndex: index, fanoutCount: models.length });
   }
   return runs;
 }
@@ -4057,6 +4069,9 @@ function jobView(job) {
     startedAt: job.startedAt, finishedAt: job.finishedAt || null,
     result: job.result || null, error: job.error || null,
     model: job.model || null,
+    fanoutId: job.fanoutId || null, fanoutRootKey: job.fanoutRootKey || null,
+    fanoutNode: job.fanoutNode || null, fanoutIndex: job.fanoutIndex ?? null,
+    fanoutCount: job.fanoutCount || null,
     uiRequests: job.uiRequests && job.uiRequests.length ? job.uiRequests : undefined,
     notices: job.notices && job.notices.length ? job.notices : undefined,
     customViews: job.customViews && Object.keys(job.customViews).length ? job.customViews : undefined,
@@ -7644,13 +7659,17 @@ async function startProjectConversation(options) {
         try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(begun.file)); } catch {}
         endLiveRunTail(job.id);
         jobChanged(job);
-        broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, final: true });
+        broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
+          fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
+          fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
       }).catch(async e => {
         headlessRuns.delete(begun.file);
         job.status = 'error'; job.statusText = e.message; job.error = e.message; job.finishedAt = Date.now();
         endLiveRunTail(job.id);
         jobChanged(job);
-        broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, final: true });
+        broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
+          fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
+          fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
       });
     }
     if (key && launchModels.length) saveConversationModels(key, launchModels);

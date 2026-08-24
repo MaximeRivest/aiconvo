@@ -970,6 +970,18 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .cmp-col .md { max-height: 280px; overflow: auto; }
 .cmp-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 .cmp-bar button { height: 24px; }
+/* Live fan-out uses the same column grammar as settled replies. Each ledger
+   owns one scrollable column; finishing a model does not move the others. */
+.parallel-stage { width: 100%; max-width: none; margin: 8px auto 14px; padding: 8px 10px; box-sizing: border-box; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.parallel-stage[hidden] { display: none; }
+.parallel-stage .cmp-col { cursor: default; display: flex; flex-direction: column; min-height: 180px; }
+.parallel-stage .cmp-col.done { border-style: solid; }
+.parallel-stage .cmp-col.failed { border-color: var(--danger); }
+.parallel-stage .ps-body { min-height: 120px; max-height: 52vh; overflow: auto; font-size: 12px; line-height: 1.5; }
+.parallel-stage .ps-body .ls-b { padding: 5px 0; border-top: 1px solid var(--border); }
+.parallel-stage .ps-body .ls-b:first-child { border-top: 0; }
+.parallel-stage .ps-abort { margin-left: auto; min-height: 20px; height: 20px; padding: 0 6px; font-size: 10px; }
+.parallel-stage .cmp-bar { justify-content: center; }
 /* Past comparisons fold into one chip once the conversation continues. */
 .cmpblock { border-bottom: 1px solid var(--border); }
 .cmpblock > summary { cursor: pointer; padding: 7px 14px; font-size: var(--fs-micro); color: var(--text-faint); border-left: 3px dashed var(--border-strong); list-style: none; user-select: none; }
@@ -8679,6 +8691,13 @@ async function headlessSendFromComposer(btn, promptOverride) {
   traceLeaves.delete(key);
   compareCache.delete(key);
   if (out.queued) { toast('queued into the running turn — pi picks it up as a follow-up (session model)'); return true; }
+  // Seed the shared stage before the first SSE delta. Every later event carries
+  // the same fan-out identity, so reload/reconnect can rebuild it too.
+  if (Array.isArray(out.runs)) for (const r of out.runs) {
+    const seed = { ...r, key: r.key, status: 'running', statusText: 'starting', startedAt: Date.now(), tail: [] };
+    activeRuns.set(r.jobId, seed); ledgerAbsorb(seed);
+  }
+  if (Array.isArray(out.runs)) renderRunCards();
   toast(out.runs ? out.runs.length + ' models running in parallel — replies appear side by side' : 'running · ' + ((out.job && out.job.model) || (models[0] && models[0].modelId) || 'session model'));
   return true;
 }
@@ -10035,7 +10054,7 @@ async function renderConv(scroll) {
   $('view').innerHTML = head +
     (msgs.length ? `<div class="transcript" id="conversationTranscript">` + blocks.join('') + `</div>`
                  : '<div class="empty" id="conversationTranscript">nothing to show in this view.</div>') +
-    `<div id="runCards"></div>` +
+    `<div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
     (offNewest ? `<div class="tracebanner">⑂ you follow an older branch — new messages continue from its end <button id="traceReset">back to newest</button></div>` : '') +
     agentComposerHtml(d);
   // Land provisionally NOW: if any wiring below throws, or the browser
@@ -10370,7 +10389,6 @@ let liveOpen = false;
 const runLedgers = new Map(); // jobId → { key, order[], blocks: Map(id → block), done }
 
 function ledgerAbsorb(r) {
-  if (!Array.isArray(r.tail)) return;
   let L = runLedgers.get(r.jobId);
   if (!L) {
     L = { key: r.key, order: [], blocks: new Map() };
@@ -10384,6 +10402,10 @@ function ledgerAbsorb(r) {
     }
   }
   L.statusText = r.statusText; L.model = r.model; L.startedAt = r.startedAt;
+  L.fanoutId = r.fanoutId; L.fanoutRootKey = r.fanoutRootKey; L.fanoutNode = r.fanoutNode;
+  L.fanoutIndex = r.fanoutIndex; L.fanoutCount = r.fanoutCount;
+  L.status = r.status; L.error = r.error;
+  if (!Array.isArray(r.tail)) return;
   for (const b of r.tail) {
     const id = String(b.id);
     if (!L.blocks.has(id)) L.order.push(id);
@@ -10682,8 +10704,8 @@ function lsSummary(r, L) {
 
 // The glass wall: every block of the run, in full, append-only, patched in
 // place (text nodes only — selection and scroll survive every delta).
-function renderLsBlocks(L) {
-  const host = $('lsBlocks');
+function renderLsBlocks(L, target = null) {
+  const host = target || $('lsBlocks');
   if (!host || !L) return;
   const pin = host.scrollHeight - host.scrollTop - host.clientHeight < 40;
   for (const id of L.order) {
@@ -10713,8 +10735,55 @@ function renderLsBlocks(L) {
     }
   }
   if (pin) host.scrollTop = host.scrollHeight;
-  const chip = $('lsChip');
-  if (chip) chip.hidden = pin;
+  if (!target) {
+    const chip = $('lsChip');
+    if (chip) chip.hidden = pin;
+  }
+}
+
+function parallelLedgersFor(key) {
+  const all = [...runLedgers.entries()].filter(([, L]) => L.fanoutId && L.fanoutRootKey === key);
+  if (!all.length) return [];
+  // Only one fan-out turn owns the live end. Older turns are transcript rows.
+  const newest = all.sort((a, b) => (b[1].startedAt || 0) - (a[1].startedAt || 0))[0][1].fanoutId;
+  return all.filter(([, L]) => L.fanoutId === newest)
+    .sort((a, b) => (a[1].fanoutIndex ?? 0) - (b[1].fanoutIndex ?? 0));
+}
+
+function renderParallelStage() {
+  const stage = $('parallelStage');
+  if (!stage) return;
+  const entries = parallelLedgersFor(activeRel);
+  // Once every child settles, the existing comparison row becomes the
+  // durable stage: full replies in the same columns plus the real merge bar.
+  if (!entries.length || entries.every(([, L]) => L.done)) { stage.hidden = true; stage.innerHTML = ''; return; }
+  stage.hidden = false;
+  const fanoutId = entries[0][1].fanoutId;
+  if (stage.dataset.fanout !== fanoutId) {
+    stage.dataset.fanout = fanoutId;
+    stage.innerHTML = `<div class="cmp-cols"></div><div class="cmp-bar"><button disabled>merge when replies finish</button><span class="dim">each model works in its own fork; finished replies stay in their columns</span></div>`;
+  }
+  const cols = stage.querySelector('.cmp-cols');
+  for (const [jobId, L] of entries) {
+    let col = cols.querySelector(`[data-ps-job="${CSS.escape(jobId)}"]`);
+    if (!col) {
+      col = document.createElement('div');
+      col.className = 'cmp-col';
+      col.dataset.psJob = jobId;
+      col.innerHTML = `<div class="cmp-head"><label class="cmp-pick"><input type="checkbox" checked></label><b></b><span class="ps-status"></span><button class="ps-abort">abort</button></div><div class="ps-body"></div>`;
+      cols.appendChild(col);
+      col.querySelector('.ps-abort').onclick = async e => {
+        const b = e.currentTarget; b.disabled = true; b.textContent = 'aborting…';
+        await postJson('/api/run/abort', { jobId });
+      };
+    }
+    col.classList.toggle('done', !!L.done);
+    col.classList.toggle('failed', L.status === 'error');
+    setLiveText(col.querySelector('b'), L.model || 'model');
+    setLiveText(col.querySelector('.ps-status'), L.done ? (L.status === 'error' ? '✗ failed' : '✓ replied') : '● ' + (L.statusText || 'working…'));
+    col.querySelector('.ps-abort').hidden = !!L.done;
+    renderLsBlocks(L, col.querySelector('.ps-body'));
+  }
 }
 
 function renderRunCards() {
@@ -10742,7 +10811,8 @@ function renderRunCards() {
     }
   }
   updateLiveStrip(runs);
-  if ((cards.length || runs.length) && pinned) v.scrollTop = v.scrollHeight;
+  renderParallelStage();
+  if ((cards.length || runs.length || parallelLedgersFor(activeRel).length) && pinned) v.scrollTop = v.scrollHeight;
 }
 
 // The live strip, both states. Runs on every run event and on the 1 Hz tick.
@@ -13215,10 +13285,10 @@ live.onmessage = ev => {
   }
   if (d.type === 'run-event') {
     if (d.final) {
-      if (window._sendPendingKey === d.key) window._sendPendingKey = null;
+      if (window._sendPendingKey === d.key || window._sendPendingKey === d.fanoutRootKey) window._sendPendingKey = null;
       ledgerAbsorb(d);
       const doneL = runLedgers.get(d.jobId);
-      if (doneL) doneL.done = true;
+      if (doneL) { doneL.done = true; doneL.status = d.status; }
       activeRuns.delete(d.jobId);
       // The run ended: perform the one full refresh now, after all live
       // thinking and tool changes stayed inside the fixed pane.
@@ -13229,20 +13299,24 @@ live.onmessage = ev => {
       // The settled reply carries fresh usage: the meter's ground truth.
       ctxMeterCache.delete(d.key);
       if (d.key === activeRel && current) refreshCtxMeter(current);
-      // A fan-out reply lands in a sibling fork file, so the OPEN conversation
-      // gets no 'update' event of its own — refresh its side-by-side columns.
-      if (activeRel && d.key !== activeRel) {
+      // Fan-out children land in sibling fork files. Keep every live column
+      // stable; refresh the settled comparison only after the whole group ends.
+      const root = d.fanoutRootKey;
+      if (root) {
+        compareCache.delete(root);
+        ctxMeterCache.delete(root);
+        if (activeRel === root && current) refreshCtxMeter(current);
+        const group = [...runLedgers.values()].filter(L => L.fanoutId === d.fanoutId);
+        if (group.length >= (d.fanoutCount || 2) && group.every(L => L.done)) {
+          if (activeRel === root && viewKind === 'conversation' && current) open(root, 'bottom');
+        }
+      } else if (activeRel && d.key !== activeRel) {
         compareCache.delete(activeRel);
-        // Sibling branch cost counts in the open conversation's family total.
         ctxMeterCache.delete(activeRel);
         if (current) refreshCtxMeter(current);
-        if (viewKind === 'conversation' && current) {
-          const v = $('view');
-          if (v.scrollHeight - v.scrollTop - v.clientHeight < 200) renderConv('bottom');
-        }
       }
     } else { activeRuns.set(d.jobId, d); ledgerAbsorb(d); }
-    if (viewKind === 'conversation' && activeRel === d.key) renderRunCards();
+    if (viewKind === 'conversation' && (activeRel === d.key || activeRel === d.fanoutRootKey)) renderRunCards();
     updateLiveBadges();
     renderAgentsPopSoon();
     return;
