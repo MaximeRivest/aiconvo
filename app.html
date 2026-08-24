@@ -1096,6 +1096,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tnode.sel { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tnode.here { border-color: var(--accent); border-width: 2px; padding: 3px 7px; }
 .tnode .herechip { color: var(--accent); font-weight: 700; white-space: nowrap; }
+.tnode .ttools { color: var(--text-faint); white-space: nowrap; }
 /* The tree status bar: one fixed line at the bottom of the view, vim-style.
    Selection paints it — the verbs never move, so the hand learns them. */
 .treebar { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 8; display: flex; gap: 18px; align-items: baseline; justify-content: center; margin-top: var(--sp-3); padding: 8px 14px; background: var(--bg); border-top: 1px solid var(--border-strong); font-size: var(--fs-meta); }
@@ -7023,7 +7024,9 @@ function renderDocChapters(ownerKey, chapters) {
     const n = i + 1;
     const subs = ch.md ? [...ch.md.matchAll(/^## (.+)$/gm)].map(m => m[1]) : [];
     const secShut = shutOf('sec:' + ch.id, !!ch.annex);
-    const tocShut = shutOf('toc:' + ch.id, !!ch.annex);
+    // The TOC starts maximally folded: only chapter titles show. A reader
+    // opens the branches they care about; the choice is remembered per page.
+    const tocShut = shutOf('toc:' + ch.id, true);
     groups.push(`<div class="ptoc-group${tocShut ? ' closed' : ''}">` +
       `<div class="ptoc-row"><span class="twist" data-toc-twist="${ch.id}" ${subs.length ? 'title="Fold this branch"' : ''}>${subs.length ? (tocShut ? '▸' : '▾') : ''}</span>` +
       `<a href="#" data-toc="${ch.id}"${ch.annex ? ' class="annexlink"' : ''}>${n}&ensp;${esc(ch.label)}</a></div>` +
@@ -7351,6 +7354,54 @@ function foldLongMessages() {
     };
     el.appendChild(btn);
   }
+}
+
+// ---- collapse everything (x) ----
+// One key folds every collapsible thing on the screen: document chapters,
+// TOC branches, tool groups, thinking blocks, results, parallel replies,
+// file trees, and unfolded long messages. It drives the real click
+// handlers where fold state is remembered, so the folds survive
+// re-renders the same way manual folds do.
+function collapseAllFolds() {
+  // Project / epic documents: subsections, chapters, then the TOC tree.
+  document.querySelectorAll('#pDocBody .pdsub:not(.closed) > h2').forEach(h => h.click());
+  document.querySelectorAll('#pDocBody .pdocsec:not(.closed) > .pdochead').forEach(h => h.click());
+  const toc = $('pToc');
+  if (toc && !toc.hidden) {
+    toc.querySelectorAll('.ptoc-group:not(.closed) [data-toc-twist]').forEach(t => { if (t.textContent) t.click(); });
+    toc.classList.remove('open'); // the phone bar closes too
+  }
+  // Every open <details> in the main surfaces. Setting the property fires
+  // each element's toggle listener, so remembered state (tool groups)
+  // stays honest.
+  for (const root of [$('view'), $('list')]) {
+    if (!root) continue;
+    root.querySelectorAll('details[open]').forEach(d => { d.open = false; });
+  }
+  // Long messages that were unfolded fold back to their preview size.
+  const view = $('view');
+  if (view && view.querySelector('.msg[data-words]')) {
+    view.querySelectorAll('.msg[data-words]:not(.folded)').forEach(el => el.classList.add('can-fold'));
+    foldLongMessages();
+  }
+}
+
+// The mirror key (X) opens everything: chapters, TOC branches, tool
+// groups, and folded long messages. Lazy chapters load through their
+// real click handlers.
+function expandAllFolds() {
+  document.querySelectorAll('#pDocBody .pdocsec.closed > .pdochead').forEach(h => h.click());
+  document.querySelectorAll('#pDocBody .pdsub.closed > h2').forEach(h => h.click());
+  const toc = $('pToc');
+  if (toc && !toc.hidden) toc.querySelectorAll('.ptoc-group.closed [data-toc-twist]').forEach(t => { if (t.textContent) t.click(); });
+  for (const root of [$('view'), $('list')]) {
+    if (!root) continue;
+    root.querySelectorAll('details:not([open])').forEach(d => { d.open = true; });
+  }
+  // Folded long messages unfold through their own button, so the button
+  // removes itself and the state stays consistent.
+  const view = $('view');
+  if (view) view.querySelectorAll('.msg.folded > .unfold').forEach(b => b.click());
 }
 
 // ---- e-ink helpers ----
@@ -11089,7 +11140,7 @@ async function showTree(key) {
   const hereNode = [...rows].reverse().find(n => n.active) || null;
   const boxes = nodes.map(n =>
     `<div class="tnode ${n.role}${n.active ? '' : ' inactive'}${n.fork ? ' fork' : ''}${n === hereNode ? ' here' : ''}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc(n.fork ? 'in fork: ' + forkTitle(n) : n.title)}">
-      <div class="tm"><b>${n.role === 'user' ? 'user' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role === 'assistant' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} msgs</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
+      <div class="tm"><b>${n.role === 'user' ? 'user' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role === 'assistant' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} msgs</span>` : ''}${n.tools ? `<span class="ttools" title="this turn package carries ${n.tools} tool call${n.tools > 1 ? 's' : ''}${n.tail ? ' — loose work after the last text; continue and fork keep all of it' : ' — continue and fork keep them'}">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
       <div class="tt">${esc(n.title)}</div></div>`).join('');
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
@@ -11147,7 +11198,7 @@ function paintTreeBar() {
   const isLeaf = !(treeNav.children.get(n.id) || []).length;
   const btn = (act, k, label, title) => `<button data-act="${act}" title="${esc(title)}"><span class="k">${k}</span>${label}</button>`;
   bar.innerHTML =
-    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${Math.round(n.chars / 100) / 10}k</span>` +
+    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${Math.round(n.chars / 100) / 10}k${n.tools ? ` · ⚙ ${n.tools}` : ''}</span>` +
     btn('read', 'r', 'read', 'Open the transcript at this box (enter, or double click). The ● here marker does not move.') +
     (isPi ? btn('branch', 'b', isLeaf ? 'continue' : 'branch', (isLeaf ? 'Move the ● here marker to this box and continue the path from it.' : 'Start a new branch after this box: the ● here marker moves to it, no copy is made.') + ' Then send from the composer as usual.') : '') +
     (isPi && n.role === 'user' ? btn('edit', 'e', 'edit', 'Fork into a NEW session that stops just before this message. Open the new conversation to edit and resend it. The original does not change.') : '') +
@@ -12572,6 +12623,7 @@ function helpNow() {
 
 const HELP_GLOBAL = [
   ['/', 'search'],
+  ['x / X', 'fold / unfold everything on the screen'],
   ['`', 'fold / unfold the top bar'],
   ['w', 'windows overview'],
   ['a', 'agents'],
@@ -12838,6 +12890,8 @@ document.addEventListener('keydown', e => {
       else showTree(activeRel);
       break;
     }
+    case 'x': e.preventDefault(); collapseAllFolds(); break;
+    case 'X': e.preventDefault(); expandAllFolds(); break;
     case 'z': e.preventDefault(); setZen(!document.body.classList.contains('zen')); break;
     case 'v': e.preventDefault(); setNavPin(!navPinOn); break;
     case 'M': {

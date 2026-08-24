@@ -987,6 +987,8 @@ function parseTreeEntries(kind, raw) {
       if (d.type === 'message' && d.message && (d.message.role === 'user' || d.message.role === 'assistant')) {
         node.role = d.message.role;
         node.text = textOf(d.message.content);
+        if (Array.isArray(d.message.content))
+          node.calls = d.message.content.filter(b => b && (b.type === 'toolCall' || b.type === 'toolUse' || b.type === 'tool_use')).length || undefined;
         if (d.message.role === 'assistant' && d.message.model) {
           node.model = d.message.model;
           if (d.message.provider) node.provider = d.message.provider;
@@ -1016,6 +1018,8 @@ function parseTreeEntries(kind, raw) {
       if ((d.type === 'user' || d.type === 'assistant') && !d.isMeta && d.message) {
         node.role = d.type;
         node.text = textOf(d.message.content);
+        if (Array.isArray(d.message.content))
+          node.calls = d.message.content.filter(b => b && b.type === 'tool_use').length || undefined;
         if (d.type === 'assistant' && d.message.model) node.model = d.message.model;
         const u = d.type === 'assistant' && d.message.usage;
         if (u) {
@@ -1124,15 +1128,46 @@ async function sessionTreeFor(key, opts = {}) {
     const up = g.members[0].bparent;
     g = up ? groupOf.get(up.id) : null;
   }
+  // Raw-entry children: a box-leaf may carry a TAIL of non-box entries below
+  // its last text message — tool calls, tool results, thinking of an aborted
+  // or tool-only run, setting switches. The anchor must reach the true end,
+  // or branch/fork silently drops that work.
+  const kidsOf = new Map();
+  for (const n of all) {
+    if (!n.parent || !byId.has(n.parent)) continue;
+    if (!kidsOf.has(n.parent)) kidsOf.set(n.parent, []);
+    kidsOf.get(n.parent).push(n);
+  }
+  const tailOf = last => {
+    let tail = last, calls = 0;
+    if (!childCount.get(last.id)) { // no box below: every descendant is loose tail
+      for (;;) {
+        const kids = kidsOf.get(tail.id) || [];
+        if (!kids.length) break;
+        tail = [...kids].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))[kids.length - 1];
+        calls += tail.calls || 0;
+      }
+    }
+    return { tail, calls };
+  };
+  // Tool calls INSIDE the turn: the non-box entries between this group's
+  // messages and its box parent (a normal agent turn hides its tools there).
+  const callsAbove = m => {
+    let c = 0;
+    for (let p = m.parent && byId.get(m.parent); p && !p.box; p = p.parent && byId.get(p.parent)) c += p.calls || 0;
+    return c;
+  };
   const nodes = groups.map(g => {
     const first = g.members[0], last = g.members[g.members.length - 1];
     const up = first.bparent ? groupOf.get(first.bparent.id) : null;
     const owner = last.keys.has(key) ? key : family.find(k => last.keys.has(k)) || key;
+    const { tail, calls: tailCalls } = tailOf(last);
+    const tools = g.members.reduce((s, m) => s + callsAbove(m), 0) + tailCalls;
     return {
-      id: last.id,                       // fork point: the whole turn is kept
+      id: tail.id,                       // fork point: the whole turn package is kept
       parent: up ? up.members[up.members.length - 1].id : null,
       role: first.role,
-      ts: first.ts, lastTs: last.ts,
+      ts: first.ts, lastTs: tail.ts || last.ts,
       jumpTs: first.ts,                  // transcript anchor of the first message
       title: nodeTitle(g.members.length > 1 ? last.text : first.text),
       model: [...g.members].reverse().map(m => m.model).find(Boolean) || undefined,
@@ -1141,6 +1176,8 @@ async function sessionTreeFor(key, opts = {}) {
       chars: g.members.reduce((n, m) => n + m.text.length, 0),
       tok: g.members.reduce((n, m) => n + (m.tok || 0), 0) || undefined,
       cost: g.members.reduce((n, m) => n + (m.cost || 0), 0) || undefined,
+      tools: tools || undefined,         // tool calls the package carries
+      tail: tail !== last || undefined,  // loose entries extend past the last text
       active: active.has(g),
       key: owner,                        // the conversation to read or fork from
       fork: owner !== key || undefined,  // lives in a forked/linked session
