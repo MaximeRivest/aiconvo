@@ -11544,6 +11544,10 @@ async function openAfterBranch(key) {
     const last = t ? [...t.querySelectorAll(':scope > .msg')].pop() : null;
     if (last) {
       last.classList.add('branchmark');
+      // A tool box branch must not look like a thin folded line — that reads
+      // as "it picked the wrong box". Unfold the ringed message completely.
+      if (last.tagName === 'DETAILS') last.open = true;
+      last.querySelectorAll('details').forEach(d => { d.open = true; });
       last.scrollIntoView({ block: 'nearest' });
     }
     const ta = $('agentText');
