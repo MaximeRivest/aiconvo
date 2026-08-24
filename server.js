@@ -1096,6 +1096,7 @@ async function familyEntryGraph(key) {
   const byId = new Map();
   const all = [];
   const lastBoxOf = new Map();
+  const lastEntryOf = new Map();
   for (const k of family) {
     const e = index[k];
     let raw;
@@ -1110,13 +1111,24 @@ async function familyEntryGraph(key) {
       }
       n.keys.add(k);
       if (n.box || n.work) lastBoxOf.set(k, n);
+      lastEntryOf.set(k, n);
     }
   }
-  return { entry, family, byId, all, lastBoxOf };
+  return { entry, family, byId, all, lastBoxOf, lastEntryOf };
+}
+
+// The leaf a resume continues from: the file's TRUE last entry (a branch
+// anchor counts — that is the whole point of the anchor), walked up to the
+// nearest visible box. File order alone would ignore an in-file branch.
+function leafBoxFor(graph, k) {
+  let n = graph.lastEntryOf.get(k) || null;
+  while (n && !(n.box || n.work)) n = n.parent ? graph.byId.get(n.parent) : null;
+  return n || graph.lastBoxOf.get(k) || null;
 }
 
 async function sessionTreeFor(key, opts = {}) {
-  const { entry, family, byId, all, lastBoxOf } = await familyEntryGraph(key);
+  const graph = await familyEntryGraph(key);
+  const { entry, family, byId, all } = graph;
   // Contract the entry graph to visible boxes (pure messages + work entries):
   // the nearest visible ancestor is the parent.
   const boxes = all.filter(n => n.box || n.work);
@@ -1140,9 +1152,9 @@ async function sessionTreeFor(key, opts = {}) {
     if (g) { g.members.push(b); groupOf.set(b.id, g); }
     else { const ng = { members: [b] }; groups.push(ng); groupOf.set(b.id, ng); }
   }
-  // The active branch: the path from the viewed file's newest message to the root.
+  // The active branch: the path from the viewed file's resume leaf to the root.
   const active = new Set();
-  const viewedLeaf = lastBoxOf.get(key);
+  const viewedLeaf = leafBoxFor(graph, key);
   for (let g = viewedLeaf ? groupOf.get(viewedLeaf.id) : null; g;) {
     active.add(g);
     const up = g.members[0].bparent;
@@ -1214,8 +1226,9 @@ async function sessionTreeFor(key, opts = {}) {
 // sizes pi reports for its models. Context is trace-scoped (siblings do not
 // share a window); cost is family-scoped (every branch spent real money).
 async function conversationContextResponse(key, leafId) {
-  const { entry, byId, all, lastBoxOf } = await familyEntryGraph(key);
-  const leaf = (leafId && byId.get(leafId)) || lastBoxOf.get(key) || null;
+  const graph = await familyEntryGraph(key);
+  const { entry, byId, all } = graph;
+  const leaf = (leafId && byId.get(leafId)) || leafBoxFor(graph, key);
   const chain = [];
   const seen = new Set();
   for (let n = leaf; n && !seen.has(n.id); n = n.parent ? byId.get(n.parent) : null) {
@@ -1422,6 +1435,11 @@ async function branchSession(key, nodeId) {
       targetId: nodeId,
     };
     await fsp.appendFile(absPath, JSON.stringify(anchor) + '\n');
+    // Refresh the index and the parse cache NOW: the next fetch must already
+    // fold the old continuation as an other branch. Waiting for the file
+    // watcher leaves a stale transcript for a debounce beat.
+    try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(absPath)); }
+    catch (e) { console.error('post-branch reindex failed:', e.message); }
     return { ok: true, key, node: nodeId };
   });
 }

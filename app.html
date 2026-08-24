@@ -11497,8 +11497,10 @@ async function branchFrom(key, n, btn) {
     const res = await fetch('/api/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
     const d = await res.json();
     if (d.error) throw new Error(d.error);
-    toast('the ● here marker moved — the next send continues from this box');
-    openAtTs(key, n.jumpTs);
+    // Stay in the tree and repaint: the ● here marker must be SEEN moving.
+    // Enter then reads the new path; the composer continues from it.
+    await showTree(key);
+    toast('the ● here marker moved — enter reads, the composer continues from here');
   } catch (e) {
     btn.disabled = false;
     btn.textContent = old;
