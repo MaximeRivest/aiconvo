@@ -1118,7 +1118,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg.jump { outline: 2px solid var(--accent); }
 /* the fresh branch point: a standing orange ring — the path ends here and
    the composer below continues from it */
-.msg.branchmark { outline: 2px solid var(--accent); outline-offset: 3px; }
+.branchmark { outline: 2px solid var(--accent); outline-offset: 3px; }
 .nhead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; border: 1px solid var(--border); background: var(--surface-1); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3); }
 .nhead h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-title); }
 .nhead .abstract { color: var(--text); margin: 0 0 var(--sp-2); }
@@ -11541,12 +11541,18 @@ async function openAfterBranch(key) {
   await open(key, 'bottom');
   requestAnimationFrame(() => {
     const t = $('conversationTranscript');
-    const last = t ? [...t.querySelectorAll(':scope > .msg')].pop() : null;
+    // The branch point can be a message OR a whole steps group ("13 steps ·
+    // thinking ×7 · bash ×5"). Ring whichever stands last on the path.
+    const last = t ? [...t.querySelectorAll(':scope > .msg, :scope > .toolgroup')].pop() : null;
     if (last) {
       last.classList.add('branchmark');
-      // A tool box branch must not look like a thin folded line — that reads
-      // as "it picked the wrong box". Unfold the ringed message completely.
-      if (last.tagName === 'DETAILS') last.open = true;
+      // A branch on a work box must not look like one thin folded line —
+      // that reads as "it picked the wrong box". Unfold the ringed block and
+      // everything inside it, and remember the choice across re-renders.
+      if (last.tagName === 'DETAILS') {
+        last.open = true;
+        if (last.dataset.gkey) toolGroupOpen.set(activeRel + '|' + last.dataset.gkey, true);
+      }
       last.querySelectorAll('details').forEach(d => { d.open = true; });
       last.scrollIntoView({ block: 'nearest' });
     }
