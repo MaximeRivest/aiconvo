@@ -987,8 +987,10 @@ function parseTreeEntries(kind, raw) {
       if (d.type === 'message' && d.message && (d.message.role === 'user' || d.message.role === 'assistant')) {
         node.role = d.message.role;
         node.text = textOf(d.message.content);
-        if (Array.isArray(d.message.content))
-          node.calls = d.message.content.filter(b => b && (b.type === 'toolCall' || b.type === 'toolUse' || b.type === 'tool_use')).length || undefined;
+        if (Array.isArray(d.message.content)) {
+          node.names = d.message.content.filter(b => b && (b.type === 'toolCall' || b.type === 'toolUse' || b.type === 'tool_use')).map(b => b.name || '?');
+          node.calls = node.names.length || undefined;
+        }
         if (d.message.role === 'assistant' && d.message.model) {
           node.model = d.message.model;
           if (d.message.provider) node.provider = d.message.provider;
@@ -999,6 +1001,8 @@ function parseTreeEntries(kind, raw) {
           node.cost = (u.cost && u.cost.total) || 0;
           node.ctx = settingsLib.usageContextTokens(u, 'pi');
         }
+      } else if (d.type === 'message' && d.message && d.message.role === 'toolResult') {
+        node.tres = d.message.toolName || true;
       } else if (d.type === 'model_change' && d.modelId) {
         // The model that serves the turns below this entry, until the next switch.
         node.modelChange = { provider: d.provider || null, model: d.modelId };
@@ -1018,8 +1022,13 @@ function parseTreeEntries(kind, raw) {
       if ((d.type === 'user' || d.type === 'assistant') && !d.isMeta && d.message) {
         node.role = d.type;
         node.text = textOf(d.message.content);
-        if (Array.isArray(d.message.content))
-          node.calls = d.message.content.filter(b => b && b.type === 'tool_use').length || undefined;
+        if (Array.isArray(d.message.content)) {
+          node.names = d.message.content.filter(b => b && b.type === 'tool_use').map(b => b.name || '?');
+          node.calls = node.names.length || undefined;
+          // A user-typed entry that carries tool_result blocks is machinery,
+          // not words: classify it as work, never as a user message.
+          if (d.message.content.some(b => b && b.type === 'tool_result')) { node.tres = true; node.role = null; }
+        }
         if (d.type === 'assistant' && d.message.model) node.model = d.message.model;
         const u = d.type === 'assistant' && d.message.usage;
         if (u) {
@@ -1030,7 +1039,15 @@ function parseTreeEntries(kind, raw) {
         }
       }
     }
-    node.box = !!(node.role && node.text.trim() && !(node.role === 'user' && isNoise(node.text)));
+    // Three kinds of entry:
+    //  - box: a PURE message — user words, or assistant words with no tool call.
+    //  - work: the machinery between pure messages — tool calls and results,
+    //    thinking-only or mixed text+tool messages. Runs of work agglomerate
+    //    into one ⚙ work box in the tree.
+    //  - neither: settings, labels, noise — invisible glue.
+    node.box = !!(node.role === 'user' ? node.text.trim() && !isNoise(node.text) && !node.tres
+      : node.role === 'assistant' ? node.text.trim() && !node.calls : false);
+    node.work = !node.box && !!(node.tres || node.calls || node.role === 'assistant');
     out.push(node);
   }
   return out;
@@ -1092,7 +1109,7 @@ async function familyEntryGraph(key) {
         all.push(n);
       }
       n.keys.add(k);
-      if (n.box) lastBoxOf.set(k, n);
+      if (n.box || n.work) lastBoxOf.set(k, n);
     }
   }
   return { entry, family, byId, all, lastBoxOf };
@@ -1100,23 +1117,26 @@ async function familyEntryGraph(key) {
 
 async function sessionTreeFor(key, opts = {}) {
   const { entry, family, byId, all, lastBoxOf } = await familyEntryGraph(key);
-  // Contract the entry graph to text messages: nearest box ancestor is the parent.
-  const boxes = all.filter(n => n.box);
+  // Contract the entry graph to visible boxes (pure messages + work entries):
+  // the nearest visible ancestor is the parent.
+  const boxes = all.filter(n => n.box || n.work);
   const childCount = new Map();
   for (const b of boxes) {
     let p = b.parent && byId.get(b.parent);
-    while (p && !p.box) p = p.parent && byId.get(p.parent);
+    while (p && !(p.box || p.work)) p = p.parent && byId.get(p.parent);
     b.bparent = p || null;
     if (p) childCount.set(p.id, (childCount.get(p.id) || 0) + 1);
   }
-  // Merge a linear assistant→assistant chain into one turn box.
-  // Never merge across a fork boundary (different file membership).
+  // Merge linear chains of the SAME kind into one box: a work run becomes one
+  // ⚙ work box, a multi-message reply one assistant box. Never merge across
+  // kinds or across a fork boundary (different file membership).
   const groupOf = new Map();
   const groups = [];
   for (const b of boxes) {
     const p = b.bparent;
-    const g = p && b.role === 'assistant' && p.role === 'assistant' && childCount.get(p.id) === 1
-      && p.keys.size === b.keys.size ? groupOf.get(p.id) : null;
+    const linear = p && childCount.get(p.id) === 1 && p.keys.size === b.keys.size;
+    const g = linear && (b.work ? p.work
+      : !p.work && b.role === 'assistant' && p.role === 'assistant') ? groupOf.get(p.id) : null;
     if (g) { g.members.push(b); groupOf.set(b.id, g); }
     else { const ng = { members: [b] }; groups.push(ng); groupOf.set(b.id, ng); }
   }
@@ -1150,26 +1170,25 @@ async function sessionTreeFor(key, opts = {}) {
     }
     return { tail, calls };
   };
-  // Tool calls INSIDE the turn: the non-box entries between this group's
-  // messages and its box parent (a normal agent turn hides its tools there).
-  const callsAbove = m => {
-    let c = 0;
-    for (let p = m.parent && byId.get(m.parent); p && !p.box; p = p.parent && byId.get(p.parent)) c += p.calls || 0;
-    return c;
-  };
   const nodes = groups.map(g => {
     const first = g.members[0], last = g.members[g.members.length - 1];
     const up = first.bparent ? groupOf.get(first.bparent.id) : null;
     const owner = last.keys.has(key) ? key : family.find(k => last.keys.has(k)) || key;
     const { tail, calls: tailCalls } = tailOf(last);
-    const tools = g.members.reduce((s, m) => s + callsAbove(m), 0) + tailCalls;
+    const isWork = !!first.work;
+    // A work box is titled by its tool tally: "bash ×5 · read ×3 · edit".
+    const tally = new Map();
+    if (isWork) for (const m of g.members) for (const nm of m.names || []) tally.set(nm, (tally.get(nm) || 0) + 1);
+    const workTitle = [...tally.entries()].sort((a, b) => b[1] - a[1])
+      .map(([nm, c]) => c > 1 ? `${nm} ×${c}` : nm).join(' · ');
+    const tools = (isWork ? g.members.reduce((s, m) => s + (m.calls || 0), 0) : 0) + tailCalls;
     return {
       id: tail.id,                       // fork point: the whole turn package is kept
       parent: up ? up.members[up.members.length - 1].id : null,
-      role: first.role,
+      role: isWork ? 'work' : first.role,
       ts: first.ts, lastTs: tail.ts || last.ts,
       jumpTs: first.ts,                  // transcript anchor of the first message
-      title: nodeTitle(g.members.length > 1 ? last.text : first.text),
+      title: isWork ? (workTitle || 'thinking') : nodeTitle(g.members.length > 1 ? last.text : first.text),
       model: [...g.members].reverse().map(m => m.model).find(Boolean) || undefined,
       fullText: opts.withTexts ? g.members.map(m => m.text).join('\n\n') : undefined,
       count: g.members.length,

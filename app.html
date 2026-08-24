@@ -422,7 +422,16 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .psection > h3 { font-size: var(--fs-label); color: var(--text-faint); border-bottom: 1px solid var(--border); padding-bottom: 4px; margin: 0 0 8px; }
 /* masthead: the project ridgeline — frameless, dateless, quiet */
 .mgantt { margin: 0 0 var(--sp-3); border-bottom: 1px solid var(--border); line-height: 0; }
+.mgantt:not([data-mg-open]) { cursor: zoom-in; }
 .mgantt .tmark { cursor: pointer; outline: none; }
+.mgantt .mg-bar { display: flex; align-items: center; gap: 2px; padding: 2px 6px; border-bottom: 1px solid var(--border); line-height: normal; }
+.mgantt .mg-bar .mg-hint { flex: 1; font: 11px var(--font); color: var(--text-dim); }
+.mgantt .mg-bar button { min-height: 30px; min-width: 36px; }
+.mgantt .mg-scroll { overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; line-height: 0; }
+.mgantt .mg-tick line { stroke: var(--border); }
+.mgantt .mg-tick.major line { stroke: var(--border-strong); }
+.mgantt .mg-tick text { fill: var(--text-dim); font: 9px var(--font); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.mgantt .mg-now { stroke: var(--accent); stroke-dasharray: 2 3; }
 /* redesigned project/epic panel */
 .ptitle { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-3) 0 var(--sp-2); }
 .ptitle h1 { flex: 1; min-width: 12ch; margin: 0; font-size: calc(var(--fs-title) * 1.7); line-height: 1.2; font-weight: 700; cursor: text; overflow-wrap: anywhere; }
@@ -1097,6 +1106,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tnode.here { border-color: var(--accent); border-width: 2px; padding: 3px 7px; }
 .tnode .herechip { color: var(--accent); font-weight: 700; white-space: nowrap; }
 .tnode .ttools { color: var(--text-faint); white-space: nowrap; }
+.tnode.work { color: var(--text-dim); }
+.tnode.work .tt { color: var(--text-dim); }
 /* The tree status bar: one fixed line at the bottom of the view, vim-style.
    Selection paints it — the verbs never move, so the hand learns them. */
 .treebar { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 8; display: flex; gap: 18px; align-items: baseline; justify-content: center; margin-top: var(--sp-3); padding: 8px 14px; background: var(--bg); border-top: 1px solid var(--border-strong); font-size: var(--fs-meta); }
@@ -6745,24 +6756,58 @@ function confirmFold(d, target, counts) {
 }
 
 // ---- masthead: the project's history as a quiet ridgeline ----
-// The first element of the panel. No dates, no labels, no box — only the
-// home timeline's marks (duration lines + density violins + live dots),
-// compressed into at most 20% of the viewport. Silently clickable: hover
-// names a conversation, a click opens it. Art first, function inside.
+// The first element of the panel. Two states, one element:
+// · collapsed (default): no dates, no labels, no box — only the marks,
+//   compressed into at most 20% of the viewport. Art first.
+// · open: a click on the chart grows it into a conversation picker —
+//   ticks, titles, zoom, scroll; one click = detail card, double click
+//   (or a tap on the card) opens. Esc or “fold” collapses it back.
+// Touch note: on coarse pointers ANY tap expands first — the collapsed
+// ridgeline is too dense for precise tapping and has no hover tooltips.
 function miniGanttHtml(rows, color) {
   return `<div class="mgantt" data-mg-host></div>`;
 }
 
-function wireMiniGantt(root, rows, color) {
+let mgUI = { key: null, expanded: false, zoom: 1, center: null };
+let mgLive = null; // { host, items, color } — lets Esc collapse the open hero
+
+function wireMiniGantt(root, rows, color, stateKey) {
   const host = root.querySelector('[data-mg-host]');
   if (!host) return;
-  const now = Date.now();
   const items = rows.map(r => {
     const a = Date.parse(r.firstTs || r.lastTs || '') || 0;
     const b = Math.max(a, Date.parse(r.lastTs || r.firstTs || '') || 0);
     return { ...r, a, b };
   }).filter(r => r.a).sort((x, y) => x.a - y.a);
   if (!items.length) { host.remove(); return; }
+  if (mgUI.key !== (stateKey || null)) mgUI = { key: stateKey || null, expanded: false, zoom: 1, center: null };
+  mgLive = { host, items, color };
+  mgPaint(host, items, color);
+}
+
+function mgPaint(host, items, color) {
+  if (mgUI.expanded) mgPaintOpen(host, items, color);
+  else mgPaintClosed(host, items, color);
+}
+
+// Esc hook (global keydown): collapse the open hero, report whether we did.
+function mgCollapseOpen() {
+  if (!mgUI.expanded || !mgLive || !mgLive.host.isConnected) return false;
+  mgUI.expanded = false;
+  mgPaint(mgLive.host, mgLive.items, mgLive.color);
+  return true;
+}
+
+function mgTip(it, s) {
+  const live = isActive(s);
+  const work = typeof isWorking === 'function' && isWorking(s);
+  return `${it.title || it.key}\n${fmtDate(it.firstTs)} → ${fmtDate(it.lastTs)}${s.userCount ? `\n${s.userCount} user · ${s.assistantCount || 0} assistant` : ''}${work ? '\n● working now' : live ? '\n○ active in the last 5 min' : ''}`;
+}
+
+function mgPaintClosed(host, items, color) {
+  const now = Date.now();
+  host.removeAttribute('data-mg-open');
+  host.title = 'Timeline — click to open the conversation picker';
   const W = Math.max(320, host.clientWidth || 800);
   const t0 = items[0].a;
   const t1 = Math.max(now, ...items.map(i => i.b));
@@ -6791,19 +6836,158 @@ function wireMiniGantt(root, rows, color) {
     const bins = it.b > it.a && profile.length ? profile : [Math.max(1, ...(profile.length ? profile : [1]))];
     const live = isActive(s);
     const work = typeof isWorking === 'function' && isWorking(s);
-    const tip = `${it.title || it.key}\n${fmtDate(it.firstTs)} → ${fmtDate(it.lastTs)}${s.userCount ? `\n${s.userCount} user · ${s.assistantCount || 0} assistant` : ''}${work ? '\n● working now' : live ? '\n○ active in the last 5 min' : ''}`;
     return `<g class="tmark${live ? ' active' : ''}" data-mg="${esc(it.key)}" tabindex="0">
-      <title>${esc(tip)}</title>
+      <title>${esc(mgTip(it, s))}</title>
       <line class="duration" style="stroke:${color.stroke}" x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}"/>
       <path class="violin" style="fill:${color.fill};stroke:${color.stroke}" d="${violinPath(x0, x1, cy, bins, false, scale)}"/>
       ${live || work ? `<circle class="livedot${work ? '' : ' idle'}" cx="${x1}" cy="${cy}" r="${Math.max(2.2, 3.5 * scale)}"/>` : ''}
     </g>`;
   }).join('');
   host.innerHTML = `<svg width="${W}" height="${chartH}" viewBox="0 0 ${W} ${chartH}">${marks}</svg>`;
+  const expand = () => { mgUI.expanded = true; mgPaintOpen(host, items, color); };
+  const coarse = matchMedia('(pointer: coarse)').matches;
   host.querySelectorAll('[data-mg]').forEach(g => {
-    g.onclick = () => open(g.dataset.mg);
+    // Fine pointer: hover already named the mark, a click opens it.
+    // Coarse pointer: a tap expands first — no blind jumps from a dense strip.
+    g.onclick = e => { e.stopPropagation(); coarse ? expand() : open(g.dataset.mg); };
     g.onkeydown = e => { if (e.key === 'Enter') open(g.dataset.mg); };
   });
+  host.onclick = expand;
+}
+
+function mgPaintOpen(host, items, color) {
+  const now = Date.now();
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  const viewW = Math.max(320, host.clientWidth || 800);
+  const maxZoom = Math.max(1, Math.floor(60000 / viewW)); // SVG width cap: e-ink and mobile rasterizers
+  mgUI.zoom = Math.min(Math.max(1, mgUI.zoom), maxZoom);
+  const t0 = items[0].a;
+  const t1 = Math.max(now, ...items.map(i => i.b));
+  const span = Math.max(t1 - t0, 3600000);
+  const W = Math.round(viewW * mgUI.zoom);
+  const PAD = 8, TICK_H = 18;
+  const xFor = t => PAD + ((t - t0) / span) * (W - 2 * PAD);
+  const tFor = x => t0 + ((x - PAD) / (W - 2 * PAD)) * span;
+  // Lane packing with room for a short title after each mark.
+  const laneEnds = [];
+  const gapT = span * (90 / W);
+  for (const it of items) {
+    let lane = laneEnds.findIndex(end => end + gapT <= it.a);
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
+    laneEnds[lane] = Math.max(it.b, it.a + span * (60 / W));
+    it.lane = lane;
+  }
+  const laneH = 26; // same rhythm as the home chart: title above, violin on the line
+  const chartH = TICK_H + laneEnds.length * laneH + 8;
+  const maxH = Math.max(180, Math.round(window.innerHeight * 0.55));
+  const pxDay = (W - 2 * PAD) / (span / 86400000);
+  const marks = items.map(it => {
+    const s = sessions.find(x => x.key === it.key) || it;
+    const x0 = xFor(it.a), x1 = Math.max(x0 + (coarse ? 14 : 8), xFor(it.b));
+    const cy = TICK_H + it.lane * laneH + laneH / 2;
+    const profile = s.densityChat || [];
+    const bins = it.b > it.a && profile.length ? profile : [Math.max(1, ...(profile.length ? profile : [1]))];
+    const live = isActive(s);
+    const work = typeof isWorking === 'function' && isWorking(s);
+    const label = String(s.timelineTitle || it.title || it.key).slice(0, mgUI.zoom >= 4 ? 34 : 18);
+    return `<g class="tmark${live ? ' active' : ''}" data-mg="${esc(it.key)}" tabindex="0">
+      <title>${esc(mgTip(it, s))}</title>
+      <line class="duration" style="stroke:${color.stroke}" x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}"/>
+      <path class="violin" style="fill:${color.fill};stroke:${color.stroke}" d="${violinPath(x0, x1, cy, bins, false, 1)}"/>
+      ${live || work ? `<circle class="livedot${work ? '' : ' idle'}" cx="${x1}" cy="${cy}" r="3.5"/>` : ''}
+      <text x="${x0}" y="${cy - 10}">${esc(label)}</text>
+    </g>`;
+  }).join('');
+  host.setAttribute('data-mg-open', '1');
+  host.removeAttribute('title');
+  host.innerHTML = `<div class="mg-bar">
+      <span class="mg-hint">${coarse ? 'tap a mark for details · tap the card to open' : 'click a mark for details · double-click opens'}</span>
+      <button type="button" class="ghost" data-mg-z="out" title="Zoom out">−</button>
+      <button type="button" class="ghost" data-mg-z="in" title="Zoom in">+</button>
+      <button type="button" class="ghost" data-mg-z="fit" title="Fit the whole history">fit</button>
+      <button type="button" class="ghost" data-mg-fold title="Collapse the timeline (Esc)">▴ fold</button>
+    </div>
+    <div class="mg-scroll" style="max-height:${maxH}px"><svg width="${W}" height="${chartH}" viewBox="0 0 ${W} ${chartH}">${mgTicks(t0, xFor, pxDay, chartH)}<line class="mg-now" x1="${xFor(now)}" y1="${TICK_H - 4}" x2="${xFor(now)}" y2="${chartH}"/>${marks}</svg></div>`;
+  const scroller = host.querySelector('.mg-scroll');
+  // Restore the view center; the first open lands on "now" (right edge).
+  scroller.scrollLeft = mgUI.center == null ? Math.max(0, W - viewW) : Math.max(0, xFor(mgUI.center) - viewW / 2);
+  scroller.onscroll = () => { mgUI.center = tFor(scroller.scrollLeft + viewW / 2); };
+  const rezoom = (z, centerT) => {
+    mgUI.zoom = Math.min(Math.max(1, z), maxZoom);
+    if (centerT !== undefined) mgUI.center = centerT;
+    mgPaintOpen(host, items, color);
+  };
+  host.querySelectorAll('[data-mg-z]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    if (b.dataset.mgZ === 'fit') return rezoom(1, null);
+    rezoom(b.dataset.mgZ === 'in' ? mgUI.zoom * 2 : mgUI.zoom / 2);
+  });
+  host.querySelector('[data-mg-fold]').onclick = e => {
+    e.stopPropagation();
+    hideMarkPop();
+    mgUI.expanded = false;
+    mgPaint(host, items, color);
+  };
+  // Ctrl+wheel (and trackpad pinch) zooms toward the cursor's time.
+  scroller.addEventListener('wheel', e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const t = tFor(scroller.scrollLeft + (e.clientX - scroller.getBoundingClientRect().left));
+    rezoom(e.deltaY < 0 ? mgUI.zoom * 2 : mgUI.zoom / 2, t);
+  }, { passive: false });
+  host.querySelectorAll('[data-mg]').forEach(g => {
+    g.onclick = e => {
+      e.stopPropagation();
+      const pop = $('markPop');
+      if (!pop.hidden && pop.dataset.rel === g.dataset.mg) return; // second click = the double click path
+      mgShowPop(g, g.dataset.mg, items);
+    };
+    g.ondblclick = e => { e.stopPropagation(); hideMarkPop(); open(g.dataset.mg); };
+    g.onkeydown = e => { if (e.key === 'Enter') { hideMarkPop(); open(g.dataset.mg); } };
+  });
+  host.onclick = e => { if (!e.target.closest('.tmark')) hideMarkPop(); };
+}
+
+// Ticks for the open hero. Density follows px/day, like the home chart:
+// days when wide, Mondays when mid, month firsts when tight.
+function mgTicks(t0, xFor, pxDay, H) {
+  const out = [];
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  if (pxDay >= 40) {
+    for (let t = +d; t >= t0; t -= 86400000) {
+      const dt = new Date(t);
+      out.push({ t, label: dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), major: dt.getDate() === 1 });
+    }
+  } else if (pxDay >= 6) {
+    while (d.getDay() !== 1) d.setDate(d.getDate() - 1);
+    for (; +d >= t0; d.setDate(d.getDate() - 7))
+      out.push({ t: +d, label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), major: d.getDate() <= 7 });
+  } else {
+    d.setDate(1);
+    for (; +d >= t0; d.setMonth(d.getMonth() - 1))
+      out.push({ t: +d, label: d.toLocaleDateString(undefined, d.getMonth() === 0 ? { month: 'short', year: 'numeric' } : { month: 'short' }), major: d.getMonth() === 0 });
+  }
+  return out.map(k => `<g class="mg-tick${k.major ? ' major' : ''}"><line x1="${xFor(k.t)}" y1="14" x2="${xFor(k.t)}" y2="${H}"/><text x="${xFor(k.t) + 3}" y="11">${esc(k.label)}</text></g>`).join('');
+}
+
+// The open hero reuses the home chart's floating detail card (#markPop):
+// its tap-to-open handler and Esc handling come for free.
+function mgShowPop(el, key, items) {
+  const it = items.find(x => x.key === key) || {};
+  const s = sessions.find(x => x.key === key) || it;
+  const live = typeof isWorking === 'function' && isWorking(s) ? '● working now' : isActive(s) ? '○ active in the last 5 min' : '';
+  const pop = $('markPop');
+  pop.innerHTML = `<h4>${esc(s.title || s.timelineTitle || it.title || '(untitled)')}</h4>` +
+    `<div class="mp-meta">${esc(fmtDate(s.firstTs || it.firstTs))} → ${esc(fmtDate(s.lastTs || it.lastTs))}\n${s.userCount || 0} user · ${s.assistantCount || 0} assistant${live ? '\n' + live : ''}</div>` +
+    `<div class="mp-hint">${matchMedia('(pointer: coarse)').matches ? 'tap here to open' : 'double click to open'}</div>`;
+  pop.dataset.rel = key;
+  pop.hidden = false;
+  const r = el.getBoundingClientRect();
+  pop.style.left = '0px'; pop.style.top = '0px';
+  const x = Math.min(Math.max(8, r.left), window.innerWidth - pop.offsetWidth - 8);
+  let y = r.bottom + 8;
+  if (y + pop.offsetHeight > window.innerHeight - 8) y = Math.max(8, r.top - pop.offsetHeight - 8);
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
 }
 
 // ---- reviewed conversation start (project panel and epic panel) ----
@@ -6892,7 +7076,7 @@ function renderProjectPanel(d) {
     </div>
     </div>
   </div>`;
-  wireMiniGantt($('view'), heroRows, color);
+  wireMiniGantt($('view'), heroRows, color, 'p:' + d.project);
   $('pTitleBig').ondblclick = e => { e.preventDefault(); startProjectTitleEdit(d.project); };
   $('pFold').onclick = () => openFoldPicker(d);
   const pUnregister = $('pUnregister');
@@ -11140,7 +11324,7 @@ async function showTree(key) {
   const hereNode = [...rows].reverse().find(n => n.active) || null;
   const boxes = nodes.map(n =>
     `<div class="tnode ${n.role}${n.active ? '' : ' inactive'}${n.fork ? ' fork' : ''}${n === hereNode ? ' here' : ''}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc(n.fork ? 'in fork: ' + forkTitle(n) : n.title)}">
-      <div class="tm"><b>${n.role === 'user' ? 'user' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role === 'assistant' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} msgs</span>` : ''}${n.tools ? `<span class="ttools" title="this turn package carries ${n.tools} tool call${n.tools > 1 ? 's' : ''}${n.tail ? ' — loose work after the last text; continue and fork keep all of it' : ' — continue and fork keep them'}">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
+      <div class="tm"><b>${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role !== 'user' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} ${n.role === 'work' ? 'steps' : 'msgs'}</span>` : ''}${n.tools && n.role !== 'work' ? `<span class="ttools" title="this box carries ${n.tools} tool call${n.tools > 1 ? 's' : ''} — continue and fork keep them">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
       <div class="tt">${esc(n.title)}</div></div>`).join('');
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
@@ -11198,7 +11382,7 @@ function paintTreeBar() {
   const isLeaf = !(treeNav.children.get(n.id) || []).length;
   const btn = (act, k, label, title) => `<button data-act="${act}" title="${esc(title)}"><span class="k">${k}</span>${label}</button>`;
   bar.innerHTML =
-    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${Math.round(n.chars / 100) / 10}k${n.tools ? ` · ⚙ ${n.tools}` : ''}</span>` +
+    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${n.role === 'work' ? n.count + ' step' + (n.count > 1 ? 's' : '') : Math.round(n.chars / 100) / 10 + 'k'}${n.tools && n.role !== 'work' ? ` · ⚙ ${n.tools}` : ''}</span>` +
     btn('read', 'r', 'read', 'Open the transcript at this box (enter, or double click). The ● here marker does not move.') +
     (isPi ? btn('branch', 'b', isLeaf ? 'continue' : 'branch', (isLeaf ? 'Move the ● here marker to this box and continue the path from it.' : 'Start a new branch after this box: the ● here marker moves to it, no copy is made.') + ' Then send from the composer as usual.') : '') +
     (isPi && n.role === 'user' ? btn('edit', 'e', 'edit', 'Fork into a NEW session that stops just before this message. Open the new conversation to edit and resend it. The original does not change.') : '') +
@@ -11416,7 +11600,7 @@ async function showEpic(id, focusKey = activeRel) {
     </div>
     </div>
   </div>`;
-  wireMiniGantt($('view'), heroRows, epicColor);
+  wireMiniGantt($('view'), heroRows, epicColor, 'e:' + id);
   $('pTitleBig').ondblclick = e => { e.preventDefault(); startEpicTitleEdit(id); };
   $('eNew').onclick = () => startReviewedConversation(d.project, { epicId: id });
   $('eRebuild').onclick = () => buildEpic(id);
@@ -12710,6 +12894,7 @@ document.addEventListener('keydown', e => {
     if (settingsOpen) { closeSettings(); return; }
     if (!$('jobsTray').hidden) return toggleJobs(false);
     if (!$('markPop').hidden) { hideMarkPop(); return; }
+    if (mgCollapseOpen()) return;
     if (!$('filtersPop').hidden) { $('filtersPop').hidden = true; return; }
     if (!$('windowsPop').hidden) { toggleWindows(false); return; }
     if (!$('agentsPop').hidden) { toggleAgents(false); return; }
