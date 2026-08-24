@@ -2012,28 +2012,56 @@ async function reintegrateFanout(rootKey, fanoutId) {
       if (!line.trim()) continue;
       try { const d = JSON.parse(line); if (d.id) have.add(d.id); } catch {}
     }
-    let canonicalPrompt = null; // { id, text, parent } — the shared fan-out prompt
+    // Each fork's new tail reads: [settings: model_change, thinking, …] →
+    // prompt → work/reply chain. The prompts are copies of ONE fan-out prompt,
+    // but their parents differ — every fork wrote its own model_change first.
+    // Restructure: one canonical prompt attached at the shared branch point;
+    // every fork's settings chain re-parents BELOW the prompt, in front of its
+    // own reply chain. One prompt box, then per-branch model switch, then reply.
+    let canonical = null; // { id, text }
     const out = [];
     for (const [k] of forks) {
       const absF = absPathForKey(k);
       stopAnyWarmSession(absF);
       let raw;
       try { raw = await fsp.readFile(absF, 'utf8'); } catch { continue; }
-      const idMap = new Map(); // dropped duplicate prompt id → canonical id
+      const fresh = [];
+      const freshById = new Map();
       for (const line of raw.split('\n')) {
         if (!line.trim()) continue;
         let d;
         try { d = JSON.parse(line); } catch { continue; }
-        if (!d.id || d.type === 'session' || have.has(d.id)) continue;
-        if (d.parentId && idMap.has(d.parentId)) d.parentId = idMap.get(d.parentId);
-        if (d.type === 'message' && d.message && d.message.role === 'user') {
-          const text = textOf(d.message.content);
-          if (canonicalPrompt && canonicalPrompt.text === text && canonicalPrompt.parent === (d.parentId || null)) {
-            idMap.set(d.id, canonicalPrompt.id);
-            continue;
-          }
-          if (!canonicalPrompt) canonicalPrompt = { id: d.id, text, parent: d.parentId || null };
+        if (!d.id || d.type === 'session' || have.has(d.id) || freshById.has(d.id)) continue;
+        fresh.push(d);
+        freshById.set(d.id, d);
+      }
+      if (!fresh.length) continue;
+      const prompt = fresh.find(d => d.type === 'message' && d.message && d.message.role === 'user');
+      if (prompt) {
+        // The prompt's fresh ancestors are the fork's start-of-run settings.
+        const settings = [];
+        let cur = prompt.parentId;
+        while (cur && freshById.has(cur)) { settings.push(freshById.get(cur)); cur = freshById.get(cur).parentId; }
+        settings.reverse(); // topmost first; `cur` is now the SHARED branch point
+        const nearest = settings.length ? settings[settings.length - 1] : null;
+        // The prompt's direct children (first work/reply entry) move under the
+        // settings chain, which now hangs off the canonical prompt.
+        const promptText = textOf(prompt.message.content);
+        const keepOwnPrompt = !canonical || canonical.text !== promptText;
+        const promptId = keepOwnPrompt ? prompt.id : canonical.id;
+        for (const d of fresh) {
+          if (d !== prompt && d.parentId === prompt.id) d.parentId = nearest ? nearest.id : promptId;
         }
+        if (settings.length) settings[0].parentId = promptId;
+        if (keepOwnPrompt) {
+          prompt.parentId = cur || null; // attach at the shared branch point
+          if (!canonical) canonical = { id: prompt.id, text: promptText };
+        } else {
+          const at = fresh.indexOf(prompt);
+          fresh.splice(at, 1);
+        }
+      }
+      for (const d of fresh) {
         have.add(d.id);
         out.push(JSON.stringify(d));
       }

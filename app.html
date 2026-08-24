@@ -10771,9 +10771,10 @@ function renderParallelStage() {
   const stage = $('parallelStage');
   if (!stage) return;
   const entries = parallelLedgersFor(activeRel);
-  // Once every child settles, the existing comparison row becomes the
-  // durable stage: full replies in the same columns plus the real merge bar.
-  if (!entries.length || entries.every(([, L]) => L.done)) { stage.hidden = true; stage.innerHTML = ''; return; }
+  // The columns hold their ground until the settled comparison replaces
+  // them: 'fanout-settled' clears these ledgers AFTER the reintegrated
+  // transcript (columns + merge bar) is on screen. No gap, no vanishing.
+  if (!entries.length) { stage.hidden = true; stage.innerHTML = ''; delete stage.dataset.fanout; return; }
   stage.hidden = false;
   const fanoutId = entries[0][1].fanoutId;
   if (stage.dataset.fanout !== fanoutId) {
@@ -10801,6 +10802,9 @@ function renderParallelStage() {
     col.querySelector('.ps-abort').hidden = !!L.done;
     renderLsBlocks(L, col.querySelector('.ps-body'));
   }
+  const bar = stage.querySelector('.cmp-bar button');
+  if (bar) setLiveText(bar, entries.every(([, L]) => L.done)
+    ? 'folding the branches into this conversation…' : 'merge when replies finish');
 }
 
 function renderRunCards() {
@@ -13302,11 +13306,17 @@ live.onmessage = ev => {
   }
   if (d.type === 'fanout-settled') {
     // The parallel opinions now live INSIDE the parent conversation as real
-    // sibling branches; the fork files are gone. Land on the comparison.
+    // sibling branches; the fork files are gone. Land on the comparison,
+    // and only then let the live columns yield to it.
     compareCache.delete(d.key);
     relatedCache.delete(d.key);
     ctxMeterCache.delete(d.key);
-    if (activeRel === d.key && current) open(d.key, 'compare');
+    const clearLedgers = () => {
+      for (const [id, L] of [...runLedgers]) if (L.fanoutId === d.fanoutId) runLedgers.delete(id);
+      if (viewKind === 'conversation') renderRunCards();
+    };
+    if (activeRel === d.key && current) open(d.key, 'compare').then(clearLedgers, clearLedgers);
+    else clearLedgers();
     return;
   }
   if (d.type === 'run-event') {
