@@ -4,7 +4,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
-  rawProjectOf, canonicalize, flattenMap, foldAlias, unfold,
+  LOOSE_PROJECT, isLooseCwd, rawProjectOf, canonicalize, flattenMap, foldAlias, unfold,
   dismissKey, normalizeRemote, suggestPairs,
 } = require('../projectfolds.js');
 
@@ -13,8 +13,18 @@ test('rawProjectOf: /Projects/ segment wins, else last part', () => {
   assert.strictEqual(rawProjectOf('/home/u/Projects/aiconvo/sub/dir'), 'aiconvo');
   assert.strictEqual(rawProjectOf('/home/u/work/thing/'), 'thing');
   assert.strictEqual(rawProjectOf('C:\\Users\\u\\Projects\\win'), 'win');
-  assert.strictEqual(rawProjectOf(''), '?');
-  assert.strictEqual(rawProjectOf(null), '?');
+  assert.strictEqual(rawProjectOf(''), LOOSE_PROJECT);
+  assert.strictEqual(rawProjectOf(null), LOOSE_PROJECT);
+});
+
+test('isLooseCwd: general launch and temporary folders stay out of projects', () => {
+  assert.strictEqual(isLooseCwd('/home/u'), true);
+  assert.strictEqual(isLooseCwd('/home/u/Projects'), true);
+  assert.strictEqual(isLooseCwd('/tmp/pi-run/session'), true);
+  assert.strictEqual(isLooseCwd('C:\\Users\\u'), true);
+  assert.strictEqual(isLooseCwd('C:\\Users\\u\\AppData\\Local\\Temp\\agent'), true);
+  assert.strictEqual(isLooseCwd('/home/u/Projects/real'), false);
+  assert.strictEqual(isLooseCwd('/home/u/work/real'), false);
 });
 
 test('canonicalize: aliases beat auto, chains resolve, pins stop', () => {

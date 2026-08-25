@@ -15,14 +15,30 @@
 // never loops. Everything here is pure and synchronous; the server owns
 // file I/O timing and the git probing that fills the auto map.
 
-// The one place the raw name comes from. Mirrors the historical logic in
-// server.js and app.html: the segment after /Projects/, else the last part.
+const LOOSE_PROJECT = 'Loose conversations';
+
+// A conversation can have a working directory without belonging to a
+// project. Keep common launch and temporary directories in one collection
+// instead of inventing projects named "maxime", "Projects", or "tmp".
+function isLooseCwd(cwd) {
+  const c = String(cwd || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!c) return true;
+  if (/^\/(?:home|Users)\/[^/]+(?:\/Projects)?$/i.test(c)) return true;
+  if (/^[A-Z]:\/Users\/[^/]+(?:\/Projects)?$/i.test(c)) return true;
+  if (/^\/(?:tmp|var\/tmp)(?:\/|$)/.test(c)) return true;
+  if (/^[A-Z]:\/Users\/[^/]+\/AppData\/Local\/Temp(?:\/|$)/i.test(c)) return true;
+  return false;
+}
+
+// The one place the raw name comes from. The segment after /Projects/ wins;
+// other real folders use their last segment. General folders stay loose.
 function rawProjectOf(cwd) {
-  const c = String(cwd || '?').replace(/\\/g, '/').replace(/\/$/, '');
+  if (isLooseCwd(cwd)) return LOOSE_PROJECT;
+  const c = String(cwd).replace(/\\/g, '/').replace(/\/$/, '');
   const m = c.match(/\/Projects\/([^/]+)/);
   if (m) return m[1];
   const parts = c.split('/').filter(Boolean);
-  return parts[parts.length - 1] || '?';
+  return parts[parts.length - 1] || LOOSE_PROJECT;
 }
 
 const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
@@ -164,4 +180,4 @@ function suggestPairs(counts = {}, remotes = {}, dismissed = []) {
   return out;
 }
 
-module.exports = { rawProjectOf, canonicalize, flattenMap, foldAlias, unfold, dismissKey, normalizeRemote, suggestPairs };
+module.exports = { LOOSE_PROJECT, isLooseCwd, rawProjectOf, canonicalize, flattenMap, foldAlias, unfold, dismissKey, normalizeRemote, suggestPairs };
