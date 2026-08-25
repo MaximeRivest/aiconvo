@@ -18,6 +18,7 @@ const settingsLib = require('./settings.js');
 const { openSearchIndex, SearchIndex } = require('./searchindex.js');
 const foldsLib = require('./projectfolds.js');
 const themesLib = require('./themes.js');
+const fanoutLib = require('./fanout.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
@@ -26,6 +27,7 @@ const SOURCES = {
   'pi-remote': path.join(os.homedir(), '.pi', 'remote', 'sessions'),
 };
 const CACHE_DIR = path.join(os.homedir(), '.cache', 'aiconvo');
+const NOTES_DIR = path.join(os.homedir(), 'notes', 'aiconvo');
 const SESS_DIR = path.join(CACHE_DIR, 'sessions');
 const INDEX_FILE = path.join(CACHE_DIR, 'index.json');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7433;
@@ -101,10 +103,19 @@ fs.mkdirSync(SESS_DIR, { recursive: true });
 // /api/search then falls back to the old scan.
 const searchIdx = openSearchIndex(path.join(CACHE_DIR, 'search.db'));
 
-// Mirror of the client's projectOf(): a stable project name from a cwd,
-// after fold resolution (worktrees and manual merges collapse into one).
-function projectNameOf(cwd) {
-  return canonicalProjectName(foldsLib.rawProjectOf(cwd));
+// Explicit conversation assignments are durable user data. They let a loose
+// conversation join a real project without changing its true tool cwd.
+const LOOSE_PROJECT = foldsLib.LOOSE_PROJECT;
+const CONVERSATION_PROJECTS_FILE = path.join(NOTES_DIR, 'projects', 'conversation-projects.json');
+let conversationProjects = {};
+try { conversationProjects = JSON.parse(fs.readFileSync(CONVERSATION_PROJECTS_FILE, 'utf8')); } catch {}
+if (!conversationProjects || typeof conversationProjects !== 'object' || Array.isArray(conversationProjects)) conversationProjects = {};
+
+// A stable project name from a cwd, after an explicit assignment and fold
+// resolution. Worktrees and manual merges collapse into one name.
+function projectNameOf(cwd, key = '') {
+  const assigned = key && conversationProjects[key];
+  return canonicalProjectName(assigned || foldsLib.rawProjectOf(cwd));
 }
 
 // index: { [relPath]: { mtimeMs, size, sessionId, cwd, gitBranch, title,
@@ -112,13 +123,19 @@ function projectNameOf(cwd) {
 let index = {};
 try { index = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf8')); } catch { index = {}; }
 
-// Atomic write: temp file + rename. Two processes (live server plus a
-// scratch/test instance, or two LAN machines on one share) can otherwise
-// interleave writes to the same cache file and corrupt its JSON.
+// Atomic write: temp file + rename. The temp name must be unique per call:
+// document regen writes several files in one folder at the same time, and a
+// shared Date.now() name made the second rename lose its temp file.
+let atomicWriteSeq = 0;
 async function writeFileAtomic(p, data) {
-  const tmp = p + '.tmp-' + process.pid + '-' + Math.random().toString(36).slice(2, 8);
-  await fsp.writeFile(tmp, data);
-  await fsp.rename(tmp, p);
+  const tmp = p + '.tmp-' + process.pid + '-' + (++atomicWriteSeq) + '-' + Math.random().toString(36).slice(2, 8);
+  try {
+    await fsp.writeFile(tmp, data);
+    await fsp.rename(tmp, p);
+  } catch (e) {
+    await fsp.unlink(tmp).catch(() => {});
+    throw e;
+  }
 }
 
 function saveIndexSoon() {
@@ -552,7 +569,7 @@ async function indexFile(source, relPath, stat) {
     markLeafDirty(key, prev, entry, stat.mtimeMs);
     if (searchIdx) {
       try {
-        searchIdx.putConversation(key, { ...entry, project: projectNameOf(entry.cwd) }, messages);
+        searchIdx.putConversation(key, { ...entry, project: projectNameOf(entry.cwd, key) }, messages);
         scheduleSemanticSync(10000); // batch live edits before pushing
       } catch (e) { console.error('search index', key, e.message); }
     }
@@ -665,7 +682,7 @@ async function legacySearch(q, limit = 100) {
     }
     if (matches.length) {
       const e = index[key];
-      groups.push({ kind: 'conversation', key, title: e.title, project: projectNameOf(e.cwd),
+      groups.push({ kind: 'conversation', key, title: e.title, project: projectNameOf(e.cwd, key),
                     source: e.source, score: 0, matchCount, matches });
     }
     if (groups.length >= limit) break;
@@ -704,7 +721,7 @@ async function syncSearchIndex() {
       let data;
       try { data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')); } catch { continue; }
       try {
-        if (searchIdx.putConversation(key, { ...entry, project: projectNameOf(entry.cwd) }, data.messages)) convs++;
+        if (searchIdx.putConversation(key, { ...entry, project: projectNameOf(entry.cwd, key) }, data.messages)) convs++;
       } catch (e) { console.error('search index', key, e.message); }
       await new Promise(r => setImmediate(r));
     }
@@ -994,6 +1011,7 @@ function parseTreeEntries(kind, raw) {
       if (d.type === 'message' && d.message && (d.message.role === 'user' || d.message.role === 'assistant')) {
         node.role = d.message.role;
         node.text = textOf(d.message.content);
+        node.bridge = bridgeKindOf(node.text);
         if (Array.isArray(d.message.content)) {
           node.names = d.message.content.filter(b => b && (b.type === 'toolCall' || b.type === 'toolUse' || b.type === 'tool_use')).map(b => b.name || '?');
           node.calls = node.names.length || undefined;
@@ -1219,6 +1237,7 @@ async function sessionTreeFor(key, opts = {}) {
       active: active.has(g),
       key: owner,                        // the conversation to read or fork from
       fork: owner !== key || undefined,  // lives in a forked/linked session
+      bridge: first.bridge || last.bridge || undefined,
     };
   });
   return {
@@ -1305,10 +1324,20 @@ const pirpc = require('./pirpc.js');
 const pisdk = require('./pisdk.js');
 const { piListCommands } = pirpc; // command palette probe stays process-isolated
 function piEng() { return appSettings.piEngine === 'rpc' ? pirpc : pisdk; }
+// Last @ context actually loaded into a warm session. Saved chips are not
+// enough: the user can clear a chip, and the warm process still holds the
+// old --append-system-prompt until we drop it.
+const appliedContextBySession = new Map();
+function contextSig(items) {
+  return normalizeContextItems(items).map(i => i.type === 'chat'
+    ? 'chat/' + i.key + (i.i == null ? '' : '/' + i.i)
+    : i.project + '/' + i.kind).sort().join('|');
+}
 function stopAnyWarmSession(sessionPath) {
   let stopped = false;
   try { stopped = pirpc.stopWarmSession(sessionPath) || stopped; } catch {}
   try { stopped = pisdk.stopWarmSession(sessionPath) || stopped; } catch {}
+  try { appliedContextBySession.delete(path.resolve(sessionPath)); } catch { appliedContextBySession.delete(sessionPath); }
   return stopped;
 }
 function stopAllEngineSessions() {
@@ -1782,6 +1811,9 @@ function runEventForwarder(job) {
           // The end event carries the authoritative message: trust it.
           const content = Array.isArray(event.message.content) ? event.message.content : [];
           cur.text = textOf(event.message.content) || cur.text;
+          // Capture for the spoken completion summary: the live tail gets
+          // pruned by indexFile before finish() reads it.
+          if (cur.text.trim()) job.lastAssistantText = cur.text;
           const think = content.filter(c => c && c.type === 'thinking' && typeof c.thinking === 'string').map(c => c.thinking).join('\n');
           if (think) cur.think = think;
           cur.done = true;
@@ -1854,10 +1886,15 @@ function runEventForwarder(job) {
 
 // Start one headless run on a conversation. node (optional): continue from
 // that entry — an in-file pi branch anchor moves the leaf there first.
-async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout }) {
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
   if (!String(message || '').trim()) throw new Error('empty prompt');
+  const contextItems = context !== undefined ? normalizeContextItems(context) : conversationContextOf(key);
+  if (context !== undefined) saveConversationContext(key, contextItems);
+  const nextCtxSig = contextSig(contextItems);
+  const prevCtxSig = appliedContextBySession.get(path.resolve(sessionPath)) || '';
+  const ctxChanged = prevCtxSig !== nextCtxSig;
   const running = findRunningConversation(key);
   if (running) {
     if (!force) {
@@ -1888,6 +1925,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     }
     throw new Error('A web run is already active on this conversation. Wait or abort it.');
   }
+  const ctxBundle = contextItems.length ? await writeAttachedContextFile(contextItems) : null;
   const job = {
     id: 'run:' + crypto.randomUUID().slice(0, 8),
     type: 'agent-run', key,
@@ -1911,12 +1949,14 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     if (error) job.error = error;
     job.finishedAt = Date.now();
     try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
+    if (status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
     endLiveRunTail(job.id);
     jobChanged(job);
     broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
       fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
       fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
     maybeSettleFanout(job);
+    speakRunDone(job);
   };
   // The full run holds the file lock. Fire and forget: the caller gets the job.
   withSessionOp(sessionPath, async () => {
@@ -1941,7 +1981,12 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       }
       job.statusText = 'running';
       jobChanged(job);
-      const handle = piEng().piHeadlessRun({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, { provider, modelId, message, images, onEvent: runEventForwarder(job) });
+      // Attached @ context lives in --append-system-prompt on the warm
+      // session. Reload when the chip set changed, including a clear.
+      if (ctxBundle || ctxChanged) stopAnyWarmSession(sessionPath);
+      const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
+      const handle = piEng().piHeadlessRun({ sessionPath, cwd, env: agentEnv(), extraArgs }, { provider, modelId, message, images, onEvent: runEventForwarder(job) });
+      appliedContextBySession.set(path.resolve(sessionPath), nextCtxSig);
       record.handle = handle;
       await handle.done;
       if (record.yielded) await finish('done', 'stopped — ' + record.yielded);
@@ -1969,17 +2014,19 @@ function markFanoutFork(key, fanout) {
   broadcast({ type: 'update', key, ...e });
 }
 
-async function startFanOut(key, { node, models, message, images, force }) {
+async function startFanOut(key, { node, models, message, images, force, context }) {
   if (!Array.isArray(models) || models.length < 2) throw new Error('fan-out needs two or more models');
   const runs = [];
   const fanoutId = 'fan:' + crypto.randomUUID().slice(0, 8);
+  const contextItems = context !== undefined ? normalizeContextItems(context) : conversationContextOf(key);
   for (let index = 0; index < models.length; index++) {
     const m = models[index];
     const forked = await forkSession(key, node); // sequential: each fork locks the source briefly
     saveConversationModels(forked.key, [m]);
+    if (contextItems.length) saveConversationContext(forked.key, contextItems);
     const fanout = { id: fanoutId, rootKey: key, node: node || null, index, count: models.length };
     markFanoutFork(forked.key, fanout);
-    const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force, fanout });
+    const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force, fanout, context: contextItems });
     runs.push({ key: forked.key, jobId: job.id, model: m.provider + '/' + m.modelId,
       fanoutId, fanoutRootKey: key, fanoutNode: node || null, fanoutIndex: index, fanoutCount: models.length });
   }
@@ -2070,6 +2117,20 @@ async function reintegrateFanout(rootKey, fanoutId) {
       const nl = !rootRaw || rootRaw.endsWith('\n') ? '' : '\n';
       await fsp.appendFile(rootPath, nl + out.join('\n') + '\n');
     }
+    // A "both" assistant keeps every opinion in context. Continue from it
+    // to send with all replies present, without synthesizing them.
+    let bothId = null;
+    if (canonical) {
+      const folded = await sessionTreeFor(rootKey, { withTexts: true });
+      const quoted = answerBranchesUnder(folded, canonical.id)
+        .map(a => ({ model: a.model || 'model', text: a.fullText || '' }))
+        .filter(a => a.text.trim());
+      if (quoted.length >= 2) {
+        const both = makeBothEntry(canonical.id, quoted);
+        bothId = both.id;
+        await fsp.appendFile(rootPath, JSON.stringify(both) + '\n');
+      }
+    }
     // Retire the scaffolding. Bytes stay on disk as .merged for recovery;
     // the scanner and watcher only see .jsonl files.
     for (const [k] of forks) {
@@ -2082,7 +2143,7 @@ async function reintegrateFanout(rootKey, fanoutId) {
     saveIndexSoon();
     try { await indexFile(entry.source, rootKey.slice(entry.source.length + 1), await fsp.stat(rootPath)); }
     catch (e) { console.error('post-reintegration reindex failed:', e.message); }
-    return true;
+    return { bothId };
   });
 }
 
@@ -2095,7 +2156,7 @@ async function maybeSettleFanout(job) {
   if (group.some(j => j.status === 'running')) return;
   try {
     const ok = await reintegrateFanout(job.fanoutRootKey, job.fanoutId);
-    if (ok) broadcast({ type: 'fanout-settled', key: job.fanoutRootKey, fanoutId: job.fanoutId });
+    if (ok) broadcast({ type: 'fanout-settled', key: job.fanoutRootKey, fanoutId: job.fanoutId, bothId: ok.bothId || null });
   } catch (e) { console.error('fan-out reintegration failed:', job.fanoutId, e.message); }
 }
 
@@ -2111,29 +2172,46 @@ async function sweepOrphanFanouts() {
     if (!index[rootKey]) continue;
     try {
       const ok = await reintegrateFanout(rootKey, fanoutId);
-      if (ok) broadcast({ type: 'fanout-settled', key: rootKey, fanoutId });
+      if (ok) broadcast({ type: 'fanout-settled', key: rootKey, fanoutId, bothId: ok.bothId || null });
     } catch (e) { console.error('fan-out sweep failed:', fanoutId, e.message); }
   }
 }
 
-// One assistant answer per direct child of node (fan-out is usually
-// prompt → answer, so the answer sits one level down).
+function isMergeBridgeText(text) {
+  const t = String(text || '');
+  if (/<!--\s*aiconvo:merge\s*-->/.test(t)) return true;
+  return /^\d+ models answered my last message in parallel\./i.test(t.trim());
+}
+function isBothBridgeText(text) {
+  return /<!--\s*aiconvo:both\s*-->/.test(String(text || ''));
+}
+function bridgeKindOf(text) {
+  if (isMergeBridgeText(text)) return 'merge';
+  if (isBothBridgeText(text)) return 'both';
+  return undefined;
+}
+function isFanoutBridgeText(text) {
+  return !!(isMergeBridgeText(text) || isBothBridgeText(text));
+}
+function makeBothEntry(parentId, answers) {
+  const body = answers.map(a => `=== ${a.model || 'model'} ===\n${String(a.text || '').trim()}`).join('\n\n')
+    + '\n\n<!-- aiconvo:both -->';
+  return {
+    type: 'message',
+    id: crypto.randomBytes(4).toString('hex'),
+    parentId,
+    timestamp: new Date().toISOString(),
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: body }],
+    },
+  };
+}
+
+// One assistant answer per direct branch. The pure fan-out classifier owns
+// bridge scope, so a merge above this node cannot hide a later fan-out.
 function answerBranchesUnder(tree, nodeId) {
-  const byParent = new Map();
-  for (const n of tree.nodes) {
-    if (!byParent.has(n.parent)) byParent.set(n.parent, []);
-    byParent.get(n.parent).push(n);
-  }
-  const answers = [];
-  for (const child of byParent.get(nodeId) || []) {
-    const queue = [child];
-    while (queue.length) {
-      const c = queue.shift();
-      if (c.role === 'assistant' && String(c.fullText || c.title || '').trim()) { answers.push(c); break; }
-      for (const k of byParent.get(c.id) || []) queue.push(k);
-    }
-  }
-  return answers;
+  return fanoutLib.answersUnder(tree, nodeId);
 }
 
 async function compareGroupsResponse(key) {
@@ -2147,20 +2225,21 @@ async function compareGroupsResponse(key) {
     const end = Date.parse(a.lastTs || a.ts || '');
     return start && end && end > start ? Math.round((end - start) / 1000) : null;
   };
-  const groups = [];
-  for (const n of tree.nodes) {
-    const answers = answerBranchesUnder(tree, n.id);
-    if (answers.length < 2) continue;
-    groups.push({
-      node: n.id,
-      answers: answers.map(a => ({
-        id: a.id, key: a.key, model: a.model || null,
-        text: String(a.fullText || '').slice(0, 16000),
-        jumpTs: a.jumpTs, fork: !!a.fork,
-        tok: a.tok || null, cost: a.cost || null, secs: secsFor(a),
-      })),
-    });
-  }
+  const answerView = a => ({
+    id: a.id, key: a.key, model: a.model || null,
+    text: String(a.fullText || '').slice(0, 16000),
+    jumpTs: a.jumpTs, fork: !!a.fork,
+    tok: a.tok || null, cost: a.cost || null, secs: secsFor(a),
+  });
+  const groups = fanoutLib.classifyFanoutGroups(tree).map(g => ({
+    node: g.node,
+    answers: g.answers.map(answerView),
+    both: g.both ? { id: g.both.id, key: g.both.key, jumpTs: g.both.jumpTs } : null,
+    merge: g.merge ? {
+      bridgeId: g.merge.bridge.id,
+      answer: answerView(g.merge.answer),
+    } : null,
+  }));
   return { key, groups };
 }
 
@@ -2178,9 +2257,32 @@ async function startAggregate(key, { node, provider, modelId, instruction, answe
   // Branch ids stay in the labels: the merge keeps its provenance in the transcript.
   const parts = children.map((c, i) =>
     `=== reply ${i + 1} of ${children.length} · ${c.model || 'unknown model'} · branch ${c.id} ===\n${c.fullText.trim()}`);
-  const message = `${children.length} models answered my last message in parallel. Their replies:\n\n${parts.join('\n\n')}\n\n${String(instruction || '').trim() || 'You have the full conversation context. Write the single best reply to my last message. Take the strongest parts of these replies, fix their mistakes, and resolve their disagreements. Your reply replaces them: answer me directly, and do not describe the replies or this merge.'}`;
+  const message = `${children.length} models answered my last message in parallel. Their replies:\n\n${parts.join('\n\n')}\n\n${String(instruction || '').trim() || 'You have the full conversation context. Write the single best reply to my last message. Take the strongest parts of these replies, fix their mistakes, and resolve their disagreements. Your reply replaces them: answer me directly, and do not describe the replies or this merge.'}\n\n<!-- aiconvo:merge -->`;
   const job = await startAgentRun(key, { node, provider, modelId, message, force });
   return { job, answers: children.length };
+}
+
+// A "both" node quotes every parallel reply as one assistant turn. Continue
+// from it to keep every opinion in context without synthesizing a merge.
+async function ensureBothBridge(key, node) {
+  const { sessionPath } = sessionPathsFor(key);
+  return withSessionOp(sessionPath, async () => {
+    // Recheck inside the file lock. Two fast clicks must not add two bridges.
+    const tree = await sessionTreeFor(key, { withTexts: true });
+    const existing = tree.nodes.find(n => n.bridge === 'both' && n.parent === node);
+    if (existing) return { id: existing.id, existed: true };
+    const answers = answerBranchesUnder(tree, node);
+    if (answers.length < 2) throw new Error('need two replies to keep both in context');
+    const both = makeBothEntry(node, answers.map(a => ({ model: a.model, text: a.fullText })));
+    stopAnyWarmSession(sessionPath);
+    const raw = await fsp.readFile(sessionPath, 'utf8');
+    const nl = !raw || raw.endsWith('\n') ? '' : '\n';
+    await fsp.appendFile(sessionPath, nl + JSON.stringify(both) + '\n');
+    const entry = index[key];
+    try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); }
+    catch (e) { console.error('both-bridge reindex failed:', e.message); }
+    return { id: both.id, existed: false };
+  });
 }
 
 // Set the conversation's model durably through pi's own runtime.
@@ -2234,7 +2336,6 @@ async function setConversationThinking(key, level, force) {
 // ---------- distillation ----------
 // Two steps. Step 1 maps the full conversation into a problem tree.
 // Step 2 distills each problem with generous context (too much beats too little).
-const NOTES_DIR = path.join(os.homedir(), 'notes', 'aiconvo');
 const EPICS_DIR = path.join(NOTES_DIR, 'epics');
 const EPICS_FILE = path.join(CACHE_DIR, 'epics.json');
 const EPIC_INPUTS_DIR = path.join(CACHE_DIR, 'epic-inputs');
@@ -2279,14 +2380,36 @@ function canonicalProjectName(raw) {
   return foldsLib.canonicalize(raw, foldStore.aliases, autoFolds);
 }
 
+async function assignConversationProject(key, rawProject) {
+  if (!key || !index[key]) throw new Error('unknown conversation');
+  const oldProject = projectNameOf(index[key].cwd, key);
+  const requested = String(rawProject || '').trim();
+  if (!requested) delete conversationProjects[key];
+  else {
+    const project = canonicalProjectName(requested);
+    if (!project || project === '?' || project === LOOSE_PROJECT) throw new Error('select a real project');
+    if (!projectMetaFor(project)) throw new Error('unknown project: ' + project);
+    conversationProjects[key] = project;
+  }
+  await fsp.mkdir(path.dirname(CONVERSATION_PROJECTS_FILE), { recursive: true });
+  await writeFileAtomic(CONVERSATION_PROJECTS_FILE, JSON.stringify(conversationProjects, null, 2) + '\n');
+  const project = projectNameOf(index[key].cwd, key);
+  try { if (searchIdx) searchIdx.setProject('conv:' + key, project); } catch {}
+  if (oldProject !== LOOSE_PROJECT) scheduleDocsRegen(oldProject);
+  if (project !== LOOSE_PROJECT && project !== oldProject) scheduleDocsRegen(project);
+  broadcast({ type: 'conversation-project', key, project });
+  return { ok: true, key, project };
+}
+
 // Model choices are user preferences, not derived cache. Keep one project
 // default and one explicit model set per conversation, shared by every UI
 // connected to this server.
 const MODEL_PREFS_FILE = path.join(NOTES_DIR, 'model-preferences.json');
-let modelPrefs = { projects: {}, conversations: {} };
+let modelPrefs = { projects: {}, conversations: {}, context: {} };
 try {
-  modelPrefs = { projects: {}, conversations: {}, ...JSON.parse(fs.readFileSync(MODEL_PREFS_FILE, 'utf8')) };
+  modelPrefs = { projects: {}, conversations: {}, context: {}, ...JSON.parse(fs.readFileSync(MODEL_PREFS_FILE, 'utf8')) };
 } catch {}
+if (!modelPrefs.context || typeof modelPrefs.context !== 'object' || Array.isArray(modelPrefs.context)) modelPrefs.context = {};
 function normalizePickedModel(raw) {
   const provider = String(raw && raw.provider || '').trim();
   const modelId = String(raw && (raw.modelId || raw.model) || '').trim();
@@ -2335,6 +2458,53 @@ function saveConversationModels(key, raw) {
   saveModelPrefs();
   return models;
 }
+const MEMORY_DOC_KINDS = ['overview', 'intent', 'environment', 'status'];
+function normalizeContextItems(raw) {
+  const out = [], seen = new Set();
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (item && item.type === 'chat') {
+      const key = String(item.key || '').trim();
+      if (!key) continue;
+      const idx = Number.isInteger(item.i) ? item.i : null;
+      const id = 'chat\0' + key + '\0' + (idx == null ? '*' : String(idx));
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const row = { type: 'chat', key };
+      if (idx != null) row.i = idx;
+      if (item.title) row.title = String(item.title).replace(/\s+/g, ' ').trim().slice(0, 80);
+      out.push(row);
+      continue;
+    }
+    const project = String(item && item.project || '').trim();
+    if (!project) continue;
+    const kinds = [];
+    if (item.kind === 'map' || item.kind === 'all') kinds.push('map');
+    else if (typeof item.kind === 'string' && MEMORY_DOC_KINDS.includes(item.kind)) kinds.push(item.kind);
+    if (Array.isArray(item.kinds)) {
+      for (const k of item.kinds) {
+        if (k === 'map' || k === 'all' || MEMORY_DOC_KINDS.includes(k)) kinds.push(k === 'all' ? 'map' : k);
+      }
+    }
+    for (const kind of kinds) {
+      const id = project + '\0' + kind;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ project, kind });
+    }
+  }
+  return out.slice(0, 24);
+}
+function conversationContextOf(key) {
+  return normalizeContextItems(modelPrefs.context && modelPrefs.context[key]);
+}
+function saveConversationContext(key, raw) {
+  if (!index[key]) throw new Error('conversation not found');
+  const items = normalizeContextItems(raw);
+  if (items.length) modelPrefs.context[key] = items;
+  else delete modelPrefs.context[key];
+  saveModelPrefs();
+  return items;
+}
 async function inferredConversationModels(key, cached) {
   if (conversationKind(index[key]) === 'claude') return [];
   const stored = normalizePickedModels(modelPrefs.conversations[key]);
@@ -2371,7 +2541,7 @@ async function inferredConversationModels(key, cached) {
     }
   } catch {}
   const entry = index[key];
-  const fallback = entry && resolvedProjectDefaultModel(projectOfEntry(entry));
+  const fallback = entry && resolvedProjectDefaultModel(projectOfEntry(entry, key));
   return fallback ? remember([{ provider: fallback.provider, modelId: fallback.modelId }]) : [];
 }
 
@@ -2421,6 +2591,7 @@ async function refreshProjectFolds() {
     if (!main) return;
     const from = foldsLib.rawProjectOf(cwd);
     const into = foldsLib.rawProjectOf(main);
+    if (from === LOOSE_PROJECT || into === LOOSE_PROJECT) return;
     if (from !== into) auto[from] = into;
   });
   if (sortedJson(auto) === sortedJson(autoFolds)) return false;
@@ -2435,7 +2606,7 @@ async function refreshProjectFolds() {
 function applyProjectFoldChange() {
   if (searchIdx) {
     for (const [key, entry] of Object.entries(index)) {
-      try { searchIdx.setProject('conv:' + key, projectNameOf(entry.cwd)); } catch {}
+      try { searchIdx.setProject('conv:' + key, projectNameOf(entry.cwd, key)); } catch {}
     }
   }
   gitRepoIndexCache.at = 0;
@@ -2459,9 +2630,10 @@ let foldSuggestionsCache = { at: 0, list: [] };
 async function projectFoldSuggestions() {
   if (Date.now() - foldSuggestionsCache.at < 60000) return foldSuggestionsCache.list;
   const counts = {};
-  for (const entry of Object.values(index)) {
+  for (const [key, entry] of Object.entries(index)) {
     if (!entry) continue;
-    const p = projectOfEntry(entry);
+    const p = projectOfEntry(entry, key);
+    if (p === LOOSE_PROJECT) continue;
     counts[p] = (counts[p] || 0) + 1;
   }
   const remotes = {};
@@ -2481,7 +2653,10 @@ async function projectFoldSuggestions() {
 }
 
 async function foldProjects(from, into) {
-  foldsLib.foldAlias(foldStore, String(from || '').trim(), String(into || '').trim());
+  from = String(from || '').trim();
+  into = String(into || '').trim();
+  if (from === LOOSE_PROJECT || into === LOOSE_PROJECT) throw new Error('loose conversations are a collection, not a project');
+  foldsLib.foldAlias(foldStore, from, into);
   saveFoldStore();
   // Fast fold, no history: the folded project's memory dir dies here and the
   // next memory build absorbs the merged conversation set.
@@ -3520,7 +3695,7 @@ async function extractLeaf(key) {
   const memoryHash = entry.memoryHash || null; // captured before the call: growth during the job leaves the leaf correctly stale
   const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
   const messages = data.messages || [];
-  const project = projectNameOf(entry.cwd);
+  const project = projectNameOf(entry.cwd, key);
   const primer = await projectPrimerFor(project);
   const intentItems = [];
   let prevAssistant = '';
@@ -3740,38 +3915,63 @@ async function synthesizeLaneJson(header, blocks, prompt, emit, label, step, ste
 const laneHashOf = items => crypto.createHash('sha256').update('lane-v1\x00' + JSON.stringify(items)).digest('hex').slice(0, 32);
 
 // Weigh all intent candidates against each other. Returns Map(id -> {tier, note}).
-async function weighIntentCandidates(project, overview, candidates, emit, step, steps) {
+// prevTiers (saved in the last build's inputs file) makes rebuilds incremental:
+// only quotes never weighed before go through the expensive pass, then one
+// cheap delta pass restores cross-build consistency (new work can still
+// supersede old directions).
+async function weighIntentCandidates(project, overview, candidates, emit, step, steps, prevTiers = new Map()) {
   const tiers = new Map();
   if (!candidates.length) return tiers;
   const header = `PROJECT: ${project}\nCURRENT OVERVIEW: ${clipped(JSON.stringify(overview), 2000)}\n\n`;
-  const blocks = candidates.map(q => JSON.stringify({
+  const blockOf = q => JSON.stringify({
     id: q.id, date: String(q.ts || '?').slice(0, 10), kind: q.kind, force: q.force || null,
     situation: q.situation || null, reason: q.reason || null, quote: clipped(q.user, 900),
-  }));
+  });
   // Output scales with quote count here (one tier row per quote), so a large
   // context is a trap: one 800-quote call times out on generation. Cap each
-  // section well below the context budget to keep every call fast; the merge
-  // pass below restores cross-section consistency.
+  // section well below the context budget to keep every call fast; the delta
+  // pass restores cross-section consistency.
   const budget = Math.min(35000, piTargetTokens() - 16000);
-  const groups = packTextBlocks(blocks, Math.max(20000, budget - estimateInputTokens(header)));
-  emit(`Weighing ${candidates.length} intent quotes${groups.length > 1 ? ` (${groups.length} sections)` : ''}…`, step, steps);
-  const partials = await mapLimit(groups, 2, async (items, i) => {
-    const label = groups.length > 1 ? `SECTION ${i + 1}/${groups.length}\n\n` : '';
-    return runPiJson(header + label + items.join('\n'), PYRAMID_WEIGH_PROMPT);
-  });
-  let rows = partials.flatMap(p => Array.isArray(p.tiers) ? p.tiers : []);
-  if (groups.length > 1) {
-    // Sections could not compare across each other — one cheap merge pass over
-    // the one-line assignments restores global consistency.
+  const weighQuotes = async quotes => {
+    const groups = packTextBlocks(quotes.map(blockOf), Math.max(20000, budget - estimateInputTokens(header)));
+    const partials = await mapLimit(groups, 2, async (items, i) => {
+      const label = groups.length > 1 ? `SECTION ${i + 1}/${groups.length}\n\n` : '';
+      return runPiJson(header + label + items.join('\n'), PYRAMID_WEIGH_PROMPT);
+    });
+    return { rows: partials.flatMap(p => Array.isArray(p.tiers) ? p.tiers : []), sections: groups.length };
+  };
+  // Delta merge: the given rows are the baseline; the model returns only the
+  // rows it corrects. This keeps the output tiny regardless of project size
+  // (a full rewrite of 800+ rows can exceed the provider output cap).
+  const deltaPass = async rows => {
     const compact = rows.map(t => JSON.stringify({ id: t.id, tier: t.tier, note: oneLine(t.note, '') }));
     const merged = await runPiJson(header + compact.join('\n'), PYRAMID_WEIGH_MERGE_PROMPT);
-    // Delta merge: section tiers are the baseline; the model returns only the
-    // rows it corrects. This keeps the output tiny regardless of project size
-    // (a full rewrite of 800+ rows can exceed the provider output cap).
     const changes = Array.isArray(merged.changes) ? merged.changes : Array.isArray(merged.tiers) ? merged.tiers : [];
     const byId = new Map(rows.map(t => [String(t.id), t]));
     for (const c of changes) if (c && c.id != null && byId.has(String(c.id))) byId.set(String(c.id), c);
-    rows = [...byId.values()];
+    return [...byId.values()];
+  };
+
+  const cachedRows = candidates.filter(q => prevTiers.has(String(q.id)))
+    .map(q => ({ id: String(q.id), ...prevTiers.get(String(q.id)) }));
+  const fresh = candidates.filter(q => !prevTiers.has(String(q.id)));
+  let rows;
+  if (cachedRows.length && fresh.length <= cachedRows.length) {
+    // Incremental rebuild: most quotes keep their tier from the last build.
+    if (!fresh.length) {
+      emit(`Reusing ${cachedRows.length} weighed intent quotes…`, step, steps);
+      rows = cachedRows;
+    } else {
+      emit(`Weighing ${fresh.length} new intent quotes (${cachedRows.length} cached)…`, step, steps);
+      rows = cachedRows.concat((await weighQuotes(fresh)).rows);
+      rows = await deltaPass(rows);
+    }
+  } else {
+    emit(`Weighing ${candidates.length} intent quotes…`, step, steps);
+    const res = await weighQuotes(candidates);
+    // Sections could not compare across each other — one cheap merge pass over
+    // the one-line assignments restores global consistency.
+    rows = res.sections > 1 ? await deltaPass(res.rows) : res.rows;
   }
   const valid = new Set(['core', 'standing', 'pattern', 'superseded', 'one-off']);
   for (const t of rows) {
@@ -3947,7 +4147,14 @@ async function regenerateDocsCore({ label, entries, paths, existingEpics, discov
   // they cannot dilute the result.
   let intent = null, tiers = new Map(), weighedQuotes = intentSelected;
   if (!skip('intent')) {
-    tiers = await weighIntentCandidates(project, overview, intentSelected, emit, 2, 6);
+    // Tier assignments from the last build make the weighing incremental.
+    const prevTiers = new Map();
+    try {
+      const validTier = new Set(['core', 'standing', 'pattern', 'superseded', 'one-off']);
+      for (const t of JSON.parse(await fsp.readFile(inputsPath, 'utf8')).tiers || [])
+        if (t && t.id && validTier.has(t.tier)) prevTiers.set(String(t.id), { tier: t.tier, note: oneLine(t.note, '') });
+    } catch {}
+    tiers = await weighIntentCandidates(project, overview, intentSelected, emit, 2, 6, prevTiers);
     weighedQuotes = intentSelected.filter(q => {
       const t = tiers.get(q.id);
       return t && t.tier !== 'one-off';
@@ -4012,6 +4219,7 @@ async function projectMemoryInfo(project, meta = projectMetaFor(project)) {
       builtAt: manifest.builtAt, stale: manifest.sourceHash !== projectSourceHash(meta),
       conversations: manifest.conversations, classifiedMessages: manifest.classifiedMessages,
       selectedIntentMessages: manifest.selectedIntentMessages,
+      coreIntent: manifest.coreIntent || null,
       overview: manifest.overview || {}, candidates: manifest.candidates || [], paths: manifest.paths || {},
       pyramid: manifest.pyramid || null,
     };
@@ -4023,6 +4231,43 @@ async function projectMemoryDocument(project, kind) {
   const file = ({ overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status })[kind];
   if (!file) throw new Error('unknown project memory document');
   return { project, kind, path: file, text: await fsp.readFile(file, 'utf8') };
+}
+
+// Cheap catalog for the @ palette: every known project plus which of the
+// four map documents exist on disk. No file bodies, no projectResponse.
+function projectMemoryIndex() {
+  const names = new Set();
+  for (const [key, entry] of Object.entries(index)) {
+    if (!entry) continue;
+    const project = projectNameOf(entry.cwd, key);
+    if (project && project !== '?' && project !== LOOSE_PROJECT) names.add(project);
+  }
+  for (const name of Object.keys(createdProjects)) {
+    if (name) names.add(canonicalProjectName(name));
+  }
+  const out = [];
+  for (const name of names) {
+    if (!name || name === '?') continue;
+    const meta = projectMetaFor(name);
+    const paths = projectMemoryPaths(name);
+    const docs = {};
+    let any = false;
+    for (const kind of MEMORY_DOC_KINDS) {
+      const ok = fs.existsSync(paths[kind]);
+      docs[kind] = ok;
+      if (ok) any = true;
+    }
+    if (!meta && !any) continue;
+    out.push({
+      name,
+      title: (projectTitles[name] && projectTitles[name].title) || null,
+      cwd: (meta && meta.cwd) || null,
+      conversations: meta && meta.entries ? meta.entries.length : 0,
+      docs,
+    });
+  }
+  out.sort((a, b) => (b.conversations - a.conversations) || a.name.localeCompare(b.name));
+  return out;
 }
 
 const oneLine = (s, fallback) => String(s || fallback).replace(/\s+/g, ' ').trim();
@@ -4173,7 +4418,7 @@ async function epicResponse(epic) {
   const docsJob = memoryDocsJobs.get('epic:' + epic.id);
   return {
     ...epic, text: await fsp.readFile(epic.notePath, 'utf8'), sessions,
-    project: sessions.length ? projectOfEntry(sessions[0]) : null,
+    project: sessions.length ? projectOfEntry(sessions[0], sessions[0].key) : null,
     memory: await epicMemoryInfo(epic), leaves,
     docsRunning: !!(docsJob && !docsJob.finished),
   };
@@ -4390,7 +4635,7 @@ function startMemoryExtractJob(ids, label = null) {
       try {
         await extractLeaf(key);
         const entry = index[key];
-        if (entry) projects.add(projectNameOf(entry.cwd));
+        if (entry) projects.add(projectNameOf(entry.cwd, key));
       } catch (e) { failures.push(e.message); }
       job.done++;
       job.statusText = `Extracted ${job.done}/${job.total} leaves…`;
@@ -4740,6 +4985,7 @@ function agentEnv() {
   const extra = [
     path.join(os.homedir(), '.local/bin'),
     path.join(os.homedir(), '.nvm/versions/node/v22.23.1/bin'),
+    '/run/current-system/sw/bin', // NixOS: xdg-open, git… live here
     '/snap/bin',
   ].filter(d => fs.existsSync(d));
   const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
@@ -5225,9 +5471,16 @@ async function confirmSubmit(title, body) {
 }
 
 async function sendToConversation(key, payload) {
-  const text = payload && payload.text != null ? String(payload.text) : '';
+  let text = payload && payload.text != null ? String(payload.text) : '';
   const rawImages = Array.isArray(payload && payload.images) ? payload.images : [];
   const images = rawImages.map(decodeImagePayload).filter(Boolean).slice(0, 8);
+  const contextItems = payload && payload.context !== undefined
+    ? normalizeContextItems(payload.context) : conversationContextOf(key);
+  if (payload && payload.context !== undefined) saveConversationContext(key, contextItems);
+  if (contextItems.length) {
+    const bundle = await writeAttachedContextFile(contextItems);
+    text = bundle.text + (text.trim() ? '\n\n---\n\n' + text : '');
+  }
   if (!text.trim() && !images.length) throw new Error('Type text or attach an image first.');
   const opened = await openConversationInTerminal(key);
   const title = opened.title;
@@ -5379,7 +5632,7 @@ function makeDiffEvent(key, entry, pathValue, kind, oldText, newText, ts, editIn
     : path.basename(String(pathValue));
   const id = diffEventHash([key, pathValue, kind, ts, editIndex, oldText, newText]);
   return {
-    id, key, source: entry.source || 'claude', project: projectOfEntry(entry),
+    id, key, source: entry.source || 'claude', project: projectOfEntry(entry, key),
     path: String(pathValue), relativePath, ts: ts || null, kind,
     conversationTitle: entry.timelineTitle || entry.title || key,
     agent: entry.source === 'claude' ? 'claude' : 'pi', branch: entry.gitBranch || null,
@@ -6348,6 +6601,154 @@ function warmProjectDiffs(project) {
   }, 100);
 }
 
+// Recent file activity is a small durable index. Git seeds committed work,
+// the working tree seeds edits made before a watcher starts, and fs.watch
+// records later saves. The code view can therefore open recent folders
+// without scanning file contents on every request.
+const PROJECT_FILE_ACTIVITY_FILE = path.join(CACHE_DIR, 'project-file-activity.json');
+const PROJECT_FILE_DAY = 24 * 60 * 60 * 1000;
+let projectFileActivity = {};
+try { projectFileActivity = JSON.parse(fs.readFileSync(PROJECT_FILE_ACTIVITY_FILE, 'utf8')); } catch {}
+if (!projectFileActivity || typeof projectFileActivity !== 'object' || Array.isArray(projectFileActivity)) projectFileActivity = {};
+let projectFileActivitySaveTimer = null;
+const projectFileSnapshots = new Map();
+const projectFileWatchers = new Map();
+const projectFileWatchPending = new Map();
+
+function saveProjectFileActivitySoon() {
+  clearTimeout(projectFileActivitySaveTimer);
+  projectFileActivitySaveTimer = setTimeout(() => writeFileAtomic(PROJECT_FILE_ACTIVITY_FILE, JSON.stringify(projectFileActivity)).catch(() => {}), 500);
+}
+
+function recordProjectFileActivity(file, event) {
+  const key = path.resolve(file);
+  const cutoff = Date.now() - PROJECT_FILE_DAY;
+  const current = projectFileActivity[key] && Array.isArray(projectFileActivity[key].events) ? projectFileActivity[key].events : [];
+  const events = current.filter(item => Number(item.ts) >= cutoff && item.id !== event.id);
+  events.push({ id: event.id, ts: Number(event.ts) || Date.now(), added: Number(event.added) || 0, removed: Number(event.removed) || 0, source: event.source || 'watch' });
+  projectFileActivity[key] = { events };
+  saveProjectFileActivitySoon();
+}
+
+function recentProjectFileActivity(file) {
+  const key = path.resolve(file);
+  const cutoff = Date.now() - PROJECT_FILE_DAY;
+  const entry = projectFileActivity[key];
+  if (!entry || !Array.isArray(entry.events)) return null;
+  entry.events = entry.events.filter(item => Number(item.ts) >= cutoff);
+  if (!entry.events.length) { delete projectFileActivity[key]; return null; }
+  return {
+    events: entry.events.length,
+    added: entry.events.reduce((sum, item) => sum + (Number(item.added) || 0), 0),
+    removed: entry.events.reduce((sum, item) => sum + (Number(item.removed) || 0), 0),
+    latestTs: Math.max(...entry.events.map(item => Number(item.ts) || 0)),
+  };
+}
+
+function watchedLineDelta(oldText, newText) {
+  const before = String(oldText || '').split('\n');
+  const after = String(newText || '').split('\n');
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let oldEnd = before.length - 1, newEnd = after.length - 1;
+  while (oldEnd >= start && newEnd >= start && before[oldEnd] === after[newEnd]) { oldEnd--; newEnd--; }
+  return { removed: Math.max(0, oldEnd - start + 1), added: Math.max(0, newEnd - start + 1) };
+}
+
+async function readProjectFileSnapshot(file) {
+  try {
+    const stat = await fsp.stat(file);
+    if (!stat.isFile() || stat.size > 2 * 1024 * 1024) return null;
+    const text = await fsp.readFile(file, 'utf8');
+    if (text.includes('\0')) return null;
+    return { text, mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch { return null; }
+}
+
+async function updateWatchedProjectFile(root, relativePath) {
+  const file = path.resolve(root, relativePath);
+  if (file !== root && !file.startsWith(root + path.sep)) return;
+  const old = projectFileSnapshots.get(file) || null;
+  const next = await readProjectFileSnapshot(file);
+  if (!old && !next) return;
+  let delta;
+  if (!old) delta = { added: String(next.text || '').split('\n').length, removed: 0 };
+  else if (!next) delta = { added: 0, removed: String(old.text || '').split('\n').length };
+  else if (old.text === next.text) return;
+  else delta = watchedLineDelta(old.text, next.text);
+  if (next) projectFileSnapshots.set(file, next); else projectFileSnapshots.delete(file);
+  recordProjectFileActivity(file, { id: `watch:${Date.now()}:${crypto.randomBytes(3).toString('hex')}`, ts: Date.now(), ...delta, source: 'watch' });
+}
+
+async function ensureProjectFileWatch(roots, rows) {
+  await mapLimit(rows, 24, async row => {
+    if (projectFileSnapshots.has(row.path)) return;
+    const snap = await readProjectFileSnapshot(row.path);
+    if (snap) projectFileSnapshots.set(row.path, snap);
+  });
+  for (const root of roots) {
+    if (projectFileWatchers.has(root) || !fs.existsSync(root)) continue;
+    try {
+      const watcher = fs.watch(root, { recursive: true }, (event, filename) => {
+        const rel = String(filename || '').replace(/\\/g, '/');
+        if (!rel || rel === '.git' || rel.startsWith('.git/') || rel.includes('/.git/')) return;
+        const key = root + '\0' + rel;
+        clearTimeout(projectFileWatchPending.get(key));
+        projectFileWatchPending.set(key, setTimeout(() => {
+          projectFileWatchPending.delete(key);
+          updateWatchedProjectFile(root, rel).catch(() => {});
+        }, 220));
+      });
+      watcher.on('error', () => { try { watcher.close(); } catch {} projectFileWatchers.delete(root); });
+      projectFileWatchers.set(root, watcher);
+    } catch (error) { console.error('project file watch failed:', root, error.message); }
+  }
+}
+
+async function seedProjectFileActivity(repositories, rows) {
+  const cutoff = Date.now() - PROJECT_FILE_DAY;
+  for (const row of rows) {
+    const recentCommits = (row.commitEvents || []).filter(event => (Date.parse(event.ts || '') || 0) >= cutoff);
+    const latestCommit = recentCommits.reduce((max, event) => Math.max(max, Date.parse(event.ts || '') || 0), 0);
+    if (latestCommit && projectFileActivity[row.path] && Array.isArray(projectFileActivity[row.path].events)) {
+      projectFileActivity[row.path].events = projectFileActivity[row.path].events.filter(event => event.source === 'git' || Number(event.ts) > latestCommit);
+    }
+    for (const event of recentCommits) recordProjectFileActivity(row.path, {
+      id: `git:${event.hash}:${row.relativePath}`, ts: Date.parse(event.ts), added: event.additions, removed: event.deletions, source: 'git',
+    });
+  }
+  for (const repo of repositories) {
+    const numstat = String(await gitText(repo.root, ['diff', 'HEAD', '--numstat', '--']).catch(() => ''));
+    for (const line of numstat.split('\n')) {
+      const [addedRaw, removedRaw, ...nameParts] = line.split('\t');
+      const rel = nameParts.join('\t');
+      if (!rel) continue;
+      const row = rows.find(item => item.repoRoot === repo.root && item.relativePath === rel);
+      if (!row) continue;
+      let stat; try { stat = await fsp.stat(row.path); } catch { continue; }
+      if (stat.mtimeMs < cutoff) continue;
+      if (projectFileActivity[row.path] && Array.isArray(projectFileActivity[row.path].events))
+        projectFileActivity[row.path].events = projectFileActivity[row.path].events.filter(event => event.source === 'git');
+      recordProjectFileActivity(row.path, {
+        id: `working:${repo.id}:${rel}:${Math.round(stat.mtimeMs)}`, ts: stat.mtimeMs,
+        added: Number(addedRaw) || 0, removed: Number(removedRaw) || 0, source: 'working',
+      });
+    }
+    for (const item of repo.workingTree.filter(item => item.status === '??')) {
+      const row = rows.find(candidate => candidate.repoRoot === repo.root && candidate.relativePath === item.path);
+      if (!row) continue;
+      const snap = await readProjectFileSnapshot(row.path);
+      if (!snap || snap.mtimeMs < cutoff) continue;
+      if (projectFileActivity[row.path] && Array.isArray(projectFileActivity[row.path].events))
+        projectFileActivity[row.path].events = projectFileActivity[row.path].events.filter(event => event.source === 'git');
+      recordProjectFileActivity(row.path, {
+        id: `new:${repo.id}:${item.path}:${Math.round(snap.mtimeMs)}`, ts: snap.mtimeMs,
+        added: String(snap.text || '').split('\n').length, removed: 0, source: 'working',
+      });
+    }
+  }
+}
+
 async function projectFileHistoryResponse(project) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
@@ -6423,6 +6824,18 @@ async function projectFileHistoryResponse(project) {
   }
   let totalCommitFileEvents = 0;
   for (const repo of repositories) {
+    // Include every current tracked and untracked workspace file, even when
+    // it has no commit or AI event yet. The code tree is a file browser.
+    if (repo.isGit === false) {
+      let count = 0;
+      for await (const relativePath of walk(repo.root, repo.root)) {
+        rowFor(repo, relativePath).current = true;
+        if (++count >= 12000) break;
+      }
+    } else {
+      for (const relativePath of await gitTrackedPaths(repo.root).catch(() => [])) rowFor(repo, relativePath).current = true;
+      for (const working of repo.workingTree) rowFor(repo, working.path).current = true;
+    }
     for (const commit of repo.commits) {
       for (const file of commit.files) {
         const row = rowFor(repo, file.path);
@@ -6439,7 +6852,12 @@ async function projectFileHistoryResponse(project) {
   }
   const projectDiffEvents = projectDiffEventsFor(project);
   projectDiffEvents.set(Date.now(), { at: Date.now(), events: [...fullEvents.values()] });
-  const outputRows = [...rows.values()].sort((a, b) => String(b.latestTs || '').localeCompare(String(a.latestTs || '')) || a.relativePath.localeCompare(b.relativePath));
+  const outputRows = [...rows.values()].filter(row => row.current || fs.existsSync(row.path))
+    .sort((a, b) => String(b.latestTs || '').localeCompare(String(a.latestTs || '')) || a.relativePath.localeCompare(b.relativePath));
+  await seedProjectFileActivity(repositories, outputRows);
+  for (const row of outputRows) row.recent24 = recentProjectFileActivity(row.path);
+  outputRows.sort((a, b) => Number((b.recent24 && b.recent24.latestTs) || 0) - Number((a.recent24 && a.recent24.latestTs) || 0) || a.relativePath.localeCompare(b.relativePath));
+  ensureProjectFileWatch(repositories.map(repo => repo.root), outputRows).catch(() => {});
   const repositoryEvents = allEvents.filter(event => event.repoId);
   const paired = repositoryEvents.filter(event => event.commitPair).length;
   return {
@@ -6684,7 +7102,7 @@ async function conversationFileHistoryResponse(key) {
   const entry = index[key];
   if (!entry) throw new Error('conversation not found');
   const events = await conversationDiffs(key);
-  const project = projectOfEntry(entry);
+  const project = projectOfEntry(entry, key);
   const meta = projectMetaFor(project);
   const roots = meta ? await projectGitRepositories(meta) : [];
   const rows = new Map();
@@ -6723,7 +7141,7 @@ async function conversationFileContext(key, root, file) {
   const conversationEvents = await conversationDiffs(key);
   const { fullPath } = normalizedRepoFile(path.resolve(root || ''), file);
   if (!conversationEvents.some(event => path.resolve(event.path) === fullPath)) throw new Error('file was not touched in this conversation');
-  const project = projectOfEntry(entry);
+  const project = projectOfEntry(entry, key);
   try { return await projectFileContext(project, root, file); }
   catch {
     const meta = projectMetaFor(project);
@@ -6844,13 +7262,6 @@ function expandHomePath(p) {
 
 const sha256Hex = text => crypto.createHash('sha256').update(text).digest('hex');
 
-// Atomic write: temp file in the same directory, then rename.
-async function writeFileAtomic(abs, text) {
-  const tmp = path.join(path.dirname(abs), '.aiconvo-edit-' + process.pid + '-' + Date.now() + '.tmp');
-  await fsp.writeFile(tmp, text);
-  await fsp.rename(tmp, abs);
-}
-
 // In-place rewrite: truncate + write + fsync on the SAME inode. A rename
 // replacement orphans recursive fs.watch on Linux (verified empirically:
 // appends after the rename emit no events), which froze live transcript
@@ -6911,6 +7322,30 @@ async function transcriptFileReadResponse(key, pathValue) {
   return { path: abs, text, sha: sha256Hex(text) };
 }
 
+// A clicked transcript path opens on the host desktop: html in the
+// browser, png in the image viewer — whatever xdg-open resolves.
+// Session file edits keep their own ▤ diff buttons; this is for reading.
+async function openNativeResponse(key, pathValue) {
+  const clean = pathWithoutLocation(pathValue || '');
+  const expanded = expandHomePath(clean);
+  const cwd = key && index[key] ? index[key].cwd || '' : '';
+  if (!path.isAbsolute(expanded) && !cwd) throw new Error('relative path without a conversation');
+  const abs = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(cwd, expanded));
+  try { await fsp.stat(abs); } catch { throw new Error('file not found on disk'); }
+  const inside = root => root && (abs === root || abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
+  const allowed = inside(os.homedir()) || inside(os.tmpdir()) ||
+    (gitRepoIndexCache.repos || []).some(repo => inside(repo.root)) ||
+    Object.values(index).some(entry => inside(entry.cwd));
+  if (!allowed) throw new Error('this path is outside your home, tmp, and projects');
+  const child = spawn('xdg-open', [abs], { detached: true, stdio: 'ignore', env: agentEnv() });
+  child.unref();
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, 150);
+    child.on('error', err => { clearTimeout(timer); reject(new Error('xdg-open failed: ' + err.message)); });
+  });
+  return { ok: true, path: abs };
+}
+
 function imageMimeForPath(file) {
   return ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.gif': 'image/gif', '.webp': 'image/webp' })[path.extname(file).toLowerCase()] || null;
@@ -6932,6 +7367,169 @@ async function fileSaveResponse(body) {
   }
   await writeFileAtomic(abs, text);
   return { ok: true, path: abs, sha: sha256Hex(text) };
+}
+
+// ---- documents: MRMD-backed markdown editing ----
+// Aiconvo owns the file lifecycle: reads, autosaves, conflict checks, Git
+// commits, and the provenance ledger. MRMD (vendored light bundle) owns the
+// editing surface only. The ledger is durable append-only JSONL: it records
+// who changed a document (human/ai) and through which input, outside the
+// markdown itself — files stay ordinary markdown.
+const DOC_EDITS_FILE = path.join(NOTES_DIR, 'doc-edits.jsonl');
+const DOC_ACTORS = new Set(['human', 'ai', 'runtime', 'external-agent']);
+const DOC_INPUTS = new Set(['keyboard', 'voice', 'pen', 'paste', 'ai-edit', 'filesystem']);
+
+async function recordDocEdit(entry) {
+  try {
+    await fsp.mkdir(NOTES_DIR, { recursive: true });
+    await fsp.appendFile(DOC_EDITS_FILE, JSON.stringify(entry) + '\n');
+  } catch {}
+}
+
+function docLineDelta(oldText, newText) {
+  const before = String(oldText || '').split('\n');
+  const after = String(newText || '').split('\n');
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start++;
+  let oldEnd = before.length - 1, newEnd = after.length - 1;
+  while (oldEnd >= start && newEnd >= start && before[oldEnd] === after[newEnd]) { oldEnd--; newEnd--; }
+  return { removed: Math.max(0, oldEnd - start + 1), added: Math.max(0, newEnd - start + 1) };
+}
+
+// Autosave: write the markdown, refuse stale writes, record provenance.
+// This is NOT a Git commit — explicit save commits (docCommitResponse).
+async function docSaveResponse(body) {
+  const { path: p, baseSha, text } = body;
+  if (typeof text !== 'string') throw new Error('missing text');
+  const abs = await editableFilePath(p || '');
+  if (!abs.endsWith('.md')) throw new Error('only markdown documents save here');
+  const oldText = await fsp.readFile(abs, 'utf8');
+  if (baseSha && sha256Hex(oldText) !== baseSha) throw new Error('the file changed on disk after you loaded it');
+  if (oldText !== text) {
+    await writeFileAtomic(abs, text);
+    const delta = docLineDelta(oldText, text);
+    await recordDocEdit({
+      ts: Date.now(), path: abs, action: 'save',
+      actor: DOC_ACTORS.has(body.actor) ? body.actor : 'human',
+      input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
+      added: delta.added, removed: delta.removed, sha: sha256Hex(text),
+    });
+    // The 24h activity index (code tree badges) hears about editor saves
+    // directly — no dependency on a watcher being attached yet.
+    recordProjectFileActivity(abs, {
+      id: `doc:${Date.now()}:${crypto.randomBytes(3).toString('hex')}`,
+      ts: Date.now(), added: delta.added, removed: delta.removed, source: 'doc',
+    });
+  }
+  return { ok: true, path: abs, sha: sha256Hex(text), changed: oldText !== text };
+}
+
+const DOC_COMMIT_TITLE_PROMPT =
+  'The attached file is a git diff of one markdown document revision. ' +
+  'Write a commit title that names what changed in the document (content, not formatting mechanics). ' +
+  'Reply with STRICT JSON only, no prose or code fence: {"title":"max 60 chars, no period"}.';
+
+// Fire-and-forget: give the fresh commit an AI title. Amend only while HEAD
+// is still that exact commit and the stage is clean — never rewrite other work.
+function scheduleDocCommitTitle(root, hash, diffText) {
+  setTimeout(async () => {
+    try {
+      const raw = await runPi(clipped(diffText, 60000), DOC_COMMIT_TITLE_PROMPT);
+      const title = oneLine(JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, '')).title, '').slice(0, 60);
+      if (!title) return;
+      const head = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
+      if (head !== hash) return;
+      await gitText(root, ['diff', '--cached', '--quiet']); // throws when something is staged
+      await gitText(root, ['commit', '--amend', '--no-verify', '-m', title]);
+      broadcast({ type: 'doc-commit-titled', root, was: hash });
+    } catch {}
+  }, 50);
+}
+
+// Explicit save = a real Git commit of this one document.
+async function docCommitResponse(body) {
+  const abs = await editableFilePath(body.path || '');
+  if (!abs.endsWith('.md')) throw new Error('only markdown documents commit here');
+  let sha = null;
+  if (typeof body.text === 'string') {
+    sha = (await docSaveResponse({ path: abs, baseSha: body.baseSha, text: body.text, actor: body.actor, input: body.input })).sha;
+  }
+  const dir = path.dirname(abs);
+  let root;
+  try { root = (await gitText(dir, ['rev-parse', '--show-toplevel'])).trim(); }
+  catch { throw new Error('this document is not inside a Git repository'); }
+  const rel = path.relative(root, abs).replace(/\\/g, '/');
+  await gitText(root, ['add', '--', rel]);
+  const staged = String(await gitText(root, ['diff', '--cached', '--numstat', '--', rel]).catch(() => '')).trim();
+  if (!staged) return { ok: true, unchanged: true, path: abs, sha };
+  const [addedRaw, removedRaw] = staged.split('\t');
+  const subject = `doc: ${path.basename(abs)} (+${Number(addedRaw) || 0} −${Number(removedRaw) || 0})`;
+  const diffText = await gitText(root, ['diff', '--cached', '--', rel]).catch(() => '');
+  await gitText(root, ['commit', '--no-verify', '-m', subject, '--', rel]);
+  const hash = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
+  await recordDocEdit({ ts: Date.now(), path: abs, action: 'commit', hash, subject });
+  scheduleDocCommitTitle(root, hash, diffText);
+  return { ok: true, path: abs, hash, subject, sha };
+}
+
+// Create a new markdown document. Documents live in <projectRoot>/documents/
+// by default — a plain folder agents and humans both find instantly.
+async function docCreateResponse(body) {
+  const project = String(body.project || '');
+  const meta = projectMetaFor(project);
+  if (!meta || !meta.cwd) throw new Error('project not found');
+  const rawName = String(body.name || '').trim();
+  if (!rawName) throw new Error('document name is required');
+  const base = rawName.replace(/\.md$/i, '').replace(/[^\p{L}\p{N}._ -]/gu, '').trim().replace(/\s+/g, '-');
+  if (!base) throw new Error('document name has no usable characters');
+  const dir = path.join(path.resolve(meta.cwd), 'documents');
+  const abs = path.join(dir, base + '.md');
+  if (fs.existsSync(abs)) throw new Error('a document with this name already exists');
+  await fsp.mkdir(dir, { recursive: true });
+  const text = `# ${rawName.replace(/\.md$/i, '')}\n\n`;
+  await writeFileAtomic(abs, text);
+  await recordDocEdit({ ts: Date.now(), path: abs, action: 'create', actor: 'human', input: 'keyboard', added: text.split('\n').length, removed: 0, sha: sha256Hex(text) });
+  return { ok: true, path: abs, project };
+}
+
+// Cheap document catalog for the project documents surface: every markdown
+// file in the project's repositories (tracked + untracked), newest first,
+// with the 24h activity badge from the durable activity index.
+async function projectDocsResponse(project) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const roots = await projectGitRepositories(meta);
+  if (!roots.length && meta.cwd && fs.existsSync(meta.cwd)) roots.push(path.resolve(meta.cwd));
+  const docs = [];
+  for (const root of roots) {
+    const rels = new Set();
+    for (const rel of await gitTrackedPaths(root).catch(() => [])) if (rel.endsWith('.md')) rels.add(rel);
+    const untracked = String(await gitText(root, ['ls-files', '--others', '--exclude-standard', '--', '*.md']).catch(() => ''));
+    for (const rel of untracked.split('\n')) if (rel.trim()) rels.add(rel.trim());
+    for (const rel of rels) {
+      const abs = path.join(root, rel);
+      let st; try { st = await fsp.stat(abs); } catch { continue; }
+      docs.push({ path: abs, rel, root, mtimeMs: st.mtimeMs, recent24: recentProjectFileActivity(abs) });
+      if (docs.length >= 800) break;
+    }
+  }
+  docs.sort((a, b) => Number((b.recent24 && b.recent24.latestTs) || b.mtimeMs) - Number((a.recent24 && a.recent24.latestTs) || a.mtimeMs));
+  return { project, cwd: meta.cwd, docs: docs.slice(0, 400) };
+}
+
+// Serve a document-relative asset (image) for the editor's rendered view.
+async function docAssetResponse(docPath, src) {
+  const doc = await editableFilePath(docPath || '');
+  const clean = String(src || '').split(/[?#]/)[0];
+  if (!clean || /^[a-z]+:/i.test(clean) || clean.startsWith('//')) throw new Error('only relative asset paths resolve here');
+  const abs = path.resolve(path.dirname(doc), clean);
+  const inside = root => root && (abs === root || abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
+  if (!inside(os.homedir())) throw new Error('asset is outside home');
+  const mime = imageMimeForPath(abs) || ({ '.svg': 'image/svg+xml' })[path.extname(abs).toLowerCase()];
+  if (!mime) throw new Error('not an image asset');
+  const bytes = await fsp.readFile(abs);
+  if (bytes.length > 24 * 1024 * 1024) throw new Error('asset too large');
+  return { mime, bytes };
 }
 
 // Notes, epics, and project-memory documents are markdown under NOTES_DIR.
@@ -7233,13 +7831,13 @@ async function findDiffEvent(id, project = '', key = '') {
 }
 
 // ---------- project overview ----------
-function projectOfEntry(entry) {
-  return projectNameOf(entry && entry.cwd);
+function projectOfEntry(entry, key = '') {
+  return projectNameOf(entry && entry.cwd, key);
 }
 
 function projectMetaFor(project) {
   const entries = Object.entries(index)
-    .filter(([key, entry]) => key && entry && projectOfEntry(entry) === project)
+    .filter(([key, entry]) => key && entry && projectOfEntry(entry, key) === project)
     .map(([key, entry]) => ({ key, entry }));
   if (!entries.length) {
     // A registered newborn: no conversations yet, but the folder is real.
@@ -7253,12 +7851,13 @@ function projectMetaFor(project) {
     .sort((a, b) =>
       (foldsLib.rawProjectOf(b) === project) - (foldsLib.rawProjectOf(a) === project)
       || b.length - a.length);
-  const cwd = cwds[0] || null;
+  const registered = createdRecordFor(project);
+  const cwd = (registered && registered.cwd) || cwds[0] || null;
   const epicsForProject = Object.values(epics)
     .map(epic => ({
       id: epic.id, title: epic.title, abstract: epic.abstract || '',
       updatedAt: epic.updatedAt || 0, notePath: epic.notePath || null,
-      sessionIds: (epic.sessionIds || []).filter(id => index[id] && projectOfEntry(index[id]) === project),
+      sessionIds: (epic.sessionIds || []).filter(id => index[id] && projectOfEntry(index[id], id) === project),
     }))
     .filter(epic => epic.sessionIds.length)
     .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -7672,6 +8271,130 @@ async function buildProjectContextBundle(project, include, focusName) {
   };
 }
 
+// Mid-conversation @ attachments. Map sections and conversation chat
+// (user + assistant only) are inlined onto --append-system-prompt.
+const ATTACH_CHAT_TOKEN_BUDGET = 12000;
+function exchangeAround(messages, i) {
+  const all = Array.isArray(messages) ? messages : [];
+  if (i < 0 || i >= all.length) return [];
+  let start = i;
+  while (start > 0 && all[start].role !== 'user') start--;
+  if (all[start].role !== 'user') {
+    const m = all[i];
+    return (m && (m.role === 'user' || m.role === 'assistant') && String(m.text || '').trim()) ? [m] : [];
+  }
+  const out = [all[start]];
+  for (let j = start + 1; j < all.length; j++) {
+    const m = all[j];
+    if (m.role === 'user') break;
+    if (m.role === 'assistant' && String(m.text || '').trim()) out.push(m);
+  }
+  return out;
+}
+function newestChatWithinBudget(chat, tokenBudget) {
+  const kept = [];
+  let tokens = 0;
+  for (let i = chat.length - 1; i >= 0; i--) {
+    const n = estimateInputTokens(chat[i].text || '');
+    if (kept.length && tokens + n > tokenBudget) break;
+    kept.push(chat[i]);
+    tokens += n;
+  }
+  return kept.reverse();
+}
+function formatAttachedChat(entry, key, picked) {
+  const title = entry.timelineTitle || entry.title || key;
+  const lines = [
+    '### conversation · ' + title,
+    '- Session: `' + key + '`',
+    '- Project: ' + (projectNameOf(entry.cwd, key) || '?'),
+    '- Path: `' + (absPathForKey(key) || '?') + '`',
+    '',
+  ];
+  for (const m of picked) {
+    lines.push(m.role === 'user' ? '#### User' : '#### Assistant');
+    lines.push('');
+    lines.push(String(m.text || '').trim());
+    lines.push('');
+  }
+  return { title, text: lines.join('\n') };
+}
+async function loadAttachedChat(item) {
+  const key = item.key;
+  const entry = index[key];
+  if (!entry) throw new Error('conversation not found');
+  const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+  const messages = data.messages || [];
+  let picked;
+  if (Number.isInteger(item.i)) {
+    picked = exchangeAround(messages, item.i).filter(m =>
+      (m.role === 'user' || m.role === 'assistant') && String(m.text || '').trim());
+  } else {
+    const chat = messages.filter(m =>
+      (m.role === 'user' || m.role === 'assistant') &&
+      String(m.text || '').trim() &&
+      !m.off &&
+      !(m.role === 'user' && (isBootstrapMessage(m.text) || isNoise(m.text))));
+    picked = newestChatWithinBudget(chat, ATTACH_CHAT_TOKEN_BUDGET);
+  }
+  if (!picked.length) throw new Error('no user or assistant text in that conversation');
+  return formatAttachedChat(entry, key, picked);
+}
+async function writeAttachedContextFile(items) {
+  const normalized = normalizeContextItems(items);
+  const maps = normalized.filter(i => i.type !== 'chat');
+  const chats = normalized.filter(i => i.type === 'chat');
+  const chatByKey = new Map();
+  for (const c of chats) {
+    const prev = chatByKey.get(c.key);
+    if (!prev || c.i == null) chatByKey.set(c.key, c);
+  }
+  const parts = [];
+  parts.push('# aiconvo attached context');
+  parts.push('');
+  parts.push('- Generated: ' + new Date().toISOString());
+  parts.push('');
+  parts.push('Added by the user for this conversation. Project memory is AI-generated — a map, not verified truth. Conversation excerpts are the original user and assistant messages.');
+  let docCount = 0;
+  const seen = new Set();
+  const byProject = new Map();
+  for (const item of maps) {
+    const kinds = item.kind === 'map' ? MEMORY_DOC_KINDS : [item.kind];
+    for (const kind of kinds) {
+      const id = item.project + '\0' + kind;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      try {
+        const doc = await projectMemoryDocument(item.project, kind);
+        if (!byProject.has(item.project)) byProject.set(item.project, []);
+        byProject.get(item.project).push('### ' + item.project + ' · ' + kind + ' · ' + doc.path + ' ' + trustLabel(doc.path) + '\n\n' + doc.text.trim());
+        docCount++;
+      } catch {}
+    }
+  }
+  for (const [project, docs] of byProject) {
+    parts.push('', '## ' + project, '', docs.join('\n\n---\n\n'));
+  }
+  let chatCount = 0;
+  const chatBlocks = [];
+  for (const item of chatByKey.values()) {
+    try {
+      const block = await loadAttachedChat(item);
+      chatBlocks.push(block.text);
+      chatCount++;
+    } catch {}
+  }
+  if (chatBlocks.length) {
+    parts.push('', '## Attached conversations (user and assistant only)', '', chatBlocks.join('\n\n---\n\n'));
+  }
+  if (!docCount && !chatCount) throw new Error('none of those context items exist yet');
+  const text = parts.join('\n') + '\n';
+  const file = path.join(BRIEFINGS_DIR,
+    new Date().toISOString().replace(/[:.]/g, '-') + '-attached-context.md');
+  await fsp.writeFile(file, text);
+  return { file, text, tokens: estimateInputTokens(text), docs: docCount, chats: chatCount };
+}
+
 // Wait for the session file the just-spawned agent creates. `existing` is a
 // snapshot of index keys taken before the spawn: only a key that was not in
 // the index before counts. Without that guard, any busy conversation in the
@@ -7818,11 +8541,13 @@ async function startProjectConversation(options) {
         else { job.status = 'done'; job.statusText = 'settled'; }
         job.finishedAt = Date.now();
         try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(begun.file)); } catch {}
+        if (job.status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
         endLiveRunTail(job.id);
         jobChanged(job);
         broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
           fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
           fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
+        speakRunDone(job);
       }).catch(async e => {
         headlessRuns.delete(begun.file);
         job.status = 'error'; job.statusText = e.message; job.error = e.message; job.finishedAt = Date.now();
@@ -7857,6 +8582,9 @@ async function startProjectConversation(options) {
 
 // ---------- Kokoro TTS (family server, same stack as readerd) ----------
 const TTS_DIR = path.join(CACHE_DIR, 'tts');
+// Document cell runs in flight, keyed by client runId — the cancel
+// endpoint interrupts the kernel and ends the matching subprocess.
+const activeDocRuns = new Map();
 const KOKORO_URL = process.env.KOKORO_URL || 'http://192.168.2.24:8880';
 const SPEECH_URL = process.env.SPEECH_URL || 'http://192.168.2.24:8078';
 const KOKORO_VOICE = process.env.KOKORO_VOICE || 'bm_george';
@@ -8009,6 +8737,53 @@ async function synthesizeSpeech(text, rewrite) {
   finally { ttsJobs.delete(id); }
 }
 
+// ---------- spoken completion ----------
+// When a web run settles, tell the user in one spoken sentence what was just
+// finished: last assistant message → Qwen (one-sentence summary) → Kokoro →
+// local speakers through pipewire. Fire and forget; every failure is silent.
+const SPEAK_SUMMARY_PROMPT = 'You are a voice announcer for a person who runs several coding-agent conversations. One conversation just returned a new reply. You get the conversation title and the full reply. Speak a short digest: start with "Your conversation about TITLE has just returned." then say in two to four short sentences what there is to read in the reply — what it did, what it found, and what it asks or recommends, if anything. Talk about the reply in the third person ("it says", "it recommends"). Plain spoken words only: no code, no file paths, no markdown, no lists. Keep the whole thing under sixty words.';
+
+// Fallback announcement when the Qwen summarizer is unreachable: title plus
+// the first plain words of the reply.
+function fallbackSpokenLine(text, title) {
+  const plain = text.replace(/```[\s\S]*?```/g, ' ').replace(/[`*_#>|]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  const head = plain.split(' ').slice(0, 25).join(' ').replace(/[,;:]+$/, '');
+  return 'Your conversation about ' + title + ' has just returned.'
+    + (head ? ' It starts with: ' + head : '');
+}
+
+async function speakRunDone(job) {
+  try {
+    if (process.env.AICONVO_SPEAK_DONE === '0') return;
+    if (job.fanoutId) return; // parallel runs would talk over each other
+    const text = String(job.doneSpeechSource || '').trim();
+    if (!text) return;
+    const entry = job.key && index[job.key];
+    const title = (entry && (entry.title || entry.timelineTitle) || '').trim() || 'an untitled task';
+    let sentence = '';
+    try {
+      const res = await httpJson(REWRITE_URL, {
+        model: REWRITE_MODEL,
+        messages: [
+          { role: 'system', content: SPEAK_SUMMARY_PROMPT },
+          { role: 'user', content: 'TITLE: ' + title + '\n\nFull reply:\n' + text.slice(0, 16000) },
+        ],
+        max_tokens: 400,
+        chat_template_kwargs: { enable_thinking: false },
+      }, 45000);
+      sentence = String(res.json && res.json.choices && res.json.choices[0]
+        && res.json.choices[0].message && res.json.choices[0].message.content || '').trim();
+    } catch (e) { console.log('speak-done summarizer unreachable, using fallback: ' + e.message); }
+    if (!sentence) sentence = fallbackSpokenLine(text, title);
+    const clip = await synthesizeSpeech(sentence, false);
+    const wavPath = path.join(TTS_DIR, clip.id + '.wav');
+    const child = spawn('pw-play', [wavPath], { stdio: 'ignore', detached: true });
+    child.on('error', () => {});
+    child.unref();
+  } catch (e) { console.log('speak-done failed: ' + e.message); }
+}
+
 // ---------- HTTP ----------
 function json(res, code, obj) {
   const body = JSON.stringify(obj);
@@ -8058,6 +8833,7 @@ const server = http.createServer(async (req, res) => {
       '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400' },
       '/icon.svg': { file: 'icon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
       '/vendor/mermaid.min.js': { file: 'vendor/mermaid.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store' },
     }[u.pathname];
     if (staticFile) {
@@ -8079,6 +8855,8 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/themes.css') {
       res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(themesLib.bundleCustomThemes(THEMES_DIR));
+    } else if (u.pathname === '/api/projects/memory-index' && req.method === 'GET') {
+      json(res, 200, { projects: projectMemoryIndex() });
     } else if (u.pathname === '/api/projects/stats' && req.method === 'POST') {
       // Folder birth date and disk size per project path, for home Gantt ordering.
       let body = '';
@@ -8107,7 +8885,8 @@ const server = http.createServer(async (req, res) => {
       const list = visibleEntries.map(([key, e]) => {
         const f = fam.get(key);
         // family fields appear only on multi-member families: less payload.
-        return f && f.size > 1 ? { key, ...e, family: f.primary, familySize: f.size } : { key, ...e };
+        const project = projectNameOf(e.cwd, key);
+        return f && f.size > 1 ? { key, ...e, project, family: f.primary, familySize: f.size } : { key, ...e, project };
       });
       list.sort((a, b) => (b.lastTs || '').localeCompare(a.lastTs || ''));
       json(res, 200, list);
@@ -8115,7 +8894,9 @@ const server = http.createServer(async (req, res) => {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
       const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+      data.project = projectNameOf(index[key].cwd, key);
       data.selectedModels = await inferredConversationModels(key, data);
+      data.attachedContext = conversationContextOf(key);
       json(res, 200, data);
     } else if (u.pathname === '/api/conversation/media' && req.method === 'GET') {
       try {
@@ -8127,6 +8908,9 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/conversation/file' && req.method === 'GET') {
       try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'))); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/open-native' && req.method === 'GET') {
+      try { json(res, 200, await openNativeResponse(u.searchParams.get('id'), u.searchParams.get('path'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/file-content' && req.method === 'GET') {
       try {
         const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'));
@@ -8315,6 +9099,30 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       try { json(res, 200, await fileSaveResponse(JSON.parse(body || '{}'))); }
       catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/save' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await docSaveResponse(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/commit' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await docCommitResponse(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/create' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await docCreateResponse(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/docs' && req.method === 'GET') {
+      try { json(res, 200, await projectDocsResponse(u.searchParams.get('name') || '')); }
+      catch (e) { json(res, e.message === 'project not found' ? 404 : 500, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/asset' && req.method === 'GET') {
+      try {
+        const out = await docAssetResponse(u.searchParams.get('doc') || '', u.searchParams.get('src') || '');
+        res.writeHead(200, { 'Content-Type': out.mime, 'Cache-Control': 'no-store' });
+        return res.end(out.bytes);
+      } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/notefile/save' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -8411,6 +9219,33 @@ const server = http.createServer(async (req, res) => {
         const p = JSON.parse(body || '{}');
         json(res, 200, setProjectDefaultModel(p.project, p.model));
       } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/fs/dirs' && req.method === 'GET') {
+      // Folder picker: list subdirectories, so an existing folder can be
+      // adopted as a project without a typed path. Local personal tool;
+      // the same process already reads the whole home directory.
+      try {
+        const base = path.resolve(expandHomePath(String(u.searchParams.get('path') || '').trim() || '~/Projects'));
+        const entries = await fsp.readdir(base, { withFileTypes: true });
+        const dirs = [];
+        for (const ent of entries) {
+          if (!ent.isDirectory() || ent.name.startsWith('.') || ent.name === 'node_modules') continue;
+          const full = path.join(base, ent.name);
+          dirs.push({
+            name: ent.name,
+            git: fs.existsSync(path.join(full, '.git')),
+            known: !!projectMetaFor(projectNameOf(full)), // already on the timeline
+          });
+        }
+        dirs.sort((a, b) => a.name.localeCompare(b.name));
+        const home = os.homedir();
+        const parent = path.dirname(base);
+        json(res, 200, {
+          path: base,
+          display: base === home || base.startsWith(home + path.sep) ? '~' + base.slice(home.length) : base,
+          parent: parent !== base ? parent : null,
+          dirs,
+        });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/create' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -8481,8 +9316,16 @@ const server = http.createServer(async (req, res) => {
       // fork branches in the navigation tree.
       tree.nodes = tree.nodes.filter(n => !(index[n.key] && index[n.key].hiddenFanout));
       tree.family = tree.family.filter(f => !(index[f.key] && index[f.key].hiddenFanout));
+      // One typed classification serves the tree and transcript. The browser
+      // must not infer fan-out again from ancestry or message text.
+      tree.fanouts = fanoutLib.classifyFanoutGroups(tree).map(g => ({
+        node: g.node,
+        answers: g.answers.map(a => a.id),
+        both: g.both ? g.both.id : null,
+        merge: g.merge ? { bridge: g.merge.bridge.id, answer: g.merge.answer.id } : null,
+      }));
       json(res, 200, tree);
-    } else if (u.pathname === '/api/conversation/context') {
+    } else if (u.pathname === '/api/conversation/context' && req.method === 'GET') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
       try { json(res, 200, await conversationContextResponse(key, u.searchParams.get('leaf') || null)); }
@@ -8551,12 +9394,26 @@ const server = http.createServer(async (req, res) => {
         const p = JSON.parse(body || '{}');
         json(res, 200, await setConversationThinking(p.id, p.level, !!p.force));
       } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/conversation/project' && req.method === 'PUT') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, await assignConversationProject(p.id, p.project));
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/models' && req.method === 'PUT') {
       let body = '';
       for await (const chunk of req) body += chunk;
       try {
         const p = JSON.parse(body || '{}');
         json(res, 200, { ok: true, models: saveConversationModels(p.id, p.models) });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/attached-context' && req.method === 'PUT') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, { ok: true, context: saveConversationContext(p.id, p.context) });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/node/send' && req.method === 'POST') {
       let body = '';
@@ -8567,11 +9424,11 @@ const server = http.createServer(async (req, res) => {
         if (models.length) saveConversationModels(p.id, models);
         const images = rpcImagesOf(p.images);
         if (models.length >= 2) {
-          json(res, 202, { ok: true, runs: await startFanOut(p.id, { node: p.node || null, models, message: p.prompt, images, force: !!p.force }) });
+          json(res, 202, { ok: true, runs: await startFanOut(p.id, { node: p.node || null, models, message: p.prompt, images, force: !!p.force, context: p.context }) });
         } else {
           const out = await startAgentRun(p.id, {
             node: p.node || null, provider: models[0] && models[0].provider, modelId: models[0] && models[0].modelId,
-            message: p.prompt, images, force: !!p.force, allowQueue: true,
+            message: p.prompt, images, force: !!p.force, allowQueue: true, context: p.context,
           });
           if (out && out.queued) json(res, 202, { ok: true, queued: true, job: out.job ? jobView(out.job) : null });
           else json(res, 202, { ok: true, job: jobView(out) });
@@ -8585,6 +9442,13 @@ const server = http.createServer(async (req, res) => {
         const out = await startAggregate(p.id, { node: p.node, provider: p.provider, modelId: p.modelId, instruction: p.instruction, answers: p.answers, force: !!p.force });
         json(res, 202, { ok: true, job: jobView(out.job), answers: out.answers });
       } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/node/both' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, { ok: true, ...(await ensureBothBridge(p.id, p.node)) });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/run/abort' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -8876,6 +9740,165 @@ const server = http.createServer(async (req, res) => {
         child.on('error', e => { clearTimeout(timer); resolve({ out: String(e.message), code: -1 }); });
       });
       json(res, 200, { ...result, cwd: cwd || '~', ms: Date.now() - t0 });
+    } else if (u.pathname === '/api/doc/run-cell' && req.method === 'POST') {
+      // Run one fenced code block from a document through the rat CLI.
+      // Design boundary (deliberately thin — no MCP client, no kernel
+      // state here): rat owns kernels, project resolution, venvs, and
+      // lifecycle; aiconvo passes {lang, code, cwd} and shows the output.
+      // Same trust surface as /api/exec above: this server already runs
+      // arbitrary shell blocks on this machine at the user's request.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const { lang, code, cwd: reqCwd } = parsed;
+      // rat resolves language aliases itself; this map only covers the
+      // common markdown fence spellings of rat's built-in runtimes.
+      const RAT_LANGS = { python: 'py', py: 'py', python3: 'py', r: 'r', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', julia: 'jl', jl: 'jl', javascript: 'js', js: 'js', node: 'js' };
+      const runtime = RAT_LANGS[String(lang || '').toLowerCase()];
+      if (!runtime) return json(res, 400, { error: 'no rat runtime for language "' + lang + '"' });
+      if (!code || typeof code !== 'string' || !code.trim()) return json(res, 400, { error: 'code required' });
+      const t0run = Date.now();
+      // cwd decides which project kernel rat resolves to (py@<project>).
+      const dir = reqCwd && typeof reqCwd === 'string' && fs.existsSync(reqCwd) ? reqCwd : os.homedir();
+      // No hard timeout here: long runs are legitimate (training, big
+      // queries). The client shows elapsed time and offers cancel, which
+      // interrupts the KERNEL (rat cancel) — killing this subprocess alone
+      // would leave the kernel computing. runId lets /api/doc/cancel-run
+      // find the pending child.
+      const runId = String(parsed.runId || '') || ('run-' + Date.now());
+      const result = await new Promise(resolve => {
+        const ratHome = path.join(os.homedir(), '.local', 'bin', 'rat');
+        const ratBin = fs.existsSync(ratHome) ? ratHome : 'rat';
+        const child = spawn(ratBin, ['run', runtime, code], { cwd: dir, env: process.env });
+        let buf = '';
+        const cap = s => { buf += s; if (buf.length > 200000) { buf = buf.slice(0, 200000) + '\n… (truncated — output capped at 200 KB)'; child.kill('SIGKILL'); } };
+        child.stdout.on('data', d => cap(String(d)));
+        child.stderr.on('data', d => cap(String(d)));
+        activeDocRuns.set(runId, { child, runtime, dir, cancelled: false });
+        child.on('close', codeNum => {
+          const entry = activeDocRuns.get(runId);
+          activeDocRuns.delete(runId);
+          if (entry && entry.cancelled) buf += (buf ? '\n' : '') + '■ cancelled — the kernel was interrupted; its variables are intact';
+          resolve({ out: buf, code: codeNum, cancelled: !!(entry && entry.cancelled) });
+        });
+        child.on('error', e => {
+          activeDocRuns.delete(runId);
+          const why = e.code === 'ENOENT' ? 'the rat CLI is not installed (or not on the PATH of this server)' : String(e.message);
+          resolve({ out: why, code: -1 });
+        });
+      });
+      json(res, 200, { ...result, runtime, ms: Date.now() - t0run });
+    } else if (u.pathname === '/api/doc/cancel-run' && req.method === 'POST') {
+      // Cancel a running cell: interrupt the kernel first (rat cancel —
+      // keeps the namespace), then end the pending run subprocess.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const entry = activeDocRuns.get(String(parsed.runId || ''));
+      if (!entry) return json(res, 404, { error: 'no such run (it may have finished already)' });
+      entry.cancelled = true;
+      const ratHome = path.join(os.homedir(), '.local', 'bin', 'rat');
+      const ratBin = fs.existsSync(ratHome) ? ratHome : 'rat';
+      const out = await new Promise(resolve => {
+        const c = spawn(ratBin, ['cancel', entry.runtime], { cwd: entry.dir, env: process.env });
+        let buf = '';
+        c.stdout.on('data', d => buf += String(d));
+        c.stderr.on('data', d => buf += String(d));
+        const timer = setTimeout(() => c.kill('SIGKILL'), 15000);
+        c.on('close', code => { clearTimeout(timer); resolve({ out: buf.trim(), code }); });
+        c.on('error', e => { clearTimeout(timer); resolve({ out: String(e.message), code: -1 }); });
+      });
+      // The interrupt normally makes `rat run` return on its own; the kill
+      // is a fallback for a wedged pipe.
+      setTimeout(() => { try { entry.child.kill('SIGKILL'); } catch {} }, 3000);
+      json(res, 200, { ok: out.code === 0, ratCancel: out });
+    } else if (u.pathname === '/api/doc/runtime-info' && req.method === 'GET') {
+      // What kernel would this document use? Pure passthrough of rat's own
+      // resolution — aiconvo adds no logic, so it can never disagree.
+      const dir = String(u.searchParams.get('cwd') || '');
+      if (!dir || !fs.existsSync(dir)) return json(res, 400, { error: 'cwd required' });
+      const lang = /^[a-z0-9]{1,12}$/.test(String(u.searchParams.get('lang') || 'py')) ? String(u.searchParams.get('lang') || 'py') : 'py';
+      const ratHome = path.join(os.homedir(), '.local', 'bin', 'rat');
+      const ratBin = fs.existsSync(ratHome) ? ratHome : 'rat';
+      const out = await new Promise(resolve => {
+        const c = spawn(ratBin, ['resolve', lang, '--json'], { cwd: dir, env: process.env });
+        let buf = '';
+        c.stdout.on('data', d => buf += String(d));
+        const timer = setTimeout(() => c.kill('SIGKILL'), 15000);
+        c.on('close', () => { clearTimeout(timer); resolve(buf); });
+        c.on('error', () => { clearTimeout(timer); resolve(''); });
+      });
+      try { json(res, 200, JSON.parse(out)); } catch { json(res, 502, { error: 'rat resolve failed' }); }
+    } else if (u.pathname === '/api/doc/install-pkg' && req.method === 'POST') {
+      // Install one Python package into the document's project venv, so a
+      // failed `import` in a rat cell is one click from working. Facts this
+      // design rests on (verified): a live rat kernel imports packages
+      // installed into its venv from outside — no restart, no state loss.
+      // Boundary: uv does the installing, rat owns the kernel; this server
+      // only sequences them. Explicit user click — never automatic.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const pkg = String(parsed.pkg || '').trim();
+      // One PyPI requirement, nothing else: no flags, no URLs, no spaces.
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}(==[A-Za-z0-9._*+!-]{1,32})?$/.test(pkg)) {
+        return json(res, 400, { error: 'not a valid package name' });
+      }
+      const docDir = parsed.cwd && typeof parsed.cwd === 'string' && fs.existsSync(parsed.cwd) ? parsed.cwd : null;
+      if (!docDir) return json(res, 400, { error: 'cwd required' });
+      const homeBin = name => { const p = path.join(os.homedir(), name); return fs.existsSync(p) ? p : null; };
+      const uvBin = homeBin('.nix-profile/bin/uv') || homeBin('.local/bin/uv') || homeBin('.cargo/bin/uv') || 'uv';
+      const ratBin = homeBin('.local/bin/rat') || 'rat';
+      const sh = (bin, args, cwd, timeoutMs) => new Promise(resolve => {
+        const child = spawn(bin, args, { cwd, env: process.env });
+        let buf = '';
+        const cap = s => { buf += s; if (buf.length > 100000) { buf = buf.slice(0, 100000); child.kill('SIGKILL'); } };
+        child.stdout.on('data', d => cap(String(d)));
+        child.stderr.on('data', d => cap(String(d)));
+        const timer = setTimeout(() => { cap('\n… (timed out)'); child.kill('SIGKILL'); }, timeoutMs);
+        child.on('close', code => { clearTimeout(timer); resolve({ out: buf, code }); });
+        child.on('error', e => { clearTimeout(timer); resolve({ out: String(e.message), code: -1 }); });
+      });
+      // 1. The project root — rat's own resolution, so the venv lands where
+      //    the kernel looks for it (rat walks up from the doc's directory).
+      const resolved = await sh(ratBin, ['resolve', 'py', '--json'], docDir, 20000);
+      let root = docDir;
+      try { root = JSON.parse(resolved.out).cwd || docDir; } catch {}
+      const venv = path.join(root, '.venv');
+      const steps = [];
+      // 2. No venv yet? Create it. The kernel (if any) was running on some
+      //    other python — it must restart to bind to the new venv. That
+      //    resets kernel variables; the client says so honestly.
+      let created = false;
+      if (!fs.existsSync(venv)) {
+        const mk = await sh(uvBin, ['venv'], root, 60000);
+        steps.push({ step: 'uv venv', code: mk.code, out: mk.out.slice(-2000) });
+        if (mk.code !== 0) return json(res, 200, { error: 'could not create a venv', steps });
+        created = true;
+      }
+      // 3. Install into that exact interpreter — never into system python.
+      const inst = await sh(uvBin, ['pip', 'install', '--python', path.join(venv, 'bin', 'python'), pkg], root, 180000);
+      steps.push({ step: 'uv pip install ' + pkg, code: inst.code, out: inst.out.slice(-4000) });
+      if (inst.code !== 0) return json(res, 200, { error: 'install failed', steps });
+      // 4. Fresh venv only: rebind the kernel. `rat restart` is NOT enough
+      //    here — the runtime entry in rat's state remembers its old (no-venv)
+      //    binding. Stop + remove clears the entry; the next run re-resolves
+      //    and picks up the new .venv. (Verified against rat's actual
+      //    behavior; an existing venv never reaches this branch.)
+      let restarted = false;
+      if (created) {
+        let name = 'py';
+        try { name = JSON.parse(resolved.out).name || 'py'; } catch {}
+        const stop = await sh(ratBin, ['stop', name], docDir, 30000);
+        steps.push({ step: 'rat stop ' + name, code: stop.code, out: stop.out.slice(-1000) });
+        const rm = await sh(ratBin, ['remove', name, '--yes'], docDir, 30000);
+        steps.push({ step: 'rat remove ' + name, code: rm.code, out: rm.out.slice(-1000) });
+        restarted = rm.code === 0;
+      }
+      json(res, 200, { ok: true, pkg, venv, created, restarted, steps });
     } else if (u.pathname === '/api/tts' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;

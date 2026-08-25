@@ -349,6 +349,14 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .project-row-label span { color: var(--text-faint); font-size: 9px; margin-top: 2px; }
 .project-row-label { pointer-events: auto; cursor: pointer; }
 .project-row-label:hover { background: var(--surface-2); }
+/* The corner cell above the project rows: the birth place of a new project.
+   It lives in the 18px day-label strip, so the chart geometry does not move. */
+.project-new-cell { position: absolute; left: 0; top: 0; width: 168px; height: 18px; line-height: 18px;
+  box-sizing: border-box; padding: 0 8px; overflow: hidden; white-space: nowrap;
+  background: var(--surface-1); border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border);
+  color: var(--text-faint); font-size: 10px; pointer-events: auto; cursor: pointer; }
+.project-new-cell:hover, .project-new-cell:focus-visible { color: var(--accent); background: var(--surface-2); }
+.project-labels.narrow .project-new-cell { width: 34px; padding: 0; text-align: center; }
 .project-row-label.hl { background: var(--surface-3); }
 .project-row-label.hl strong { color: var(--accent); }
 .project-row-label.hl > span:first-of-type { font-size: 0; }
@@ -405,6 +413,19 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 /* ---- view ---- */
 #view { flex: 1; overflow-y: auto; padding: var(--sp-3) var(--sp-4) var(--sp-6); }
 .project-overview { max-width: var(--read-max); margin: 0 auto; }
+.loose-intro { margin: 0 0 24px; color: var(--text-dim); max-width: 70ch; }
+.loose-tools { display: flex; gap: 8px; align-items: center; margin: 14px 0; }
+.loose-tools input { flex: 1; min-width: 0; }
+.loose-list { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); }
+.loose-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 12px; background: var(--bg); cursor: pointer; }
+.loose-row:hover { background: var(--surface-1); }
+.loose-main { min-width: 0; }
+.loose-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.loose-meta { margin-top: 3px; color: var(--text-dim); font-size: var(--fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loose-assign { white-space: nowrap; }
+.loose-pick-list { display: grid; gap: 4px; margin-top: 10px; max-height: 45vh; overflow: auto; }
+.loose-pick-list button { text-align: left; }
+@media (max-width: 700px) { .loose-row { grid-template-columns: minmax(0, 1fr); } .loose-assign { justify-self: start; } }
 .phead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; background: var(--bg); border-bottom: 1px solid var(--border); border-left: 4px solid var(--accent); padding: var(--sp-2) 0 var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); }
 .phead h2 { margin: 0 0 2px; font-size: var(--fs-title); }
 .pmeta { color: var(--text-dim); font-size: var(--fs-meta); margin-bottom: var(--sp-2); }
@@ -440,6 +461,79 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .ptitle h1 input { font: inherit; font-weight: inherit; width: 100%; box-sizing: border-box; padding: 0 6px; background: var(--bg); color: inherit; border: 1px solid currentColor; }
 .pdesc .pidentity { color: var(--text-dim); font-size: var(--fs-meta); text-transform: lowercase; letter-spacing: 0.04em; margin: 0 0 6px; }
 .pdesc .psummary { margin: 0 0 var(--sp-4); max-width: none; font-size: calc(var(--fs-body) * 1.06); line-height: 1.7; }
+/* One project has two working surfaces. Keep this switch quiet and stable
+   while each surface changes its content and tools below it. */
+.project-switch { display: flex; align-items: stretch; margin: 0 0 var(--sp-4); border-bottom: 1px solid var(--border-strong); }
+.project-switch button { height: 32px; padding: 0 12px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: transparent; color: var(--text-dim); }
+.project-switch button:hover { background: var(--surface-1); color: var(--text); }
+.project-switch button.on { border-bottom-color: var(--accent); color: var(--text); font-weight: 700; }
+:root[data-theme-mode="binary"] .project-switch button.on { border-bottom: 4px double var(--text); }
+.project-code-bar { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-3); min-height: 38px; padding: 0 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
+.project-code-bar > b { font-size: var(--fs-body); }
+.project-code-bar .project-switch { margin: 0; align-self: stretch; border-bottom: 0; }
+.project-code-bar > .dim { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); }
+.project-code .ff-tree { font-size: 10.5px; line-height: 1.25; padding: 5px; }
+.project-code .ff-tree summary { padding: 2px 1px; }
+.project-code .ff-tree .ff-file { padding-top: 2px; padding-bottom: 2px; font-size: inherit; }
+.project-code .ff-tree .ff-lines { font-size: 8.5px; }
+/* ---- document view: aiconvo chrome around the MRMD editing surface ---- */
+.doc-view { height: calc(100vh - 82px); min-height: 400px; display: flex; flex-direction: column; margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-6)); }
+.doc-head { flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
+.doc-head .doc-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-head #docStatus { flex: 1; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); }
+.doc-head #docSource.on { background: var(--accent-strong); color: var(--accent-ink); }
+.doc-editor-host { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
+/* The page: the same reading column as a conversation (--read-max). */
+.doc-editor-host > div { max-width: var(--read-max); margin: 0 auto; padding: 28px 20px 50vh; min-height: 100%; }
+.doc-editor-host .cm-editor { height: auto; }
+.doc-editor-host .cm-scroller { overflow: visible; }
+/* One voice for markdown: the editor mirrors the conversation .md look.
+
+   CodeMirror geometry rules (learned from mrmd-editor's own code-block
+   plugin — see codeBlockStyles in mrmd-editor/src/index.js):
+   · NO margins on lines — CM maps positions from the line box; margins
+     sit outside it and break clicks, the caret, and up/down arrow motion.
+     Spacing uses padding only (inside the box, measured correctly).
+   · NO background-color on lines — CM paints the selection in a layer
+     BELOW .cm-line; an opaque ground hides it. An inset box-shadow gives
+     the same fill without joining layer painting.
+   · NO cursor-dependent font sizes — a size that flips with .cm-activeLine
+     relayouts the text under the mouse on every click.
+
+   Headings: same size as body, bold, a rule under h1/h2. */
+.doc-editor-host .cm-md-heading-line { padding-top: 14px; }
+.doc-editor-host .cm-md-h1-line, .doc-editor-host .cm-md-h2-line { border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+/* Code blocks: the same box as .md pre — surface-2 ground, 1px border,
+   smaller mono. Per-line paint; the fence rows open and close the box. */
+.doc-editor-host .cm-md-codeblock-line { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--surface-2) 85%, transparent); border-left: 1px solid var(--border); border-right: 1px solid var(--border); padding-left: 12px; padding-right: 12px; font-size: 12.5px; }
+.doc-editor-host .cm-md-codeblock-first { border-top: 1px solid var(--border); padding-top: 5px; }
+.doc-editor-host .cm-md-codeblock-last { border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+/* Fence rows are quiet chrome: the info string reads as the small
+   language label (like .md pre[data-lang]::before). Constant size —
+   the label grows only via the marker span when the caret enters it. */
+.doc-editor-host .cm-md-codeblock-first, .doc-editor-host .cm-md-codeblock-last { color: var(--text-faint); font-size: 10px; line-height: 1.7; min-height: 21px; }
+/* Inline code: the conversation's quieter italic voice (no chip). */
+.doc-editor-host .cm-md-inline-code { font-style: italic; }
+/* Run status strip: kernel chip · state · cancel. Output lives IN the
+   document (```output under the cell, MRMD style), never here. */
+.doc-run-strip { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-3); padding: 4px 10px; font-size: var(--fs-micro); color: var(--text-dim); border-top: 1px solid var(--border-strong); background: var(--bg); }
+.doc-run-strip .doc-run-state { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-run-strip .doc-run-cancel { height: 22px; padding: 0 8px; font-size: var(--fs-micro); color: var(--danger); border-color: var(--border-strong); }
+/* Output blocks read as results, not as code: the conversation's run-out
+   voice — no side borders, a single quiet accent bar, dim text. */
+.doc-editor-host .cm-md-codeblock-line[data-lang="output"], .doc-editor-host .cm-md-codeblock-line.cm-output-line { border-left: 3px solid var(--border-strong); border-right: 0; box-shadow: none; color: var(--text-dim); }
+.doc-run-fix { display: flex; align-items: center; gap: var(--sp-2); padding: 4px 10px; font-size: var(--fs-micro); border-top: 1px solid var(--border); flex-wrap: wrap; background: var(--bg); }
+.doc-run-fix .doc-fix-pkg { width: 18ch; height: 22px; font: inherit; font-size: var(--fs-micro); background: var(--surface-1); color: var(--text); border: 1px solid var(--border); padding: 0 6px; }
+.doc-run-fix .doc-fix-go { height: 22px; padding: 0 8px; font-size: var(--fs-micro); }
+/* project documents list */
+.pdocs-list { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); margin: var(--sp-2) 0 var(--sp-3); }
+.pdocs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: baseline; padding: 8px 11px; background: var(--bg); cursor: pointer; border: 0; border-radius: 0; height: auto; text-align: left; font: inherit; color: var(--text); }
+.pdocs-row:hover { background: var(--surface-1); }
+.pdocs-row .pd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.pdocs-row .pd-name .pd-dir { color: var(--text-faint); font-weight: 400; }
+.pdocs-row .pd-delta { color: var(--accent); font-size: var(--fs-micro); white-space: nowrap; }
+.pdocs-row .pd-when { color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; }
+.pdocs-more { color: var(--text-dim); font-size: var(--fs-meta); padding: 4px 1px; }
 /* The project page reads like programming documentation: a sticky table of
    contents on the left, the document with big headings on the right. */
 .pdoclayout { display: flex; gap: var(--sp-4); align-items: flex-start; }
@@ -692,6 +786,7 @@ body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { displ
 .qf-cmd { margin: 0; padding: 8px 12px; white-space: pre-wrap; font: 11px/1.45 var(--font); }
 .quick-file-view .fi-columns { max-height: none; overflow: visible; }
 [data-file-diff].kbd-pick { outline: 2px solid var(--accent); outline-offset: 1px; }
+[data-file-diff].file-return-jump { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ff-sheet { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .ff-sheet .fi-columns { height: 100%; overflow: hidden; }
 .ff-sheet.scroll .fi-columns { overflow: auto; }
@@ -787,10 +882,13 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg .role { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-micro); margin-bottom: 4px; color: var(--text-faint); }
 .msg .role > span { min-width: 0; }
 .msg .role .mmodel { color: var(--text-faint); font-size: 10px; border: 1px solid var(--border); padding: 0 4px; border-radius: var(--r); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
-.msg .msg-copy, .msg .msg-read { margin-left: auto; height: 18px; padding: 0 5px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; }
-.msg .msg-read { margin-left: 6px; }
-.msg .msg-copy:hover, .msg .msg-read:hover { background: transparent; color: var(--text); text-decoration: underline; }
-.msg .msg-edit { height: 18px; padding: 0 5px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; }
+.msg-actions { display: flex; justify-content: flex-end; align-items: center; gap: 2px; min-height: 22px; margin-top: 8px; opacity: 0; visibility: hidden; transition: opacity .12s ease; }
+.msg:hover > .msg-actions, .msg:focus-within > .msg-actions, .msg.actions-open > .msg-actions { opacity: 1; visibility: visible; }
+.msg-actions button { height: 20px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; }
+.msg-actions button:hover, .msg-actions button:focus-visible { background: transparent; color: var(--text); text-decoration: underline; }
+/* Touch has no stable hover. Keep the actions visible after a message tap. */
+@media (hover: none) { .msg-actions { transition: none; } }
+:root[data-theme-mode="binary"] .msg-actions { transition: none; }
 /* branch switcher pill (the transcript is a trace through the tree) */
 .branchpill { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; padding: 4px 8px; border: 1px dashed var(--border-strong); color: var(--text-dim); font-size: var(--fs-micro); max-width: var(--read-max); }
 .branchpill > button { height: 22px; min-width: 26px; padding: 0 6px; }
@@ -836,6 +934,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .rc-cv-screen:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 /* command palette: grouped, filtered, floats above the composer */
 .slash-pop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; max-height: 340px; overflow: auto; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); z-index: 40; }
+/* A short or new conversation leaves more room below the composer. Open the
+   shared / and @ palette there instead of clipping it above the view. */
+.slash-pop.open-below { top: 100%; bottom: auto; margin-top: 6px; margin-bottom: 0; }
 .slash-hint { color: var(--text-dim); font-size: var(--fs-micro); padding: 8px 10px; }
 .slash-inp-row { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface-1); }
 .slash-lead { color: var(--accent); font-weight: 700; }
@@ -863,12 +964,36 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* launcher mode row + overlays (mode manager, mode form, context confirm) */
 .mode-form, .ctx-confirm { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: var(--overlay); padding: 16px; }
 .mm-card, .mf-card, .cc-card { background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); display: flex; flex-direction: column; gap: 8px; padding: 12px; width: min(680px, 94vw); max-height: 90vh; }
-.mm-head { display: flex; align-items: baseline; gap: 10px; }
-.mm-head b { flex: 0 0 auto; }
+.mm-head, .cc-head { display: flex; align-items: baseline; gap: 10px; }
+.mm-head b, .cc-head b { flex: 0 0 auto; }
 .mm-head .hint, .mm-head span { flex: 1 1 auto; }
 .mm-foot, .cc-foot, .mf-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .mf-foot .mf-err { flex: 1 1 auto; color: var(--warn); }
 .mf-body { overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+/* new project form: caption above field, one calm column */
+.np-card { width: min(480px, 94vw); }
+.np-body { gap: 10px; }
+.np-body label { display: flex; flex-direction: column; gap: 4px; }
+.np-body .np-cap { color: var(--text-dim); font-size: 11px; }
+.np-body textarea, .np-body input[type="text"] { width: 100%; box-sizing: border-box; }
+.np-body textarea { resize: vertical; }
+.np-browse-toggle { align-self: flex-start; border: 0; background: transparent; padding: 0; color: var(--text-faint); font: inherit; font-size: 11px; cursor: pointer; }
+.np-browse-toggle:hover { color: var(--text); }
+.np-adopt { color: var(--text-dim); font-size: 11px; border-left: 3px solid var(--border-strong); padding-left: 8px; }
+.np-browse { border: 1px solid var(--border-strong); background: var(--bg); }
+.np-bhead { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-bottom: 1px solid var(--border); }
+.np-bpath { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 11px; }
+.np-bhead .ghost, .np-brow .ghost { flex: 0 0 auto; font-size: 11px; padding: 1px 6px; }
+.np-blist { max-height: 180px; overflow: auto; }
+.np-brow { display: flex; align-items: center; gap: 8px; padding: 2px 8px; }
+.np-brow:hover { background: var(--surface-2); }
+.np-bname { flex: 1 1 auto; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-btag { flex: 0 0 auto; color: var(--text-faint); font-size: 10px; }
+.np-bempty { padding: 8px; color: var(--text-faint); font-size: 11px; }
+.np-details summary { cursor: pointer; color: var(--text-faint); font-size: 11px; }
+.np-details summary:hover { color: var(--text); }
+.np-details-body { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.np-git-row { flex-direction: row !important; align-items: center; gap: 6px; }
 .mf-pair { display: flex; gap: 8px; }
 .mf-pair > * { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
 .mf-body textarea, .mf-body input, .cc-text { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); padding: 6px 8px; }
@@ -955,6 +1080,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .ls-livechip:hover { color: var(--text); }
 
 .cmp-row { margin: 8px 0 14px; max-width: none; }
+.cmp-row.both-on { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cmp-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
 /* The visible reply is the branch: solid frame = active, dashed = the alternatives. */
 .cmp-col { border: 1px dashed var(--border-strong); padding: 8px 10px; min-width: 0; background: var(--surface-1); cursor: pointer; }
@@ -998,10 +1124,23 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg-editor textarea:focus { outline: 0; border-color: var(--accent); }
 .msg-editor-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .msg-editor-bar .dim { color: var(--text-dim); font-size: var(--fs-micro); margin-right: auto; }
-.tts-player { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; font-size: 10px; color: var(--text-dim); }
-.tts-player input[type=range] { width: 90px; height: 14px; }
-.tts-player select { height: 18px; font-size: 10px; padding: 0 4px; }
+.tts-player { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 4px; font-size: 10px; color: var(--text-dim); }
+.tts-player input[type=range] { width: min(220px, 35vw); height: 14px; accent-color: var(--accent); appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+.tts-player input[type=range]::-webkit-slider-runnable-track { height: 4px; background: var(--border-strong); border: 1px solid var(--border); border-radius: var(--r-sm); }
+.tts-player input[type=range]::-webkit-slider-thumb { width: 14px; height: 14px; margin-top: -6px; appearance: none; -webkit-appearance: none; background: var(--accent); border: 2px solid var(--surface-1); border-radius: 50%; }
+.tts-player input[type=range]:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--text); outline-offset: 2px; }
+.tts-player input[type=range]::-moz-range-track { height: 4px; background: var(--border-strong); border: 1px solid var(--border); border-radius: var(--r-sm); }
+.tts-player input[type=range]::-moz-range-progress { height: 4px; background: var(--accent); border: 1px solid var(--accent-strong); border-radius: var(--r-sm); }
+.tts-player input[type=range]::-moz-range-thumb { width: 12px; height: 12px; background: var(--accent); border: 2px solid var(--surface-1); border-radius: 50%; }
+.tts-player input[type=range]:focus-visible::-moz-range-thumb { outline: 2px solid var(--text); outline-offset: 2px; }
+:root[data-theme-mode="binary"] .tts-player input[type=range]::-webkit-slider-thumb,
+:root[data-theme-mode="binary"] .tts-player input[type=range]::-moz-range-thumb { border-radius: 0; }
 .tts-player button { height: 18px; padding: 0 6px; font-size: 10px; }
+.tts-rate-menu { position: absolute; right: 0; bottom: 22px; z-index: 20; display: flex; flex-direction: column; min-width: 64px; padding: 3px; background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); box-shadow: 0 4px 12px var(--shadow-color); }
+.tts-rate-menu[hidden] { display: none; }
+.tts-rate-menu button { width: 100%; height: 24px; text-align: left; color: var(--text-dim); background: var(--surface-1); border-color: transparent; }
+.tts-rate-menu button:hover, .tts-rate-menu button:focus-visible { color: var(--text); background: var(--surface-2); }
+.tts-rate-menu button.on { color: var(--accent); border-color: var(--accent); }
 /* user turns carry the surface tint and sit a step to the right;
    assistant replies sit on the page, a step to the left. Prose reads at
    the reading-view size (15px/1.65), not the UI label size. */
@@ -1120,6 +1259,14 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tnode .ttools { color: var(--text-faint); white-space: nowrap; }
 .tnode.work { color: var(--text-dim); }
 .tnode.work .tt { color: var(--text-dim); }
+.tnode.fanout { border-style: dashed; min-height: 86px; cursor: default; }
+.tnode.fanout .tm b { color: var(--accent); }
+.tnode.fanout .tt { -webkit-line-clamp: 1; }
+.tfanchoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; margin-top: 5px; }
+.tfanchoice { min-width: 0; height: 19px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); font: inherit; font-size: 10px; text-align: left; }
+.tfanchoice:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.tfanchoice.on { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.tfanchoice.current::before { content: "● "; }
 /* The tree status bar: one fixed line at the bottom of the view, vim-style.
    Selection paints it — the verbs never move, so the hand learns them. */
 .treebar { position: sticky; bottom: calc(-1 * var(--sp-6)); z-index: 8; display: flex; gap: 18px; align-items: baseline; justify-content: center; margin-top: var(--sp-3); padding: 8px 14px; background: var(--bg); border-top: 1px solid var(--border-strong); font-size: var(--fs-meta); }
@@ -1191,10 +1338,17 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose textarea::placeholder { color: var(--text-faint); opacity: 1; }
 .agent-thumbs { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .agent-thumbs:empty { display: none; }
+.agent-ctx { display: flex; flex-wrap: wrap; gap: 6px; }
+.agent-ctx:empty { display: none; }
+.agent-ctx-chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 8px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font-size: var(--fs-micro); }
+.agent-ctx-chip b { font-weight: 600; }
+.agent-ctx-chip button { height: 18px; min-height: 18px; padding: 0 5px; border: 0; background: transparent; color: var(--text-dim); font-size: 11px; }
+.agent-ctx-chip button:hover { color: var(--text); }
 .agent-thumb { position: relative; width: 56px; height: 56px; border: 1px solid var(--border); background: var(--surface-2); }
 .agent-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .agent-thumb button { position: absolute; top: 0; right: 0; height: 18px; padding: 0 5px; font-size: 11px; }
 .agent-compose-row { display: flex; gap: var(--sp-2); align-items: center; }
+#agentAt.on { color: var(--accent); border-color: var(--accent); }
 .agent-mic { width: 34px; min-width: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .agent-mic[hidden] { display: none; }
 .agent-mic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: square; }
@@ -1262,6 +1416,14 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 #settingsDlg .set-body { overflow-y: auto; padding: var(--sp-4); min-height: 0; }
 /* One corner stack: the help hint on top, the navigator below it. */
 #cornerStack { position: fixed; right: 10px; bottom: 10px; z-index: 75; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+/* E-ink gesture feedback: a static label, no motion, black on white. */
+#einkFlash { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 96; background: var(--bg); color: var(--text); border: 2px solid var(--text); padding: 4px 14px; font-weight: 700; pointer-events: none; }
+#einkFlash[hidden] { display: none; }
+/* E-ink page-turn marker: a dashed line at the previous page edge, so the
+   eye finds the last-read line after the jump. It tracks the content. */
+#einkEdge { position: fixed; z-index: 74; height: 0; border-top: 1px dashed var(--text); pointer-events: none; }
+#einkEdge::after { content: "▸"; position: absolute; right: 2px; top: -9px; font-size: 11px; color: var(--text); }
+#einkEdge[hidden] { display: none; }
 #helpMini { background: var(--surface-1); border: 1px solid var(--border-strong); padding: 6px 9px; font-size: var(--fs-micro); color: var(--text-dim); max-width: 260px; max-height: 45vh; overflow-y: auto; cursor: pointer; pointer-events: auto; }
 
 /* ---- arrow navigator: where am I in the list, what is next up / down ---- */
@@ -1416,8 +1578,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .agent-compose.compose-min .agent-state, .agent-compose.compose-min .model-strip,
 .agent-compose.compose-min .think-pick, .agent-compose.compose-min .mode-pick,
   .agent-compose.compose-min .ctxmeter,
-  .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min #agentAttach,
-  .agent-compose.compose-min #agentSlash, .agent-compose.compose-min #agentTree,
+  .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min .agent-ctx, .agent-compose.compose-min #agentAttach,
+  .agent-compose.compose-min #agentSlash, .agent-compose.compose-min #agentAt, .agent-compose.compose-min #agentTree,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
   .agent-compose.compose-min textarea { flex: 1 1 auto; min-width: 0; min-height: 46px; height: 46px; max-height: 46px; }
   .agent-compose.compose-min .agent-compose-row { flex: 0 0 auto; }
@@ -1705,6 +1867,7 @@ window.aiconvoSyncTheme();
 </div>
 <script>
 let sessions = [];          // full index list
+const LOOSE_PROJECT = 'Loose conversations';
 let projectFolds = { map: {}, suggestions: [] }; // raw→canonical project folds + fold suggestions
 let shown = [];             // currently displayed list (index or search results)
 let selected = new Set();   // key set
@@ -1749,6 +1912,11 @@ function unlockLandscape() {
 }
 
 function setRouteKind(kind, crumbs) {
+  // Leaving a document flushes its pending autosave and destroys the editor.
+  if (viewKind === 'doc' && kind !== 'doc' && typeof docState !== 'undefined' && docState) {
+    if (docState.dirty) autosaveDocument();
+    closeDocument();
+  }
   viewKind = kind;
   // Systematic: every navigation starts at the top. #view is the scroller;
   // without this, a new view inherits the old scroll offset and opens
@@ -1819,6 +1987,10 @@ function dispatchHash(h) {
     return;
   }
   if (h.startsWith('note=')) return openNoteFile(h.slice(5));
+  if (h.startsWith('doc=')) {
+    const [docPath, project] = h.slice(4).split('&').map(s => { try { return decodeURIComponent(s); } catch { return s; } });
+    return openDocument(docPath, project || null);
+  }
   if (h.startsWith('tree=')) return showTree(h.slice(5));
   if (h === 'git') { goHome(); return setTab('repos'); }
   if (h.startsWith('git=')) return showGitRepoHistory(h.slice(4));
@@ -1836,6 +2008,8 @@ function dispatchHash(h) {
     return openToolCallFile(key, pathValue, ts, anchor, call);
   }
   if (h.startsWith('blame=')) return showFileBlame(h.slice(6));
+  if (viewKind === 'file' && conversationFileReturn && conversationFileReturn.key === h)
+    return returnToConversationFile(h, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call);
   return open(h);
 }
 
@@ -1845,7 +2019,7 @@ function dispatchHash(h) {
 let routeSegs = [];
 
 const crumbHome = () => ({ label: '❯ home', title: 'The whole-system timeline', go: () => goHome() });
-const crumbProject = name => ({ label: name, title: 'Project overview · ' + name, go: () => showProjectOverview(name) });
+const crumbProject = name => ({ label: name, title: name === LOOSE_PROJECT ? 'Conversations without a project' : 'Project overview · ' + name, go: () => showProjectOverview(name) });
 
 function crumbConversation(key) {
   const s = sessions.find(x => x.key === key);
@@ -1980,7 +2154,7 @@ function winKindLabel(kind) {
     home: 'whole-system timeline', conversation: 'conversation', tree: 'tree',
     note: 'note', epic: 'epic', diffs: 'diffs', file: 'file', blame: 'blame',
     project: 'project', 'project-tree': 'file tree', 'project-files': 'file gantt',
-    'project-diffs': 'diffs', repo: 'git history',
+    'project-diffs': 'diffs', repo: 'git history', doc: 'document',
   })[kind] || kind || '';
 }
 
@@ -1994,7 +2168,7 @@ function winLabel() {
 function emptyWin(hash, kind, title, tabName) {
   return {
     id: winNewId(), hash: hash || '', kind: kind || 'home', title: title || 'home',
-    tab: tabName || 'conv', draft: null, images: [], scrollView: 0, scrollList: 0,
+    tab: tabName || 'conv', draft: null, images: [], context: [], scrollView: 0, scrollList: 0,
     previewHTML: '', previewHome: true,
   };
 }
@@ -2022,6 +2196,7 @@ function captureWinDraft(w) {
   const ta = $('agentText');
   w.draft = ta ? { value: ta.value, start: ta.selectionStart, end: ta.selectionEnd } : w.draft;
   w.images = (window._agentImages || []).slice();
+  w.context = attachedContext().slice();
   w.scrollView = $('view') ? $('view').scrollTop : 0;
   w.scrollList = $('list') ? $('list').scrollTop : 0;
 }
@@ -2229,6 +2404,7 @@ function newWindow() {
   persistWins();
   toggleWindows(false);
   window._agentImages = [];
+  window._agentContext = [];
   const ta = $('agentText');
   if (ta) ta.value = '';
   goHome();
@@ -2265,7 +2441,7 @@ function applyActiveWinDraft() {
     ta.value = w.draft.value;
     try { ta.setSelectionRange(w.draft.start || 0, w.draft.end || 0); } catch {}
   }
-  if (ta) renderAgentThumbs();
+  if (ta) { renderAgentThumbs(); renderAgentContext(); }
   if (w.scrollView && $('view')) $('view').scrollTop = w.scrollView;
   if (w.scrollList && $('list')) $('list').scrollTop = w.scrollList;
 }
@@ -2277,12 +2453,13 @@ function restoreWinPending() {
   winPending = null;
   winSwitching = false;
   if (p.images) window._agentImages = p.images.slice();
+  if (Array.isArray(p.context)) window._agentContext = p.context.slice();
   const ta = $('agentText');
   if (ta && p.draft) {
     ta.value = p.draft.value || '';
     try { ta.setSelectionRange(p.draft.start || 0, p.draft.end || 0); } catch {}
   }
-  if (ta) renderAgentThumbs();
+  if (ta) { renderAgentThumbs(); renderAgentContext(); }
   if (p.scrollView && $('view') && viewKind !== 'home') $('view').scrollTop = p.scrollView;
   if (p.scrollList && $('list')) $('list').scrollTop = p.scrollList;
   syncActiveWin();
@@ -2309,11 +2486,12 @@ function switchWindow(id) {
   toggleWindows(false);
   winSwitching = true;
   winPending = {
-    draft: target.draft, images: target.images, scrollView: target.scrollView,
-    scrollList: target.scrollList,
+    draft: target.draft, images: target.images, context: target.context,
+    scrollView: target.scrollView, scrollList: target.scrollList,
     expectComposer: target.kind === 'conversation',
   };
   window._agentImages = (target.images || []).slice();
+  window._agentContext = Array.isArray(target.context) ? target.context.slice() : [];
   const ta = $('agentText');
   if (ta) ta.value = '';
   if (target.tab) tab = target.tab;
@@ -2343,11 +2521,12 @@ function closeWindow(id) {
   persistWins();
   winSwitching = true;
   winPending = {
-    draft: next.draft, images: next.images, scrollView: next.scrollView,
-    scrollList: next.scrollList,
+    draft: next.draft, images: next.images, context: next.context,
+    scrollView: next.scrollView, scrollList: next.scrollList,
     expectComposer: next.kind === 'conversation',
   };
   window._agentImages = (next.images || []).slice();
+  window._agentContext = Array.isArray(next.context) ? next.context.slice() : [];
   const ta = $('agentText');
   if (ta) ta.value = '';
   if (next.tab) tab = next.tab;
@@ -2570,6 +2749,8 @@ function selectTheme(t, repaint = true) {
   else delete document.documentElement.dataset.theme;
   syncActiveTheme();
   refreshMermaidTheme();
+  // An open document editor re-derives its dark flag and inline tokens.
+  if (docState && docState.editor) { try { docState.editor.setTheme(mrmdHostTheme()); } catch {} }
   if (!repaint) return;
   renderTabList();
   if (current && $('conversationTranscript')) renderConv();
@@ -3342,11 +3523,22 @@ function fallbackTimelineTitle(s) {
   return text.length <= 10 ? text : text.slice(0, 10);
 }
 
+function looseCwd(cwd) {
+  const c = String(cwd || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  return !c
+    || /^\/(?:home|Users)\/[^/]+(?:\/Projects)?$/i.test(c)
+    || /^[A-Z]:\/Users\/[^/]+(?:\/Projects)?$/i.test(c)
+    || /^\/(?:tmp|var\/tmp)(?:\/|$)/.test(c)
+    || /^[A-Z]:\/Users\/[^/]+\/AppData\/Local\/Temp(?:\/|$)/i.test(c);
+}
 function projectOf(s) {
-  const cwd = String(s.cwd || '?').replace(/\\/g, '/').replace(/\/$/, '');
+  // The server field includes durable per-conversation assignments.
+  if (s && s.project) return s.project;
+  const cwd = String((s && s.cwd) || '').replace(/\\/g, '/').replace(/\/$/, '');
+  if (looseCwd(cwd)) return LOOSE_PROJECT;
   const inProjects = cwd.match(/\/Projects\/([^/]+)/);
   const name = inProjects ? inProjects[1]
-    : (cwd.split('/').filter(Boolean).pop() || '?');
+    : (cwd.split('/').filter(Boolean).pop() || LOOSE_PROJECT);
   // Folds collapse worktrees and merged projects into one canonical name.
   return projectFolds.map[name] || name;
 }
@@ -3409,7 +3601,7 @@ async function ensureProjectStats() {
   if (projectStatsAsked || !sessions.length) return;
   projectStatsAsked = true;
   const paths = new Map();
-  for (const s of sessions) { const p = projectOf(s); if (s.cwd && !paths.has(p)) paths.set(p, s.cwd); }
+  for (const s of sessions) { const p = projectOf(s); if (p !== LOOSE_PROJECT && s.cwd && !paths.has(p)) paths.set(p, s.cwd); }
   for (const c of (projectFolds.created || [])) if (c.path && !paths.has(c.name)) paths.set(c.name, c.path);
   try {
     const r = await fetch('/api/projects/stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths: [...paths.values()] }) });
@@ -3512,7 +3704,9 @@ function visibleTimelineRows(rows, pos, chartW, list) {
 function projectLabelsHtml(pos) {
   if (pos.type !== 'project') return '';
   const phone = phoneDevice();
-  return `<div class="project-labels${phone ? ' narrow' : ''}">${pos.projects.map(row => {
+  // A new project is a new row, so the entry point heads the row column.
+  const bornCell = `<div class="project-new-cell" data-new-project tabindex="0" title="New project — a folder is born; the first prompt starts the first conversation (P)">${phone ? '+' : '+ new project'}</div>`;
+  return `<div class="project-labels${phone ? ' narrow' : ''}">${bornCell}${pos.projects.map(row => {
     const top = LABEL_H + row.baseLane * PROJECT_LANE_H;
     const height = row.laneCount * PROJECT_LANE_H;
     const main = row.mode ? row.title : row.project;
@@ -3925,6 +4119,7 @@ $('list').addEventListener('click', e => {
   if (repoLink) return showGitRepoHistory(repoLink.dataset.gitRepo);
   const foldChip = e.target.closest('[data-fold-from]');
   if (foldChip) return quickFold(foldChip.dataset.foldFrom, foldChip.dataset.foldInto);
+  if (e.target.closest('[data-new-project]')) return openNewProjectForm();
   const chip = e.target.closest('.sr-chip');
   if (chip) return setSearchScope(chip.dataset.scope);
   if (e.target.id === 'srMore') return fullText(true);
@@ -5406,6 +5601,7 @@ function conversationWindowSummary(rows) {
 }
 
 function fileTreeHtml(rows, selectedId, query = '') {
+  const projectCode = !!(fileHistoryData && fileHistoryData.projectCode);
   const filtered = (rows || []).filter(row => !query || row.relativePath.toLowerCase().includes(query));
   const repos = new Map();
   for (const row of filtered) {
@@ -5419,17 +5615,21 @@ function fileTreeHtml(rows, selectedId, query = '') {
     }
     node.files.push({ row, file });
   }
+  const hasRecent = node => node.files.some(item => item.row.recent24 && item.row.recent24.events) || [...node.dirs.values()].some(hasRecent);
   const renderNode = (node, prefix = '', repoRoot = '') => {
-    const dirs = [...node.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, child]) => {
+    const dirs = [...node.dirs.entries()].sort((a, b) => Number(hasRecent(b[1])) - Number(hasRecent(a[1])) || a[0].localeCompare(b[0])).map(([name, child]) => {
       const pathValue = prefix ? `${prefix}/${name}` : name;
       const selected = focusedFileRow && focusedFileRow.repoRoot === repoRoot && focusedFileRow.relativePath.startsWith(pathValue + '/');
-      return `<details${selected || !prefix ? ' open' : ''}><summary>▸ ${esc(name)}</summary>${renderNode(child, pathValue, repoRoot)}</details>`;
+      const open = selected || (projectCode ? hasRecent(child) : !prefix);
+      return `<details${open ? ' open' : ''}><summary>▸ ${esc(name)}</summary>${renderNode(child, pathValue, repoRoot)}</details>`;
     }).join('');
-    const files = node.files.sort((a, b) => a.file.localeCompare(b.file)).map(({ row, file }) => {
-      const stats = fileWindowStats(row);
+    const files = node.files.sort((a, b) => Number(!!b.row.recent24) - Number(!!a.row.recent24) || a.file.localeCompare(b.file)).map(({ row, file }) => {
+      const stats = projectCode ? row.recent24 : fileWindowStats(row);
       const changed = stats && stats.events > 0;
-      const lines = changed ? (stats.removed || stats.added ? `−${stats.removed} +${stats.added}` : `${stats.touches} touch${stats.touches === 1 ? '' : 'es'}`) : '';
-      const title = `${row.relativePath}${changed ? `\n${stats.events} changes between keyframes · ${lines}` : focusedFileWindow ? '\nno changes between keyframes' : ''}`;
+      const lines = changed ? (projectCode
+        ? `${stats.added ? `+${stats.added}` : ''}${stats.added && stats.removed ? ' ' : ''}${stats.removed ? `−${stats.removed}` : ''}`
+        : (stats.removed || stats.added ? `−${stats.removed} +${stats.added}` : `${stats.touches} touch${stats.touches === 1 ? '' : 'es'}`)) : '';
+      const title = projectCode ? `${row.relativePath}${changed ? `\nlast 24 hours · ${lines}` : ''}` : `${row.relativePath}${changed ? `\n${stats.events} changes between keyframes · ${lines}` : focusedFileWindow ? '\nno changes between keyframes' : ''}`;
       return `<button class="ff-file${row.id === selectedId.id ? ' on' : ''}${changed ? ' changed' : ''}" data-ff-file="${fgAttr(row.id)}" title="${fgAttr(title)}"><span class="ff-state">${changed ? '●' : '·'}</span><span class="ff-name">${esc(file)}</span><span class="ff-lines">${esc(lines)}</span></button>`;
     }).join('');
     return dirs + files;
@@ -5440,6 +5640,13 @@ function fileTreeHtml(rows, selectedId, query = '') {
 
 function updateFocusedTreeWindow() {
   if (!fileHistoryData) return;
+  if (fileHistoryData.projectCode) {
+    if ($('ffTreeSummary')) {
+      const recent = fileHistoryData.rows.filter(row => row.recent24 && row.recent24.events);
+      $('ffTreeSummary').textContent = `${fileHistoryData.rows.length} files · ${recent.length} changed in 24h`;
+    }
+    return;
+  }
   if ($('ffTreeSummary')) {
     if (focusedFileWindow) {
       const summary = conversationWindowSummary(fileHistoryData.rows);
@@ -5827,18 +6034,24 @@ function focusedFileCrumbs(row) {
 function enterFocusedFile(row, selection = {}) {
   if (!fileHistoryData || !row) return;
   focusedFileRow = row;
-  setRouteKind('file', focusedFileCrumbs(row));
+  const projectCode = !!fileHistoryData.projectCode;
+  if (!projectCode) setRouteKind('file', focusedFileCrumbs(row));
   const conversationScope = fileHistoryData.scope === 'conversation';
   const gitScope = fileHistoryData.scope === 'git';
-  $('view').innerHTML = `<div class="focused-file-view"><div class="ff-head"><button id="ffBack">${conversationScope ? '← conversation' : gitScope ? (fileHistoryData.backProject ? '← project files' : '← repo files') : '← all files'}</button><button id="ffTreeToggle" class="mobile-only" type="button">files</button><b id="ffTitle">${esc(row.relativePath)}</b>${conversationScope ? '<button id="ffLatest">jump to latest changes</button>' : ''}<span class="dim">${conversationScope ? 'only changes from this conversation · ' : gitScope ? 'Git commits and working tree only · ' : ''}two draggable keyframes · complete file</span></div>
-    <div class="ff-layout"><aside class="ff-tree" id="ffTree"><input id="ffTreeSearch" type="search" placeholder="filter file tree"><div class="ff-tree-summary" id="ffTreeSummary"></div><div id="ffTreeBody"></div></aside>
+  const head = projectCode
+    ? `<div class="project-code-bar"><b>${esc(fileHistoryData.project)}</b>${projectSwitchHtml('code')}<span class="dim" id="ffTitle">${esc(row.relativePath)}</span></div>`
+    : `<div class="ff-head"><button id="ffBack">${conversationScope ? '← conversation' : gitScope ? (fileHistoryData.backProject ? '← project files' : '← repo files') : '← all files'}</button><button id="ffTreeToggle" class="mobile-only" type="button">files</button><b id="ffTitle">${esc(row.relativePath)}</b>${conversationScope ? '<button id="ffLatest">jump to latest changes</button>' : ''}<span class="dim">${conversationScope ? 'only changes from this conversation · ' : gitScope ? 'Git commits and working tree only · ' : ''}two draggable keyframes · complete file</span></div>`;
+  $('view').innerHTML = `<div class="focused-file-view${projectCode ? ' project-code' : ''}">${head}
+    <div class="ff-layout"><aside class="ff-tree" id="ffTree"><input id="ffTreeSearch" type="search" placeholder="filter all files"><div class="ff-tree-summary" id="ffTreeSummary"></div><div id="ffTreeBody"></div></aside>
       <main class="ff-main" id="ffMain"><div class="ff-timeline" id="ffTimeline"></div><div class="ff-compare" id="ffCompare"><div class="ff-loading">loading…</div></div><div class="diff-card" id="diffCard" hidden></div></main></div></div>`;
-  $('ffBack').onclick = () => conversationScope
-    ? (fileHistoryData.returnTs ? openAtTs(fileHistoryData.key, fileHistoryData.returnTs) : open(fileHistoryData.key))
+  if (projectCode) wireProjectSwitch(fileHistoryData.project);
+  const ffBack = $('ffBack');
+  if (ffBack) ffBack.onclick = () => conversationScope
+    ? returnToConversationFile(fileHistoryData.key, fileHistoryData.returnPath, fileHistoryData.returnTs, fileHistoryData.returnCall)
     : gitScope
       ? (fileHistoryData.backProject ? showProjectTree(fileHistoryData.backProject) : showGitRepoHistory(fileHistoryData.cwd, true))
       : showProjectFileHistory(fileHistoryData.project, true);
-  if (phoneLayout()) $('ffBack').textContent = '← back';
+  if (phoneLayout() && ffBack) ffBack.textContent = '← back';
   if ($('ffLatest')) $('ffLatest').onclick = jumpToLatestConversationChanges;
   if ($('ffTreeToggle')) $('ffTreeToggle').onclick = () => {
     const root = $('ffTreeToggle').closest('.focused-file-view');
@@ -5858,7 +6071,7 @@ async function openToolCallFile(key, pathValue, ts, anchor, callId) {
   const hash = 'filecall=' + [key, callId || '', pathValue || '', ts || '', anchor || ''].map(encodeURIComponent).join('&');
   setRoute('file', hash, convCrumbs(key, { label: '▤ ' + String(pathValue || '').split('/').pop(), title: pathValue || '' }));
   $('view').innerHTML = `<div class="quick-file-view"><div class="qf-head"><button id="qfBack">← conversation</button><b>${esc(shortFilePath(pathValue || ''))}</b></div><div class="qf-body"><div class="ff-loading">loading this change…</div></div></div>`;
-  $('qfBack').onclick = () => anchor ? openAtTs(key, anchor) : open(key);
+  $('qfBack').onclick = () => returnToConversationFile(key, pathValue, anchor || ts, callId);
   lastQuickFile = { key, path: pathValue || '', ts: ts || '', anchor: anchor || '', call: callId || '' };
   let data;
   try {
@@ -5870,7 +6083,7 @@ async function openToolCallFile(key, pathValue, ts, anchor, callId) {
     errToast(data.error);
     return openConversationFileDiff(key, pathValue, ts, anchor);
   }
-  renderQuickFileView(data, { key, pathValue: pathValue || data.path, ts, anchor });
+  renderQuickFileView(data, { key, pathValue: pathValue || data.path, ts, anchor, call: callId || '' });
 }
 
 // Context reconstruction without any extra request: the response already
@@ -5945,7 +6158,7 @@ function renderQuickFileView(data, ctx) {
       <button id="qfHistory" title="Build the conversation-wide keyframe history. This is the slow, complete view.">keyframe history</button>
       <span class="dim">this click's change only · highlight ${esc(lang)}${first.ts ? ' · ' + fmtDate(first.ts) : ''}</span></div>
     <div class="qf-body">${quickFileHunksHtml(data, lang)}</div>`;
-  $('qfBack').onclick = () => ctx.anchor ? openAtTs(ctx.key, ctx.anchor) : open(ctx.key);
+  $('qfBack').onclick = () => returnToConversationFile(ctx.key, ctx.pathValue, ctx.anchor || ctx.ts, ctx.call);
   $('qfHistory').onclick = () => openConversationFileDiff(ctx.key, ctx.pathValue, ctx.ts, ctx.anchor);
   if (editable) $('qfEdit').onclick = () => renderQuickFileEditor(data, ctx);
 }
@@ -5987,6 +6200,69 @@ function renderQuickFileEditor(data, ctx) {
 // conversation reopens the last file view — one key toggles both sides.
 let filePick = -1;
 let lastQuickFile = null;
+let conversationFileReturn = null;
+
+// Keep the clicked file control at the same viewport position after a file
+// review. The call and path identify the exact control. The timestamp alone
+// is not sufficient because a folded work group can contain many file edits.
+function rememberConversationFileReturn(button) {
+  const view = $('view');
+  if (!button || !view || viewKind !== 'conversation') return;
+  const viewRect = view.getBoundingClientRect();
+  const group = button.closest('.toolgroup');
+  conversationFileReturn = {
+    key: activeRel,
+    path: button.dataset.fileDiff || '',
+    call: button.dataset.fileCall || '',
+    ts: button.dataset.fileAnchor || button.dataset.fileTs || '',
+    className: button.className || '',
+    groupKey: group ? group.dataset.gkey || '' : '',
+    offset: button.getBoundingClientRect().top - viewRect.top,
+    scrollTop: view.scrollTop,
+  };
+}
+
+async function returnToConversationFile(key, pathValue, ts, callId) {
+  const saved = conversationFileReturn && conversationFileReturn.key === key &&
+    (!pathValue || conversationFileReturn.path === pathValue) &&
+    (!callId || conversationFileReturn.call === callId) ? conversationFileReturn : null;
+  await open(key, 'top');
+  requestAnimationFrame(() => {
+    const view = $('view');
+    if (!view) return;
+    let buttons = [...view.querySelectorAll('[data-file-diff]')].filter(button =>
+      (!pathValue || button.dataset.fileDiff === pathValue) &&
+      (!callId || button.dataset.fileCall === callId));
+    let fallbackMessage = null;
+    if (!buttons.length && ts) {
+      fallbackMessage = view.querySelector(`[data-ts="${CSS.escape(ts)}"]`);
+      if (fallbackMessage) buttons = [...fallbackMessage.querySelectorAll('[data-file-diff]')];
+    }
+    let target = buttons[0] || fallbackMessage;
+    if (saved && buttons.length > 1) {
+      target = buttons.sort((a, b) => {
+        const score = button =>
+          (button.className === saved.className ? 4 : 0) +
+          (((button.closest('.toolgroup') || {}).dataset || {}).gkey === saved.groupKey ? 8 : 0);
+        return score(b) - score(a);
+      })[0];
+    }
+    if (!target) {
+      if (saved) view.scrollTop = saved.scrollTop;
+      return;
+    }
+    if (!saved) {
+      for (let node = target.parentElement; node && node !== view; node = node.parentElement)
+        if (node.tagName === 'DETAILS') node.open = true;
+      target.scrollIntoView({ block: 'center' });
+    } else {
+      const viewRect = view.getBoundingClientRect();
+      view.scrollTop += target.getBoundingClientRect().top - viewRect.top - saved.offset;
+    }
+    target.classList.add('file-return-jump');
+    setTimeout(() => target.classList.remove('file-return-jump'), 1800);
+  });
+}
 
 function filePickButtons() {
   return viewKind === 'conversation' ? [...$('view').querySelectorAll('[data-file-diff]')] : [];
@@ -6089,6 +6365,9 @@ async function openConversationFileDiff(key, pathValue, ts, anchorTs) {
   if (!reuse) { focusedCompareCache.clear(); focusedRowsCache.clear(); }
   diffScope = { scope: 'conversation', key };
   data.returnTs = anchorTs || ts || null;
+  data.returnPath = pathValue || null;
+  data.returnCall = (conversationFileReturn && conversationFileReturn.key === key &&
+    conversationFileReturn.path === pathValue) ? conversationFileReturn.call : null;
   // Frame the compare on the clicked edit when one matches the timestamp.
   let selection = {};
   const wantMs = Date.parse(ts || '');
@@ -6142,6 +6421,7 @@ async function showProjectFileHistory(name, reuse = false) {
     focusedRowsCache.clear();
   }
   if (data.error) { $('view').innerHTML = `<div class="empty">could not build file history.<div class="hint">${esc(data.error)}</div></div>`; return; }
+  data.projectCode = false;
   fileHistoryData = data;
   fileGanttInitialScroll = true;
   diffScope = { scope: 'project' };
@@ -6150,7 +6430,7 @@ async function showProjectFileHistory(name, reuse = false) {
   $('view').innerHTML = `<div class="file-gantt-view" id="fgRoot">
     <div class="phead"><h2>❯ ${esc(data.project)} · file history</h2>
       <div class="pmeta">${totals.files || 0} files · ${totals.aiEvents || 0} in-repository AI edits (${totals.failed || 0} failed) · ${totals.commits || 0} commits · ${totals.paired || 0} inferred pairs · ${totals.workingTreeFiles || 0} working-tree files${totals.externalAiEvents ? ` · ${totals.externalAiEvents} external file touches excluded` : ''}</div>
-      <div class="pactions"><button id="fgBack">back to project</button><button id="fgList">edit list</button></div></div>
+      <div class="pactions"><button id="fgBack">back to code</button></div></div>
     <div class="fg-toolbar">
       <input id="fgSearch" type="search" placeholder="filter file path">
       <select id="fgBranch"><option value="">all branches</option>${branches.map(branch => `<option value="${fgAttr(branch)}">${esc(branch)}</option>`).join('')}</select>
@@ -6163,8 +6443,7 @@ async function showProjectFileHistory(name, reuse = false) {
     <div class="fg-scroll" id="fgScroll"><div class="fg-axis"><div class="fg-corner">repository-relative file</div><div class="fg-time-axis" id="fgAxis"></div></div><div id="fgRows"></div></div>
     <div class="diff-card" id="diffCard" hidden></div>
   </div>`;
-  $('fgBack').onclick = () => showProjectOverview(name);
-  $('fgList').onclick = () => showProjectDiffs(name);
+  $('fgBack').onclick = () => showProjectTree(name);
   $('fgSearch').oninput = renderFileGanttChart;
   $('fgBranch').onchange = renderFileGanttChart;
   $('fgMode').onchange = renderFileGanttChart;
@@ -6507,6 +6786,560 @@ async function showProjectDiffs(name) {
   renderDiffView('project', rows, `file diffs · ${d.project}`, `${d.files.length} files · scanned ${d.scanned}/${d.totalConversations} recent conversations`);
 }
 
+// ---- documents: the MRMD-backed markdown editor ----
+// Aiconvo owns files, autosave, conflict checks, Git commits, and the
+// provenance ledger (design boundary in vendor/mrmd-document/README.md).
+// The vendored light MRMD bundle owns only the editing surface. Loaded
+// lazily: normal aiconvo startup never pays for the editor.
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js';
+let mrmdDocLoad = null;
+function loadMrmdDocument() {
+  if (window.mrmdDocument) return Promise.resolve(window.mrmdDocument);
+  if (!mrmdDocLoad) {
+    mrmdDocLoad = new Promise((ok, bad) => {
+      const s = document.createElement('script');
+      s.src = MRMD_DOC_SRC;
+      s.onload = () => ok(window.mrmdDocument);
+      s.onerror = () => { mrmdDocLoad = null; bad(new Error('the document editor bundle failed to load')); };
+      document.head.appendChild(s);
+    });
+  }
+  return mrmdDocLoad;
+}
+
+// Measure the app theme's real background brightness: paint --bg on a
+// probe and read the computed rgb back. No color literals in app.html
+// (design rule: tokens.css owns every color).
+function appThemeIsDark() {
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute;visibility:hidden;background:var(--bg)';
+  document.body.appendChild(probe);
+  const rgb = (getComputedStyle(probe).backgroundColor.match(/\d+/g) || []).map(Number);
+  probe.remove();
+  const [rr, gg, bb] = rgb.length >= 3 ? rgb : [255, 255, 255];
+  return (0.299 * rr + 0.587 * gg + 0.114 * bb) / 255 < 0.5;
+}
+
+// Build an MRMD theme object out of aiconvo's own design tokens. Every
+// value is a var() reference, so the editor repaints with the app theme
+// (light, dark, custom, and binary e-ink) with no color literals here.
+// The syntax map mirrors the app's sx-* palette (keyword=accent,
+// string=cyan, comment=faint, number=magenta, type=yellow).
+function mrmdHostTheme() {
+  const binary = themeMode() === 'binary';
+  return {
+    name: 'aiconvo',
+    isDark: appThemeIsDark(),
+
+    // editor surface
+    '--editor-background': 'var(--bg)',
+    '--editor-foreground': 'var(--text)',
+    '--editor-cursor': 'var(--accent)',
+    '--editor-selection': 'color-mix(in srgb, var(--accent) 30%, var(--bg))',
+    '--editor-selection-match': 'color-mix(in srgb, var(--accent) 18%, var(--bg))',
+    '--editor-active-line': 'transparent',
+    '--editor-gutter': 'var(--bg)',
+    '--editor-line-number': 'var(--text-faint)',
+    '--editor-line-number-active': 'var(--text-dim)',
+    '--editor-matching-bracket': 'color-mix(in srgb, var(--accent) 25%, var(--bg))',
+    '--editor-font-family': 'var(--font)',
+    '--editor-font-size': 'var(--fs-title)',
+    '--editor-line-height': '1.65',
+
+    // widgets (panels, tooltips, fold placeholders)
+    '--widget-font-mono': 'var(--font)',
+    '--widget-font-sans': 'var(--font)',
+    '--widget-border-radius': 'var(--r-sm)',
+    '--widget-surface': 'var(--surface-1)',
+    '--widget-surface-hover': 'var(--surface-2)',
+    '--widget-surface-elevated': 'var(--surface-2)',
+    '--widget-surface-inset': 'var(--surface-1)',
+    '--widget-border': 'var(--border)',
+    '--widget-border-accent': 'var(--accent)',
+    '--widget-border-focus': 'var(--accent-strong)',
+    '--widget-text': 'var(--text)',
+    '--widget-text-muted': 'var(--text-dim)',
+    '--widget-text-accent': 'var(--accent)',
+    '--widget-success': 'var(--success)',
+    '--widget-warning': 'var(--warn)',
+    '--widget-error': 'var(--danger)',
+    '--widget-info': 'var(--blue)',
+
+    // syntax — the app's sx-* palette
+    '--syntax-keyword': 'var(--accent)',
+    '--syntax-control': 'var(--accent)',
+    '--syntax-string': 'var(--cyan)',
+    '--syntax-number': 'var(--magenta)',
+    '--syntax-comment': 'var(--text-faint)',
+    '--syntax-function': 'var(--blue)',
+    '--syntax-variable': 'var(--text)',
+    '--syntax-variable-special': 'var(--accent)',
+    '--syntax-property': 'var(--text)',
+    '--syntax-operator': 'var(--text-dim)',
+    '--syntax-punctuation': 'var(--text-dim)',
+    '--syntax-type': 'var(--yellow)',
+    '--syntax-class': 'var(--yellow)',
+    '--syntax-constant': 'var(--magenta)',
+    '--syntax-parameter': 'var(--text)',
+    '--syntax-regexp': 'var(--red)',
+    '--syntax-escape': 'var(--yellow)',
+    '--syntax-tag': 'var(--accent)',
+    '--syntax-attribute': 'var(--yellow)',
+    '--syntax-attribute-value': 'var(--cyan)',
+    '--syntax-heading': 'var(--text)',
+    '--syntax-link': 'var(--cyan)',
+    '--syntax-link-text': 'var(--cyan)',
+    '--syntax-emphasis': 'var(--text)',
+    '--syntax-strong': 'var(--text)',
+    '--syntax-strikethrough': 'var(--text-faint)',
+    '--syntax-quote': 'var(--text-dim)',
+    // inline code follows the conversation voice: quiet, dim, italic
+    '--syntax-code': 'var(--text-dim)',
+    '--syntax-code-background': 'var(--surface-2)',
+    '--syntax-meta': 'var(--text-dim)',
+    '--syntax-inserted': 'var(--green)',
+    '--syntax-deleted': 'var(--red)',
+    '--syntax-changed': 'var(--blue)',
+
+    // rendered markdown — mirrors the conversation .md styles: flat
+    // heading sizes with a rule under h1/h2 (rule via .cm-md-h*-line CSS),
+    // quiet italic inline code, square corners, thin blockquote bar.
+    '--md-heading-1-size': '1.15em',
+    '--md-heading-2-size': '1.15em',
+    '--md-heading-3-size': '1em',
+    '--md-heading-4-size': '1em',
+    '--md-heading-5-size': '1em',
+    '--md-heading-6-size': '1em',
+    '--md-heading-weight': '700',
+    '--md-heading-margin-top': '0',
+    '--md-heading-color': 'var(--text)',
+    '--md-marker-color': 'var(--text-faint)',
+    '--md-marker-font': 'var(--font)',
+    '--md-link-color': 'var(--cyan)',
+    '--md-link-decoration': 'underline',
+    '--md-code-background': 'transparent',
+    '--md-code-color': 'var(--text-dim)',
+    '--md-code-padding': '0',
+    '--md-code-radius': '0',
+    '--md-blockquote-border': 'var(--border-strong)',
+    '--md-blockquote-border-width': '2px',
+    '--md-blockquote-padding': '10px',
+    '--md-blockquote-color': 'var(--text-dim)',
+    '--md-list-marker-color': 'var(--text-faint)',
+    '--md-hr-color': 'var(--border)',
+    '--md-table-border': 'var(--border)',
+    '--md-table-header-bg': 'var(--surface-1)',
+    '--md-checkbox-color': 'var(--accent)',
+    '--md-alert-note-color': 'var(--blue)',
+    '--md-alert-tip-color': 'var(--green)',
+    '--md-alert-important-color': 'var(--magenta)',
+    '--md-alert-warning-color': 'var(--warn)',
+    '--md-alert-caution-color': 'var(--danger)',
+
+    // The selection overlay paints ABOVE line fills (code blocks) — a
+    // translucent accent keeps text readable while staying unmissable.
+    '--mrmd-selection-overlay': binary ? 'var(--overlay)' : 'color-mix(in srgb, var(--accent) 32%, transparent)',
+
+    // popups the bundle may open (menus, dialogs)
+    '--mrmd-ui-font': 'var(--font)',
+    '--mrmd-panel-bg': 'var(--surface-2)',
+    '--mrmd-popup-bg': 'var(--surface-2)',
+    '--mrmd-bg': 'var(--bg)',
+    '--mrmd-fg': 'var(--text)',
+    '--mrmd-fg-muted': 'var(--text-dim)',
+    '--mrmd-border': 'var(--border)',
+    '--mrmd-hover-bg': 'var(--surface-2)',
+    '--mrmd-active-bg': 'var(--surface-3)',
+    '--mrmd-selection-bg': 'color-mix(in srgb, var(--accent) 30%, var(--bg))',
+    '--mrmd-accent': 'var(--accent)',
+    '--mrmd-accent-hover': 'var(--accent-strong)',
+    '--mrmd-success': 'var(--success)',
+    '--mrmd-warning': 'var(--warn)',
+    '--mrmd-error': 'var(--danger)',
+    '--mrmd-shadow-md': 'var(--shadow)',
+    '--mrmd-shadow-lg': 'var(--shadow)',
+    '--mrmd-shadow-xl': 'var(--shadow)',
+    '--mrmd-menu-border': 'var(--border-strong)',
+    '--mrmd-dialog-border': 'var(--border-strong)',
+    '--mrmd-input-border': 'var(--border)',
+    '--mrmd-button-bg': 'var(--surface-2)',
+    '--mrmd-button-border': 'var(--border)',
+    '--mrmd-button-hover': 'var(--surface-3)',
+    '--mrmd-button-active': 'var(--surface-3)',
+
+    // binary e-ink: no half-tones — selection and brackets go solid
+    ...(binary ? {
+      '--editor-selection': 'var(--text)',
+      '--editor-selection-match': 'transparent',
+      '--editor-matching-bracket': 'transparent',
+      '--mrmd-selection-bg': 'var(--text)',
+    } : {}),
+  };
+}
+
+let docState = null; // { path, project, sha, editor, dirty, saveTimer, saving }
+
+function closeDocument() {
+  if (!docState) return;
+  clearTimeout(docState.saveTimer);
+  if (docState.editor) { try { docState.editor.destroy(); } catch {} }
+  docState = null;
+}
+
+function docStatusLine(text) {
+  const el = $('docStatus');
+  if (el) el.textContent = text;
+}
+
+// Autosave after a 2 s pause. Autosave writes to disk (with the SHA conflict
+// check) and records provenance; it does NOT create a Git commit. The save
+// button / Mod-S creates the real commit (with an AI title in background).
+function scheduleDocAutosave() {
+  if (!docState) return;
+  docState.dirty = true;
+  docStatusLine('editing…');
+  clearTimeout(docState.saveTimer);
+  docState.saveTimer = setTimeout(autosaveDocument, 2000);
+}
+
+async function autosaveDocument() {
+  if (!docState || !docState.dirty || docState.saving) return;
+  const st = docState;
+  st.saving = true;
+  st.dirty = false;
+  const text = st.editor.getContent();
+  let out;
+  try {
+    out = await postJson('/api/doc/save', { path: st.path, baseSha: st.sha, text, actor: 'human', input: 'keyboard' });
+  } catch { out = { error: 'network failure' }; }
+  st.saving = false;
+  if (docState !== st) return;
+  if (out.error) {
+    st.dirty = true;
+    docStatusLine('⚠ ' + out.error);
+    if (String(out.error).includes('changed on disk')) {
+      // The disk moved under us (agent edit, git checkout). Offer a reload.
+      if ($('docReload')) $('docReload').hidden = false;
+    }
+    return;
+  }
+  st.sha = out.sha;
+  docStatusLine(st.dirty ? 'editing…' : 'autosaved · ' + new Date().toLocaleTimeString());
+  if (st.dirty) scheduleDocAutosave();
+}
+
+async function commitDocument() {
+  if (!docState) return;
+  const st = docState;
+  clearTimeout(st.saveTimer);
+  docStatusLine('committing…');
+  const text = st.editor.getContent();
+  let out;
+  try {
+    out = await postJson('/api/doc/commit', { path: st.path, baseSha: st.sha, text, actor: 'human', input: 'keyboard' });
+  } catch { out = { error: 'network failure' }; }
+  if (docState !== st) return;
+  if (out.error) return docStatusLine('⚠ ' + out.error);
+  st.dirty = false;
+  // docCommitResponse saves through docSaveResponse first; it returns the
+  // sha of the exact text the server now holds.
+  st.sha = out.sha || st.sha;
+  if (out.unchanged) { docStatusLine('nothing new to commit'); return; }
+  docStatusLine('✓ committed ' + (out.hash || '').slice(0, 10) + ' · title arriving…');
+  toast('✓ saved as a revision · ' + (out.subject || ''));
+}
+
+async function reloadDocumentFromDisk() {
+  if (!docState) return;
+  const st = docState;
+  let d;
+  try { d = await (await fetch('/api/file/read?path=' + encodeURIComponent(st.path))).json(); } catch { d = { error: 'network failure' }; }
+  if (docState !== st || d.error) return d && d.error ? errToast(d.error) : undefined;
+  st.editor.setContent(d.text);
+  st.sha = d.sha;
+  st.dirty = false;
+  if ($('docReload')) $('docReload').hidden = true;
+  docStatusLine('reloaded from disk');
+}
+
+// Run the fenced code block at the cursor through rat (Mod-Enter, or the
+// ▶ button in the head bar). Deliberate boundaries, to stay simple:
+// · rat owns kernels, project resolution, venvs, state — the server just
+//   shells out to `rat run <lang> <code>` in the document's directory.
+// · output lands in a dock under the editor, never inside the markdown —
+//   the document text is the user's; running code must not mutate it.
+// The run status strip under the editor: kernel chip, elapsed time,
+// cancel. Output does NOT live here — it lands in the document as an
+// ```output fence under the cell (the MRMD convention). The strip only
+// answers "what is running, on which kernel, and how do I stop it".
+function docRunStrip() {
+  let strip = document.querySelector('.doc-run-strip');
+  if (strip) return strip;
+  const view = document.querySelector('.doc-view');
+  if (!view) return null;
+  strip = document.createElement('div');
+  strip.className = 'doc-run-strip';
+  strip.innerHTML = `<span class="doc-run-chip dim" title="The kernel rat resolves for this document's folder"></span>
+    <span class="doc-run-state"></span>
+    <button class="doc-run-cancel" hidden title="Interrupt the kernel (variables survive)">■ cancel</button>`;
+  view.appendChild(strip);
+  return strip;
+}
+
+// The kernel chip: rat's own resolution for this document's folder.
+async function refreshDocRuntimeChip(lang = 'py') {
+  const st = docState;
+  const strip = docRunStrip();
+  if (!st || !strip) return;
+  const docDir = st.path.split('/').slice(0, -1).join('/');
+  let info = null;
+  try { info = await (await fetch('/api/doc/runtime-info?cwd=' + encodeURIComponent(docDir) + '&lang=' + encodeURIComponent(lang))).json(); } catch {}
+  if (docState !== st || !strip.isConnected) return;
+  const chip = strip.querySelector('.doc-run-chip');
+  chip.textContent = info && info.name ? '⚙ ' + info.name : '';
+}
+
+let docRunSeq = 0;
+
+async function runDocCell(cell, opts = {}) {
+  const st = docState;
+  if (!st || !cell || !cell.code.trim()) return { ok: false };
+  if (st.running) { toast('a cell is already running — cancel it first'); return { ok: false }; }
+  const strip = docRunStrip();
+  const state = strip.querySelector('.doc-run-state');
+  const cancelBtn = strip.querySelector('.doc-run-cancel');
+  const docDir = st.path.split('/').slice(0, -1).join('/');
+  const runId = 'run-' + (++docRunSeq) + '-' + Date.now();
+  st.running = runId;
+  refreshDocRuntimeChip(cell.lang && cell.lang.toLowerCase().startsWith('p') ? 'py' : cell.lang);
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    if (st.running === runId) state.textContent = '● ' + (cell.lang || '?') + ' cell · ' + Math.round((Date.now() - t0) / 1000) + 's';
+  }, 1000);
+  state.textContent = '● ' + (cell.lang || '?') + ' cell · 0s';
+  cancelBtn.hidden = false;
+  cancelBtn.disabled = false;
+  cancelBtn.onclick = async () => {
+    cancelBtn.disabled = true;
+    state.textContent = '■ interrupting the kernel…';
+    try { await postJson('/api/doc/cancel-run', { runId }); } catch {}
+  };
+  let r;
+  try {
+    r = await postJson('/api/doc/run-cell', { lang: cell.lang, code: cell.code, cwd: docDir, runId });
+  } catch { r = { error: 'network failure' }; }
+  clearInterval(tick);
+  if (docState !== st) return { ok: false };
+  st.running = null;
+  cancelBtn.hidden = true;
+  if (r.error) { state.textContent = '✗ ' + r.error; return { ok: false, r }; }
+  const secs = Math.round(r.ms / 100) / 10;
+  state.textContent = (r.code === 0 ? '✓ ' : '✗ exit ' + r.code + ' · ') + r.runtime + ' · ' + secs + 's';
+  // Write the result under the cell — the editor owns markdown mechanics
+  // (ownership rule, replacement, undo). Strip rat's own status tail and
+  // kernel-start banner: the fence stores program output, not chrome.
+  const outText = String(r.out || '')
+    .replace(/^[a-z0-9@._-]+ started on http[^\n]*\n?/im, '')
+    .replace(/\n?[✓✗] \d+(?:\.\d+)?m?s( \| \d+ vars?)?\s*$/, '')
+    .trim();
+  const wrote = st.editor.setCellOutput(cell, outText);
+  if (!wrote) {
+    // Stale guard fired: the cell changed while running. Honest fallback.
+    toast('the cell changed while it ran — output not written');
+    state.textContent += ' · cell edited during run, output dropped';
+  }
+  offerPackageInstall(strip, r, cell, docDir);
+  if (opts.advance && r.code === 0) st.editor.advanceToNextCell(cell);
+  return { ok: r.code === 0, r };
+}
+
+// Run every cell, top to bottom, one kernel, one at a time — state builds
+// like a notebook. Stops at the first error; the remaining cells keep
+// their old outputs (honest: they did not run).
+async function runAllDocCells() {
+  const st = docState;
+  if (!st) return;
+  if (st.running) return toast('a cell is already running — cancel it first');
+  const cells = st.editor.listCells();
+  if (!cells.length) return toast('no code cells in this document');
+  for (let i = 0; i < cells.length; i++) {
+    // Re-list before each run: earlier outputs moved the later offsets.
+    const fresh = st.editor.listCells();
+    if (docState !== st || i >= fresh.length) return;
+    const { ok } = await runDocCell(fresh[i]);
+    if (!ok) {
+      if (docState === st) toast('run all stopped at cell ' + (i + 1) + ' of ' + fresh.length);
+      return;
+    }
+  }
+  toast('✓ ran all ' + cells.length + ' cells');
+}
+
+// A failed python cell with ModuleNotFoundError gets a one-click repair:
+// install the package into the project venv (uv), then rerun the cell.
+// The module name is only a guess for the PyPI name (cv2 ≠ opencv-python),
+// so the field is editable. Explicit click — nothing installs on its own.
+function offerPackageInstall(dock, r, cell, docDir) {
+  document.querySelector('.doc-run-fix')?.remove();
+  if (r.code === 0 || r.runtime !== 'py') return;
+  const miss = (r.out || '').match(/ModuleNotFoundError: No module named '([A-Za-z0-9_.]+)'/);
+  if (!miss) return;
+  const guess = miss[1].split('.')[0];
+  const fix = document.createElement('div');
+  fix.className = 'doc-run-fix';
+  fix.innerHTML = `<span class="dim">missing module · install into the project venv:</span>
+    <input class="doc-fix-pkg" spellcheck="false">
+    <button class="doc-fix-go">⇩ uv pip install + rerun</button>
+    <span class="doc-fix-note dim" hidden></span>`;
+  const input = fix.querySelector('.doc-fix-pkg');
+  input.value = guess;
+  const note = fix.querySelector('.doc-fix-note');
+  const btn = fix.querySelector('.doc-fix-go');
+  const go = async () => {
+    const pkg = input.value.trim();
+    if (!pkg) return;
+    btn.disabled = true; input.disabled = true;
+    note.hidden = false; note.textContent = '● installing…';
+    let ri;
+    try { ri = await postJson('/api/doc/install-pkg', { pkg, cwd: docDir }); }
+    catch { ri = { error: 'network failure' }; }
+    if (!fix.isConnected) return;
+    if (ri.error) {
+      btn.disabled = false; input.disabled = false;
+      const last = (ri.steps || []).at(-1);
+      note.textContent = '✗ ' + ri.error + (last && last.out ? ' · ' + last.out.trim().split('\n').at(-1) : '');
+      return;
+    }
+    note.textContent = '✓ installed' + (ri.restarted ? ' · kernel restarted on the new venv (variables reset)' : '') + ' · rerunning…';
+    fix.remove();
+    await runDocCell(cell);
+  };
+  btn.onclick = go;
+  input.onkeydown = e => { if (e.key === 'Enter') go(); };
+  dock.insertAdjacentElement('afterend', fix);
+}
+
+async function openDocument(docPath, project = null) {
+  if (!docPath) return;
+  markSettingsClosed();
+  closeDocument();
+  if (project) projectOverviewName = project;
+  const name = String(docPath).split('/').pop();
+  setRoute('doc', 'doc=' + encodeURIComponent(docPath) + (project ? '&' + encodeURIComponent(project) : ''),
+    project ? [crumbHome(), crumbProject(project), { label: '☰ ' + name, title: docPath }]
+      : [crumbHome(), { label: '☰ ' + name, title: docPath }]);
+  $('view').innerHTML = `<div class="doc-view">
+    <div class="doc-head">
+      ${project ? `<button id="docBack">← documents</button>` : ''}
+      <b class="doc-title" title="${esc(docPath)}">${esc(name)}</b>
+      <span class="dim" id="docStatus">loading…</span>
+      <button id="docReload" hidden title="The disk file changed — reload it (your unsaved edits are lost)">reload from disk</button>
+      <button id="docRun" title="Run the code block at the cursor through rat · Ctrl+Enter (Shift+Enter runs and advances)">▶ run cell</button>
+      <button id="docRunAll" title="Run every code cell, top to bottom, in one kernel — stops at the first error">▶▶ run all</button>
+      <button id="docSource" title="Toggle raw markdown source">source</button>
+      <button id="docSave" class="primary" title="Save a named revision (Git commit) · Ctrl+S">save revision</button>
+    </div>
+    <div class="doc-editor-host"><div id="docEditor"></div></div>
+  </div>`;
+  if ($('docBack')) $('docBack').onclick = () => showProjectOverview(project);
+  let bundle, d;
+  try {
+    [bundle, d] = await Promise.all([
+      loadMrmdDocument(),
+      (await fetch('/api/file/read?path=' + encodeURIComponent(docPath))).json(),
+    ]);
+  } catch (e) {
+    $('view').innerHTML = `<div class="empty">could not open the document.<div class="hint">${esc(e.message)}</div></div>`;
+    return;
+  }
+  if (d.error) {
+    $('view').innerHTML = `<div class="empty">could not read the document.<div class="hint">${esc(d.error)}</div></div>`;
+    return;
+  }
+  if (viewKind !== 'doc' || !$('docEditor')) return; // user navigated away during load
+  const st = { path: d.path, project, sha: d.sha, dirty: false, saveTimer: 0, saving: false, source: false };
+  st.editor = bundle.createDocumentEditor($('docEditor'), {
+    doc: d.text,
+    theme: mrmdHostTheme(),
+    placeholder: 'Start writing…',
+    assetResolver: url => '/api/doc/asset?doc=' + encodeURIComponent(d.path) + '&src=' + encodeURIComponent(url),
+    onChange: scheduleDocAutosave,
+    onSave: commitDocument,
+    onRunCell: (cell, o) => runDocCell(cell, o),
+  });
+  docState = st;
+  docStatusLine('autosaves after a 2 s pause · save revision = Git commit');
+  $('docSave').onclick = commitDocument;
+  $('docReload').onclick = reloadDocumentFromDisk;
+  $('docRun').onclick = () => {
+    const cell = st.editor.codeBlockAtCursor && st.editor.codeBlockAtCursor();
+    if (!cell || !cell.code.trim()) return toast('put the cursor inside a code block first');
+    runDocCell(cell);
+  };
+  $('docRunAll').onclick = runAllDocCells;
+  refreshDocRuntimeChip();
+  $('docSource').onclick = () => {
+    st.source = !st.source;
+    st.editor.setSourceMode(st.source);
+    $('docSource').classList.toggle('on', st.source);
+  };
+  st.editor.focus();
+}
+
+// The documents list on the project panel: every markdown file in the
+// project's repositories, newest activity first. Rendered async so the
+// panel itself never waits on git.
+async function renderProjectDocsList(project) {
+  let d;
+  try { d = await (await fetch('/api/project/docs?name=' + encodeURIComponent(project))).json(); }
+  catch { d = { error: 'network failure' }; }
+  const host = $('pDocsList');
+  if (!host || projectOverviewName !== project || viewKind !== 'project') return;
+  if (d.error) { host.textContent = 'could not list documents: ' + d.error; return; }
+  const docs = d.docs || [];
+  if (!docs.length) { host.innerHTML = '<span class="dim">no markdown documents yet — create the first one.</span>'; return; }
+  const shown = docs.slice(0, 12);
+  host.innerHTML = `<div class="pdocs-list">${shown.map((doc, i) => {
+    const parts = doc.rel.split('/');
+    const base = parts.pop();
+    const delta = doc.recent24 && doc.recent24.events
+      ? `${doc.recent24.added ? '+' + doc.recent24.added : ''}${doc.recent24.added && doc.recent24.removed ? ' ' : ''}${doc.recent24.removed ? '−' + doc.recent24.removed : ''}`
+      : '';
+    const when = doc.recent24 && doc.recent24.latestTs ? ago(Date.now() - doc.recent24.latestTs) : ago(Date.now() - doc.mtimeMs);
+    return `<button type="button" class="pdocs-row" data-p-doc="${esc(String(i))}" title="${esc(doc.path)}">
+      <span class="pd-name">${parts.length ? `<span class="pd-dir">${esc(parts.join('/'))}/</span>` : ''}${esc(base)}</span>
+      <span class="pd-delta">${esc(delta)}</span><span class="pd-when">${esc(when)}</span></button>`;
+  }).join('')}</div>${docs.length > shown.length ? `<div class="pdocs-more">… ${docs.length - shown.length} more in the code view</div>` : ''}`;
+  host.querySelectorAll('[data-p-doc]').forEach(b => b.onclick = () => openDocument(shown[Number(b.dataset.pDoc)].path, project));
+}
+
+// New document: ask for a name, create <project>/documents/<name>.md, open it.
+async function createProjectDocument(project) {
+  const name = prompt('Document name (a .md file in ' + project + '/documents/):');
+  if (!name || !name.trim()) return;
+  let out;
+  try { out = await postJson('/api/doc/create', { project, name: name.trim() }); }
+  catch { out = { error: 'network failure' }; }
+  if (out.error) return errToast(out.error);
+  toast('✓ created ' + name.trim());
+  openDocument(out.path, project);
+}
+
+// One stable switch joins project documents and code. File history and the
+// whole-file diff live inside the code surface.
+function projectSwitchHtml(active) {
+  const item = (key, label) => `<button type="button" role="tab" data-project-surface="${key}" class="${active === key ? 'on' : ''}" aria-selected="${active === key}">${label}</button>`;
+  return `<nav class="project-switch" role="tablist" aria-label="Project view">${item('documents', 'documents')}${item('code', 'code')}</nav>`;
+}
+
+function wireProjectSwitch(name, root = $('view')) {
+  if (!root) return;
+  root.querySelectorAll('[data-project-surface]').forEach(button => button.onclick = () => {
+    if (button.dataset.projectSurface === 'documents') showProjectOverview(name);
+    else showProjectTree(name);
+  });
+}
+
 // ---- project tree mode (home ▸ project ▸ files) ----
 // The information view toggles into a full file tree: every tracked,
 // modified, untracked, and ignored path, plus branches and worktrees.
@@ -6518,16 +7351,24 @@ async function showProjectTree(name) {
   markSettingsClosed();
   projectOverviewName = name;
   setRoute('project-tree', 'project=' + encodeURIComponent(name) + '&tree',
-    [crumbHome(), crumbProject(name), { label: 'files', title: 'All files, commits, and worktrees' }]);
-  let d = projectTreeCache.get(name);
-  if (!d) {
-    $('view').innerHTML = `<div class="project-overview"><div class="phead"><h2>${esc(name)} · files</h2><div class="pmeta">reading repositories…</div></div></div>`;
-    d = await (await fetch('/api/project/tree?name=' + encodeURIComponent(name))).json();
-    if (d.error) { $('view').innerHTML = `<div class="empty">could not read the project tree.<div class="hint">${esc(d.error)}</div></div>`; return; }
-    projectTreeCache.set(name, d);
-    if (projectTreeCache.size > 8) projectTreeCache.delete(projectTreeCache.keys().next().value);
+    [crumbHome(), crumbProject(name), { label: 'code', title: 'All project files and whole-file changes' }]);
+  $('view').innerHTML = `<div class="project-overview"><div class="phead"><h2>${esc(name)} · code</h2><div class="pmeta">indexing files and recent edits…</div>${projectSwitchHtml('code')}</div></div>`;
+  wireProjectSwitch(name);
+  let data = fileHistoryData && fileHistoryData.project === name && fileHistoryData.projectCode ? fileHistoryData : null;
+  if (!data) {
+    data = await (await fetch('/api/project/file-history?name=' + encodeURIComponent(name))).json();
+    focusedCompareCache.clear();
+    focusedRowsCache.clear();
   }
-  renderProjectTree(name, d);
+  if (data.error) { $('view').innerHTML = `<div class="empty">could not read project code.<div class="hint">${esc(data.error)}</div></div>`; return; }
+  data.projectCode = true;
+  fileHistoryData = data;
+  diffScope = { scope: 'project' };
+  focusedFileWindow = null;
+  const rows = data.rows || [];
+  const row = rows.find(item => item.recent24 && item.recent24.events) || rows.find(item => item.workingTree) || rows[0];
+  if (!row) { $('view').innerHTML = `<div class="project-overview"><h2>${esc(name)} · code</h2>${projectSwitchHtml('code')}<div class="empty">no files found.</div></div>`; wireProjectSwitch(name); return; }
+  enterFocusedFile(row);
 }
 
 function buildFileTreeNodes(repo) {
@@ -6597,12 +7438,12 @@ function renderProjectTree(name, d) {
     <div class="phead" style="border-left-color:${projectColor(name).fill}">
       <h2>☷ ${esc(name)} · files</h2>
       <div class="pmeta"><code>${esc(shortDir(d.cwd || ''))}</code> · ${repos.length} repositor${repos.length === 1 ? 'y' : 'ies'} · click a file for its whole-file view</div>
-      <div class="pactions"><button id="ptreeInfo" title="Toggle back to the project information view">☰ info</button></div>
+      ${projectSwitchHtml('code')}
     </div>
     <div class="ptree-toolbar"><input id="ptreeFilter" type="search" placeholder="filter files" value="${esc(q)}"></div>
     <div id="ptreeBody">${repoHtml}</div>
   </div>`;
-  $('ptreeInfo').onclick = () => showProjectOverview(name);
+  wireProjectSwitch(name);
   let filterTimer;
   $('ptreeFilter').oninput = () => {
     clearTimeout(filterTimer);
@@ -7069,6 +7910,7 @@ function renderProjectPanel(d) {
   const color = projectColor(d.project);
   const memory = d.memory || null;
   const o = (memory && memory.overview) || {};
+  const vision = memory && (memory.coreIntent || o.vision || o.summary);
   const pyramid = d.pyramid || {};
   const leaves = pyramid.leaves || {};
   const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
@@ -7080,9 +7922,14 @@ function renderProjectPanel(d) {
     <div class="ptitle"><h1 id="pTitleBig" title="${esc(pTitleHint(displayTitle))}">${esc(displayTitle)}</h1><button id="pNew" class="primary pnewbtn" title="Start a new conversation in ${esc(d.project)} — you review the context before it goes">+ new in ${esc(d.project)}</button></div>
     <section class="psection pdesc">
       ${memory
-        ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(o.summary || '(no overview summary yet)')}</p>`
-        : '<p class="psummary dim">No project memory yet. Build the memory leaves once — after that, the documents stay current automatically.</p>'}
+        ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(vision || '(no project vision yet)')}</p>`
+        : '<p class="psummary dim">No project vision yet. Build the memory leaves once — after that, the documents stay current automatically.</p>'}
       ${d.epics.length ? `<div class="pepicstrip"><span class="pes-label">epics</span>${d.epics.map(e => `<a href="#" data-p-epic-open="${esc(e.id)}" title="Open the epic · ${e.sessionIds.length} conversations · updated ${fmtDate(e.updatedAt)}">▸ ${esc(e.title)}<span class="pes-n">${e.sessionIds.length}</span></a>`).join('')}</div>` : ''}
+    </section>
+    ${projectSwitchHtml('documents')}
+    <section class="psection" id="pDocsSection">
+      <h3>documents <button id="pDocNew" class="ghost pfoldbtn" title="Create a markdown document in ${esc(d.project)}/documents/">+ new document</button></h3>
+      <div id="pDocsList" class="dim">reading project documents…</div>
     </section>
     <div class="pdoclayout">
     <nav id="pToc" class="ptoc" hidden></nav>
@@ -7103,6 +7950,9 @@ function renderProjectPanel(d) {
     </div>
   </div>`;
   wireMiniGantt($('view'), heroRows, color, 'p:' + d.project);
+  wireProjectSwitch(d.project);
+  $('pDocNew').onclick = () => createProjectDocument(d.project);
+  renderProjectDocsList(d.project);
   $('pTitleBig').ondblclick = e => { e.preventDefault(); startProjectTitleEdit(d.project); };
   $('pFold').onclick = () => openFoldPicker(d);
   const pUnregister = $('pUnregister');
@@ -7152,8 +8002,97 @@ function renderProjectPanel(d) {
   $('pNew').onclick = () => startReviewedConversation(d.project);
 }
 
+function realProjectNames() {
+  return [...new Set([
+    ...sessions.map(projectOf),
+    ...((projectFolds.created || []).map(c => c.name)),
+  ])].filter(p => p && p !== '?' && p !== LOOSE_PROJECT).sort((a, b) => a.localeCompare(b));
+}
+
+function openLooseProjectPicker(key) {
+  const conversation = sessions.find(s => s.key === key);
+  if (!conversation) return;
+  const projects = realProjectNames();
+  if (!projects.length) return errToast('create a project first');
+  const ov = document.createElement('div');
+  ov.className = 'ctx-confirm';
+  ov.innerHTML = `<div class="cc-card">
+    <div class="cc-head"><b>assign to a project</b><button type="button" class="ghost" data-close>cancel</button></div>
+    <div class="cc-meta dim">${esc(conversation.title || '(untitled)')}</div>
+    <input type="text" data-project-q placeholder="find a project" autocomplete="off">
+    <div class="loose-pick-list" data-project-list></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const q = ov.querySelector('[data-project-q]');
+  const list = ov.querySelector('[data-project-list]');
+  const close = () => ov.remove();
+  const paint = () => {
+    const needle = q.value.trim().toLowerCase();
+    const hits = projects.filter(p => p.toLowerCase().includes(needle)).slice(0, 30);
+    list.innerHTML = hits.map(p => `<button type="button" data-target="${esc(p)}">${esc(p)}</button>`).join('')
+      || '<div class="hint">no project matches.</div>';
+    list.querySelectorAll('[data-target]').forEach(button => button.onclick = async () => {
+      button.disabled = true;
+      const out = await (await fetch('/api/conversation/project', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: key, project: button.dataset.target }),
+      })).json();
+      if (out.error) { button.disabled = false; return errToast(out.error); }
+      conversation.project = out.project;
+      close();
+      toast('assigned to ' + out.project);
+      showLooseConversations();
+    });
+  };
+  ov.querySelector('[data-close]').onclick = close;
+  q.oninput = paint;
+  q.onkeydown = e => {
+    if (e.key === 'Escape') close();
+    if (e.key === 'Enter') { const first = list.querySelector('[data-target]'); if (first) first.click(); }
+  };
+  paint();
+  q.focus();
+}
+
+function showLooseConversations() {
+  markSettingsClosed();
+  lastNavProject = LOOSE_PROJECT;
+  projectOverviewName = LOOSE_PROJECT;
+  setRoute('project', 'project=' + encodeURIComponent(LOOSE_PROJECT), [crumbHome(), { label: LOOSE_PROJECT, title: 'Conversations without a project' }]);
+  const rows = sessions.filter(s => projectOf(s) === LOOSE_PROJECT)
+    .sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || '')));
+  const heroRows = rows.map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
+  $('view').innerHTML = `<div class="project-overview loose-overview">
+    ${miniGanttHtml(heroRows)}
+    <div class="ptitle"><h1>${LOOSE_PROJECT}</h1></div>
+    <p class="loose-intro">These conversations started without a project. They have no shared memory, files, or Git history. Assign one when it belongs to existing work.</p>
+    <div class="loose-tools"><input type="text" id="looseQ" placeholder="filter ${rows.length} conversations" autocomplete="off"><span class="dim" id="looseCount"></span></div>
+    <div class="loose-list" id="looseList"></div>
+  </div>`;
+  wireMiniGantt($('view'), heroRows, projectColor(LOOSE_PROJECT), 'loose');
+  const paint = () => {
+    const needle = $('looseQ').value.trim().toLowerCase();
+    const shownRows = rows.filter(s => !needle || `${s.title || ''} ${s.cwd || ''} ${s.source || ''}`.toLowerCase().includes(needle));
+    $('looseCount').textContent = `${shownRows.length}`;
+    $('looseList').innerHTML = shownRows.map(s => `<div class="loose-row" data-loose-row="${esc(s.key)}" tabindex="0">
+      <div class="loose-main"><div class="loose-title">${esc(s.title || '(untitled)')}</div>
+      <div class="loose-meta">${esc(s.cwd || 'no working directory')} · ${esc(s.source || 'unknown')} · ${fmtDate(s.lastTs || s.firstTs)}</div></div>
+      <button type="button" class="ghost loose-assign" data-loose-assign="${esc(s.key)}">assign to project…</button>
+    </div>`).join('') || '<div class="empty">no loose conversations match.</div>';
+    $('looseList').querySelectorAll('[data-loose-row]').forEach(row => {
+      row.onclick = e => { if (!e.target.closest('[data-loose-assign]')) open(row.dataset.looseRow); };
+      row.onkeydown = e => { if (e.key === 'Enter') open(row.dataset.looseRow); };
+    });
+    $('looseList').querySelectorAll('[data-loose-assign]').forEach(button =>
+      button.onclick = e => { e.stopPropagation(); openLooseProjectPicker(button.dataset.looseAssign); });
+  };
+  $('looseQ').oninput = paint;
+  paint();
+}
+
 async function showProjectOverview(name) {
   if (!name) return;
+  if (name === LOOSE_PROJECT) return showLooseConversations();
   markSettingsClosed();
   projectOverviewName = name;
   setRoute('project', 'project=' + encodeURIComponent(name), [crumbHome(), { label: name, title: 'Project overview · ' + name }]);
@@ -7417,8 +8356,16 @@ function openMediaLightbox(src, title = 'image') {
 }
 
 async function openTranscriptPath(pathValue) {
-  const key = activeRel;
-  if (!key) return;
+  // A clicked path opens natively on the laptop: html in the browser,
+  // png in the image viewer. Only the ▤ session-edit buttons open the
+  // in-app diff view. The in-app reader below is the fallback when the
+  // native open fails (file gone, path outside the allowed roots).
+  const key = activeRel || '';
+  let out;
+  try { out = await (await fetch('/api/open-native?id=' + encodeURIComponent(key) + '&path=' + encodeURIComponent(pathValue))).json(); }
+  catch { out = { error: 'network failure' }; }
+  if (out && out.ok) { toast('▤ opened ' + shortFilePath(out.path)); return; }
+  if (!key) return errToast(out.error || 'could not open ' + shortFilePath(pathValue));
   if (/\.(png|jpe?g|gif|webp)(?::\d+(?::\d+)?)?$/i.test(pathValue)) {
     const src = '/api/conversation/file-content?id=' + encodeURIComponent(key) + '&path=' + encodeURIComponent(pathValue);
     return openMediaLightbox(src, pathValue);
@@ -7434,6 +8381,16 @@ async function openTranscriptPath(pathValue) {
   if (data.error) { body.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
   body.innerHTML = `<div class="ff-status"><code>${esc(data.path)}</code></div><pre class="md-code"><code>${esc(data.text)}</code></pre>`;
 }
+
+// Paths render in many surfaces (notes, project pages, chat prose) that
+// never run the transcript wiring: one delegate covers them all. The
+// transcript's own per-button handlers stopPropagation, so no double fire.
+document.addEventListener('click', e => {
+  const b = e.target && e.target.closest ? e.target.closest('[data-transcript-path]') : null;
+  if (!b) return;
+  e.preventDefault();
+  openTranscriptPath(b.dataset.transcriptPath);
+});
 
 function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   if (m.role === 'filetouch') {
@@ -7496,8 +8453,14 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
     const full = `<div class="md">${mdRender(m.text, q)}</div>${messageMediaHtml(m.images)}`;
+    const actions = `<div class="msg-actions" aria-label="Message actions">` +
+      `<button type="button" class="msg-copy" data-msg-index="${copyIndex}" title="Copy the message Markdown">copy</button>` +
+      `<button type="button" class="msg-read" data-msg-index="${copyIndex}" title="Read this message aloud">read</button>` +
+      `<button type="button" class="msg-edit" data-msg-index="${copyIndex}" title="Edit this message in the session file">edit</button>` +
+      (m.role === 'assistant' ? `<button type="button" class="msg-regenerate" data-msg-index="${copyIndex}" title="Create another answer from the node before this reply">regenerate</button>` : '') +
+      `</div>`;
     const words = m.text.split(/\s+/).length;
-    return `<div class="msg ${m.role}${keepOpen ? '' : ' can-fold'}" data-words="${words}"${anchor}${idxAttr}>${role}${full}</div>`;
+    return `<div class="msg ${m.role}${keepOpen ? '' : ' can-fold'}" tabindex="0" data-words="${words}"${anchor}${idxAttr}>${role}${full}${actions}</div>`;
   }
   return `<div class="msg ${m.role}"${idxAttr}>${role}${hl(m.text)}</div>`;
 }
@@ -7674,9 +8637,12 @@ function ttsDuration() {
 
 function bindTtsPlayer(player) {
   const toggle = player.querySelector('.tts-toggle');
+  const stop = player.querySelector('.tts-stop');
+  const replay = player.querySelector('.tts-replay');
   const scrub = player.querySelector('.tts-scrub');
   const time = player.querySelector('.tts-time');
   const rate = player.querySelector('.tts-rate');
+  const rateMenu = player.querySelector('.tts-rate-menu');
   const paint = () => {
     const dur = ttsDuration();
     if (dur) {
@@ -7694,6 +8660,18 @@ function bindTtsPlayer(player) {
     if (ttsAudio.paused) ttsAudio.play();
     else ttsAudio.pause();
   };
+  stop.onclick = e => {
+    e.stopPropagation();
+    ttsAudio.pause();
+    ttsAudio.currentTime = 0;
+    paint();
+  };
+  replay.onclick = e => {
+    e.stopPropagation();
+    ttsAudio.currentTime = 0;
+    ttsAudio.play();
+    paint();
+  };
   const seek = () => {
     const dur = ttsDuration();
     if (!dur) return;
@@ -7701,14 +8679,30 @@ function bindTtsPlayer(player) {
   };
   scrub.oninput = seek;
   scrub.onchange = seek;
-  rate.onchange = () => { ttsAudio.playbackRate = Number(rate.value) || 1; };
+  rate.onclick = e => {
+    e.stopPropagation();
+    rateMenu.hidden = !rateMenu.hidden;
+    if (!rateMenu.hidden) rateMenu.querySelector('.on, button').focus();
+  };
+  rateMenu.querySelectorAll('button').forEach(option => option.onclick = e => {
+    e.stopPropagation();
+    const value = Number(option.dataset.rate) || 1;
+    ttsAudio.playbackRate = value;
+    rate.textContent = value + '×';
+    rateMenu.querySelectorAll('button').forEach(item => item.classList.toggle('on', item === option));
+    rateMenu.hidden = true;
+    rate.focus();
+  });
+  player.onfocusout = () => setTimeout(() => {
+    if (!player.contains(document.activeElement)) rateMenu.hidden = true;
+  });
 }
 
 async function readAloudMessage(btn) {
   const message = current && current.messages[Number(btn.dataset.msgIndex)];
   if (!message || !message.text) return;
-  const role = btn.closest('.role');
-  let player = role && role.querySelector('.tts-player');
+  const msg = btn.closest('.msg');
+  let player = msg && msg.querySelector(':scope > .tts-player');
   if (player && ttsActiveBtn === btn && ttsAudio.src) {
     if (ttsAudio.paused) ttsAudio.play();
     else ttsAudio.pause();
@@ -7724,19 +8718,23 @@ async function readAloudMessage(btn) {
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'TTS failed');
-    if (!player && role) {
-      player = document.createElement('span');
+    if (!player && msg) {
+      player = document.createElement('div');
       player.className = 'tts-player';
       player.innerHTML = '<button type="button" class="tts-toggle">pause</button>' +
-        '<input type="range" class="tts-scrub" min="0" max="1000" value="0">' +
+        '<button type="button" class="tts-stop" title="Stop and return to the start">stop</button>' +
+        '<button type="button" class="tts-replay" title="Play again from the start">replay</button>' +
+        '<input type="range" class="tts-scrub" min="0" max="1000" value="0" aria-label="Audio position">' +
         '<span class="tts-time">0:00</span>' +
-        '<select class="tts-rate" title="Playback speed">' +
-        '<option value="0.75">0.75×</option><option value="1" selected>1×</option>' +
-        '<option value="1.25">1.25×</option><option value="1.5">1.5×</option>' +
-        '<option value="2">2×</option></select>';
-      btn.after(player);
-      bindTtsPlayer(player);
+        '<button type="button" class="tts-rate" title="Playback speed" aria-haspopup="menu">1×</button>' +
+        '<div class="tts-rate-menu" role="menu" hidden>' +
+        '<button type="button" data-rate="0.5">0.5×</button><button type="button" data-rate="0.75">0.75×</button>' +
+        '<button type="button" class="on" data-rate="1">1×</button><button type="button" data-rate="1.25">1.25×</button>' +
+        '<button type="button" data-rate="1.5">1.5×</button><button type="button" data-rate="2">2×</button></div>';
+      msg.appendChild(player);
     }
+    // Rebind global audio events when playback moves to another message.
+    if (player) bindTtsPlayer(player);
     ttsActiveBtn = btn;
     window._ttsDuration = (data.durationMs || 0) / 1000;
     const audioRes = await fetch(data.url);
@@ -7746,7 +8744,8 @@ async function readAloudMessage(btn) {
     ttsAudio._blobUrl = URL.createObjectURL(blob);
     ttsAudio.pause();
     ttsAudio.src = ttsAudio._blobUrl;
-    ttsAudio.playbackRate = Number((player && player.querySelector('.tts-rate').value) || 1);
+    const selectedRate = player && player.querySelector('.tts-rate-menu .on');
+    ttsAudio.playbackRate = Number(selectedRate && selectedRate.dataset.rate) || 1;
     await ttsAudio.play();
     btn.textContent = data.cached ? 'replay' : 'read';
   } catch (e) {
@@ -7755,6 +8754,16 @@ async function readAloudMessage(btn) {
   }
   btn.disabled = false;
 }
+
+$('view').addEventListener('mouseup', () => {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return;
+  const node = selection.anchorNode && (selection.anchorNode.nodeType === Node.TEXT_NODE ? selection.anchorNode.parentElement : selection.anchorNode);
+  const msg = node && node.closest && node.closest('.msg.user, .msg.assistant');
+  if (!msg) return;
+  document.querySelectorAll('.msg.actions-open').forEach(el => { if (el !== msg) el.classList.remove('actions-open'); });
+  msg.classList.add('actions-open');
+});
 
 $('view').addEventListener('click', async e => {
   const readBtn = e.target.closest('.msg-read');
@@ -7769,6 +8778,12 @@ $('view').addEventListener('click', async e => {
     openTranscriptEditor(editBtn);
     return;
   }
+  const regenBtn = e.target.closest('.msg-regenerate');
+  if (regenBtn) {
+    e.stopPropagation();
+    regenerateMessage(regenBtn);
+    return;
+  }
   const copy = e.target.closest('.msg-copy');
   if (copy) {
     e.stopPropagation();
@@ -7779,11 +8794,21 @@ $('view').addEventListener('click', async e => {
       // Markdown, code fences, and hidden text exactly as the agent wrote it.
       await navigator.clipboard.writeText(message.text || '');
       copy.textContent = 'copied';
-      setTimeout(() => { if (copy.isConnected) copy.textContent = 'copy md'; }, 1200);
+      setTimeout(() => { if (copy.isConnected) copy.textContent = 'copy'; }, 1200);
     } catch (error) { errToast(error.message || 'Could not copy the message.'); }
     return;
   }
-  if (!e.target.classList.contains('more')) return;
+  if (!e.target.classList.contains('more')) {
+    const msg = e.target.closest('.msg.user, .msg.assistant');
+    if (msg && !e.target.closest('button, a, input, select, textarea, summary, pre')) {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) {
+        document.querySelectorAll('.msg.actions-open').forEach(el => { if (el !== msg) el.classList.remove('actions-open'); });
+        msg.classList.toggle('actions-open');
+      }
+    }
+    return;
+  }
   const msg = e.target.closest('.msg');
   const trunc = msg.querySelector('.trunc'), full = msg.querySelector('.full');
   const expand = full.hidden;
@@ -7796,6 +8821,41 @@ $('view').addEventListener('click', async e => {
 // Edits the message in its native JSONL place. The server keeps the file
 // format valid, stops a running agent first, and reopens it after the save
 // so it resumes with the edited context.
+async function regenerateMessage(btn) {
+  const i = Number(btn.dataset.msgIndex);
+  const message = current && current.messages[i];
+  if (!message || message.role !== 'assistant' || !message.eid || !activeRel) return;
+  if (current.source !== 'pi' && current.source !== 'pi-remote') return errToast('regenerate is available for Pi conversations');
+  const trace = computeTrace(current);
+  // A reply can contain many assistant, tool, and model-change nodes. Walk
+  // through that whole turn to the user node. Branching at the reply's last
+  // internal node makes the old reply look like an unrelated side branch.
+  const roleByNode = new Map(current.messages.filter(m => m.eid).map(m => [m.eid, m.role]));
+  let node = trace.parents.get(message.eid);
+  const seen = new Set();
+  while (node && roleByNode.get(node) !== 'user' && !seen.has(node)) {
+    seen.add(node);
+    node = trace.parents.get(node);
+  }
+  if (!node) return errToast('the message has no earlier user node');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'starting…';
+  // The marker lets the transcript distinguish this transport turn from a
+  // real user message. Markdown does not show the comment if it ever renders.
+  const payload = { id: activeRel, node, prompt: 'Continue.\n<!-- aiconvo:regenerate -->', models: fanModels().slice(0, 1), images: [] };
+  let out = await postJson('/api/node/send', payload);
+  if (out && out.needsForce) {
+    if (confirm('A terminal owns this conversation. Stop the terminal and regenerate?')) out = await postJson('/api/node/send', { ...payload, force: true });
+    else out = null;
+  }
+  btn.disabled = false;
+  btn.textContent = old;
+  if (!out) return;
+  if (out.error) return errToast('regenerate failed: ' + out.error);
+  toast('regenerating — use the arrows below the reply to move between versions');
+}
+
 async function openTranscriptEditor(btn) {
   const i = Number(btn.dataset.msgIndex);
   const key = current && current.key;
@@ -8070,8 +9130,10 @@ function convHead(d) {
   // the right. Every removed action keeps its keyboard path (z zen, c copy,
   // d distill, T tree).
   const title = d.title || '(untitled)';
+  const project = projectOf(d);
   $('chProject').textContent = shortDir(d.cwd);
-  $('chProject').title = 'Open the project overview · ' + projectOf(d);
+  $('chProject').title = project === LOOSE_PROJECT ? 'Open loose conversations' : 'Open the project overview · ' + project;
+  $('chNew').style.display = project === LOOSE_PROJECT ? 'none' : '';
   $('chTitle').textContent = title;
   $('chTitle').title = chTitleHint(title);
   $('convHeadExtra').innerHTML = '';
@@ -8321,7 +9383,7 @@ function wireHead() {
 async function startSiblingConversation() {
   if (!current || window._chNewBusy) return;
   const project = projectOf(current);
-  if (!project || project === '?') return errToast('this conversation has no project');
+  if (!project || project === '?' || project === LOOSE_PROJECT) return errToast('assign this conversation to a project first');
   window._chNewBusy = true;
   const prevKey = activeRel;
   // Everything the new conversation inherits is known NOW, from caches:
@@ -8599,9 +9661,11 @@ function agentComposerHtml(d) {
     <div id="slashPop" class="slash-pop" hidden></div>
     <textarea id="agentText" rows="1" placeholder="say the word…"></textarea>
     <div class="agent-thumbs" id="agentThumbs"></div>
+    <div class="agent-ctx" id="agentCtx"></div>
     <div class="agent-compose-row">
       ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
+      <button id="agentAt" type="button" title="Add project map sections or conversation chat (@). They ride in the system prompt.">@</button>
       <button id="agentTree" type="button" title="Open the conversation tree (shift+T): branches, forks, parallel replies">tree</button>
       <button id="agentAttach" type="button">attach image</button>
       <input id="agentFiles" type="file" accept="image/*" multiple hidden>
@@ -8677,7 +9741,7 @@ async function headlessSendFromComposer(btn, promptOverride) {
   if ($('liveStrip')) $('liveStrip').hidden = false;
   const images = [];
   if (fromBox) for (const img of (window._agentImages || [])) images.push(await shrinkAgentImage(img));
-  const payload = { id: key, prompt, node, models, images };
+  const payload = { id: key, prompt, node, models, images, context: attachedContext() };
   let out = await postJson('/api/node/send', payload);
   if (out && out.needsForce) {
     if (confirm('A terminal owns this conversation. Stop the terminal and send from the web?'))
@@ -8700,6 +9764,7 @@ async function headlessSendFromComposer(btn, promptOverride) {
     updateComposeMin();
   }
   traceLeaves.delete(key);
+  fanoutFocus.delete(key);
   compareCache.delete(key);
   if (out.queued) { toast('queued into the running turn — pi picks it up as a follow-up (session model)'); return true; }
   // Seed the shared stage before the first SSE delta. Every later event carries
@@ -8803,6 +9868,43 @@ function slashGroupOf(source) {
   return source === 'extension' ? 'extensions' : source === 'skill' ? 'skills' : 'prompts';
 }
 
+// Keep the shared / and @ palette inside the visible reading area. A full
+// transcript has room above the sticky composer. A new transcript has room
+// below it. The palette uses the larger side and scrolls when neither fits.
+function placeComposerPalette(pop) {
+  const dock = $('composerDock');
+  if (!pop || pop.hidden || !dock) return;
+  const view = $('view');
+  const dockRect = dock.getBoundingClientRect();
+  const viewRect = view ? view.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const vv = window.visualViewport;
+  const vvTop = vv ? vv.offsetTop : 0;
+  const vvBottom = vvTop + (vv ? vv.height : window.innerHeight);
+  const top = Math.max(viewRect.top, vvTop);
+  const bottom = Math.min(viewRect.bottom, vvBottom);
+  const above = Math.max(0, dockRect.top - top - 6);
+  const below = Math.max(0, bottom - dockRect.bottom - 6);
+  const openBelow = below > above;
+  pop.classList.toggle('open-below', openBelow);
+  pop.style.maxHeight = Math.max(48, Math.min(340, Math.floor(openBelow ? below : above))) + 'px';
+}
+
+function showComposerPalette(pop) {
+  if (!pop) return;
+  pop.hidden = false;
+  placeComposerPalette(pop);
+  requestAnimationFrame(() => placeComposerPalette(pop));
+  if (window._composerPalettePlacementBound) return;
+  window._composerPalettePlacementBound = true;
+  const placeCurrent = () => {
+    const currentPop = $('slashPop');
+    if (currentPop && !currentPop.hidden) requestAnimationFrame(() => placeComposerPalette(currentPop));
+  };
+  window.addEventListener('resize', placeCurrent, { passive: true });
+  $('view').addEventListener('scroll', placeCurrent, { passive: true });
+  if (window.visualViewport) visualViewport.addEventListener('resize', placeCurrent, { passive: true });
+}
+
 function hideSlashPop() {
   const p = $('slashPop');
   if (p) { p.hidden = true; p.innerHTML = ''; }
@@ -8867,13 +9969,14 @@ function openSlashPalette() {
   const pop = $('slashPop');
   if (!pop) return;
   if (window._slashDetached && !pop.hidden) return hideSlashPop(); // toggle
+  hideAtPop({ silent: true });
   window._slashOpen = false;
   window._slashDetached = true;
   window._slashSel = 0;
   pop.innerHTML = '<div class="slash-inp-row"><span class="slash-lead">/</span>' +
     '<input id="slashInput" type="text" placeholder="command · enter runs · tab completes · esc closes" spellcheck="false" autocomplete="off"></div>' +
     '<div id="slashRows"></div>';
-  pop.hidden = false;
+  showComposerPalette(pop);
   const inp = $('slashInput');
   inp.oninput = () => { window._slashSel = 0; paintSlashPop(); };
   inp.onkeydown = e => {
@@ -8927,6 +10030,7 @@ async function paintSlashPop() {
     ? slashRowsHtml(window._slashList, window._slashSel)
     : '<div class="slash-hint">no matching command</div>';
   wireSlashRows(host);
+  placeComposerPalette($('slashPop'));
 }
 
 // The inline palette: typing / as the first character of the composer.
@@ -8938,11 +10042,11 @@ async function updateSlashPop(ta) {
   const wanted = ta.value;
   let cmds;
   try {
-    if (!pop.childElementCount) { pop.innerHTML = '<div class="slash-hint">loading pi commands…</div>'; pop.hidden = false; }
+    if (!pop.childElementCount) { pop.innerHTML = '<div class="slash-hint">loading pi commands…</div>'; showComposerPalette(pop); }
     cmds = await ensureSlashCmds(activeRel);
   } catch (e) {
     pop.innerHTML = `<div class="slash-hint">${esc(e.message || 'could not load commands')}</div>`;
-    pop.hidden = false;
+    showComposerPalette(pop);
     return;
   }
   const now = $('agentText');
@@ -8955,8 +10059,302 @@ async function updateSlashPop(ta) {
   window._slashSel = Math.min(window._slashSel || 0, window._slashList.length - 1);
   pop.innerHTML = slashRowsHtml(window._slashList, window._slashSel);
   wireSlashRows(pop);
-  pop.hidden = false;
+  showComposerPalette(pop);
   window._slashOpen = true;
+}
+
+// ---- @ palette: attach project maps or conversation chat ----
+// Same detached pop as slash. The user's draft stays untouched. Picked
+// items become chips and ride in the system prompt on every send.
+const AT_KINDS = [
+  { kind: 'map', label: 'map', desc: 'all four project map sections' },
+  { kind: 'overview', label: 'overview', desc: 'high-level description' },
+  { kind: 'intent', label: 'intent', desc: 'durable vision and what matters' },
+  { kind: 'environment', label: 'environment', desc: 'setup, commands, facts' },
+  { kind: 'status', label: 'status', desc: 'current work and unfinished items' },
+];
+let atIndexCache = null;
+let atIndexAt = 0;
+
+async function ensureAtIndex() {
+  if (atIndexCache && Date.now() - atIndexAt < 30000) return atIndexCache;
+  const d = await (await fetch('/api/projects/memory-index')).json();
+  atIndexCache = d.projects || [];
+  atIndexAt = Date.now();
+  return atIndexCache;
+}
+
+function currentProjectName() {
+  const key = (current && current.key) || activeRel;
+  const s = key && sessions.find(x => x.key === key);
+  if (s) {
+    const name = projectOf(s);
+    if (name && name !== '?') return name;
+  }
+  return '';
+}
+
+function attachedContext() {
+  return Array.isArray(window._agentContext) ? window._agentContext : [];
+}
+
+function contextId(c) {
+  if (c && c.type === 'chat') return 'chat:' + c.key + ':' + (c.i == null ? '*' : c.i);
+  return 'map:' + (c && c.project || '') + ':' + (c && c.kind || '');
+}
+function contextHasItem(item) {
+  const id = contextId(item);
+  return attachedContext().some(c => contextId(c) === id);
+}
+
+function atItems(index, query, here) {
+  const q = String(query || '').replace(/^@/, '').toLowerCase();
+  const items = [];
+  const seen = new Set();
+  const push = (p, kindDef, group) => {
+    const hasAny = p.docs && AT_KINDS.some(k => k.kind !== 'map' && p.docs[k.kind]);
+    if (kindDef.kind === 'map' && p.docs && !hasAny) return;
+    if (kindDef.kind !== 'map' && p.docs && p.docs[kindDef.kind] === false) return;
+    const token = kindDef.kind === 'map' ? p.name : p.name + '/' + kindDef.kind;
+    if (seen.has(token)) return;
+    const hay = (token + ' ' + (p.title || '') + ' ' + kindDef.desc).toLowerCase();
+    if (q && !hay.includes(q)) return;
+    seen.add(token);
+    items.push({
+      type: 'map', project: p.name, kind: kindDef.kind, token, group,
+      title: p.title || '', desc: kindDef.desc,
+      added: contextHasItem({ project: p.name, kind: kindDef.kind }),
+    });
+  };
+  const hereProj = here && index.find(p => p.name === here);
+  const others = index.filter(p => p.name !== here);
+  if (hereProj) for (const k of AT_KINDS) push(hereProj, k, 'this project');
+  for (const p of others) {
+    if (!q) push(p, AT_KINDS[0], 'other projects');
+    else for (const k of AT_KINDS) push(p, k, 'other projects');
+  }
+  return items;
+}
+
+function hideAtPop(opts) {
+  if (!window._atOpen && !window._atDetached) return;
+  if (window._atSearchCtl) { try { window._atSearchCtl.abort(); } catch {} window._atSearchCtl = null; }
+  const p = $('slashPop');
+  if (p) { p.hidden = true; p.innerHTML = ''; }
+  const was = window._atDetached;
+  window._atDetached = false;
+  window._atOpen = false;
+  if (was && !(opts && opts.silent)) { const ta = $('agentText'); if (ta) ta.focus(); }
+}
+
+function atRowsHtml(list, sel) {
+  let html = '';
+  let lastGroup = null;
+  list.forEach((c, i) => {
+    if (c.group !== lastGroup) { html += `<div class="slash-group">${esc(c.group)}</div>`; lastGroup = c.group; }
+    const mark = c.added ? ' ✓' : '';
+    const name = c.type === 'chat'
+      ? ('chat ' + (c.title || 'conversation') + (c.i == null ? '' : ' · turn'))
+      : c.token;
+    const desc = c.type === 'chat' ? (c.desc || 'user and assistant messages')
+      : ((c.title ? c.title + ' · ' : '') + c.desc);
+    html += `<div class="slash-row${i === sel ? ' sel' : ''}" data-i="${i}">` +
+      `<span class="slash-name">@${esc(name)}${mark}</span>` +
+      `<span class="slash-desc">${esc(desc)}</span></div>`;
+  });
+  return html;
+}
+
+function wireAtRows(host) {
+  host.querySelectorAll('.slash-row').forEach(r => {
+    r.onmousedown = e => { e.preventDefault(); pickAt(Number(r.dataset.i)); };
+  });
+  const sel = host.querySelector('.slash-row.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+
+function pickAt(i, fillOnly) {
+  const c = (window._atList || [])[i];
+  if (!c) return;
+  if (fillOnly) {
+    const inp = $('slashInput');
+    if (inp) {
+      inp.value = c.type === 'chat' ? (c.title || '') : (c.kind === 'map' ? c.project + '/' : c.token);
+      inp.focus();
+      paintAtPop();
+    }
+    return;
+  }
+  toggleContextItem(c);
+  hideAtPop();
+}
+
+function toggleContextItem(item) {
+  window._agentContext = attachedContext().slice();
+  const id = contextId(item);
+  const i = window._agentContext.findIndex(c => contextId(c) === id);
+  if (i >= 0) window._agentContext.splice(i, 1);
+  else if (item.type === 'chat') {
+    window._agentContext.push({ type: 'chat', key: item.key, ...(item.i == null ? {} : { i: item.i }), title: item.title || '' });
+  } else {
+    window._agentContext.push({ project: item.project, kind: item.kind });
+  }
+  window._ctxTouched = true;
+  renderAgentContext();
+  persistConversationContext();
+}
+
+function contextChipParts(c) {
+  if (c.type === 'chat') {
+    const s = sessions.find(x => x.key === c.key);
+    const title = c.title || (s && (s.timelineTitle || s.title)) || 'conversation';
+    const short = String(title).replace(/\s+/g, ' ').trim().slice(0, 28);
+    return ['chat', c.i == null ? short : short + ' · turn'];
+  }
+  return [c.project || '?', c.kind || ''];
+}
+
+function renderAgentContext() {
+  const box = $('agentCtx');
+  if (!box) return;
+  const items = attachedContext();
+  box.innerHTML = items.map((c, i) => {
+    const [lead, rest] = contextChipParts(c);
+    return `<span class="agent-ctx-chip"><b>@${esc(lead)}</b> ${esc(rest)}<button type="button" data-rm="${i}" title="Remove this context">x</button></span>`;
+  }).join('');
+  box.querySelectorAll('[data-rm]').forEach(b => {
+    b.onclick = () => {
+      window._agentContext.splice(Number(b.dataset.rm), 1);
+      window._ctxTouched = true;
+      renderAgentContext();
+      persistConversationContext();
+    };
+  });
+  const btn = $('agentAt');
+  if (btn) btn.classList.toggle('on', items.length > 0);
+  updateComposeMin();
+}
+
+async function persistConversationContext() {
+  if (!activeRel) return;
+  const items = attachedContext();
+  if (current && current.key === activeRel) current.attachedContext = items.slice();
+  try {
+    await fetch('/api/conversation/attached-context', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: activeRel, context: items }),
+    });
+  } catch {}
+}
+
+function openAtPalette(seed) {
+  const pop = $('slashPop');
+  if (!pop) return;
+  if (window._atDetached && !pop.hidden) return hideAtPop();
+  hideSlashPop();
+  window._slashOpen = false;
+  window._slashDetached = false;
+  window._atOpen = true;
+  window._atDetached = true;
+  window._atSel = 0;
+  pop.innerHTML = '<div class="slash-inp-row"><span class="slash-lead">@</span>' +
+    '<input id="slashInput" type="text" placeholder="project, section, or conversation · enter adds · esc closes" spellcheck="false" autocomplete="off"></div>' +
+    '<div id="slashRows"></div>';
+  showComposerPalette(pop);
+  const inp = $('slashInput');
+  if (seed) inp.value = String(seed).replace(/^@/, '');
+  inp.oninput = () => { window._atSel = 0; paintAtPop(); };
+  inp.onkeydown = e => {
+    e.stopPropagation();
+    const n = (window._atList || []).length;
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
+      e.preventDefault();
+      window._atSel = ((window._atSel || 0) + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+      paintAtPop();
+      return;
+    }
+    if (e.key === 'Tab') { e.preventDefault(); if (n) pickAt(window._atSel || 0, true); return; }
+    if (e.key === 'Escape') { e.preventDefault(); hideAtPop(); return; }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (n) pickAt(window._atSel || 0);
+    }
+  };
+  inp.focus();
+  paintAtPop();
+}
+
+function atChatSnippet(s) {
+  return String(s || '').replace(/\u0001|\u0002/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+async function searchAtChats(q) {
+  if (window._atSearchCtl) window._atSearchCtl.abort();
+  window._atSearchCtl = new AbortController();
+  const signal = window._atSearchCtl.signal;
+  const out = await (await fetch('/api/search?q=' + encodeURIComponent(q + ' type:conversation') + '&limit=8', { signal })).json();
+  let groups = (out.groups || []).filter(g => g.kind === 'conversation' && g.key && g.key !== activeRel);
+  if (out.sem) {
+    try {
+      const sem = await (await fetch('/api/search/semantic?q=' + encodeURIComponent(q), { signal })).json();
+      const extra = (sem.groups || []).filter(g => g.kind === 'conversation' && g.key && g.key !== activeRel);
+      if (extra.length) {
+        const bag = { groups };
+        mergeSemantic(bag, { groups: extra });
+        groups = bag.groups;
+      }
+    } catch (e) { if (e.name === 'AbortError') throw e; }
+  }
+  const items = [];
+  for (const g of groups.slice(0, 6)) {
+    const title = String(g.timelineTitle || g.title || 'conversation').replace(/\s+/g, ' ').trim();
+    const hits = (g.matches || []).filter(m => m.i != null && (m.role === 'user' || m.role === 'assistant'));
+    const hit = hits[0];
+    const item = {
+      type: 'chat', key: g.key, group: 'conversations', title,
+      desc: atChatSnippet((hit && hit.snippet) || '') || 'user and assistant messages',
+    };
+    if (hit) item.i = hit.i;
+    item.added = contextHasItem(item);
+    items.push(item);
+    if (hit) {
+      const full = { type: 'chat', key: g.key, group: 'conversations', title,
+        desc: 'full chat · user and assistant only' };
+      full.added = contextHasItem(full);
+      items.push(full);
+    }
+  }
+  return items;
+}
+async function paintAtPop() {
+  const host = $('slashRows');
+  const inp = $('slashInput');
+  if (!host || !inp || !window._atDetached) return;
+  const q = inp.value;
+  const needle = q.replace(/^@/, '').trim();
+  let index;
+  try {
+    if (!host.childElementCount) host.innerHTML = '<div class="slash-hint">loading…</div>';
+    index = await ensureAtIndex();
+  } catch (e) {
+    host.innerHTML = `<div class="slash-hint">${esc(e.message || 'could not load projects')}</div>`;
+    return;
+  }
+  if (!window._atDetached || $('slashInput') !== inp || inp.value !== q) return;
+  const maps = atItems(index, q, currentProjectName());
+  let chats = [];
+  if (needle.length >= 2) {
+    try { chats = await searchAtChats(needle); }
+    catch (e) { if (e.name === 'AbortError') return; }
+    if (!window._atDetached || $('slashInput') !== inp || inp.value !== q) return;
+  }
+  const matched = maps.concat(chats);
+  window._atList = matched.slice(0, 20);
+  window._atSel = Math.min(window._atSel || 0, Math.max(0, window._atList.length - 1));
+  host.innerHTML = window._atList.length
+    ? atRowsHtml(window._atList, window._atSel)
+    : '<div class="slash-hint">' + (needle.length >= 2 ? 'no matching project, section, or conversation' : 'no matching project or section') + '</div>';
+  wireAtRows(host);
+  placeComposerPalette($('slashPop'));
 }
 
 function fileToImage(file) {
@@ -9066,7 +10464,7 @@ async function sendToAlacritty(btn) {
   try {
     const res = await fetch('/api/conversation/send', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: activeRel, text, images }),
+      body: JSON.stringify({ id: activeRel, text, images, context: attachedContext() }),
     });
     const raw = await res.text();
     let data = {};
@@ -9128,7 +10526,7 @@ function applyAgentPane(data) {
     offline: 'no live terminal — send will open one',
   }[data && data.state] || (data && data.attached ? 'live' : 'no live terminal');
   if (hint) hint.textContent = label + ' · ' + rows + '×' + cols;
-  if ($('agentBarHint')) $('agentBarHint').textContent = data && data.state === 'ready' ? 'type a prompt. / opens slash commands' : label;
+  if ($('agentBarHint')) $('agentBarHint').textContent = data && data.state === 'ready' ? 'type a prompt. / slash · @ project context' : label;
   if (choices) {
     choices.innerHTML = ((data && data.choices) || []).map(c =>
       `<button type="button" data-choice="${esc(c.id)}">${esc(c.label)}</button>`
@@ -9651,7 +11049,7 @@ function updateComposeMin() {
   if (!phoneLayout() || isEink()) { box.classList.remove('compose-min'); return; }
   // A blurred draft rests too: the slim bar still shows its first line.
   const busy = document.activeElement === ta ||
-    (window._agentImages || []).length || window._agentSpeechState;
+    (window._agentImages || []).length || attachedContext().length || window._agentSpeechState;
   box.classList.toggle('compose-min', !busy);
 }
 
@@ -9734,10 +11132,15 @@ function wireAgentComposer() {
   const isPi = !!runBtn; // pi composers have the web send button
   const slashBtn = $('agentSlash');
   if (slashBtn) slashBtn.onclick = () => openSlashPalette();
+  const atBtn = $('agentAt');
+  if (atBtn) atBtn.onclick = () => openAtPalette();
+  renderAgentContext();
   const treeBtn = $('agentTree');
   if (treeBtn) treeBtn.onclick = () => { if (activeRel) showTree(activeRel); };
   window._slashOpen = false;
   window._slashDetached = false; // a re-render replaced the pop's DOM
+  window._atOpen = false;
+  window._atDetached = false;
   if (send) send.onclick = () => {
     if (!isPi && ta && ta.value.startsWith('/')) {
       agentLiveQueue(async () => {
@@ -9761,6 +11164,14 @@ function wireAgentComposer() {
         // pi: the palette autocompletes pi's real commands over RPC. No
         // hidden terminal, no keystroke streaming — the TUI adapter is
         // pi's own get_commands + prompt.
+        if (v === '@' || (v.startsWith('@') && !v.includes('\n') && !/\s/.test(v))) {
+          const q = v.slice(1);
+          ta.value = '';
+          autoGrowCompose();
+          updateComposeMin();
+          openAtPalette(q);
+          return;
+        }
         if (v.startsWith('/')) updateSlashPop(ta);
         else if (!window._slashDetached) hideSlashPop();
         return;
@@ -9898,6 +11309,7 @@ function wireAgentComposer() {
 async function renderConv(scroll) {
   const d = current;
   if (!d) return;
+  const seq = conversationLoadSeq;
   // A live-tail re-render must not steal the composer: keep its text,
   // caret, and focus across the DOM replacement.
   const oldTa = $('agentText');
@@ -9912,7 +11324,7 @@ async function renderConv(scroll) {
   const hl = t => qrx ? esc(t).replace(qrx, m => `<mark>${m}</mark>`) : esc(t);
   const entry = sessions.find(s => s.key === activeRel) || {};
   const related = await relatedFor(activeRel);
-  if (d !== current) return;
+  if (d !== current || seq !== conversationLoadSeq) return;
   const head = convHead(d, entry, related);
   if (mode === 'uniqcmd' || mode === 'files') {
     $('view').innerHTML = head + `<div class="dprog">` + renderDerived(d, mode, hl) + `</div>` + agentComposerHtml(d);
@@ -9963,11 +11375,25 @@ async function renderConv(scroll) {
     msgs = merged;
   }
   const msgIndexes = new Map(d.messages.map((m, i) => [m, i]));
-  const groups = (d.source !== 'claude' && mode !== 'all') ? await loadCompare(d.key) : [];
-  if (d !== current) return;
+  // Merge transport is a real user turn for pi, but not for the reader.
+  msgs = msgs.filter(m => !isFanoutBridgeMessage(m));
+  // Regenerate must send a real user turn to Pi. Hide that transport bridge
+  // when it is one of several paths. The ancestor can be an old assistant or
+  // tool node because earlier app versions branched at the wrong node.
+  if (trace) {
+    const regenerateBridges = new Set(d.messages.filter(m =>
+      isRegenerateBridgeMessage(m) &&
+      (trace.children.get(trace.parents.get(m.eid)) || []).filter(id => trace.carries.has(id)).length > 1
+    ).map(m => m.eid));
+    if (regenerateBridges.size) msgs = msgs.filter(m => !regenerateBridges.has(m.eid));
+  }
+  // The transcript view is always 'all' now. Settled fan-out still needs
+  // the compare row: without it the live columns vanish and only one branch stays.
+  const groups = d.source !== 'claude' ? await loadCompare(d.key) : [];
+  if (d !== current || seq !== conversationLoadSeq) return;
   const groupByNode = new Map(groups.map(g => [g.node, g]));
   const pills = trace ? tracePills(d, trace, msgs, groupByNode) : new Map();
-  const cmp = compareAnchors(d, msgs, groups, trace);
+  const cmp = compareAnchors(d, msgs, groups, trace || computeTrace(d), fanoutFocus.get(d.key) || null);
   const compares = cmp.rows;
   const skipAns = cmp.skip;
   // Branch-aware transcript: a branch is a deliberate strategy (a side
@@ -10023,7 +11449,7 @@ async function renderConv(scroll) {
     const isHit = m => !!qtest && qtest.test(m.text || '');
     if (trace || !msgs[i].off) {
       const m = msgs[i];
-      if (!(m.role === 'assistant' && skipAns.has(m.eid))) {
+      if (!skipAns.has(m.eid)) {
         const plainReasoning = m.role === 'assistant' && m.eid && toolTurnEids.has(m.eid);
         if (plainReasoning || ['tool', 'toolresult', 'thinking'].includes(m.role)) {
           const html = msgBlock(m, hl, isHit(m), q, msgIndexes.get(m));
@@ -10053,7 +11479,8 @@ async function renderConv(scroll) {
     flushTools();
     let j = i;
     while (j < msgs.length && msgs[j].off) j++;
-    const group = msgs.slice(i, j);
+    const group = msgs.slice(i, j).filter(m => !skipAns.has(m.eid));
+    if (!group.length) { i = j; continue; }
     const chat = group.filter(m => m.role === 'user' || m.role === 'assistant').length;
     blocks.push(`<details class="branchblock"${group.some(isHit) ? ' open' : ''}>` +
       `<summary>⑂ other branch · ${chat || group.length} message${(chat || group.length) > 1 ? 's' : ''} · not on the current path</summary>` +
@@ -10100,6 +11527,7 @@ async function renderConv(scroll) {
   $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     e.preventDefault(); // a link inside a <summary> must not toggle the fold
+    rememberConversationFileReturn(b);
     openToolCallFile(activeRel, b.dataset.fileDiff, b.dataset.fileTs, b.dataset.fileAnchor, b.dataset.fileCall);
   });
   $('view').querySelectorAll('[data-media-src]').forEach(b => b.onclick = e => {
@@ -10134,10 +11562,13 @@ async function renderConv(scroll) {
     else if (pillEl) pillEl.scrollIntoView({ block: 'center' });
     else if (scroll === 'top') $('view').scrollTop = 0;
     else if (scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
-    else if (scroll === 'compare') {
+    else if (scroll === 'compare' || (typeof scroll === 'string' && scroll.startsWith('compare:'))) {
+      const wanted = typeof scroll === 'string' && scroll.startsWith('compare:') ? scroll.slice(8) : '';
+      const row = wanted ? $('view').querySelector(`.cmp-row[data-cmp-node="${CSS.escape(wanted)}"]`) : null;
       const comparisons = [...$('view').querySelectorAll('.cmpblock')];
-      const cmp = comparisons[comparisons.length - 1];
+      const cmp = wanted ? (row && row.closest('.cmpblock')) : comparisons[comparisons.length - 1];
       if (cmp) { cmp.open = true; cmp.scrollIntoView({ block: 'center' }); }
+      else if (wanted) errToast('that parallel reply group is not available — reload the tree');
       else $('view').scrollTop = $('view').scrollHeight;
     }
     else if (mk) mk.scrollIntoView({ block: 'center' });
@@ -10177,6 +11608,9 @@ async function renderConv(scroll) {
 // The transcript is one path through the entry tree. The selected leaf per
 // conversation lives here; default is the file's own leaf (the active path).
 const traceLeaves = new Map();
+// The tree can focus one fan-out choice. This is view state, separate from
+// the session file leaf. It keeps the exact comparison open across refreshes.
+const fanoutFocus = new Map(); // conversation key → { node, choice, id }
 
 function computeTrace(d) {
   const raw = d && d.entryParents;
@@ -10219,14 +11653,39 @@ function deepestUnder(trace, id) {
   return best;
 }
 
+function isMergeBridgeText(text) {
+  const t = String(text || '');
+  if (/<!--\s*aiconvo:merge\s*-->/.test(t)) return true;
+  return /^\d+ models answered my last message in parallel\./i.test(t.trim());
+}
+function isBothBridgeText(text) {
+  return /<!--\s*aiconvo:both\s*-->/.test(String(text || ''));
+}
+function isMergeBridgeMessage(m) {
+  return !!(m && m.role === 'user' && isMergeBridgeText(m.text));
+}
+function isBothBridgeMessage(m) {
+  return !!(m && isBothBridgeText(m.text));
+}
+function isFanoutBridgeMessage(m) {
+  return isMergeBridgeMessage(m) || isBothBridgeMessage(m);
+}
+function isRegenerateBridgeMessage(m) {
+  if (!m || m.role !== 'user' || !m.eid) return false;
+  const text = String(m.text || '').trim();
+  return /^continue\.?$/i.test(text) || /<!--\s*aiconvo:regenerate\s*-->/.test(text);
+}
+
 function branchPreview(d, trace, childId) {
   const sub = new Set([childId]);
   const stack = [childId];
   while (stack.length) {
     for (const c of trace.children.get(stack.pop()) || []) { sub.add(c); stack.push(c); }
   }
-  const first = d.messages.find(m => m.eid && sub.has(m.eid) && (m.role === 'user' || m.role === 'assistant'));
-  const modelMsg = d.messages.find(m => m.eid && sub.has(m.eid) && m.role === 'assistant' && m.model);
+  const branchMessages = d.messages.filter(m => m.eid && sub.has(m.eid));
+  const bridge = branchMessages.find(isRegenerateBridgeMessage);
+  const first = branchMessages.find(m => (m.role === 'user' || m.role === 'assistant') && m !== bridge);
+  const modelMsg = branchMessages.find(m => m.role === 'assistant' && m.model);
   return {
     text: first ? first.text.replace(/\s+/g, ' ').slice(0, 60) : '(no message)',
     model: modelMsg ? modelMsg.model : null,
@@ -10247,14 +11706,15 @@ function tracePills(d, trace, msgs, groupByNode = new Map()) {
     if (at < 0) continue;
     let anchor = eid;
     while (anchor && !displayed.has(anchor)) anchor = trace.parents.get(anchor);
+    const versioned = carrying.some(k => d.messages.some(m => m.eid === k && isRegenerateBridgeMessage(m)));
     const alts = carrying.map((k, i) => {
       const p = branchPreview(d, trace, k);
-      return `<button class="bp-alt${i === at ? ' on' : ''}" data-pill-alt="${esc(k)}" data-eid="${esc(eid)}" title="Switch the transcript to this branch">${i === at ? '● ' : ''}${i + 1} · ${p.model ? esc(p.model) + ' · ' : ''}${esc(p.text)}</button>`;
+      return `<button class="bp-alt${i === at ? ' on' : ''}" data-pill-alt="${esc(k)}" data-eid="${esc(eid)}" title="Switch the transcript to this ${versioned ? 'version' : 'branch'}">${i === at ? '● ' : ''}${i + 1} · ${p.model ? esc(p.model) + ' · ' : ''}${esc(p.text)}</button>`;
     }).join('');
     const pill = `<div class="branchpill" data-eid="${esc(eid)}">
-      <button data-pill-go="-1" data-eid="${esc(eid)}"${at === 0 ? ' disabled' : ''} title="previous branch">◀</button>
-      <span>⑂ branch ${at + 1}/${carrying.length}</span>
-      <button data-pill-go="1" data-eid="${esc(eid)}"${at === carrying.length - 1 ? ' disabled' : ''} title="next branch">▶</button>
+      <button data-pill-go="-1" data-eid="${esc(eid)}"${at === 0 ? ' disabled' : ''} title="previous ${versioned ? 'version' : 'branch'}">◀</button>
+      <span>${versioned ? `version ${at + 1} of ${carrying.length}` : `⑂ branch ${at + 1}/${carrying.length}`}</span>
+      <button data-pill-go="1" data-eid="${esc(eid)}"${at === carrying.length - 1 ? ' disabled' : ''} title="next ${versioned ? 'version' : 'branch'}">▶</button>
       <details><summary>list</summary><div class="bp-list">${alts}</div></details>
     </div>`;
     const a = anchor || '';
@@ -10298,32 +11758,48 @@ function compareRowHtml(g, trace, expanded) {
     `<div class="md">${mdRender(a.text)}</div></div>`).join('');
   const models = fanModels();
   const mergeModel = models[0] ? models[0].modelId : 'session model';
-  const row = `<div class="cmp-row" data-cmp-node="${esc(g.node)}"><div class="cmp-cols">${cols}</div>
-    <div class="cmp-bar"><button class="primary" data-cmp-merge>merge ${g.answers.length} of ${g.answers.length}</button>
+  const focus = current && fanoutFocus.get(current.key);
+  const bothOn = !!(focus && focus.node === g.node && focus.choice === 'both')
+    || !!(trace && g.both && trace.onPath.has(g.both.id));
+  const row = `<div class="cmp-row${bothOn ? ' both-on' : ''}" data-cmp-node="${esc(g.node)}"><div class="cmp-cols">${cols}</div>
+    <div class="cmp-bar">${bothOn ? '<b>both selected · your next message continues with both replies in context</b>' : ''}
+    <button class="primary" data-cmp-merge>merge ${g.answers.length} of ${g.answers.length}</button>
     <button data-cmp-mmodel title="The model that writes the merged reply">◇ ${esc(mergeModel)} ▾</button>
     <span class="dim">the merge model reads the whole conversation and the picked replies, then writes one better reply — you continue from it</span></div></div>`;
   const names = g.answers.map(a => String(a.model || 'model').split('/').pop()).join(' · ');
   return `<details class="cmpblock"${expanded ? ' open' : ''}><summary>⤑ ${g.answers.length} parallel replies · ${esc(names)}</summary>${row}</details>`;
 }
 
-// Returns { rows: Map(anchorEid → html), skip: Set(answer eids) }.
-// A group is expanded only while nothing on the path continues after it;
-// then its answers render inside the columns, not as plain messages.
-function compareAnchors(d, msgs, groups, trace) {
+// Returns { rows: Map(anchorEid → html), skip: Set(package eids) }.
+// Hide each answer package from its branch root through its final reply.
+// Do not hide descendants after the answer: they are later conversation.
+function compareHideIds(trace, nodeId, ansIds) {
+  const hide = new Set(ansIds);
+  if (!trace) return hide;
+  for (const answer of ansIds) {
+    const seen = new Set();
+    for (let cur = answer; cur && cur !== nodeId && !seen.has(cur); cur = trace.parents.get(cur)) {
+      seen.add(cur);
+      hide.add(cur);
+    }
+  }
+  return hide;
+}
+function compareAnchors(d, msgs, groups, trace, focus = null) {
   const rows = new Map();
   const skip = new Set();
   if (!groups.length) return { rows, skip };
   const displayedIds = msgs.map(m => m.eid).filter(Boolean);
   const displayed = new Set(displayedIds);
   for (const g of groups) {
-    const ansIds = new Set(g.answers.map(a => a.id));
+    const hide = compareHideIds(trace, g.node, g.answers.map(a => a.id));
+    for (const id of hide) skip.add(id);
     let lastOther = '';
-    for (const id of displayedIds) if (!ansIds.has(id)) lastOther = id;
+    for (const id of displayedIds) if (!hide.has(id)) lastOther = id;
     let anchor = g.node;
     if (trace) while (anchor && !displayed.has(anchor)) anchor = trace.parents.get(anchor);
     else if (!displayed.has(anchor)) anchor = '';
-    const expanded = !!anchor && anchor === lastOther;
-    if (expanded) for (const id of ansIds) skip.add(id);
+    const expanded = !!(focus && focus.node === g.node) || (!!anchor && anchor === lastOther);
     const a = anchor || '';
     rows.set(a, (rows.get(a) || '') + compareRowHtml(g, trace, expanded));
   }
@@ -10388,6 +11864,7 @@ async function mergeCompareGroup(row, btn) {
   if (out.error) return errToast('merge failed: ' + out.error);
   compareCache.delete(activeRel);
   traceLeaves.delete(activeRel); // the merged reply becomes the active branch
+  fanoutFocus.delete(activeRel);
   toast('merging ' + out.answers + ' replies — the merged reply lands here and becomes the active branch');
 }
 
@@ -10770,6 +12247,10 @@ function parallelLedgersFor(key) {
 function renderParallelStage() {
   const stage = $('parallelStage');
   if (!stage) return;
+  // Settled compare owns the turn. Do not stack a second live copy under it.
+  if ($('view') && $('view').querySelector('.cmpblock')) {
+    stage.hidden = true; stage.innerHTML = ''; delete stage.dataset.fanout; return;
+  }
   const entries = parallelLedgersFor(activeRel);
   // The columns hold their ground until the settled comparison replaces
   // them: 'fanout-settled' clears these ledgers AFTER the reintegrated
@@ -10969,6 +12450,8 @@ async function open(rel, scroll) {
     // it into the next one (a leaked flag streams every keystroke to a PTY).
     window._agentLiveOn = false;
     window._agentLiveText = '';
+    window._ctxTouched = false;
+    if (!winSwitching && !winPending) window._agentContext = [];
     setRoute('conversation', encodeURIComponent(rel), convCrumbs(rel));
     render();
   }
@@ -10988,6 +12471,9 @@ async function open(rel, scroll) {
     return;
   }
   current = next;
+  if (!(window._ctxTouched && current && current.key === rel) && !winSwitching && !winPending) {
+    window._agentContext = Array.isArray(next.attachedContext) ? next.attachedContext.slice() : [];
+  }
   await renderConv(scroll);
 }
 
@@ -11128,7 +12614,14 @@ function mdRender(src, q = '') {
   // Multi-word queries mark each term (matching the AND search semantics).
   const qr = q ? termRegex(q) : null;
   const mark = h => qr ? h.replace(qr, m => `<mark>${m}</mark>`) : h;
-  const inline = s => mark(esc(s))
+  // Absolute file paths in chat prose become open buttons: html lands in
+  // the browser, png in the image viewer — native apps on the laptop
+  // (openTranscriptPath). The text is already HTML-escaped here, so the
+  // match is safe inside an attribute. The last char must be a word char:
+  // this drops sentence punctuation glued to the path.
+  const pathify = h => h.replace(/(^|[\s(*`>;])((?:~\/|\/)(?:[\w.@+-]+\/)+[\w.@+-]*[A-Za-z0-9_])/g,
+    (_, pre, p) => `${pre}<button type="button" class="msg-path" data-transcript-path="${p}" title="Open ${p}">${p}</button>`);
+  const inline = s => pathify(mark(esc(s)))
     .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
     .replace(/\*\*((?:[^*]|\*(?!\*))+?)\*\*/g, '<b>$1</b>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>')
@@ -11348,7 +12841,88 @@ function noteFileEditor(text, pathLabel, context, section) {
 // ---- conversation tree (design: root at the top, y axis is time) ----
 // Each box is one user message or one merged assistant turn. Solid boxes and
 // green edges mark the current branch; dashed marks other branches.
-const TREE_COLW = 300, TREE_ROWH = 76;
+const TREE_COLW = 300, TREE_ROWH = 96;
+
+function shortModelName(m) {
+  return String(m || 'model').split('/').pop();
+}
+function treeFirstAssistant(start, children) {
+  const queue = [start];
+  const seen = new Set();
+  while (queue.length) {
+    const c = queue.shift();
+    if (!c || seen.has(c.id)) continue;
+    seen.add(c.id);
+    if (c.role === 'assistant') return c;
+    for (const k of children.get(c.id) || []) queue.push(k);
+  }
+  return null;
+}
+// Parallel replies become ONE box. The server supplies typed groups. The
+// legacy inference is only a compatibility path for a tab on an old server.
+function collapseFanoutTree(raw, typedGroups = []) {
+  const byId = new Map(raw.map(n => [n.id, n]));
+  const children = new Map();
+  for (const n of raw) {
+    if (!n.parent || !byId.has(n.parent)) continue;
+    if (!children.has(n.parent)) children.set(n.parent, []);
+    children.get(n.parent).push(n);
+  }
+  let groups = Array.isArray(typedGroups) ? typedGroups : [];
+  if (!groups.length) {
+    groups = [];
+    for (const n of raw) {
+      const answers = [], seen = new Set();
+      let both = null, merge = null;
+      for (const child of children.get(n.id) || []) {
+        if (child.bridge === 'both') { both = child.id; continue; }
+        if (child.bridge === 'merge' || isMergeBridgeText(child.title)) {
+          const answer = treeFirstAssistant(child, children);
+          if (answer) merge = { bridge: child.id, answer: answer.id };
+          continue;
+        }
+        const answer = child.role === 'assistant' ? child : treeFirstAssistant(child, children);
+        if (answer && answer.bridge !== 'both' && !seen.has(answer.id)) { seen.add(answer.id); answers.push(answer.id); }
+      }
+      if (answers.length >= 2) groups.push({ node: n.id, answers, both, merge });
+    }
+  }
+  const hidden = new Set();
+  const boxes = [];
+  const memberToBox = new Map();
+  for (const group of groups) {
+    const n = byId.get(group.node);
+    if (!n) continue;
+    const models = (group.answers || []).map(id => byId.get(id)).filter(Boolean);
+    const both = group.both ? byId.get(group.both) : null;
+    const mergeUser = group.merge && group.merge.bridge ? byId.get(group.merge.bridge) : null;
+    const mergeAsst = group.merge && group.merge.answer ? byId.get(group.merge.answer) : null;
+    if (models.length < 2) continue;
+    const picks = models.map(a => ({
+      kind: 'model', id: a.id, model: a.model || 'model', title: a.title, ts: a.jumpTs || a.ts, key: a.key, active: !!a.active,
+    }));
+    picks.push({ kind: 'both', id: both ? both.id : null, model: 'both', title: 'both replies in context', key: n.key, active: !!(both && both.active) });
+    if (mergeAsst) picks.push({ kind: 'merge', id: mergeAsst.id, model: mergeAsst.model || 'merge', title: mergeAsst.title, ts: mergeAsst.jumpTs || mergeAsst.ts, key: mergeAsst.key, active: !!mergeAsst.active });
+    const members = [...models, both, mergeUser, mergeAsst].filter(Boolean);
+    const box = {
+      id: 'fanbox:' + n.id, parent: n.id, role: 'fanout',
+      title: models.length + ' replies · ' + models.map(a => shortModelName(a.model)).join(' · '),
+      ts: models[0].ts, lastTs: members.map(m => m.lastTs || m.ts).sort().pop(),
+      jumpTs: models[0].jumpTs || models[0].ts,
+      model: undefined, count: models.length, chars: members.reduce((s, m) => s + (m.chars || 0), 0),
+      active: members.some(m => m.active), key: n.key, picks, promptId: n.id,
+    };
+    boxes.push(box);
+    for (const m of members) { hidden.add(m.id); memberToBox.set(m.id, box); }
+  }
+  const nodes = raw.filter(n => !hidden.has(n.id)).concat(boxes);
+  for (const n of nodes) {
+    if (n.role === 'fanout') continue;
+    const box = n.parent && memberToBox.get(n.parent);
+    if (box) n.parent = box.id;
+  }
+  return nodes;
+}
 
 async function showTree(key) {
   activeRel = key;
@@ -11357,7 +12931,7 @@ async function showTree(key) {
   try { t = await (await fetch('/api/tree?id=' + encodeURIComponent(key))).json(); }
   catch { return errToast('could not load the conversation tree'); }
   if (t.error) return errToast(t.error);
-  const nodes = t.nodes;
+  const nodes = collapseFanoutTree(t.nodes || [], t.fanouts || []);
   const byId = new Map(nodes.map(n => [n.id, n]));
   const children = new Map();
   for (const n of nodes) {
@@ -11398,13 +12972,14 @@ async function showTree(key) {
     n.tlabel = (day !== prevDay ? day + ' ' : '') + time;
     prevDay = day;
   }
-  const bw = TREE_COLW - 40, bh = 44;
+  const bw = TREE_COLW - 40;
+  const boxHeight = n => n.role === 'fanout' ? 86 : 44;
   const W = (nextCol + 1) * TREE_COLW + 20, H = rows.length * TREE_ROWH + 120;
   const px = n => n.col * TREE_COLW + 20, py = n => n.row * TREE_ROWH + 10;
   const edges = nodes.map(n => {
     const p = n.parent && byId.get(n.parent);
     if (!p) return '';
-    const x1 = px(p) + bw / 2, y1 = py(p) + bh, x2 = px(n) + bw / 2, y2 = py(n);
+    const x1 = px(p) + bw / 2, y1 = py(p) + boxHeight(p), x2 = px(n) + bw / 2, y2 = py(n);
     const act = n.active && p.active;
     const stroke = act ? 'var(--accent)' : n.fork ? 'var(--magenta)' : 'var(--border-strong)';
     return `<path d="M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}" fill="none" stroke="${stroke}" stroke-width="${act ? 2 : 1}"${act ? '' : ' stroke-dasharray="4 3"'}/>`;
@@ -11416,10 +12991,15 @@ async function showTree(key) {
   // The "here" marker: the newest box on the active path. The next send
   // continues from this box; read never moves it.
   const hereNode = [...rows].reverse().find(n => n.active) || null;
+  const fanChoicesHtml = n => (n.picks || []).map(p => {
+    const label = p.kind === 'both' ? 'both · all replies' : p.kind === 'merge' ? 'merge · ' + (p.title || shortModelName(p.model)) : shortModelName(p.model) + ' · ' + (p.title || 'reply');
+    const tip = p.kind === 'both' ? 'Continue with every reply in context' : p.kind === 'merge' ? 'Continue from the merged reply: ' + (p.title || '') : `Continue from ${p.model || 'this model'} only: ${p.title || ''}`;
+    return `<button class="tfanchoice${p.active ? ' current on' : ''}" data-fan-choice="${esc(p.id || '')}" data-fan-kind="${esc(p.kind)}" title="${esc(tip)}">${esc(label)}</button>`;
+  }).join('');
   const boxes = nodes.map(n =>
     `<div class="tnode ${n.role}${n.active ? '' : ' inactive'}${n.fork ? ' fork' : ''}${n === hereNode ? ' here' : ''}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc(n.fork ? 'in fork: ' + forkTitle(n) : n.title)}">
-      <div class="tm"><b>${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role !== 'user' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} ${n.role === 'work' ? 'steps' : 'msgs'}</span>` : ''}${n.tools && n.role !== 'work' ? `<span class="ttools" title="this box carries ${n.tools} tool call${n.tools > 1 ? 's' : ''} — continue and fork keep them">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
-      <div class="tt">${esc(n.title)}</div></div>`).join('');
+      <div class="tm"><b>${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : n.role === 'fanout' ? 'parallel' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role !== 'user' && n.role !== 'fanout' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} ${n.role === 'work' ? 'steps' : 'msgs'}</span>` : ''}${n.tools && n.role !== 'work' ? `<span class="ttools" title="this box carries ${n.tools} tool call${n.tools > 1 ? 's' : ''} — continue and fork keep them">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
+      <div class="tt">${esc(n.title)}</div>${n.role === 'fanout' ? `<div class="tfanchoices">${fanChoicesHtml(n)}</div>` : ''}</div>`).join('');
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
       <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges}</svg>${boxes}
@@ -11431,11 +13011,50 @@ async function showTree(key) {
   treeNav = { key, byId, children, roots, wrap, source: t.source, sel: leaf ? leaf.id : null };
   // Click = select (the status bar shows the verbs) · double click = read.
   wrap.querySelectorAll('.tnode').forEach(el => {
-    el.onclick = () => treeSetSel(el.dataset.tn, { scroll: false });
-    el.ondblclick = () => {
+    el.onclick = e => {
+      if (e.target.closest('[data-fan-choice]')) return;
+      treeSetSel(el.dataset.tn, { scroll: false });
+    };
+    el.ondblclick = e => {
+      if (e.target.closest('[data-fan-choice]')) return;
       const n = byId.get(el.dataset.tn);
       if (n) openAtTs(n.key || key, n.jumpTs);
     };
+  });
+  wrap.querySelectorAll('[data-fan-choice]').forEach(el => el.onclick = async e => {
+    e.stopPropagation();
+    const box = el.closest('.tnode');
+    if (!box) return;
+    treeSetSel(box.dataset.tn, { scroll: false });
+    const n = byId.get(box.dataset.tn);
+    let pickId = el.dataset.fanChoice || null;
+    if (!pickId && el.dataset.fanKind === 'both' && n) {
+      el.disabled = true;
+      const old = el.textContent;
+      el.textContent = 'building both…';
+      const out = await postJson('/api/node/both', { id: n.key || key, node: n.promptId });
+      el.disabled = false;
+      el.textContent = old;
+      if (!out || out.error) {
+        const stale = out && out.error === 'not found';
+        return errToast(stale ? 'server update pending — try both again after aiconvo restarts' : ((out && out.error) || 'could not build both'));
+      }
+      pickId = out.id;
+      el.dataset.fanChoice = pickId;
+      const pick = (n.picks || []).find(p => p.kind === 'both');
+      if (pick) pick.id = pickId;
+    }
+    treeNav.fanPick = pickId;
+    treeNav.fanPickKind = el.dataset.fanKind;
+    box.querySelectorAll('[data-fan-choice]').forEach(b => b.classList.toggle('on', b === el));
+    if (treeNav.fanPick) traceLeaves.set(key, treeNav.fanPick);
+    if (n) fanoutFocus.set(n.key || key, { node: n.promptId, choice: el.dataset.fanKind, id: treeNav.fanPick });
+    paintTreeBar();
+    // "Both" is a context target, not a chat bubble. Open its exact typed
+    // fan-out group: both replies, pick boxes, merge model, and merge button.
+    if (el.dataset.fanKind === 'both' && treeNav.fanPick && n) {
+      await open(n.key || key, 'compare:' + n.promptId);
+    }
   });
   // Land on the newest message of the active branch.
   if (leaf) requestAnimationFrame(() => treeSetSel(leaf.id));
@@ -11453,6 +13072,7 @@ function treeSelEl() {
 
 function treeSetSel(id, { scroll = true } = {}) {
   if (!treeNav || !id || !treeNav.byId.has(id)) return;
+  if (treeNav.sel !== id) { treeNav.fanPick = null; treeNav.fanPickKind = null; }
   treeNav.sel = id;
   treeNav.wrap.querySelectorAll('.tnode.sel').forEach(el => el.classList.remove('sel'));
   const el = treeSelEl();
@@ -11475,23 +13095,61 @@ function paintTreeBar() {
   // tree a new sibling path starts (branch). Same action underneath.
   const isLeaf = !(treeNav.children.get(n.id) || []).length;
   const btn = (act, k, label, title) => `<button data-act="${act}" title="${esc(title)}"><span class="k">${k}</span>${label}</button>`;
+  const fanPicks = n.role === 'fanout' && Array.isArray(n.picks) ? n.picks : [];
+  if (fanPicks.length && !treeNav.fanPickKind) {
+    const on = fanPicks.find(p => p.active) || fanPicks.find(p => p.kind === 'both' && p.id) || fanPicks[0];
+    treeNav.fanPick = on && on.id;
+    treeNav.fanPickKind = on && on.kind;
+  }
+  const selBox = treeSelEl();
+  if (selBox && fanPicks.length) selBox.querySelectorAll('[data-fan-choice]').forEach(el => {
+    const picked = treeNav.fanPick ? el.dataset.fanChoice === treeNav.fanPick : el.dataset.fanKind === treeNav.fanPickKind;
+    el.classList.toggle('on', picked);
+  });
   bar.innerHTML =
-    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${n.role === 'work' ? n.count + ' step' + (n.count > 1 ? 's' : '') : Math.round(n.chars / 100) / 10 + 'k'}${n.tools && n.role !== 'work' ? ` · ⚙ ${n.tools}` : ''}</span>` +
+    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : n.role === 'fanout' ? 'parallel' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${n.role === 'work' ? n.count + ' step' + (n.count > 1 ? 's' : '') : n.role === 'fanout' ? fanPicks.length + ' continues' : Math.round(n.chars / 100) / 10 + 'k'}${n.tools && n.role !== 'work' ? ` · ⚙ ${n.tools}` : ''}</span>` +
     btn('read', 'r', 'read', 'Open the transcript at this box (enter, or double click). The ● here marker does not move.') +
     (isPi ? btn('branch', 'b', isLeaf ? 'continue' : 'branch', (isLeaf ? 'Move the ● here marker to this box and continue the path from it.' : 'Start a new branch after this box: the ● here marker moves to it, no copy is made.') + ' Then send from the composer as usual.') : '') +
     (isPi && n.role === 'user' ? btn('edit', 'e', 'edit', 'Fork into a NEW session that stops just before this message. Open the new conversation to edit and resend it. The original does not change.') : '') +
-    (isPi && n.aKids >= 2 ? btn('agg', 'a', 'aggregate…', 'Collect the answer branches under this node, quote each with its model name, and ask one model to synthesize them.') : '') +
+    (isPi && (n.aKids >= 2 || n.role === 'fanout') ? btn('agg', 'a', 'merge…', 'Synthesize a new reply from the parallel answers. That merge becomes another continue target.') : '') +
     btn('fork', 'f', 'fork', 'Copy the path from the start to this message into a NEW session file and continue there. The original does not change. For Claude this is the only option: its CLI always continues at the file end.');
   // A box can live in a forked session: actions target that session.
   const key = n.key || treeNav.key;
-  bar.querySelector('[data-act=read]').onclick = () => openAtTs(key, n.jumpTs);
+  const fanTarget = async () => {
+    if (n.role !== 'fanout') return n;
+    let pick = fanPicks.find(p => p.id && p.id === treeNav.fanPick)
+      || fanPicks.find(p => p.kind === treeNav.fanPickKind)
+      || fanPicks.find(p => p.kind === 'both') || fanPicks[0];
+    if (pick && pick.kind === 'both' && !pick.id) {
+      const out = await postJson('/api/node/both', { id: key, node: n.promptId });
+      if (!out || out.error) {
+        const stale = out && out.error === 'not found';
+        errToast(stale ? 'server update pending — try both again after aiconvo restarts' : ((out && out.error) || 'could not build the both-continue'));
+        return null;
+      }
+      pick.id = out.id;
+      treeNav.fanPick = out.id;
+    }
+    if (!pick || !pick.id) return n;
+    return { id: pick.id, key: pick.key || key, jumpTs: pick.ts || n.jumpTs, title: pick.title };
+  };
+  bar.querySelector('[data-act=read]').onclick = async () => {
+    const t = await fanTarget();
+    if (t) openAtTs(t.key || key, t.jumpTs);
+  };
   const bb = bar.querySelector('[data-act=branch]');
-  if (bb) bb.onclick = ev => branchFrom(key, n, ev.currentTarget);
+  if (bb) bb.onclick = async ev => {
+    const t = await fanTarget();
+    if (t) branchFrom(t.key || key, t, ev.currentTarget);
+  };
   const eb = bar.querySelector('[data-act=edit]');
   if (eb) eb.onclick = ev => editFrom(key, n, ev.currentTarget);
   const ab = bar.querySelector('[data-act=agg]');
-  if (ab) ab.onclick = () => openAggregateDialog(key, n);
-  bar.querySelector('[data-act=fork]').onclick = ev => forkFrom(key, n, ev.currentTarget);
+  if (ab) ab.onclick = () => openAggregateDialog(key, n.role === 'fanout' ? { ...n, id: n.promptId, title: n.title } : n);
+  bar.querySelector('[data-act=fork]').onclick = async ev => {
+    const t = await fanTarget();
+    if (t) forkFrom(t.key || key, t, ev.currentTarget);
+  };
 }
 
 function treeKeydown(e) {
@@ -12090,18 +13748,24 @@ function openNewProjectForm() {
   const ov = document.createElement('div');
   ov.className = 'ctx-confirm';
   const lastParent = localStorage.getItem('aiconvo.newProjectParent') || '~/Projects';
-  ov.innerHTML = `<div class="cc-card">
-    <div class="cc-head"><b>new project</b><span class="dim">a folder is born — no conversations, no commits yet</span></div>
-    <div class="mf-body">
-      <div class="mf-pair">
-        <label>name<input class="np-name" type="text" placeholder="my-new-thing" autocomplete="off"></label>
-        <label>inside<input class="np-parent" type="text" value="${esc(lastParent)}" autocomplete="off"></label>
-      </div>
-      <label><input class="np-git" type="checkbox" checked> git init</label>
-      <label>intent — what is this project? (human-written; becomes the vouched intent.md seed)
-        <textarea class="np-intent" rows="4" placeholder="Why does this project exist? What should it become?"></textarea></label>
-      <label>first prompt (optional — starts the first conversation now, with your intent in the system prompt)
-        <textarea class="np-first" rows="3" placeholder="leave empty to create the project only"></textarea></label>
+  ov.innerHTML = `<div class="cc-card np-card">
+    <div class="cc-head"><b>new project</b><span class="dim">a folder is born</span></div>
+    <div class="mf-body np-body">
+      <label><span class="np-cap">first prompt — starts the first conversation right away</span>
+        <textarea class="np-first" rows="5" placeholder="What should the agent do first? Leave empty to create the folder only."></textarea></label>
+      <label><span class="np-cap">name</span>
+        <input class="np-name" type="text" placeholder="named from your prompt — edit freely" autocomplete="off"></label>
+      <button type="button" class="np-browse-toggle">▸ or pick an existing folder — it joins the timeline as a project</button>
+      <div class="np-adopt" hidden></div>
+      <div class="np-browse" hidden></div>
+      <label><span class="np-cap">intent — why does this project exist? (becomes the vouched intent.md)</span>
+        <textarea class="np-intent" rows="3" placeholder="Optional — but every future agent briefing reads it."></textarea></label>
+      <details class="np-details"><summary>details</summary>
+        <div class="np-details-body">
+          <label><span class="np-cap">inside</span><input class="np-parent" type="text" value="${esc(lastParent)}" autocomplete="off"></label>
+          <label class="np-git-row"><input class="np-git" type="checkbox" checked> git init</label>
+        </div>
+      </details>
     </div>
     <div class="cc-foot">
       <span class="mf-err np-err"></span>
@@ -12111,13 +13775,77 @@ function openNewProjectForm() {
   </div>`;
   document.body.appendChild(ov);
   const q = sel => ov.querySelector(sel);
-  const paintGo = () => { q('.np-go').textContent = q('.np-first').value.trim() ? 'create + start' : 'create'; };
-  q('.np-first').oninput = paintGo;
+  const paintGo = () => {
+    const verb = typeof isAdopt === 'function' && isAdopt() ? 'adopt' : 'create';
+    q('.np-go').textContent = q('.np-first').value.trim() ? verb + ' + start' : verb;
+  };
+  // The name grows out of the prompt: client-side, no model call.
+  // A hand-typed name wins and stops the suggestion.
+  const nameFromPrompt = txt => String(txt).toLowerCase()
+    .replace(/[^a-z0-9\s._-]+/g, ' ').trim().split(/\s+/).slice(0, 4).join('-')
+    .replace(/^[^a-z0-9]+/, '').slice(0, 40).replace(/[-._]+$/, '');
+  let nameTouched = false;
+  // ---- adopt an existing folder: the picker browses real directories ----
+  // Picking only prefills name + parent; the server adopts what exists.
+  let adopt = null; // { name, parent, full } from the last pick
+  const isAdopt = () => !!adopt && q('.np-name').value.trim() === adopt.name && q('.np-parent').value.trim() === adopt.parent;
+  const syncAdopt = () => {
+    const on = isAdopt();
+    q('.np-adopt').hidden = !on;
+    if (on) q('.np-adopt').textContent = `existing folder — ${adopt.full} is adopted, nothing new is created`;
+    paintGo();
+  };
+  const pickFolder = full => {
+    const name = full.split('/').pop();
+    adopt = { name, parent: full.slice(0, -(name.length + 1)) || '/', full };
+    nameTouched = true;
+    q('.np-name').value = name;
+    q('.np-parent').value = adopt.parent;
+    q('.np-browse').hidden = true;
+    q('.np-browse-toggle').textContent = '▸ pick a different folder';
+    syncAdopt();
+  };
+  async function paintBrowse(p) {
+    const panel = q('.np-browse');
+    panel.hidden = false;
+    panel.innerHTML = '<div class="np-bempty">reading…</div>';
+    let out = null;
+    try { out = await (await fetch('/api/fs/dirs?path=' + encodeURIComponent(p))).json(); }
+    catch (e) { out = { error: e.message }; }
+    if (!out || out.error) { panel.innerHTML = `<div class="np-bempty">${esc((out && out.error) || 'network error')}</div>`; return; }
+    panel.innerHTML = `<div class="np-bhead">
+        <button type="button" class="ghost np-bup" title="Up one folder" ${out.parent ? '' : 'disabled'}>↑</button>
+        <span class="np-bpath" title="${esc(out.path)}">${esc(out.display)}</span>
+        <button type="button" class="ghost np-buse">adopt this folder</button>
+      </div>
+      <div class="np-blist">${out.dirs.map(d => `<div class="np-brow" data-dir="${esc(d.name)}">
+        <span class="np-bname" title="open ${esc(d.name)}">${esc(d.name)}</span>
+        ${d.git ? '<span class="np-btag">⌂ git</span>' : ''}
+        ${d.known ? '<span class="np-btag np-bknown">already a project</span>' : `<button type="button" class="ghost np-badopt" data-adopt="${esc(d.name)}">adopt</button>`}
+      </div>`).join('') || '<div class="np-bempty">no folders here</div>'}</div>`;
+    panel.querySelector('.np-bup').onclick = () => out.parent && paintBrowse(out.parent);
+    panel.querySelector('.np-buse').onclick = () => pickFolder(out.path);
+    panel.querySelectorAll('.np-bname').forEach(el =>
+      el.onclick = () => paintBrowse(out.path + '/' + el.closest('.np-brow').dataset.dir));
+    panel.querySelectorAll('[data-adopt]').forEach(b =>
+      b.onclick = () => pickFolder(out.path + '/' + b.dataset.adopt));
+  }
+  q('.np-browse-toggle').onclick = () => {
+    const panel = q('.np-browse');
+    if (panel.hidden) paintBrowse(adopt ? adopt.parent : (q('.np-parent').value.trim() || '~/Projects'));
+    else panel.hidden = true;
+  };
+  q('.np-name').addEventListener('input', () => { nameTouched = q('.np-name').value.trim() !== ''; syncAdopt(); });
+  q('.np-parent').addEventListener('input', syncAdopt);
+  q('.np-first').oninput = () => {
+    if (!nameTouched) q('.np-name').value = nameFromPrompt(q('.np-first').value);
+    syncAdopt();
+  };
   q('.np-cancel').onclick = () => ov.remove();
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
   q('.np-go').onclick = async () => {
-    const name = q('.np-name').value.trim();
-    if (!name) { q('.np-err').textContent = 'give the project a name.'; return; }
+    const name = q('.np-name').value.trim() || nameFromPrompt(q('.np-first').value);
+    if (!name) { q('.np-err').textContent = 'give the project a name, or write a first prompt.'; return; }
     q('.np-go').disabled = true;
     q('.np-err').textContent = 'creating…';
     let out = null;
@@ -12142,7 +13870,7 @@ function openNewProjectForm() {
     if (out.started && out.started.key) await open(out.started.key, 'bottom');
     else showProjectOverview(out.project);
   };
-  q('.np-name').focus();
+  q('.np-first').focus();
 }
 $('newProject').onclick = openNewProjectForm;
 
@@ -12608,6 +14336,169 @@ function cornerStack() {
   return box;
 }
 
+// ---- e-ink touch grammar ----
+// Active only in the binary theme (isEink). Three gestures, nothing more:
+// · two-finger vertical drag scrolls the current scroller 1:1 (no inertia)
+// · one-finger tap on quiet space pages: top half up, bottom half down
+// · one-finger horizontal swipe moves between levels: left→right goes up
+//   (transcript → project → home), right→left goes back down.
+// · a long press (500 ms, still) on a message opens its action bar
+//   (copy, edit, regenerate) — the tap itself pages, so the press takes
+//   over the toggle role that a plain tap has on other devices.
+// Buttons, links, marks, rows, and form fields keep their normal taps.
+// The terminal pane and the open mini-gantt keep their own touch handlers.
+const einkTapSkip = 'button, a, input, select, textarea, summary, label, .more, .tmark, .item, .win-card, .ag-row, .sr-hit, .sr-chip, .branchpill, [data-close], .job, .fg-mark, .mgantt';
+
+function einkFlash(text) {
+  let el = $('einkFlash');
+  if (!el) { el = document.createElement('div'); el.id = 'einkFlash'; document.body.appendChild(el); }
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.hidden = true; }, 700);
+}
+
+// Page-turn marker: after a tap page, a dashed line shows where the old
+// page ended. It is glued to the content — later scrolls move it, and it
+// hides once its spot leaves the screen or the scroller changes.
+let einkEdge = null; // { scroller, y, top } — y is the clientY at mark time, top the scrollTop then
+function einkEdgePlace() {
+  const el = $('einkEdge');
+  if (!el || !einkEdge) return;
+  const sc = einkEdge.scroller;
+  if (!sc.isConnected) { el.hidden = true; einkEdge = null; return; }
+  const rect = sc.getBoundingClientRect();
+  const y = einkEdge.y - (sc.scrollTop - einkEdge.top);
+  if (y < rect.top + 4 || y > rect.bottom - 4) { el.hidden = true; return; }
+  el.style.left = rect.left + 'px';
+  el.style.width = rect.width + 'px';
+  el.style.top = y + 'px';
+  el.hidden = false;
+}
+window.addEventListener('hashchange', () => {
+  if ($('einkEdge')) $('einkEdge').hidden = true;
+  einkEdge = null;
+});
+function einkMarkEdge(sc, clientY) {
+  let el = $('einkEdge');
+  if (!el) { el = document.createElement('div'); el.id = 'einkEdge'; document.body.appendChild(el); }
+  if (!einkEdge || einkEdge.scroller !== sc) {
+    if (einkEdge) einkEdge.scroller.removeEventListener('scroll', einkEdgePlace);
+    sc.addEventListener('scroll', einkEdgePlace, { passive: true });
+  }
+  einkEdge = { scroller: sc, y: clientY, top: sc.scrollTop };
+  einkEdgePlace();
+}
+
+// The nearest scrollable ancestor; the reading overlay and the two main
+// panes are the fallbacks.
+function einkScroller(fromEl) {
+  if (readOverlayOpen()) return $('readBody');
+  let el = fromEl;
+  while (el && el !== document.body) {
+    if (el.scrollHeight > el.clientHeight + 4) {
+      const o = getComputedStyle(el).overflowY;
+      if (o === 'auto' || o === 'scroll') return el;
+    }
+    el = el.parentElement;
+  }
+  return viewKind === 'home' ? $('list') : $('view');
+}
+
+let einkTouch = null;
+document.addEventListener('touchstart', e => {
+  if (!isEink()) return;
+  if (e.target.closest && e.target.closest('#agentPane, .mgantt[data-mg-open], canvas')) { einkTouch = null; return; }
+  if (e.touches.length === 1) {
+    const t = e.touches[0];
+    einkTouch = { mode: 'one', x: t.clientX, y: t.clientY, t: Date.now(), moved: 0, scroller: einkScroller(e.target) };
+    // Long press on a message: open its action bar. The timer dies on
+    // movement, on a second finger, and on lift-off.
+    const msg = e.target.closest && e.target.closest('.msg.user, .msg.assistant');
+    if (msg && !e.target.closest('button, a, input, select, textarea')) {
+      const st = einkTouch;
+      st.press = setTimeout(() => {
+        if (einkTouch !== st || st.moved >= 12) return;
+        st.held = true; // the following touchend must not page or click
+        document.querySelectorAll('.msg.actions-open').forEach(el => { if (el !== msg) el.classList.remove('actions-open'); });
+        msg.classList.toggle('actions-open');
+      }, 500);
+    }
+  } else if (e.touches.length === 2) {
+    if (einkTouch && einkTouch.press) clearTimeout(einkTouch.press);
+    if (!einkTouch) einkTouch = { scroller: einkScroller(e.target) };
+    einkTouch.mode = 'two';
+    einkTouch.y2 = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+  } else {
+    einkTouch = null;
+  }
+}, { passive: true });
+
+document.addEventListener('touchmove', e => {
+  if (!isEink() || !einkTouch) return;
+  if (einkTouch.mode === 'two' && e.touches.length === 2) {
+    e.preventDefault(); // no browser pinch-zoom; we own two fingers here
+    const y = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    if (einkTouch.scroller) einkTouch.scroller.scrollTop -= y - einkTouch.y2;
+    einkTouch.y2 = y;
+    return;
+  }
+  if (einkTouch.mode === 'one' && e.touches.length === 1) {
+    const t = e.touches[0];
+    einkTouch.moved = Math.max(einkTouch.moved, Math.hypot(t.clientX - einkTouch.x, t.clientY - einkTouch.y));
+    if (einkTouch.moved >= 12 && einkTouch.press) { clearTimeout(einkTouch.press); einkTouch.press = null; }
+  }
+}, { passive: false });
+
+document.addEventListener('touchcancel', () => {
+  if (einkTouch && einkTouch.press) clearTimeout(einkTouch.press);
+  einkTouch = null;
+}, { passive: true });
+
+document.addEventListener('touchend', e => {
+  if (!isEink() || !einkTouch) return;
+  if (e.touches.length > 0) return; // wait until every finger is up
+  const st = einkTouch;
+  einkTouch = null;
+  if (st.press) clearTimeout(st.press);
+  if (st.held) { e.preventDefault(); return; } // the press already acted
+  if (st.mode !== 'one') return;
+  const t = e.changedTouches[0];
+  if (!t) return;
+  const dx = t.clientX - st.x, dy = t.clientY - st.y;
+  // Horizontal swipe: the level ladder. Dominant axis, high threshold —
+  // a sloppy vertical scroll must never change the view.
+  if (Math.abs(dx) >= 70 && Math.abs(dx) > 2 * Math.abs(dy)) {
+    if (['home', 'project', 'conversation'].includes(viewKind) && !readOverlayOpen()) {
+      e.preventDefault();
+      const before = viewKind;
+      if ($('einkEdge')) { $('einkEdge').hidden = true; einkEdge = null; } // new content, stale mark
+      moveViewLevel(dx > 0 ? -1 : 1);
+      const short = { home: 'home', project: 'project', conversation: 'transcript' };
+      if (viewKind !== before) einkFlash(dx > 0 ? '◀ ' + (short[viewKind] || viewKind) : (short[viewKind] || viewKind) + ' ▶');
+    }
+    return;
+  }
+  // Tap on quiet space: page by screen half. Interactive targets and an
+  // active text selection keep their normal behavior.
+  if (st.moved < 12 && Date.now() - st.t < 500) {
+    if (e.target.closest && e.target.closest(einkTapSkip)) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return;
+    const sc = st.scroller;
+    if (!sc || sc.scrollHeight <= sc.clientHeight + 4) return;
+    e.preventDefault(); // the synthesized click must not fire (no action toggles)
+    const rect = sc.getBoundingClientRect();
+    const up = t.clientY < rect.top + rect.height / 2;
+    const before = sc.scrollTop;
+    sc.scrollBy({ top: (up ? -1 : 1) * Math.max(120, sc.clientHeight * 0.9), behavior: 'auto' });
+    const jumped = sc.scrollTop - before; // the clamped, real distance
+    // Mark the old page edge: after page down the old bottom edge sits near
+    // the top; after page up the old top edge sits near the bottom.
+    if (jumped) einkMarkEdge(sc, up ? rect.top + Math.abs(jumped) : rect.bottom - jumped);
+  }
+}, { passive: false });
+
 function showNavHud() {
   let el = $('navHud');
   if (!el) { el = document.createElement('div'); el.id = 'navHud'; cornerStack().append(el); }
@@ -12775,6 +14666,16 @@ function helpNow() {
     return sections;
   }
 
+  if (window._atDetached && ae && ae.id === 'slashInput') {
+    sections.push({ label: 'composer · project context', keys: [
+      ['type', 'filter projects or search conversations'],
+      ['↑ ↓', 'highlight a row'],
+      ['enter', 'add or remove the highlighted item'],
+      ['tab', 'fill the name'],
+      ['esc', 'close'],
+    ] });
+    return sections;
+  }
   // The focused element decides: while typing, only its keys are live.
   if (ae && ae.id === 'agentText') {
     const pi = !!$('agentRun');
@@ -12794,7 +14695,7 @@ function helpNow() {
     if (pi) keys.push(['ctrl+shift+enter', 'open the terminal & send']);
     if ($('agentMic') && !$('agentMic').hidden) keys.push(['ctrl+m', 'start / stop dictation']);
     if (pi) keys.push(['alt+m', 'change the model'], ['alt+o', 'change the mode'], ['shift+tab', 'cycle reasoning']);
-    keys.push(['/', 'start a slash command'], ['esc', 'leave the composer']);
+    keys.push(['/', 'start a slash command'], ['@', 'add project or conversation context'], ['esc', 'leave the composer']);
     sections.push({ label: pi ? 'composer · pi' : 'composer · claude', keys });
     return sections;
   }
@@ -12862,6 +14763,7 @@ function helpNow() {
     }
     const keys = [
       ['i', 'focus the composer'],
+      ['@', 'add project or conversation context'],
       ['r', 'read the last message full screen'],
       ['.', 'pick a file change (newest first)'],
     ];
@@ -12923,6 +14825,7 @@ function helpNow() {
       ['g', 'timeline layout: bottom / left / projects / off'],
       ['+ − 0', 'timeline zoom'],
       ['n / b / t', 'timeline: now / beginning / date'],
+      ['P', 'new project — a folder is born'],
       ['f', 'filters']);
     sections.push({ label: 'list & timeline', keys: listKeys });
   }
@@ -13170,6 +15073,9 @@ document.addEventListener('keydown', e => {
       if (project && project !== '?') showProjectOverview(project);
       break;
     }
+    case 'P':
+      if (viewKind === 'home') { e.preventDefault(); openNewProjectForm(); }
+      break;
     case 'r': {
       const msg = lastReadableMsg();
       if (msg) { e.preventDefault(); openReadingView(msg); }
@@ -13183,6 +15089,10 @@ document.addEventListener('keydown', e => {
         try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch {}
         ta.scrollIntoView({ block: 'center' });
       }
+      break;
+    }
+    case '@': {
+      if ($('agentAt') || $('agentText')) { e.preventDefault(); openAtPalette(); }
       break;
     }
     case 'm': {
@@ -13286,6 +15196,14 @@ live.onmessage = ev => {
     applyProjectTitleUpdate(d.project, d.title);
     return;
   }
+  if (d.type === 'conversation-project') {
+    const conversation = sessions.find(s => s.key === d.key);
+    if (conversation) conversation.project = d.project;
+    if (current && activeRel === d.key) { current.project = d.project; convHead(current); }
+    if (viewKind === 'home' && tab === 'conv' && !searchMode) render();
+    else if (projectOverviewName === LOOSE_PROJECT) showLooseConversations();
+    return;
+  }
   if (d.type === 'project-folds') {
     // A fold re-attributes projects everywhere. Refetch quietly; never navigate.
     fetch('/api/project-folds').then(r => r.json()).then(f => {
@@ -13311,12 +15229,17 @@ live.onmessage = ev => {
     compareCache.delete(d.key);
     relatedCache.delete(d.key);
     ctxMeterCache.delete(d.key);
+    if (d.bothId) traceLeaves.set(d.key, d.bothId);
     const clearLedgers = () => {
       for (const [id, L] of [...runLedgers]) if (L.fanoutId === d.fanoutId) runLedgers.delete(id);
       if (viewKind === 'conversation') renderRunCards();
     };
-    if (activeRel === d.key && current) open(d.key, 'compare').then(clearLedgers, clearLedgers);
-    else clearLedgers();
+    if (activeRel === d.key && current) {
+      open(d.key, 'compare').then(() => {
+        // Keep the live columns if the settled row failed to appear.
+        if ($('view') && $('view').querySelector('.cmpblock')) clearLedgers();
+      }, clearLedgers);
+    } else clearLedgers();
     return;
   }
   if (d.type === 'run-event') {
