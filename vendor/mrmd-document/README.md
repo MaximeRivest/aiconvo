@@ -33,9 +33,8 @@ Git commits, and provenance; MRMD owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Git commit: `b799ac3` ("document entry: the light bundle for host
-  applications" — contains `src/document-entry.js` and
-  `rollup.document.config.js`)
+- Git commit: `124d914` ("document entry: host theming, selection
+  overlay, notebook cell API"; built by `e2807c4`)
 - SHA-256: `3dd51aae07455a1d773ca05a31bf0676053310451c7a9dbadd542f40330dd015`
 - License: MIT (see `0.9.4/LICENSE`)
 
