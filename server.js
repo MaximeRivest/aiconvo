@@ -9830,7 +9830,21 @@ const server = http.createServer(async (req, res) => {
         c.on('close', () => { clearTimeout(timer); resolve(buf); });
         c.on('error', () => { clearTimeout(timer); resolve(''); });
       });
-      try { json(res, 200, JSON.parse(out)); } catch { json(res, 502, { error: 'rat resolve failed' }); }
+      try {
+        const info = JSON.parse(out);
+        // Enrich with what the fix bar needs to be honest: the venv path
+        // rat's kernel binds to, and the name of the project's own package
+        // (pyproject.toml) — so a failed import of the project itself can
+        // offer `uv pip install -e .` instead of a wrong PyPI fetch.
+        const root = info.cwd || dir;
+        info.venv = fs.existsSync(path.join(root, '.venv')) ? path.join(root, '.venv') : null;
+        try {
+          const toml = await fsp.readFile(path.join(root, 'pyproject.toml'), 'utf8');
+          const m = toml.match(/^\s*name\s*=\s*["']([A-Za-z0-9._-]+)["']/m);
+          if (m) info.selfPackage = m[1];
+        } catch {}
+        json(res, 200, info);
+      } catch { json(res, 502, { error: 'rat resolve failed' }); }
     } else if (u.pathname === '/api/doc/install-pkg' && req.method === 'POST') {
       // Install one Python package into the document's project venv, so a
       // failed `import` in a rat cell is one click from working. Facts this
@@ -9843,8 +9857,10 @@ const server = http.createServer(async (req, res) => {
       let parsed;
       try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
       const pkg = String(parsed.pkg || '').trim();
-      // One PyPI requirement, nothing else: no flags, no URLs, no spaces.
-      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}(==[A-Za-z0-9._*+!-]{1,32})?$/.test(pkg)) {
+      // One PyPI requirement — or the project itself, editable ('-e .').
+      // Nothing else: no other flags, no URLs, no spaces.
+      const editableSelf = pkg === '-e .';
+      if (!editableSelf && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}(==[A-Za-z0-9._*+!-]{1,32})?$/.test(pkg)) {
         return json(res, 400, { error: 'not a valid package name' });
       }
       const docDir = parsed.cwd && typeof parsed.cwd === 'string' && fs.existsSync(parsed.cwd) ? parsed.cwd : null;
@@ -9880,15 +9896,27 @@ const server = http.createServer(async (req, res) => {
         created = true;
       }
       // 3. Install into that exact interpreter — never into system python.
-      const inst = await sh(uvBin, ['pip', 'install', '--python', path.join(venv, 'bin', 'python'), pkg], root, 180000);
-      steps.push({ step: 'uv pip install ' + pkg, code: inst.code, out: inst.out.slice(-4000) });
+      //    '-e .' installs the project's own package from the project root.
+      const args = ['pip', 'install', '--python', path.join(venv, 'bin', 'python'), ...(editableSelf ? ['-e', '.'] : [pkg])];
+      const inst = await sh(uvBin, args, root, 180000);
+      steps.push({ step: 'uv pip install ' + (editableSelf ? '-e . (this project, editable)' : pkg), code: inst.code, out: inst.out.slice(-4000) });
       if (inst.code !== 0) return json(res, 200, { error: 'install failed', steps });
-      // 4. Fresh venv only: rebind the kernel. `rat restart` is NOT enough
-      //    here — the runtime entry in rat's state remembers its old (no-venv)
-      //    binding. Stop + remove clears the entry; the next run re-resolves
-      //    and picks up the new .venv. (Verified against rat's actual
-      //    behavior; an existing venv never reaches this branch.)
+      // 4a. Editable installs land as a .pth finder hook, and .pth files
+      //     are processed only at interpreter STARTUP — a live kernel
+      //     cannot see them (verified). Normal wheels need no restart.
       let restarted = false;
+      if (editableSelf && !created) {
+        let name = 'py';
+        try { name = JSON.parse(resolved.out).name || 'py'; } catch {}
+        const rs = await sh(ratBin, ['restart', name], docDir, 60000);
+        steps.push({ step: 'rat restart ' + name + ' (editable installs need a fresh interpreter)', code: rs.code, out: rs.out.slice(-1000) });
+        restarted = rs.code === 0;
+      }
+      // 4b. Fresh venv: rebind the kernel. `rat restart` is NOT enough
+      //     here — the runtime entry in rat's state remembers its old
+      //     (no-venv) binding. Stop + remove clears the entry; the next
+      //     run re-resolves and picks up the new .venv. (Verified; an
+      //     existing venv never reaches this branch.)
       if (created) {
         let name = 'py';
         try { name = JSON.parse(resolved.out).name || 'py'; } catch {}

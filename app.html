@@ -7095,8 +7095,15 @@ async function refreshDocRuntimeChip(lang = 'py') {
   let info = null;
   try { info = await (await fetch('/api/doc/runtime-info?cwd=' + encodeURIComponent(docDir) + '&lang=' + encodeURIComponent(lang))).json(); } catch {}
   if (docState !== st || !strip.isConnected) return;
+  st.runtimeInfo = info && info.name ? info : null;
   const chip = strip.querySelector('.doc-run-chip');
-  chip.textContent = info && info.name ? '⚙ ' + info.name : '';
+  if (!info || !info.name) { chip.textContent = ''; return; }
+  // The chip answers "which kernel, which environment": venv when the
+  // project has one, the bare interpreter warning when it does not.
+  const env = info.venv ? shortDir(info.venv) : 'no venv — system python';
+  chip.textContent = '⚙ ' + info.name + ' · ' + env;
+  chip.title = 'The kernel rat resolves for this document\u0027s folder.\nProject root: ' + (info.cwd || '?')
+    + '\nEnvironment: ' + (info.venv || 'none — the kernel runs on the system python');
 }
 
 let docRunSeq = 0;
@@ -7177,45 +7184,68 @@ async function runAllDocCells() {
 
 // A failed python cell with ModuleNotFoundError gets a one-click repair:
 // install the package into the project venv (uv), then rerun the cell.
+// The bar answers the three questions users actually have:
+//   what is missing · where will the install land · what exactly runs.
+// Special case: when the missing module IS this project's own package
+// (pyproject.toml name), the right fix is `uv pip install -e .` — the
+// project in editable mode — not a PyPI download of the same name.
 // The module name is only a guess for the PyPI name (cv2 ≠ opencv-python),
 // so the field is editable. Explicit click — nothing installs on its own.
-function offerPackageInstall(dock, r, cell, docDir) {
+async function offerPackageInstall(dock, r, cell, docDir) {
   document.querySelector('.doc-run-fix')?.remove();
   if (r.code === 0 || r.runtime !== 'py') return;
   const miss = (r.out || '').match(/ModuleNotFoundError: No module named '([A-Za-z0-9_.]+)'/);
   if (!miss) return;
   const guess = miss[1].split('.')[0];
+  const st = docState;
+  // The bar's honesty depends on the resolved runtime info (venv path,
+  // the project's own package name) — fetch it when not yet loaded.
+  if (st && !st.runtimeInfo) await refreshDocRuntimeChip();
+  if (docState !== st) return;
+  const info = (st && st.runtimeInfo) || {};
+  const isSelf = !!info.selfPackage
+    && guess.toLowerCase().replace(/-/g, '_') === info.selfPackage.toLowerCase().replace(/-/g, '_');
+  const destination = info.venv ? shortDir(info.venv) : (shortDir(info.cwd || docDir) + '/.venv (will be created — kernel restarts, variables reset)');
   const fix = document.createElement('div');
   fix.className = 'doc-run-fix';
-  fix.innerHTML = `<span class="dim">missing module · install into the project venv:</span>
-    <input class="doc-fix-pkg" spellcheck="false">
-    <button class="doc-fix-go">⇩ uv pip install + rerun</button>
-    <span class="doc-fix-note dim" hidden></span>`;
+  fix.innerHTML = isSelf
+    ? `<span class="dim">⚙ <b>${esc(guess)}</b> is this project's own package — it is not installed in <b>${esc(destination)}</b> yet:</span>
+       <button class="doc-fix-go">⇩ uv pip install -e . + rerun</button>
+       <span class="doc-fix-note dim" hidden></span>`
+    : `<span class="dim">module <b>${esc(guess)}</b> not found in <b>${esc(destination)}</b> · install from PyPI (edit if the package name differs):</span>
+       <input class="doc-fix-pkg" spellcheck="false">
+       <button class="doc-fix-go">⇩ uv pip install + rerun</button>
+       <span class="doc-fix-note dim" hidden></span>`;
   const input = fix.querySelector('.doc-fix-pkg');
-  input.value = guess;
+  if (input) input.value = guess;
   const note = fix.querySelector('.doc-fix-note');
   const btn = fix.querySelector('.doc-fix-go');
   const go = async () => {
-    const pkg = input.value.trim();
+    const pkg = isSelf ? '-e .' : input.value.trim();
     if (!pkg) return;
-    btn.disabled = true; input.disabled = true;
-    note.hidden = false; note.textContent = '● installing…';
+    btn.disabled = true; if (input) input.disabled = true;
+    note.hidden = false; note.textContent = '● installing into ' + destination + '…';
     let ri;
     try { ri = await postJson('/api/doc/install-pkg', { pkg, cwd: docDir }); }
     catch { ri = { error: 'network failure' }; }
     if (!fix.isConnected) return;
     if (ri.error) {
-      btn.disabled = false; input.disabled = false;
+      btn.disabled = false; if (input) input.disabled = false;
       const last = (ri.steps || []).at(-1);
       note.textContent = '✗ ' + ri.error + (last && last.out ? ' · ' + last.out.trim().split('\n').at(-1) : '');
       return;
     }
-    note.textContent = '✓ installed' + (ri.restarted ? ' · kernel restarted on the new venv (variables reset)' : '') + ' · rerunning…';
+    // The bar goes away now — the confirmation must outlive it, so it
+    // lands in the status strip (which stays under the editor).
+    const installedMsg = '✓ installed' + (ri.restarted ? ' · kernel restarted (variables reset — ' + (isSelf ? 'editable installs need a fresh interpreter' : 'new venv') + ')' : '');
     fix.remove();
+    const stripState = document.querySelector('.doc-run-strip .doc-run-state');
+    if (stripState) stripState.textContent = installedMsg + ' · rerunning…';
+    toast(installedMsg);
     await runDocCell(cell);
   };
   btn.onclick = go;
-  input.onkeydown = e => { if (e.key === 'Enter') go(); };
+  if (input) input.onkeydown = e => { if (e.key === 'Enter') go(); };
   dock.insertAdjacentElement('afterend', fix);
 }
 
