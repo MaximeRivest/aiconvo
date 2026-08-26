@@ -5551,6 +5551,7 @@ let diffCache = {};
 try { diffCache = JSON.parse(fs.readFileSync(DIFF_CACHE_FILE, 'utf8')); } catch {}
 const DIFF_CACHE_VERSION = 'v6:';
 
+
 function pruneDiffCache() {
   for (const key of Object.keys(diffCache)) {
     const row = diffCache[key];
@@ -5558,6 +5559,7 @@ function pruneDiffCache() {
     if (stale) delete diffCache[key];
   }
 }
+pruneDiffCache();
 
 function saveDiffCacheSoon() {
   clearTimeout(saveDiffCacheSoon.t);
@@ -9214,7 +9216,20 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { stats });
     } else if (u.pathname === '/api/sessions') {
       // Temporary fan-out files do not enlarge the visible fork family.
-      const visibleEntries = Object.entries(index).filter(([, e]) => !e.hiddenFanout);
+      let n = 0, last = '', mt = 0;
+      const visibleEntries = [];
+      for (const pair of Object.entries(index)) {
+        if (pair[1].hiddenFanout) continue;
+        visibleEntries.push(pair);
+        n++;
+        if ((pair[1].lastTs || '') > last) last = pair[1].lastTs || '';
+        if ((pair[1].mtimeMs || 0) > mt) mt = pair[1].mtimeMs || 0;
+      }
+      const etag = '"' + n + '-' + last + '-' + mt + '"';
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, { ETag: etag });
+        return res.end();
+      }
       const fam = groupFamilies(visibleEntries, keyForSessionPath);
       const list = visibleEntries.map(([key, e]) => {
         const f = fam.get(key);
@@ -9223,7 +9238,9 @@ const server = http.createServer(async (req, res) => {
         return f && f.size > 1 ? { key, ...e, project, family: f.primary, familySize: f.size } : { key, ...e, project };
       });
       list.sort((a, b) => (b.lastTs || '').localeCompare(a.lastTs || ''));
-      json(res, 200, list);
+      const body = JSON.stringify(list);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ETag: etag });
+      res.end(body);
     } else if (u.pathname === '/api/session') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });

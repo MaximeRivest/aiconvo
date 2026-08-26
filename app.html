@@ -2674,12 +2674,23 @@ $('agentsPop').onclick = async e => {
 };
 
 // ---- index + filtering ----
+// The session list is 1–2 MB. Polling it every 30s rebuilt the Gantt even
+// when nothing changed. ETag + 304 keeps RAM and CPU flat on a quiet desk.
+let sessionsEtag = '';
 async function load() {
-  const [sess, folds] = await Promise.all([
-    fetch('/api/sessions').then(r => r.json()),
-    fetch('/api/project-folds').then(r => r.json()).catch(() => null),
-  ]);
-  sessions = sess;
+  if (document.hidden) return;
+  let sessRes, folds;
+  try {
+    [sessRes, folds] = await Promise.all([
+      fetch('/api/sessions', sessionsEtag ? { headers: { 'If-None-Match': sessionsEtag } } : {}),
+      fetch('/api/project-folds').then(r => r.json()).catch(() => null),
+    ]);
+  } catch { return; }
+  if (!sessRes.ok && sessRes.status !== 304) return;
+  const unchanged = sessRes.status === 304;
+  const tag = sessRes.headers.get('ETag');
+  if (tag) sessionsEtag = tag;
+  if (!unchanged) sessions = await sessRes.json();
   if (folds && folds.map) projectFolds = folds;
   // Notes and epics paint as marks on the home timeline: keep them fresh.
   Promise.all([
@@ -2693,6 +2704,7 @@ async function load() {
     else if (Array.isArray(epics)) epicsList = epics;
     if (changed && viewKind === 'home' && !searchMode && tab === 'conv') render();
   });
+  if (unchanged) return;
   projectTreeCache.clear(); // the tree may change while agents work
   const dirs = [...new Set(sessions.map(s => shortDir(s.cwd)))].sort();
   const keepDir = $('dir').value, keepSrc = $('src').value, keepProject = $('ganttProject').value;
@@ -12717,16 +12729,21 @@ function paintTreeBar() {
   };
   const bb = bar.querySelector('[data-act=branch]');
   if (bb) bb.onclick = async ev => {
+    // Event.currentTarget becomes null after the first await. Keep the button
+    // now, or branchFrom fails before it can show progress or an error.
+    const button = ev.currentTarget;
     const t = await fanTarget();
-    if (t) branchFrom(t.key || key, t, ev.currentTarget);
+    if (t) branchFrom(t.key || key, t, button);
   };
   const eb = bar.querySelector('[data-act=edit]');
   if (eb) eb.onclick = ev => editFrom(key, n, ev.currentTarget);
   const ab = bar.querySelector('[data-act=agg]');
   if (ab) ab.onclick = () => openAggregateDialog(key, n.role === 'fanout' ? { ...n, id: n.promptId, title: n.title } : n);
   bar.querySelector('[data-act=fork]').onclick = async ev => {
+    // Preserve the button across fanTarget's async boundary.
+    const button = ev.currentTarget;
     const t = await fanTarget();
-    if (t) forkFrom(t.key || key, t, ev.currentTarget);
+    if (t) forkFrom(t.key || key, t, button);
   };
 }
 
@@ -15071,11 +15088,9 @@ setInterval(() => {
   renderRunCards();
 }, 1000);
 
-// refresh the █ markers and working/recent marks as sessions go quiet
-setInterval(() => {
-  updateLiveBadges();
-  if (!searchMode && tab === 'conv') render();
-}, 60000);
+// Header live count only. The Gantt marks refresh on the next real load()
+// (ETag 304 skips the rebuild when the list did not change).
+setInterval(() => { if (!document.hidden) updateLiveBadges(); }, 60000);
 
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement && document.body.classList.contains('file-full')) exitFileDiffFull();
@@ -15095,8 +15110,9 @@ load().then(() => {
   dispatchHash(decodeURIComponent(location.hash.slice(1)));
   if (!phoneLayout() && !location.hash && window.matchMedia('(pointer: fine)').matches) $('q').focus();
 });
-setInterval(load, 30000);
-setInterval(loadJobs, 15000);
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+setInterval(() => { if (!document.hidden) loadJobs(); }, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 if (window.isSecureContext && navigator.serviceWorker) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
