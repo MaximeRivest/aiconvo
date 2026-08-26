@@ -8693,10 +8693,10 @@ async function rewriteForSpeech(text) {
   return String(out || '').trim();
 }
 
-async function synthesizeSpeech(text, rewrite) {
+async function synthesizeSpeech(text, rewrite, speed = 1) {
   const src = String(text || '').trim();
   if (!src) throw new Error('No text to read.');
-  const id = crypto.createHash('sha256').update((rewrite ? 'r1|' : 'r0|') + src).digest('hex').slice(0, 24);
+  const id = crypto.createHash('sha256').update((rewrite ? 'r1|' : 'r0|') + (speed !== 1 ? 's' + speed + '|' : '') + src).digest('hex').slice(0, 24);
   const wavPath = path.join(TTS_DIR, id + '.wav');
   const metaPath = path.join(TTS_DIR, id + '.json');
   if (fs.existsSync(wavPath)) {
@@ -8717,7 +8717,7 @@ async function synthesizeSpeech(text, rewrite) {
       }
     }
     const tts = await httpPcm(KOKORO_URL.replace(/\/$/, '') + '/tts', {
-      text: spoken, voice: KOKORO_VOICE, speed: 1,
+      text: spoken, voice: KOKORO_VOICE, speed,
     }, 180000);
     if (tts.status !== 200 || !tts.buf.length) {
       throw new Error('Kokoro TTS failed (' + tts.status + '). Is kokoro-tts running?');
@@ -8741,16 +8741,27 @@ async function synthesizeSpeech(text, rewrite) {
 // When a web run settles, tell the user in one spoken sentence what was just
 // finished: last assistant message → Qwen (one-sentence summary) → Kokoro →
 // local speakers through pipewire. Fire and forget; every failure is silent.
-const SPEAK_SUMMARY_PROMPT = 'You are a voice announcer for a person who runs several coding-agent conversations. One conversation just returned a new reply. You get the conversation title and the full reply. Speak a short digest: start with "Your conversation about TITLE has just returned." then say in two to four short sentences what there is to read in the reply — what it did, what it found, and what it asks or recommends, if anything. Talk about the reply in the third person ("it says", "it recommends"). Plain spoken words only: no code, no file paths, no markdown, no lists. Keep the whole thing under sixty words.';
+const SPEAK_SUMMARY_PROMPT = 'You are a voice announcer for a person who runs several coding-agent conversations. One conversation just returned a new reply. You get an OPENING line, the conversation title, and the full reply. Speak a short digest: start with the OPENING exactly as given, then say in two to four short sentences what there is to read in the reply — what it did, what it found, and what it asks or recommends, if anything. Talk about the reply in the third person ("it says", "it recommends"). Plain spoken words only: no code, no file paths, no markdown, no lists. Keep the whole thing under sixty words.';
 
-// Fallback announcement when the Qwen summarizer is unreachable: title plus
+// Spoken playback speed for announcements and confirmations.
+const VOICE_SPEED = Number(process.env.AICONVO_VOICE_SPEED) || 1.5;
+
+// Name the conversation only when it changes: back-to-back replies from the
+// same conversation open with a short line instead of the full title.
+function voiceOpeningFor(key, title) {
+  const same = voice.lastAnnouncedKey === key;
+  voice.lastAnnouncedKey = key;
+  return same ? 'The same conversation has returned again.'
+    : 'Your conversation about ' + title + ' has just returned.';
+}
+
+// Fallback announcement when the Qwen summarizer is unreachable: opening plus
 // the first plain words of the reply.
-function fallbackSpokenLine(text, title) {
+function fallbackSpokenLine(text, opening) {
   const plain = text.replace(/```[\s\S]*?```/g, ' ').replace(/[`*_#>|]/g, ' ')
     .replace(/\s+/g, ' ').trim();
   const head = plain.split(' ').slice(0, 25).join(' ').replace(/[,;:]+$/, '');
-  return 'Your conversation about ' + title + ' has just returned.'
-    + (head ? ' It starts with: ' + head : '');
+  return opening + (head ? ' It starts with: ' + head : '');
 }
 
 async function speakRunDone(job) {
@@ -8761,13 +8772,14 @@ async function speakRunDone(job) {
     if (!text) return;
     const entry = job.key && index[job.key];
     const title = (entry && (entry.title || entry.timelineTitle) || '').trim() || 'an untitled task';
+    const opening = voiceOpeningFor(job.key, title);
     let sentence = '';
     try {
       const res = await httpJson(REWRITE_URL, {
         model: REWRITE_MODEL,
         messages: [
           { role: 'system', content: SPEAK_SUMMARY_PROMPT },
-          { role: 'user', content: 'TITLE: ' + title + '\n\nFull reply:\n' + text.slice(0, 16000) },
+          { role: 'user', content: 'OPENING: ' + opening + '\nTITLE: ' + title + '\n\nFull reply:\n' + text.slice(0, 16000) },
         ],
         max_tokens: 400,
         chat_template_kwargs: { enable_thinking: false },
@@ -8775,13 +8787,383 @@ async function speakRunDone(job) {
       sentence = String(res.json && res.json.choices && res.json.choices[0]
         && res.json.choices[0].message && res.json.choices[0].message.content || '').trim();
     } catch (e) { console.log('speak-done summarizer unreachable, using fallback: ' + e.message); }
-    if (!sentence) sentence = fallbackSpokenLine(text, title);
-    const clip = await synthesizeSpeech(sentence, false);
-    const wavPath = path.join(TTS_DIR, clip.id + '.wav');
-    const child = spawn('pw-play', [wavPath], { stdio: 'ignore', detached: true });
-    child.on('error', () => {});
-    child.unref();
+    if (!sentence) sentence = fallbackSpokenLine(text, opening);
+    const clip = await synthesizeSpeech(sentence, false, VOICE_SPEED);
+    enqueueAnnouncement({ job, title, wavPath: path.join(TTS_DIR, clip.id + '.wav') });
   } catch (e) { console.log('speak-done failed: ' + e.message); }
+}
+
+// ---------- voice loop ----------
+// Announcements queue so they never talk over each other. After each one the
+// microphone opens: a beep, then up to 10 s of waiting for speech. What the
+// user says goes through STT, then a Qwen gate decides: a dictated reply for
+// the conversation that just finished, an app command (mute, skip, status),
+// or noise to ignore.
+const voice = { queue: [], playing: false, mutedUntil: 0, lastAnnouncedKey: null, current: null, paused: false };
+const voiceMuted = () => voice.mutedUntil && Date.now() < voice.mutedUntil;
+
+const VOICE_GATE_PROMPT = 'You are a voice gate for a coding-agent app. The user just heard a spoken summary of an agent reply and the microphone opened. You get the full transcript captured so far; the user paused, and you must decide what to do. The user often thinks in silence between phrases, so an unfinished thought is normal. Answer STRICT JSON only, no prose, no code fence: {"action":"send|wait|command|ignore","command":"mute|skip|status|read|goto|none","target":"...","text":"..."}. Use "send" ONLY when the user clearly ended the message with a send word such as: send, done, go, submit, enter, control enter, ship it, that is all. Put the cleaned message in "text" with the trailing send word removed. Use "wait" when the user dictated something addressed to the agent but no send word ended it yet — they are still thinking; keep the microphone open. Use "command" for short standalone app commands: "mute" (also: stop, be quiet, shut up, pause notifications), "skip" (also: next, dismiss), "status" (also: what is running, what is done), "read" (read a reply aloud — matches: read it, read the reply, read me the last reply, what did it say; put any named conversation or project in "target", empty means the one that just spoke), "goto" (open something on screen — matches: go to, open, show me; put the named conversation or project in "target"). Use "ignore" ONLY when the transcript is clearly not addressed to the app: background noise, other people talking to each other, phone calls, or the user talking to someone else in the room. The topic does not matter — the user may ask the agent anything, including casual requests. The strongest signal that speech is addressed to the app is a trailing send word. A message that ends with a send word is a send even when the topic is casual. Transcription is imperfect: stray trailing words after the send word (like "complete" or "thank you") still count as a send. Examples: "can you tell me a joke? send" is send with text "can you tell me a joke?". "I will pick it up on the way home no worries" is ignore (talking to someone else, no send word). "refactor the queue and add tests, send" is send. "maybe we should split that function" is wait.';
+
+// Small state tones. Each is a distinct earcon:
+//   open  — rising two notes: the microphone is now listening
+//   ack   — one short high tick: speech was captured, the gate is deciding
+//   wait  — two quick high ticks: kept open, keep thinking or talking
+//   close — falling two notes: the microphone closed, nothing was sent
+const VOICE_TONES = {
+  open: [[660, 90], [880, 120]],
+  ack: [[988, 70]],
+  wait: [[880, 60], [0, 50], [880, 60]],
+  close: [[660, 90], [440, 150]],
+};
+
+function tonePath(name) {
+  const p = path.join(TTS_DIR, 'tone-' + name + '.wav');
+  if (!fs.existsSync(p)) {
+    const rate = 24000;
+    const parts = [];
+    for (const [freq, ms] of VOICE_TONES[name]) {
+      const n = Math.floor(rate * ms / 1000);
+      const pcm = Buffer.alloc(n * 2);
+      if (freq > 0) for (let i = 0; i < n; i++) {
+        const env = Math.min(1, i / (rate * 0.008), (n - i) / (rate * 0.03));
+        pcm.writeInt16LE(Math.round(Math.sin(2 * Math.PI * freq * i / rate) * 8000 * env), i * 2);
+      }
+      parts.push(pcm);
+    }
+    fs.mkdirSync(TTS_DIR, { recursive: true });
+    fs.writeFileSync(p, pcmToWav(Buffer.concat(parts), rate));
+  }
+  return p;
+}
+
+const playTone = name => playWav(tonePath(name));
+
+// Play one wav. Speech clips (speech=true) register as the pausable,
+// mutable "now playing" clip and notify browsers; short tones do not.
+function playWav(p, speech = false) {
+  return new Promise(resolve => {
+    const child = spawn('pw-play', [p], { stdio: 'ignore' });
+    if (speech) {
+      voice.current = child;
+      voice.paused = false;
+      broadcast({ type: 'voice-playing', playing: true, paused: false });
+    }
+    const done = () => {
+      if (speech && voice.current === child) {
+        voice.current = null;
+        voice.paused = false;
+        broadcast({ type: 'voice-playing', playing: false, paused: false });
+      }
+      resolve();
+    };
+    child.on('close', done);
+    child.on('error', done);
+  });
+}
+
+function voicePauseToggle() {
+  if (!voice.current) return false;
+  try {
+    voice.current.kill(voice.paused ? 'SIGCONT' : 'SIGSTOP');
+    voice.paused = !voice.paused;
+    broadcast({ type: 'voice-playing', playing: true, paused: voice.paused });
+  } catch {}
+  return true;
+}
+
+function voiceStopCurrent() {
+  if (!voice.current) return false;
+  try { voice.current.kill('SIGCONT'); voice.current.kill('SIGKILL'); } catch {}
+  return true;
+}
+
+async function speakLine(text) {
+  try {
+    const clip = await synthesizeSpeech(text, false, VOICE_SPEED);
+    await playWav(path.join(TTS_DIR, clip.id + '.wav'), true);
+  } catch (e) { console.log('voice speak failed: ' + e.message); }
+}
+
+function enqueueAnnouncement(item) {
+  if (voiceMuted()) return;
+  voice.queue.push(item);
+  if (voice.queue.length > 5) voice.queue.splice(0, voice.queue.length - 5);
+  voicePump();
+}
+
+async function voicePump() {
+  if (voice.playing) return;
+  voice.playing = true;
+  try {
+    while (voice.queue.length) {
+      const item = voice.queue.shift();
+      if (voiceMuted()) continue;
+      await playWav(item.wavPath, true);
+      if (voiceMuted()) continue; // muted mid-announcement: no mic window
+      await voiceListen(item).catch(e => console.log('voice listen failed: ' + e.message));
+    }
+  } finally { voice.playing = false; }
+}
+
+// One utterance from the room microphone: wait up to waitMs for speech to
+// start, then stop after tailMs of trailing silence. Returns raw s16/16k/mono
+// PCM, or null when nobody spoke.
+function recordUtterance({ waitMs = 10000, tailMs = 2200, maxMs = 120000 } = {}) {
+  return new Promise(resolve => {
+    let child;
+    try {
+      child = spawn('pw-record', ['--raw', '--format', 's16', '--rate', '16000', '--channels', '1', '-'],
+        { stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch { return resolve(null); }
+    const chunks = [];
+    let leftover = Buffer.alloc(0);
+    // The first five 100 ms frames calibrate the ambient floor. Speech must
+    // then run three consecutive frames above the threshold: one-frame spikes
+    // (keys, clicks) never open the gate.
+    const calib = [];
+    let started = false, lastVoice = 0, floor = 0, loudRun = 0;
+    const t0 = Date.now();
+    let settled = false;
+    const finish = ok => {
+      if (settled) return;
+      settled = true;
+      clearInterval(timer);
+      try { child.kill('SIGKILL'); } catch {}
+      resolve(ok && started ? Buffer.concat(chunks) : null);
+    };
+    const timer = setInterval(() => {
+      const now = Date.now();
+      if (!started && now - t0 > waitMs) finish(false);
+      else if (started && now - lastVoice > tailMs) finish(true);
+      else if (now - t0 > maxMs) finish(started);
+    }, 100);
+    child.on('error', () => finish(false));
+    child.on('close', () => finish(started));
+    child.stdout.on('data', buf => {
+      chunks.push(buf);
+      leftover = leftover.length ? Buffer.concat([leftover, buf]) : buf;
+      while (leftover.length >= 3200) { // 100 ms frames
+        const frame = leftover.subarray(0, 3200);
+        leftover = leftover.subarray(3200);
+        let sum = 0;
+        for (let i = 0; i < 3200; i += 2) { const v = frame.readInt16LE(i); sum += v * v; }
+        const rms = Math.sqrt(sum / 1600);
+        if (calib.length < 5) {
+          calib.push(rms);
+          if (calib.length === 5) floor = [...calib].sort((a, b) => a - b)[2]; // median
+          continue;
+        }
+        floor = Math.min(floor, Math.max(rms, 40));
+        const threshold = Math.max(floor * 3, floor + 600);
+        if (rms > threshold) {
+          loudRun++;
+          if (loudRun >= 3) { started = true; lastVoice = Date.now(); }
+        } else {
+          loudRun = 0;
+        }
+      }
+    });
+  });
+}
+
+async function transcribePcm(pcm) {
+  const out = await httpRaw(SPEECH_URL.replace(/\/$/, '') + '/transcribe', pcm,
+    'audio/L16;rate=16000;channels=1', 60000 + Math.floor(pcm.length / 128));
+  if (out.status !== 200) throw new Error('speech service ' + out.status);
+  return out.buf.toString('utf8').trim();
+}
+
+// The send word may sit at the very end, or be followed by a couple of
+// stray transcription words ("Send. Complete.", "send thank you").
+const VOICE_SEND_TAIL = /[\s.,!]*(send|done|go|submit|enter|control enter|ship it|that'?s all)[\s.,!]*(\w+[\s.,!]*){0,2}$/i;
+
+async function voiceGate(transcript) {
+  try {
+    const res = await httpJson(REWRITE_URL, {
+      model: REWRITE_MODEL,
+      messages: [
+        { role: 'system', content: VOICE_GATE_PROMPT },
+        { role: 'user', content: transcript },
+      ],
+      max_tokens: 300,
+      chat_template_kwargs: { enable_thinking: false },
+    }, 30000);
+    const raw = String(res.json && res.json.choices && res.json.choices[0]
+      && res.json.choices[0].message && res.json.choices[0].message.content || '');
+    const m = raw.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(m ? m[0] : raw);
+    if (['send', 'wait', 'command', 'ignore'].includes(parsed.action)) return parsed;
+  } catch (e) { console.log('voice gate unreachable, using heuristic: ' + e.message); }
+  // Heuristic fallback when Qwen is down: commands, an explicit send word at
+  // the end sends, anything else with real length waits for more.
+  const t = transcript.toLowerCase().replace(/[.!?,]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/^(mute|stop|be quiet|shut up|pause)\b/.test(t) && t.split(' ').length <= 4) return { action: 'command', command: 'mute', text: '' };
+  if (/^(skip|next|dismiss)\b/.test(t) && t.split(' ').length <= 3) return { action: 'command', command: 'skip', text: '' };
+  if (/^(status|what'?s? (is )?(running|done))/.test(t)) return { action: 'command', command: 'status', text: '' };
+  if (VOICE_SEND_TAIL.test(transcript.trim()) && t.split(' ').length >= 2) {
+    const cleaned = transcript.replace(VOICE_SEND_TAIL, '').trim();
+    if (cleaned) return { action: 'send', command: 'none', text: cleaned };
+  }
+  if (t.split(' ').filter(Boolean).length >= 2) return { action: 'wait', command: 'none', text: '' };
+  return { action: 'ignore', command: 'none', text: '' };
+}
+
+// Resolve a spoken name ("the dspy conversation", "aiconvo") to the best
+// matching recent conversation. Titles and project names are both searched;
+// word overlap scores the match, recency breaks ties.
+function voiceResolveTarget(spoken) {
+  const words = String(spoken || '').toLowerCase()
+    .replace(/\b(the|a|an|my|conversation|conversations|project|projects|one|about)\b/g, ' ')
+    .replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 1);
+  if (!words.length) return null;
+  let best = null, bestScore = 0;
+  for (const [key, e] of Object.entries(index)) {
+    if (!e || e.hiddenFanout) continue;
+    const hay = ((e.title || '') + ' ' + (e.timelineTitle || '') + ' ' + projectNameOf(e.cwd, key)).toLowerCase();
+    let score = 0;
+    for (const w of words) if (hay.includes(w)) score++;
+    if (!score) continue;
+    const age = Date.now() - Date.parse(e.lastTs || 0);
+    const recency = Math.max(0, 1 - age / (30 * 24 * 3600 * 1000)); // 30-day fade
+    score += recency;
+    if (score > bestScore) { bestScore = score; best = { key, entry: e }; }
+  }
+  return bestScore >= 1.2 ? best : null; // at least one word plus some recency
+}
+
+// Read one conversation's last assistant reply aloud, shortened by Qwen when
+// it is long.
+async function voiceReadReply(key) {
+  let text = '';
+  try {
+    const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+    const m = (data.messages || []).filter(x => x.role === 'assistant' && x.text && x.text.trim()).slice(-1)[0];
+    text = m ? String(m.text) : '';
+  } catch {}
+  if (!text) { await speakLine('I found no reply to read.'); return; }
+  let spoken = text;
+  if (text.length > 600) {
+    try { spoken = await rewriteForSpeech(text.slice(0, 12000)) || text.slice(0, 600); }
+    catch { spoken = text.slice(0, 600); }
+  }
+  await speakLine(spoken.slice(0, 3000));
+}
+
+function voiceStatusLine() {
+  const jobs = [...agentRunJobs.values()];
+  const running = jobs.filter(j => j.status === 'running');
+  const doneRecent = jobs.filter(j => j.status === 'done' && j.finishedAt && Date.now() - j.finishedAt < 15 * 60 * 1000);
+  const nameOf = j => {
+    const e = j.key && index[j.key];
+    return (e && (e.title || e.timelineTitle) || j.title || 'untitled').slice(0, 60);
+  };
+  const parts = [];
+  if (running.length) parts.push(running.length + ' running: ' + running.slice(0, 3).map(nameOf).join('; '));
+  if (doneRecent.length) parts.push(doneRecent.length + ' finished in the last fifteen minutes: ' + doneRecent.slice(0, 3).map(nameOf).join('; '));
+  return parts.length ? parts.join('. ') + '.' : 'Nothing is running, and nothing finished recently.';
+}
+
+// The listen session: beep, then segments of speech separated by pauses.
+// Each pause sends the accumulated transcript to the Qwen gate. "wait" keeps
+// the microphone open — the user thinks between phrases and only an explicit
+// send word (send, done, go, submit, control enter) closes and sends.
+async function voiceListen(item) {
+  if (process.env.AICONVO_VOICE_REPLY === '0') return;
+  await playTone('open');
+  let transcript = '';
+  const sessionStart = Date.now();
+  for (let segment = 0; segment < 12; segment++) {
+    if (Date.now() - sessionStart > 5 * 60 * 1000) break;
+    // First segment: a short window. After "wait": a generous thinking window.
+    const pcm = await recordUtterance({ waitMs: segment === 0 ? 10000 : 45000 });
+    if (!pcm || pcm.length < 16000) {
+      // Silence. With accumulated text the user walked away mid-thought:
+      // drop it rather than send something unconfirmed.
+      if (transcript) {
+        console.log('voice window closed with unsent text: ' + transcript.slice(0, 120));
+        await playTone('close');
+        await speakLine('Closed without sending.');
+      } else {
+        await playTone('close');
+      }
+      return;
+    }
+    await playTone('ack'); // speech captured, the gate is deciding
+    let piece = '';
+    try { piece = await transcribePcm(pcm); }
+    catch (e) {
+      console.log('voice transcribe failed: ' + e.message);
+      await playTone('close');
+      await speakLine('Speech service failed. Closed.');
+      return;
+    }
+    if (piece) transcript = (transcript ? transcript + ' ' : '') + piece;
+    if (!transcript) { await playTone('wait'); continue; }
+    console.log('voice heard so far: ' + transcript.slice(0, 200));
+    const gate = await voiceGate(transcript);
+    if (gate.action === 'ignore') {
+      console.log('voice gate ignored: ' + transcript.slice(0, 120));
+      if (!transcript.trim() || segment === 0) {
+        await playTone('close');
+        await speakLine('Ignored.');
+        return;
+      }
+      await playTone('wait'); // noise on top of real dictation: still open
+      continue;
+    }
+    if (gate.action === 'wait') {
+      console.log('voice gate: wait');
+      await playTone('wait'); // kept open — keep thinking, then talk again
+      continue;
+    }
+    if (gate.action === 'command') {
+      console.log('voice gate command: ' + gate.command + (gate.target ? ' · ' + gate.target : ''));
+      if (gate.command === 'mute') {
+        voice.mutedUntil = Date.now() + 30 * 60 * 1000;
+        voice.queue.length = 0;
+        broadcast({ type: 'voice-state', muted: true, mutedUntil: voice.mutedUntil });
+        await speakLine('Muted for thirty minutes.');
+      } else if (gate.command === 'skip') {
+        voice.queue.length = 0;
+        await speakLine('Skipped.');
+      } else if (gate.command === 'status') {
+        await speakLine(voiceStatusLine());
+      } else if (gate.command === 'read') {
+        const hit = gate.target ? voiceResolveTarget(gate.target) : (item.job && item.job.key ? { key: item.job.key } : null);
+        if (!hit) await speakLine('I could not find that conversation.');
+        else await voiceReadReply(hit.key);
+      } else if (gate.command === 'goto') {
+        const hit = voiceResolveTarget(gate.target || transcript);
+        if (!hit) await speakLine('I could not find that.');
+        else {
+          broadcast({ type: 'voice-nav', key: hit.key });
+          await speakLine('Opening ' + ((hit.entry && (hit.entry.title || '')) || 'it').slice(0, 60) + '.');
+        }
+      }
+      await playTone('close');
+      return;
+    }
+    // "send": deliver to the conversation that just spoke, same model.
+    const text = String(gate.text || transcript).replace(VOICE_SEND_TAIL, '').trim();
+    if (!text || !item.job || !item.job.key) { await playTone('close'); return; }
+    const model = String(item.job.model || '');
+    const slash = model.indexOf('/');
+    try {
+      await startAgentRun(item.job.key, {
+        provider: slash > 0 ? model.slice(0, slash) : undefined,
+        modelId: slash > 0 ? model.slice(slash + 1) : undefined,
+        message: text, allowQueue: true,
+      });
+      await speakLine('Sent.');
+    } catch (e) {
+      console.log('voice reply send failed: ' + e.message);
+      await speakLine('Sending failed.');
+    }
+    await playTone('close');
+    return;
+  }
+  await playTone('close');
+  await speakLine('Closed without sending.');
 }
 
 // ---------- HTTP ----------
@@ -9698,6 +10080,24 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}');
       try { json(res, 200, await actOnConversation(parsed.id, parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/voice/state' && req.method === 'GET') {
+      json(res, 200, { muted: voiceMuted(), mutedUntil: voice.mutedUntil || null, queued: voice.queue.length,
+        playing: !!voice.current, paused: voice.paused });
+    } else if (u.pathname === '/api/voice/pause' && req.method === 'POST') {
+      json(res, 200, { ok: voicePauseToggle(), paused: voice.paused });
+    } else if (u.pathname === '/api/voice/mute' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        if (p.muted) {
+          voice.mutedUntil = Date.now() + Math.max(1, Math.min(24 * 60, Number(p.minutes) || 30)) * 60 * 1000;
+          voice.queue.length = 0;
+          voiceStopCurrent(); // silence right now, not after the clip
+        } else voice.mutedUntil = 0;
+        broadcast({ type: 'voice-state', muted: voiceMuted(), mutedUntil: voice.mutedUntil || null });
+        json(res, 200, { muted: voiceMuted(), mutedUntil: voice.mutedUntil || null });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/speech/transcribe' && req.method === 'POST') {
       const max = 16000 * 2 * 600;
       const chunks = [];

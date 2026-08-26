@@ -111,6 +111,9 @@ mark { background: none; color: var(--warn); font-weight: 700; }
 #srMore { margin: 2px auto 10px; display: block; }
 mark.cur { outline: 2px solid var(--warn); outline-offset: 1px; }
 #matchHud { position: fixed; right: 12px; bottom: 12px; z-index: 60; background: var(--surface-1); border: 1px solid var(--border-strong); padding: 4px 10px; font-size: var(--fs-meta); color: var(--text-dim); pointer-events: none; }
+#voicePill { position: fixed; right: 12px; bottom: 48px; z-index: 65; display: flex; gap: 8px; align-items: center; background: var(--surface-1); border: 1px solid var(--border-strong); padding: 6px 10px; font-size: var(--fs-meta); color: var(--text); box-shadow: 0 4px 16px color-mix(in srgb, var(--bg) 60%, transparent); }
+#voicePill .vp-label { color: var(--text-dim); }
+#voicePill button { height: 24px; min-height: 24px; padding: 0 8px; font-size: 11px; }
 code { color: var(--cyan); }
 a { color: var(--cyan); }
 
@@ -2674,6 +2677,45 @@ function toggleJobs(show) {
   t.hidden = show !== undefined ? !show : !t.hidden;
 }
 $('jobsBtn').onclick = () => toggleJobs();
+
+// ---------- voice playback state ----------
+// The server owns the speakers. Browsers mirror two things: the mute state
+// (settings + the floating control) and "now speaking" (a floating pill with
+// pause and mute, visible only while audio plays).
+let voiceMutedState = false;
+function renderVoiceUi(playing, paused) {
+  let pill = $('voicePill');
+  if (!playing) { if (pill) pill.remove(); return; }
+  if (!pill) {
+    pill = document.createElement('div');
+    pill.id = 'voicePill';
+    pill.innerHTML = '<span class="vp-label">🔊 speaking</span>'
+      + '<button id="vpPause" title="Pause / resume"></button>'
+      + '<button id="vpMute" title="Stop and mute for 30 minutes">mute</button>';
+    document.body.appendChild(pill);
+    $('vpPause').onclick = () => fetch('/api/voice/pause', { method: 'POST' }).catch(() => {});
+    $('vpMute').onclick = () => voiceSetMuted(true);
+  }
+  pill.querySelector('.vp-label').textContent = paused ? '⏸ paused' : '🔊 speaking';
+  $('vpPause').textContent = paused ? 'resume' : 'pause';
+}
+async function voiceSetMuted(muted, minutes = 30) {
+  try {
+    const d = await (await fetch('/api/voice/mute', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ muted, minutes }),
+    })).json();
+    voiceMutedState = !!d.muted;
+  } catch {}
+  if (settingsOpen) renderSettings();
+}
+(async () => {
+  try {
+    const d = await (await fetch('/api/voice/state')).json();
+    voiceMutedState = !!d.muted;
+    renderVoiceUi(d.playing, d.paused);
+  } catch {}
+})();
 $('jobsClose').onclick = () => toggleJobs(false);
 $('jobsList').onclick = e => {
   const el = e.target.closest('.job');
@@ -14135,6 +14177,11 @@ function renderSettings() {
       </div>
     </section>
     <section class="psection">
+      <h3>voice</h3>
+      <p class="hint">Finished agent runs are announced on the speakers, then the microphone listens for a spoken reply or command. Mute silences announcements and keeps runs working.</p>
+      <label style="display:flex;gap:6px;align-items:center"><input id="setVoiceMute" type="checkbox"${voiceMutedState ? ' checked' : ''}> mute voice for 30 minutes</label>
+    </section>
+    <section class="psection">
       <h3>semantic search</h3>
       <p class="hint">A late-interaction (ColBERT) stage on the GPU server adds meaning-based matches to search — it forgives reworded speech-to-text queries. The laptop stays authoritative: lexical search keeps working when the server is off.</p>
       <label style="display:flex;gap:6px;align-items:center"><input id="setSemantic" type="checkbox"${(settingsState && settingsState.settings && settingsState.settings.semanticSearch) ? ' checked' : ''}> enable semantic search</label>
@@ -14154,6 +14201,7 @@ function renderSettings() {
       <div id="setModels">${catalog}</div>
     </section>
   </div>`;
+  $('setVoiceMute').onchange = () => voiceSetMuted($('setVoiceMute').checked);
   $('setSemantic').onchange = () => saveSettings({ semanticSearch: $('setSemantic').checked }, 'semantic search ' + ($('setSemantic').checked ? 'on — backfill starts now' : 'off'));
   $('setSemanticUrl').onchange = () => saveSettings({ semanticUrl: $('setSemanticUrl').value.trim() }, 'semantic server saved');
   $('setSemanticNs').onchange = () => saveSettings({ semanticNs: $('setSemanticNs').value.trim() }, 'semantic namespace saved — full re-push starts');
@@ -15270,6 +15318,13 @@ live.onmessage = ev => {
         if ($('view') && $('view').querySelector('.cmpblock')) clearLedgers();
       }, clearLedgers);
     } else clearLedgers();
+    return;
+  }
+  if (d.type === 'voice-state') { voiceMutedState = !!d.muted; if (settingsOpen) renderSettings(); return; }
+  if (d.type === 'voice-playing') { renderVoiceUi(d.playing, d.paused); return; }
+  if (d.type === 'voice-nav') {
+    // A spoken "go to X": follow it on this screen.
+    if (d.key) open(d.key, 'bottom').catch(() => {});
     return;
   }
   if (d.type === 'run-event') {
