@@ -464,54 +464,6 @@ function broadcast(ev) {
   for (const res of sseClients) res.write(line);
 }
 
-// ---------- shared app windows ----------
-// One window list for every device (desktop, phone, e-ink). Each device keeps
-// its own active window; the server owns the list and pushes changes over SSE.
-const WINDOWS_FILE = path.join(CACHE_DIR, 'windows.json');
-const WINDOW_PREVIEW_MAX = 200 * 1024;
-let sharedWindows = { rev: 0, list: [] };
-try {
-  const d = JSON.parse(fs.readFileSync(WINDOWS_FILE, 'utf8'));
-  if (d && Array.isArray(d.list)) sharedWindows = { rev: Number(d.rev) || 0, list: d.list };
-} catch {}
-let windowsSaveT = null;
-function saveWindows() {
-  clearTimeout(windowsSaveT);
-  windowsSaveT = setTimeout(() => {
-    fsp.writeFile(WINDOWS_FILE, JSON.stringify(sharedWindows)).catch(() => {});
-  }, 300);
-}
-function upsertSharedWindow(win, client) {
-  if (!win || !win.id) return null;
-  const clean = {
-    id: String(win.id).slice(0, 64),
-    hash: String(win.hash || '').slice(0, 2048),
-    kind: String(win.kind || 'home').slice(0, 32),
-    title: String(win.title || 'home').slice(0, 200),
-    tab: String(win.tab || 'conv').slice(0, 16),
-    draft: typeof win.draft === 'string' ? win.draft.slice(0, 20000) : '',
-    previewHTML: typeof win.previewHTML === 'string' && win.previewHTML.length <= WINDOW_PREVIEW_MAX ? win.previewHTML : '',
-    previewHome: !!win.previewHome,
-    updatedAt: Date.now(),
-  };
-  const i = sharedWindows.list.findIndex(w => w.id === clean.id);
-  if (i >= 0) sharedWindows.list[i] = clean;
-  else sharedWindows.list.push(clean);
-  sharedWindows.rev++;
-  saveWindows();
-  broadcast({ type: 'windows', rev: sharedWindows.rev, client: client || '' });
-  return clean;
-}
-function closeSharedWindow(id, client) {
-  const i = sharedWindows.list.findIndex(w => w.id === id);
-  if (i < 0) return false;
-  sharedWindows.list.splice(i, 1);
-  sharedWindows.rev++;
-  saveWindows();
-  broadcast({ type: 'windows', rev: sharedWindows.rev, client: client || '' });
-  return true;
-}
-
 async function indexFile(source, relPath, stat) {
   const key = source + ':' + relPath;
   const absPath = path.join(SOURCES[source], relPath);
@@ -9936,21 +9888,6 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { key, title: data.title, cwd: data.cwd, firstTs: data.firstTs, lastTs: data.lastTs, ...evidence });
     } else if (u.pathname === '/api/jobs') {
       json(res, 200, allJobs());
-    } else if (u.pathname === '/api/windows' && req.method === 'GET') {
-      json(res, 200, { rev: sharedWindows.rev, list: sharedWindows.list });
-    } else if (u.pathname === '/api/windows/upsert' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const parsed = JSON.parse(body || '{}');
-      const w = upsertSharedWindow(parsed.window, parsed.client);
-      if (!w) return json(res, 400, { error: 'bad window' });
-      json(res, 200, { ok: true, rev: sharedWindows.rev });
-    } else if (u.pathname === '/api/windows/close' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const parsed = JSON.parse(body || '{}');
-      closeSharedWindow(String(parsed.id || ''), parsed.client);
-      json(res, 200, { ok: true, rev: sharedWindows.rev });
     } else if (u.pathname === '/api/settings' && req.method === 'GET') {
       json(res, 200, settingsResponse());
     } else if (u.pathname === '/api/settings' && (req.method === 'PUT' || req.method === 'POST')) {

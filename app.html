@@ -33,12 +33,7 @@ try {
 :root[data-theme-mode="binary"] .branchblock .msg { opacity: 1; }
 /* A binary theme uses shape and decoration instead of surface tints. */
 :root[data-theme-mode="binary"] button:hover, :root[data-theme-mode="binary"] #brand:hover,
-:root[data-theme-mode="binary"] #ticker:hover, :root[data-theme-mode="binary"] #winBtn:hover { background: transparent; color: var(--text); text-decoration: underline; }
-:root[data-theme-mode="binary"] .win-card:hover { background: var(--bg); text-decoration: none; }
-:root[data-theme-mode="binary"] .win-card.on { background: var(--bg); color: var(--text); border-width: 2px; }
-:root[data-theme-mode="binary"] .win-card.on .win-card-foot { background: var(--text); color: var(--bg); }
-:root[data-theme-mode="binary"] .win-card.on .win-sub, :root[data-theme-mode="binary"] .win-card.on .win-mark { color: var(--bg); }
-:root[data-theme-mode="binary"] .win-card.win-new-card:hover { background: var(--bg); }
+:root[data-theme-mode="binary"] #ticker:hover { background: transparent; color: var(--text); text-decoration: underline; }
 :root[data-theme-mode="binary"] button.primary:hover { background: var(--text); color: var(--bg); filter: none; text-decoration: none; }
 :root[data-theme-mode="binary"] .ag-row:hover, :root[data-theme-mode="binary"] .item:hover,
 :root[data-theme-mode="binary"] .msgrow:hover { background: transparent; }
@@ -168,35 +163,6 @@ body.conv #chTitle:hover { text-decoration: underline dotted; text-underline-off
 #aiTitle { height: 22px; padding: 0 6px; font-size: 11px; flex-shrink: 0; }
 body.conv #convHeadExtra { display: inline-flex; flex-shrink: 0; }
 #chTitle input { font: inherit; font-weight: 700; width: 38vw; box-sizing: border-box; padding: 0 4px; background: var(--bg); color: inherit; border: 1px solid currentColor; }
-#winBtn { height: 26px; padding: 0 8px; min-width: 30px; width: auto; flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
-#winBtn.on { border-color: var(--accent); color: var(--accent); }
-#windowsPop { position: fixed; inset: 0; z-index: 80; background: var(--bg); display: flex; flex-direction: column; padding: 12px 16px 16px; overflow: auto; }
-#windowsPop[hidden] { display: none; }
-body.windows-over { overflow: hidden; }
-.win-over-bar { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 4px auto 16px; width: min(520px, 100%); flex-shrink: 0; }
-.win-over-bar input { flex: 1; min-width: 0; text-align: center; }
-.win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; align-content: start; flex: 1; width: 100%; max-width: 1400px; margin: 0 auto; }
-.win-card { position: relative; display: flex; flex-direction: column; border: 1px solid var(--border-strong); background: var(--surface-1); cursor: pointer; min-height: 0; padding: 0; height: auto; text-align: left; }
-.win-card:hover { background: var(--surface-1); }
-.win-card.on { border-width: 2px; border-color: var(--text); }
-.win-thumb { position: relative; overflow: hidden; height: 160px; background: var(--bg); border-bottom: 1px solid var(--border); pointer-events: none; }
-.win-thumb-empty { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: var(--fs-label); }
-.win-mini { position: absolute; top: 0; left: 0; width: 400%; height: 400%; transform: scale(0.25); transform-origin: top left; overflow: hidden; pointer-events: none; }
-.win-mini .agent-compose, .win-mini #tabs, .win-mini #ganttBar, .win-mini #ganttResize, .win-mini #selShown { display: none !important; }
-.win-mini .composer-dock { position: static !important; }
-.win-card-foot { display: flex; gap: 8px; align-items: center; padding: 8px 10px; min-height: 40px; }
-.win-mark { flex: 0 0 14px; font-weight: 700; color: var(--accent); }
-.win-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.win-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-size: var(--fs-meta); }
-.win-sub { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.win-card.on .win-card-foot { background: var(--accent-strong); color: var(--accent-ink); }
-.win-card.on .win-sub { color: var(--accent-ink); }
-.win-card.on .win-mark { color: var(--accent-ink); }
-.win-close { position: absolute; top: 6px; right: 6px; z-index: 2; height: 24px; min-width: 24px; padding: 0 6px; }
-.win-card.win-new-card { border-style: dashed; min-height: 200px; align-items: center; justify-content: center; }
-.win-card.win-new-card .win-new-plus { font-size: 42px; line-height: 1; font-weight: 700; padding: 36px 0 12px; }
-.win-card.win-new-card .win-card-foot { border-top: 0; justify-content: center; width: 100%; }
-
 #qwrap { flex: 1 1 120px; min-width: 120px; position: relative; display: flex; }
 #qBtn { display: none; font-size: 17px; font-weight: 700; }
 #q { flex: 1; min-width: 0; }
@@ -209,8 +175,8 @@ body.windows-over { overflow: hidden; }
 #settingsBtn.on { color: var(--accent); }
 #jobsBtn.running { color: var(--accent); animation: activepulse 2.4s ease-in-out infinite; }
 /* Away from home the header quiets down: reading and talking need no
-   search, window grid, count, or list filters. Keyboard paths remain. */
-body:not(.home) #winBtn, body:not(.home) #qBtn, body:not(.home) #qwrap,
+   search, count, or list filters. Keyboard paths remain. */
+body:not(.home) #qBtn, body:not(.home) #qwrap,
 body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; }
 #ticker { flex: 0 1 auto; min-width: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: transparent; color: var(--text-dim); font-size: var(--fs-micro); padding: 0 6px; height: 26px; }
 /* Mid-width windows: the bar wraps and the search takes its own row. */
@@ -277,7 +243,7 @@ body.home #view { display: none !important; }
 /* Home is the bare chart: no tabs bar, no filter bar. */
 body.home #tabs, body.home #ganttBar { display: none !important; }
 /* Home keeps the header quiet: no search field, windows button, or filters. */
-body.home #qwrap, body.home #winBtn, body.home #filtersBtn { display: none !important; }
+body.home #qwrap, body.home #filtersBtn { display: none !important; }
 /* Floating mark details: one click shows them, a second click opens. */
 #markPop { position: fixed; z-index: 70; max-width: 340px; padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--border-strong); color: var(--text); font: 12px var(--font); box-shadow: 0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent); }
 #markPop h4 { margin: 0 0 4px; font-size: 12px; line-height: 1.35; }
@@ -1457,7 +1423,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 #helpMini td { padding: 1px 4px 1px 0; vertical-align: top; }
 #helpMini td:first-child { color: var(--text-faint); white-space: nowrap; }
 :root[data-theme-mode="binary"] #helpMini { background: var(--bg); border: 2px solid var(--text); color: var(--text); }
-.win-card:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---- reading view (r: the last message, comfortable to read) ---- */
 #readOverlay { position: fixed; inset: 0; z-index: 85; background: var(--bg); display: flex; flex-direction: column; }
@@ -1502,9 +1467,8 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   input[type=text], input[type=search], select { min-height: 42px; font-size: 16px; }
 
   header { height: auto; min-height: 52px; padding: 4px 6px; gap: 3px; flex-wrap: wrap; align-content: center; }
-  /* One row: brand + 6 compact buttons must fit 360 CSS px. */
+  /* One row: brand + compact buttons must fit 360 CSS px. */
   #brand { height: 44px; padding: 0 8px; font-size: 17px; }
-  #winBtn { height: 44px; min-width: 40px; width: auto; padding: 0 6px; font-size: 15px; }
   #qBtn { height: 44px; min-width: 40px; width: 40px; padding: 0; }
   #qwrap { order: 20; flex: 1 0 100%; min-width: 0; padding: 2px 0 3px; }
   #q { width: 100%; height: 44px; }
@@ -1529,15 +1493,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 
   #filtersPop, #agentsPop { position: fixed; top: 56px; left: 6px; right: 6px; width: auto; max-height: calc(100dvh - 64px); overflow: auto; }
   body.home #filtersPop, body.home #agentsPop { top: 108px; }
-  #windowsPop { padding: 8px 8px calc(12px + env(safe-area-inset-bottom)); }
-  .win-over-bar { width: 100%; margin-bottom: 10px; }
-  /* minmax(0,1fr), not 1fr: a long title must not widen the track past the screen */
-  .win-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .win-card { min-width: 0; max-width: 100%; }
-  .win-thumb { height: 140px; }
-  .win-card-foot { min-height: 48px; }
-  .win-close { height: 36px; min-width: 36px; }
-  .win-card.win-new-card { min-height: 160px; }
   #filtersPop { min-width: 0; }
   #jobsTray { top: 0; width: 100%; z-index: 75; }
 
@@ -1757,7 +1712,6 @@ window.aiconvoSyncTheme();
   <button id="chNew" title="New conversation in this project — same model and thinking level, the project map in the system prompt, an empty composer">+</button>
   <div id="chTitle"></div>
   <span id="convHeadExtra"></span>
-  <button id="winBtn" title="Windows. Open another view without losing this one. (w)" aria-label="Windows" aria-expanded="false">⧉</button>
   <button id="qBtn" title="Search" aria-label="Search">⌕</button>
   <div id="qwrap">
     <input id="q" type="text" placeholder="search everything — conversations, notes, epics, memory" title="Words AND together · &quot;exact phrase&quot; · project: role: source: type: after: before: path: · ↑↓ select · enter open · alt+1–5 scope">
@@ -1774,7 +1728,6 @@ window.aiconvoSyncTheme();
 </header>
 <button id="zenExit" title="Leave zen mode (z)">zen ✕</button>
 <button id="gRecenter" title="Jump to now" aria-label="Jump to now">⌖</button>
-<div id="windowsPop" hidden></div>
 <div id="agentsPop" hidden></div>
 <div id="searchOverlay" class="overlay" hidden>
   <div class="dialog search-dialog" role="dialog" aria-modal="true" aria-labelledby="searchModalInput">
@@ -1961,7 +1914,6 @@ function setRouteKind(kind, crumbs) {
 }
 
 function setRoute(kind, hash, crumbs) {
-  if (viewKind === 'conversation' && kind !== 'conversation') captureWinDraft(activeWin());
   setRouteKind(kind, crumbs);
   currentHash = hash || '';
   let now = location.hash.replace(/^#/, '');
@@ -1972,7 +1924,6 @@ function setRoute(kind, hash, crumbs) {
     if (currentHash) location.hash = currentHash;
     else history.pushState('', '', location.pathname + location.search);
   }
-  syncActiveWin();
 }
 
 window.addEventListener('hashchange', () => {
@@ -2003,7 +1954,6 @@ function dispatchHash(h) {
     if (progressStream) { progressStream.close(); progressStream = null; }
     setRouteKind('home', []);
     currentHash = h;
-    syncActiveWin();
     let q = h.slice(2); try { q = decodeURIComponent(q); } catch {}
     $('q').value = q;
     $('qclear').hidden = !q;
@@ -2079,514 +2029,6 @@ window.uiAudit = function uiAudit(root) {
   }
   return bad;
 };
-
-// ---- windows: extra places to work without losing the current view ----
-// One page, many independent routes. The ⧉ button next to the brand opens
-// the overview. New window starts at home. Each window keeps its hash and
-// any unsent composer text. The window LIST is shared through the server, so
-// desktop, phone, and e-ink see the same windows. The ACTIVE window, scroll
-// positions, and attached images stay local to each device. Live updates
-// never change the active window.
-let winList = [];
-let winActive = null;
-let winSwitching = false;
-let winPending = null;
-let winQuery = '';
-const winClient = (() => {
-  try {
-    let id = sessionStorage.getItem('aiconvo.winclient');
-    if (!id) { id = Math.random().toString(36).slice(2, 10); sessionStorage.setItem('aiconvo.winclient', id); }
-    return id;
-  } catch { return Math.random().toString(36).slice(2, 10); }
-})();
-
-function winNewId() { return 'w' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7); }
-function activeWin() { return winList.find(w => w.id === winActive); }
-
-// Push local window state to the server (debounced, merged by id).
-const winPushPending = new Map();
-let winPushT = null;
-function pushWin(w) {
-  if (!w || !w.id) return;
-  winPushPending.set(w.id, w);
-  clearTimeout(winPushT);
-  winPushT = setTimeout(flushWinPush, 350);
-}
-function flushWinPush() {
-  const pending = [...winPushPending.values()];
-  winPushPending.clear();
-  for (const w of pending) {
-    let preview = w.previewHTML || '';
-    if (preview.length > 195000) preview = '';
-    fetch('/api/windows/upsert', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client: winClient, window: {
-        id: w.id, hash: w.hash, kind: w.kind, title: w.title, tab: w.tab,
-        draft: (w.draft && w.draft.value) || '', previewHTML: preview, previewHome: w.previewHome,
-      } }),
-    }).catch(() => {});
-  }
-}
-
-// Pull the shared list. The window this device is USING is never overwritten
-// by a remote change; a remotely closed active window stays on screen and
-// re-registers on the next local action.
-let winSseT = null;
-let winFirstLoad = true;
-async function loadSharedWindows() {
-  let remote;
-  try { remote = await (await fetch('/api/windows')).json(); }
-  catch { winFirstLoad = false; return; }
-  if (!remote || !Array.isArray(remote.list)) { winFirstLoad = false; return; }
-  const byId = new Map(winList.map(w => [w.id, w]));
-  const next = [];
-  for (const r of remote.list) {
-    if (!r || !r.id) continue;
-    const local = byId.get(r.id);
-    if (local && r.id === winActive) { next.push(local); continue; }
-    const w = local || emptyWin();
-    w.id = r.id;
-    w.hash = r.hash || '';
-    w.kind = r.kind || 'home';
-    w.title = r.title || 'home';
-    w.tab = r.tab || 'conv';
-    if (r.draft) w.draft = { value: r.draft, start: r.draft.length, end: r.draft.length };
-    else if (!local) w.draft = null;
-    w.previewHTML = r.previewHTML || '';
-    w.previewHome = !!r.previewHome;
-    next.push(w);
-  }
-  const act = activeWin();
-  let keepAct = act && !next.some(w => w.id === act.id);
-  // A fresh boot at home duplicates a shared home window: adopt that one
-  // instead of registering one extra window per device start.
-  if (keepAct && winFirstLoad && !act.hash && !(act.draft && act.draft.value)) {
-    const home = next.find(w => !w.hash);
-    if (home) { winActive = home.id; keepAct = false; }
-  }
-  if (keepAct) next.push(act);
-  winFirstLoad = false;
-  winList = next.length ? next : [emptyWin()];
-  if (!winList.some(w => w.id === winActive)) winActive = winList[0].id;
-  persistWinsLocal();
-  renderWinBtn();
-  if (!$('windowsPop').hidden) renderWindowsPop();
-}
-
-function winKindLabel(kind) {
-  return ({
-    home: 'whole-system timeline', conversation: 'conversation', tree: 'tree',
-    note: 'note', epic: 'epic', diffs: 'diffs', file: 'file', blame: 'blame',
-    project: 'project', 'project-tree': 'file tree', 'project-files': 'file gantt',
-    'project-diffs': 'diffs', repo: 'git history', doc: 'document',
-  })[kind] || kind || '';
-}
-
-function winLabel() {
-  if (viewKind === 'home') return tab === 'conv' ? 'home' : 'home · ' + tab;
-  const segs = routeSegs.map(s => String(s.label || '').trim()).filter(Boolean);
-  if (segs.length > 1) return segs.slice(1).join(' ▸ ');
-  return winKindLabel(viewKind) || 'window';
-}
-
-function emptyWin(hash, kind, title, tabName) {
-  return {
-    id: winNewId(), hash: hash || '', kind: kind || 'home', title: title || 'home',
-    tab: tabName || 'conv', draft: null, images: [], context: [], scrollView: 0, scrollList: 0,
-    previewHTML: '', previewHome: true,
-  };
-}
-
-function captureWinPreview(w) {
-  if (!w) return;
-  try {
-    const home = document.body.classList.contains('home');
-    const root = home ? $('left') : $('view');
-    if (!root) { w.previewHTML = ''; w.previewHome = home; return; }
-    const clone = root.cloneNode(true);
-    clone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
-    clone.querySelectorAll('script, iframe, textarea, input, select').forEach(el => el.remove());
-    clone.querySelectorAll('button, a, [tabindex]').forEach(el => {
-      el.setAttribute('tabindex', '-1');
-      if (el.tagName === 'BUTTON') el.disabled = true;
-    });
-    w.previewHTML = clone.innerHTML;
-    w.previewHome = home;
-  } catch { w.previewHTML = ''; }
-}
-
-function captureWinDraft(w) {
-  if (!w) return;
-  const ta = $('agentText');
-  w.draft = ta ? { value: ta.value, start: ta.selectionStart, end: ta.selectionEnd } : w.draft;
-  w.images = (window._agentImages || []).slice();
-  w.context = attachedContext().slice();
-  w.scrollView = $('view') ? $('view').scrollTop : 0;
-  w.scrollList = $('list') ? $('list').scrollTop : 0;
-}
-
-function captureWin(w) {
-  if (!w) return;
-  captureWinDraft(w);
-  w.hash = currentHash;
-  w.kind = viewKind;
-  w.title = winLabel();
-  w.tab = tab;
-  captureWinPreview(w);
-  pushWin(w);
-}
-
-// Local cache only bridges a server outage; the server list wins on load.
-function persistWinsLocal() {
-  try {
-    sessionStorage.setItem('aiconvo.windows', JSON.stringify({
-      active: winActive,
-      list: winList.map(w => ({ id: w.id, hash: w.hash, kind: w.kind, title: w.title, tab: w.tab })),
-    }));
-  } catch {}
-}
-
-function persistWins() {
-  persistWinsLocal();
-  pushWin(activeWin());
-}
-
-function syncActiveWin() {
-  const w = activeWin();
-  if (!w || winSwitching) return;
-  w.hash = currentHash;
-  w.kind = viewKind;
-  w.title = winLabel();
-  if (viewKind === 'home') w.tab = tab;
-  persistWins();
-  renderWinBtn();
-}
-
-function renderWinBtn() {
-  const b = $('winBtn');
-  if (!b) return;
-  const n = winList.length;
-  b.textContent = n > 1 ? '⧉ ' + n : '⧉';
-  b.title = n > 1
-    ? n + ' windows. Open the switcher to move or start another. (w)'
-    : 'Windows. Open another view without losing this one. (w)';
-  b.setAttribute('aria-expanded', String(!$('windowsPop').hidden));
-  b.classList.toggle('on', n > 1 || !$('windowsPop').hidden);
-}
-
-function winThumbHtml(w) {
-  if (!w.previewHTML) {
-    return `<div class="win-thumb win-thumb-empty">${esc(winKindLabel(w.kind) || 'window')}</div>`;
-  }
-  return `<div class="win-thumb"><div class="win-mini${w.previewHome ? ' home' : ''}">${w.previewHTML}</div></div>`;
-}
-
-function renderWindowsPop() {
-  const pop = $('windowsPop');
-  if (!pop || pop.hidden) return;
-  captureWin(activeWin());
-  const keepQ = $('winQ');
-  const qFocus = keepQ && document.activeElement === keepQ;
-  const qCaret = qFocus ? [keepQ.selectionStart, keepQ.selectionEnd] : null;
-  const q = (keepQ ? keepQ.value : winQuery).trim().toLowerCase();
-  winQuery = keepQ ? keepQ.value : winQuery;
-  const shown = q
-    ? winList.filter(w => ((w.title || '') + ' ' + (w.kind || '')).toLowerCase().includes(q))
-    : winList;
-  const cards = shown.map(w => {
-    const on = w.id === winActive;
-    const close = winList.length > 1
-      ? `<button type="button" class="win-close" data-close="${esc(w.id)}" title="Close this window" aria-label="Close this window">✗</button>`
-      : '';
-    return `<div class="win-card${on ? ' on' : ''}" data-win="${esc(w.id)}" role="button" tabindex="0">
-      ${winThumbHtml(w)}${close}
-      <div class="win-card-foot">
-        <span class="win-mark">❯</span>
-        <span class="win-card-text"><span class="win-title">${esc(w.title || w.kind || 'window')}</span>
-        <span class="win-sub">${esc(winKindLabel(w.kind))}</span></span>
-      </div>
-    </div>`;
-  }).join('');
-  pop.innerHTML =
-    `<div class="win-over-bar">
-      <input id="winQ" type="search" placeholder="type to search" value="${esc(winQuery)}" autocomplete="off">
-      <button type="button" id="winOverClose" title="Close the overview (esc)">close</button>
-    </div>
-    <div class="win-grid" id="winGrid">
-      <button type="button" class="win-card win-new-card" id="winNew">
-        <div class="win-new-plus">+</div>
-        <div class="win-card-foot">new window</div>
-      </button>
-      ${cards}
-    </div>`;
-  $('winNew').onclick = e => { e.stopPropagation(); newWindow(); };
-  $('winOverClose').onclick = e => { e.stopPropagation(); toggleWindows(false); };
-  const box = $('winQ');
-  box.oninput = () => { winQuery = box.value; renderWindowsPop(); };
-  box.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); toggleWindows(false); } };
-  if (qFocus) {
-    box.focus();
-    try { box.setSelectionRange(qCaret[0], qCaret[1]); } catch {}
-  }
-  pop.querySelectorAll('.win-card[data-win]').forEach(card => {
-    card.onclick = e => {
-      if (e.target.closest('[data-close]')) return;
-      switchWindow(card.dataset.win);
-    };
-    card.onkeydown = e => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchWindow(card.dataset.win); }
-    };
-  });
-  pop.querySelectorAll('[data-close]').forEach(b => {
-    b.onclick = e => { e.stopPropagation(); closeWindow(b.dataset.close); };
-  });
-}
-
-function toggleWindows(show) {
-  const pop = $('windowsPop');
-  if (!pop) return;
-  pop.hidden = show !== undefined ? !show : !pop.hidden;
-  document.body.classList.toggle('windows-over', !pop.hidden);
-  if (!pop.hidden) {
-    $('filtersPop').hidden = true;
-    if (!$('agentsPop').hidden) toggleAgents(false);
-    winQuery = '';
-    renderWindowsPop();
-    // Keyboard flow: w → type to search → enter opens the first match.
-    const q = $('winQ');
-    if (q && !window.matchMedia('(pointer: coarse)').matches) q.focus();
-  }
-  renderWinBtn();
-}
-
-function winCardEls() {
-  return [...document.querySelectorAll('#winGrid .win-card[data-win]')];
-}
-
-function moveWinFocus(from, key, cards) {
-  const i = cards.indexOf(from);
-  if (key === 'ArrowLeft') { (i > 0 ? cards[i - 1] : $('winQ') || cards[0]).focus(); return; }
-  if (key === 'ArrowRight') { if (i < cards.length - 1) cards[i + 1].focus(); return; }
-  const r = from.getBoundingClientRect();
-  const cx = r.left + r.width / 2;
-  let best = null, bestD = Infinity;
-  for (const c of cards) {
-    const b = c.getBoundingClientRect();
-    if (Math.abs(b.top - r.top) < 5) continue;               // same row
-    if (key === 'ArrowDown' && b.top < r.top) continue;
-    if (key === 'ArrowUp' && b.top > r.top) continue;
-    const d = Math.abs(b.top - r.top) * 1000 + Math.abs(b.left + b.width / 2 - cx);
-    if (d < bestD) { bestD = d; best = c; }
-  }
-  if (best) best.focus();
-  else if (key === 'ArrowUp' && $('winQ')) $('winQ').focus();
-}
-
-// All keys while the windows overview is open. Called from the global handler.
-function windowsPopKeydown(e) {
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const cards = winCardEls();
-  const inQ = e.target && e.target.id === 'winQ';
-  if (e.key === 'Escape') { e.preventDefault(); toggleWindows(false); return; }
-  if (inQ) {
-    if (e.key === 'Enter' && cards.length) { e.preventDefault(); switchWindow(cards[0].dataset.win); }
-    else if (e.key === 'ArrowDown' && cards.length) { e.preventDefault(); cards[0].focus(); }
-    return;
-  }
-  if (e.target.closest && e.target.closest('input, select, textarea')) return;
-  const focused = document.activeElement && document.activeElement.closest
-    ? document.activeElement.closest('.win-card[data-win]') : null;
-  if (e.key === 'w') { e.preventDefault(); toggleWindows(false); return; }
-  if (e.key === '/') { e.preventDefault(); if ($('winQ')) $('winQ').focus(); return; }
-  if (e.key === '?') { e.preventDefault(); toggleHelpOverlay(); return; }
-  if (e.key === 'n') { e.preventDefault(); newWindow(); return; }
-  if (/^[1-9]$/.test(e.key)) {
-    const c = cards[Number(e.key) - 1];
-    if (c) { e.preventDefault(); switchWindow(c.dataset.win); }
-    return;
-  }
-  if ((e.key === 'x' || e.key === 'Delete') && focused && winList.length > 1) {
-    e.preventDefault();
-    const i = cards.indexOf(focused);
-    closeWindow(focused.dataset.win);
-    const next = winCardEls();
-    if (next.length) next[Math.min(i, next.length - 1)].focus();
-    return;
-  }
-  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-    e.preventDefault();
-    if (!focused) { (cards.find(c => c.classList.contains('on')) || cards[0] || { focus() {} }).focus(); return; }
-    moveWinFocus(focused, e.key, cards);
-  }
-}
-
-function newWindow() {
-  captureWin(activeWin());
-  const w = emptyWin();
-  winList.push(w);
-  winActive = w.id;
-  persistWins();
-  toggleWindows(false);
-  window._agentImages = [];
-  window._agentContext = [];
-  const ta = $('agentText');
-  if (ta) ta.value = '';
-  goHome();
-  setTab('conv');
-  renderWinBtn();
-}
-
-function applyWinHash(hash) {
-  const encoded = hash || '';
-  const now = location.hash.replace(/^#/, '');
-  let same = now === encoded;
-  if (!same) {
-    try { same = decodeURIComponent(now) === decodeURIComponent(encoded); } catch {}
-  }
-  if (same) {
-    afterWinApply();
-    renderWinBtn();
-    return;
-  }
-  suppressHashEvents++;
-  if (encoded) history.replaceState(null, '', location.pathname + location.search + '#' + encoded);
-  else history.replaceState(null, '', location.pathname + location.search);
-  currentHash = encoded;
-  dispatchHash(encoded ? decodeURIComponent(encoded) : '');
-  afterWinApply();
-}
-
-function applyActiveWinDraft() {
-  const w = activeWin();
-  if (!w) return;
-  if (w.images && w.images.length) window._agentImages = w.images.slice();
-  const ta = $('agentText');
-  if (ta && w.draft && w.draft.value && !ta.value) {
-    ta.value = w.draft.value;
-    try { ta.setSelectionRange(w.draft.start || 0, w.draft.end || 0); } catch {}
-  }
-  if (ta) { renderAgentThumbs(); renderAgentContext(); }
-  if (w.scrollView && $('view')) $('view').scrollTop = w.scrollView;
-  if (w.scrollList && $('list')) $('list').scrollTop = w.scrollList;
-}
-
-function restoreWinPending() {
-  const p = winPending;
-  if (!p) return true;
-  if (p.expectComposer && viewKind === 'conversation' && !$('agentText')) return false;
-  winPending = null;
-  winSwitching = false;
-  if (p.images) window._agentImages = p.images.slice();
-  if (Array.isArray(p.context)) window._agentContext = p.context.slice();
-  const ta = $('agentText');
-  if (ta && p.draft) {
-    ta.value = p.draft.value || '';
-    try { ta.setSelectionRange(p.draft.start || 0, p.draft.end || 0); } catch {}
-  }
-  if (ta) { renderAgentThumbs(); renderAgentContext(); }
-  if (p.scrollView && $('view') && viewKind !== 'home') $('view').scrollTop = p.scrollView;
-  if (p.scrollList && $('list')) $('list').scrollTop = p.scrollList;
-  syncActiveWin();
-  renderWinBtn();
-  return true;
-}
-
-function afterWinApply() {
-  if (restoreWinPending()) return;
-  let n = 0;
-  const t = setInterval(() => {
-    n++;
-    if (restoreWinPending() || n > 40) clearInterval(t);
-  }, 50);
-}
-
-function switchWindow(id) {
-  if (id === winActive) { toggleWindows(false); return; }
-  const target = winList.find(w => w.id === id);
-  if (!target) return;
-  captureWin(activeWin());
-  winActive = id;
-  persistWins();
-  toggleWindows(false);
-  winSwitching = true;
-  winPending = {
-    draft: target.draft, images: target.images, context: target.context,
-    scrollView: target.scrollView, scrollList: target.scrollList,
-    expectComposer: target.kind === 'conversation',
-  };
-  window._agentImages = (target.images || []).slice();
-  window._agentContext = Array.isArray(target.context) ? target.context.slice() : [];
-  const ta = $('agentText');
-  if (ta) ta.value = '';
-  if (target.tab) tab = target.tab;
-  applyWinHash(target.hash);
-  if (!target.hash && target.tab) setTab(target.tab);
-}
-
-function closeWindow(id) {
-  if (winList.length < 2) return;
-  const i = winList.findIndex(w => w.id === id);
-  if (i < 0) return;
-  const was = id === winActive;
-  winList.splice(i, 1);
-  winPushPending.delete(id);
-  fetch('/api/windows/close', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client: winClient, id }),
-  }).catch(() => {});
-  if (!was) {
-    persistWinsLocal();
-    renderWindowsPop();
-    renderWinBtn();
-    return;
-  }
-  const next = winList[Math.max(0, i - 1)];
-  winActive = next.id;
-  persistWins();
-  winSwitching = true;
-  winPending = {
-    draft: next.draft, images: next.images, context: next.context,
-    scrollView: next.scrollView, scrollList: next.scrollList,
-    expectComposer: next.kind === 'conversation',
-  };
-  window._agentImages = (next.images || []).slice();
-  window._agentContext = Array.isArray(next.context) ? next.context.slice() : [];
-  const ta = $('agentText');
-  if (ta) ta.value = '';
-  if (next.tab) tab = next.tab;
-  applyWinHash(next.hash);
-  if (!next.hash && next.tab) setTab(next.tab);
-}
-
-function initWindows() {
-  try {
-    const raw = sessionStorage.getItem('aiconvo.windows');
-    const d = raw ? JSON.parse(raw) : null;
-    if (d && Array.isArray(d.list) && d.list.length) {
-      winList = d.list.map(w => ({
-        id: w.id, hash: w.hash || '', kind: w.kind || 'home', title: w.title || 'home',
-        tab: w.tab || 'conv', draft: null, images: [], scrollView: 0, scrollList: 0,
-        previewHTML: '', previewHome: w.kind === 'home',
-      }));
-      winActive = d.active && winList.some(w => w.id === d.active) ? d.active : winList[0].id;
-    }
-  } catch {}
-  if (!winList.length) {
-    winList = [emptyWin()];
-    winActive = winList[0].id;
-  }
-  const urlHash = location.hash.replace(/^#/, '');
-  const match = winList.find(w => (w.hash || '') === urlHash);
-  if (match) winActive = match.id;
-  else {
-    const w = activeWin() || winList[0];
-    w.hash = urlHash;
-    winActive = w.id;
-  }
-  renderWinBtn();
-  // The server list is the shared truth: adopt it as soon as it answers.
-  loadSharedWindows();
-}
 
 function fmtDate(ts) { return ts ? new Date(ts).toLocaleString() : '?'; }
 function fmtDateShort(ts) {
@@ -2768,7 +2210,6 @@ function renderFiltersBtn() {
 }
 $('filtersBtn').onclick = e => {
   e.stopPropagation();
-  if (!$('windowsPop').hidden) toggleWindows(false);
   $('filtersPop').hidden = !$('filtersPop').hidden;
 };
 // Theme: '' follows the OS, e-ink is the binary black/white theme.
@@ -3000,7 +2441,6 @@ try {
 document.addEventListener('click', e => {
   if (!$('filtersPop').hidden && !e.target.closest('#filtersPop')) $('filtersPop').hidden = true;
   if (!$('agentsPop').hidden && !e.target.closest('#agentsPop')) toggleAgents(false);
-  if (!$('windowsPop').hidden && !e.target.closest('#windowsPop') && !e.target.closest('#winBtn')) toggleWindows(false);
 });
 
 // ---- activity ticker + agents popover (design/10-activity-and-agents.md) ----
@@ -9530,9 +8970,8 @@ async function startSiblingConversation() {
     if (c && c.provider && c.model) models = [{ provider: c.provider, modelId: c.model }];
   }
   const thinking = thinkLevels.get(prevKey) || null;
-  // The press answers instantly: leave the transcript (draft captured) and
-  // show the launch progress full-screen, staged as it truly happens.
-  if (viewKind === 'conversation') captureWinDraft(activeWin());
+  // The press answers instantly: leave the transcript and show the launch
+  // progress full-screen, staged as it truly happens.
   setRouteKind('launch', [crumbHome(), crumbProject(project), { label: 'new conversation' }]);
   $('view').innerHTML = `<div class="dprog" style="margin-top:70px;text-align:center">
     <div style="font-size:15px"><span class="spin">░</span> new conversation · <b>${esc(project)}</b></div>
@@ -11448,7 +10887,7 @@ async function renderConv(scroll) {
   // A live-tail re-render must not steal the composer: keep its text,
   // caret, and focus across the DOM replacement.
   const oldTa = $('agentText');
-  const keepCompose = (oldTa && !winSwitching) ? {
+  const keepCompose = oldTa ? {
     value: oldTa.value, start: oldTa.selectionStart, end: oldTa.selectionEnd,
     focused: document.activeElement === oldTa,
   } : null;
@@ -11465,8 +10904,6 @@ async function renderConv(scroll) {
     $('view').innerHTML = head + `<div class="dprog">` + renderDerived(d, mode, hl) + `</div>` + agentComposerHtml(d);
     wireHead();
     wireAgentComposer();
-    if (winSwitching || winPending) restoreWinPending();
-    else applyActiveWinDraft();
     $('view').scrollTop = scroll === 'top' ? 0 : $('view').scrollHeight;
     return;
   }
@@ -11657,8 +11094,6 @@ async function renderConv(scroll) {
     try { newTa.setSelectionRange(keepCompose.start, keepCompose.end); } catch {}
   }
   if (keepCompose && newTa && keepCompose.focused) newTa.focus();
-  if (winSwitching || winPending) restoreWinPending();
-  else applyActiveWinDraft();
   $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => {
     e.stopPropagation();
     e.preventDefault(); // a link inside a <summary> must not toggle the fold
@@ -12594,7 +12029,7 @@ async function open(rel, scroll) {
     window._agentLiveOn = false;
     window._agentLiveText = '';
     window._ctxTouched = false;
-    if (!winSwitching && !winPending) window._agentContext = [];
+    window._agentContext = [];
     setRoute('conversation', encodeURIComponent(rel), convCrumbs(rel));
     render();
   }
@@ -12614,7 +12049,7 @@ async function open(rel, scroll) {
     return;
   }
   current = next;
-  if (!(window._ctxTouched && current && current.key === rel) && !winSwitching && !winPending) {
+  if (!(window._ctxTouched && current && current.key === rel)) {
     window._agentContext = Array.isArray(next.attachedContext) ? next.attachedContext.slice() : [];
   }
   await renderConv(scroll);
@@ -13660,7 +13095,6 @@ function setTab(t) {
   if (t === 'notes') loadNotesTab();
   if (t === 'epics') loadEpicsTab();
   if (t === 'repos') loadReposTab();
-  if (viewKind === 'home') syncActiveWin();
 }
 document.querySelectorAll('#tabs button[data-tab]').forEach(b => b.onclick = () => setTab(b.dataset.tab));
 
@@ -14387,9 +13821,6 @@ $('brand').onclick = e => {
   }
   goHome();
 };
-$('winBtn').onclick = e => { e.stopPropagation(); toggleWindows(); };
-$('windowsPop').onclick = e => e.stopPropagation();
-
 // ---- search modal (Ctrl+F) ----
 let modalSearchCtl = null;
 let modalSearchSeq = 0;
@@ -14607,7 +14038,7 @@ function cornerStack() {
 //   over the toggle role that a plain tap has on other devices.
 // Buttons, links, marks, rows, and form fields keep their normal taps.
 // The terminal pane and the open mini-gantt keep their own touch handlers.
-const einkTapSkip = 'button, a, input, select, textarea, summary, label, .more, .tmark, .item, .win-card, .ag-row, .sr-hit, .sr-chip, .branchpill, [data-close], .job, .fg-mark, .mgantt';
+const einkTapSkip = 'button, a, input, select, textarea, summary, label, .more, .tmark, .item, .ag-row, .sr-hit, .sr-chip, .branchpill, [data-close], .job, .fg-mark, .mgantt';
 
 function einkFlash(text) {
   let el = $('einkFlash');
@@ -14872,18 +14303,6 @@ function helpNow() {
     ] });
     return sections;
   }
-  if (!$('windowsPop').hidden) {
-    sections.push({ label: 'windows overview', keys: [
-      ['type', 'search windows'],
-      ['enter', 'open the first match'],
-      ['↑ ↓ ← →', 'move between windows'],
-      ['1…9', 'open a window by position'],
-      ['n', 'new window'],
-      ['x / del', 'close the focused window'],
-      ['esc', 'close the overview'],
-    ] });
-    return sections;
-  }
   if (agentModalOpen()) {
     sections.push({ label: 'live terminal', keys: [
       ['type', 'keys go to the terminal'],
@@ -14980,7 +14399,6 @@ function helpNow() {
   if (document.body.classList.contains('file-full')) {
     sections.push({ label: 'focused file', keys: [
       ['esc', 'leave full screen'],
-      ['w', 'windows overview'],
     ] });
   }
   if (viewKind === 'file' && $('view').querySelector('.quick-file-view')) {
@@ -15086,7 +14504,6 @@ const HELP_GLOBAL = [
   ['ctrl+f', 'search overlay — keeps this page'],
   ['x / X', 'fold / unfold everything on the screen'],
   ['`', 'fold / unfold the top bar'],
-  ['w', 'windows overview'],
   ['a', 'agents'],
   ['j', 'jobs'],
   [',', 'settings'],
@@ -15179,7 +14596,6 @@ document.addEventListener('keydown', e => {
     if (!$('markPop').hidden) { hideMarkPop(); return; }
     if (mgCollapseOpen()) return;
     if (!$('filtersPop').hidden) { $('filtersPop').hidden = true; return; }
-    if (!$('windowsPop').hidden) { toggleWindows(false); return; }
     if (!$('agentsPop').hidden) { toggleAgents(false); return; }
     if (!inField && viewKind === 'file' && $('view').querySelector('.quick-file-view')) {
       // In the editor: cancel back to the diff. In the diff: back to the conversation.
@@ -15198,7 +14614,6 @@ document.addEventListener('keydown', e => {
   }
   if (searchModalOpenNow()) return;
   if (readOverlayOpen()) { readingKeydown(e); return; }
-  if (!$('windowsPop').hidden) { windowsPopKeydown(e); return; }
   if (!$('agentsPop').hidden) { agentsPopKeydown(e); return; }
   if (agentModalOpen()) {
     const ta = $('agentText');
@@ -15331,11 +14746,6 @@ document.addEventListener('keydown', e => {
     case 't': if (!$('ganttBar').checkVisibility()) break; e.preventDefault(); $('ganttDate').focus(); break;
     case 'a': toggleAgents(); break;
     case '`': e.preventDefault(); setBarFold(!barFolded()); break;
-    case 'w':
-      e.preventDefault();
-      if (document.body.classList.contains('file-full')) exitFileDiffFull();
-      toggleWindows();
-      break;
     case ',': e.preventDefault(); settingsOpen ? closeSettings() : showSettings(); break;
     case 'j': toggleJobs(); break;
     case 'p': {
@@ -15439,14 +14849,6 @@ live.onopen = () => {
 };
 live.onmessage = ev => {
   const d = JSON.parse(ev.data);
-  if (d.type === 'windows') {
-    // The shared window list changed on another device. Patch the list only;
-    // never navigate, never touch this device's active window.
-    if (d.client === winClient) return;
-    clearTimeout(winSseT);
-    winSseT = setTimeout(loadSharedWindows, 200);
-    return;
-  }
   if (d.type === 'timeline-titles') {
     for (const update of d.titles || []) {
       const s = sessions.find(x => x.key === update.key);
@@ -15689,7 +15091,6 @@ fetch('/api/git/repos').then(r => r.json()).then(d => {
   gitReposCache = (d && d.repos) || [];
   if (viewKind === 'home' && !searchMode && tab === 'conv') render();
 }).catch(() => {});
-initWindows();
 load().then(() => {
   dispatchHash(decodeURIComponent(location.hash.slice(1)));
   if (!phoneLayout() && !location.hash && window.matchMedia('(pointer: fine)').matches) $('q').focus();

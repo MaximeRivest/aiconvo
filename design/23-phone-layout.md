@@ -20,7 +20,6 @@ Desktop and e-ink layouts keep their existing behavior.
 ## Reading and response
 
 - The header becomes one compact row. Search appears only at home.
-- The `⧉` window button stays next to the brand. The overview is full-screen with one card per row.
 - Breadcrumbs scroll horizontally.
 - Transcript text uses a 15-pixel base and full-width message cards.
 - The composer stays at the bottom with large attach, microphone, and send controls.

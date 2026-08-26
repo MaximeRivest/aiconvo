@@ -34,14 +34,6 @@ home (system timeline: conversations · notes · epics · repos lenses)
     `conversation`, the same conversation, and the user is at the bottom.
   - A live-tail re-render keeps composer text, caret, and focus.
 - The brand button = go home. Shift-click also clears all filters.
-- **Windows** sit next to the brand (`⧉`, key `w`). The switcher is a full-screen overview of miniatures, not a list. Each window is one independent route plus any unsent composer text. **new window** starts at home and leaves the previous place intact. The overview never opens by itself: live updates do not change the active window.
-- The list is shared through the server (`/api/windows`, SSE `windows` events).
-  Shared: id, route, title, tab, draft text, miniature. Local per device:
-  the active window, scroll, e-ink page, attached images.
-  Rules: a device owns its active window — remote changes never overwrite it;
-  a remotely closed active window stays on screen and re-registers on the next
-  local action; drafts merge last-writer-wins; a fresh boot at home adopts the
-  shared home window instead of adding one window per device.
 
 ## Breadcrumb spine
 
