@@ -114,6 +114,15 @@ mark.cur { outline: 2px solid var(--warn); outline-offset: 1px; }
 #voicePill { position: fixed; right: 12px; bottom: 48px; z-index: 65; display: flex; gap: 8px; align-items: center; background: var(--surface-1); border: 1px solid var(--border-strong); padding: 6px 10px; font-size: var(--fs-meta); color: var(--text); box-shadow: 0 4px 16px color-mix(in srgb, var(--bg) 60%, transparent); }
 #voicePill .vp-label { color: var(--text-dim); }
 #voicePill button { height: 24px; min-height: 24px; padding: 0 8px; font-size: 11px; }
+/* Ctrl+F keeps the current page in place. It uses the same lexical and
+   semantic services as the full home search. */
+#searchOverlay { z-index: 90; align-items: center; padding: clamp(12px, 3vh, 32px) clamp(12px, 3vw, 40px); }
+#searchOverlay .search-dialog { width: 100%; height: 100%; max-width: none; max-height: none; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.search-modal-head { display: flex; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+#searchModalInput { flex: 1; height: 42px; font-size: var(--fs-body); }
+#searchModalResults { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 10px; }
+#searchModalResults .sr-group { flex: 0 0 auto; }
+.search-modal-empty { padding: 24px 10px; color: var(--text-dim); text-align: center; }
 code { color: var(--cyan); }
 a { color: var(--cyan); }
 
@@ -222,6 +231,7 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 @keyframes activepulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 #agentsPop { position: absolute; top: calc(var(--header-h) - 4px); right: var(--sp-3); z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); width: 460px; max-width: calc(100vw - 24px); max-height: 60vh; overflow: auto; padding: var(--sp-1) 0; }
 #agentsPop[hidden] { display: none; }
+#agentsPop .ag-row.kbd-selected { background: var(--surface-2); outline: 1px solid var(--accent); outline-offset: -1px; }
 .ag-sec { color: var(--text-faint); font-size: var(--fs-micro); padding: 8px 10px 3px; border-bottom: 1px solid var(--border); }
 .ag-row { display: flex; gap: 8px; align-items: center; padding: 5px 10px; cursor: pointer; font-size: var(--fs-meta); }
 .ag-row:hover { background: var(--surface-2); }
@@ -1766,6 +1776,15 @@ window.aiconvoSyncTheme();
 <button id="gRecenter" title="Jump to now" aria-label="Jump to now">⌖</button>
 <div id="windowsPop" hidden></div>
 <div id="agentsPop" hidden></div>
+<div id="searchOverlay" class="overlay" hidden>
+  <div class="dialog search-dialog" role="dialog" aria-modal="true" aria-labelledby="searchModalInput">
+    <div class="search-modal-head">
+      <input id="searchModalInput" type="text" placeholder="search conversations, notes, epics, and memory" autocomplete="off" spellcheck="false">
+      <button id="searchModalClose" class="ghost" title="Close search (Escape)" aria-label="Close search">✕</button>
+    </div>
+    <div id="searchModalResults"><div class="search-modal-empty">Type two or more characters. Query operators and semantic search are available.</div></div>
+  </div>
+</div>
 <div id="filtersPop" hidden>
   <label for="src">source</label>
   <select id="src"><option value="">all sources</option></select>
@@ -1882,6 +1901,8 @@ let notesList = [], epicsList = [];
 let gitReposCache = [];     // repo cards for home-row glyphs and crumbs
 let chromeScrollLast = -1;  // phone: last #view scrollTop for chrome auto-hide
 let chromeUpAcc = 0, chromeDownAcc = 0; // accumulated scroll distance per direction
+let lastNavProject = null;
+const lastNavConversation = new Map(); // project → last conversation opened there
 
 // ---- router: one truth for "where the user is" ----
 // Every view change goes through setRoute/setRouteKind. The hash mirrors the
@@ -3043,6 +3064,7 @@ function updateActiveBtn() {
 // re-render it (debounced) while it is open.
 let agentsTimer = null;
 let agentsPopT = null;
+let agentsSelectedKey = null;
 let agentsPids = new Map(); // key → terminal pid, from the last server fetch
 let agentsProcs = [];       // every pi/claude process, from the last server fetch
 function renderAgentsPopSoon() {
@@ -3140,12 +3162,52 @@ async function renderAgentsPop(refetch) {
     (recent.length ? '<div class="ag-sec">recent — last hour</div>' + recent.map(s => row(s, s.key, 'wrote ' + secs(now - s.mtimeMs))).join('') : '') ||
     '<div class="ag-sec">nothing is running, writing, or recent.</div>';
   pop.scrollTop = st;
+  selectAgentRow(agentsSelectedKey, false);
+}
+function agentRows() {
+  return [...$('agentsPop').querySelectorAll('.ag-row[data-key]')].filter(row => row.dataset.key);
+}
+function selectAgentRow(key, scroll = true) {
+  const rows = agentRows();
+  if (!rows.length) { agentsSelectedKey = null; return null; }
+  let row = rows.find(item => item.dataset.key === key);
+  if (!row) row = rows.find(item => item.dataset.key === activeRel) || rows[0];
+  agentsSelectedKey = row.dataset.key;
+  rows.forEach(item => item.classList.toggle('kbd-selected', item === row));
+  if (scroll) row.scrollIntoView({ block: 'nearest' });
+  return row;
+}
+function agentsPopKeydown(e) {
+  if ($('agentsPop').hidden) return false;
+  if (e.key === 'Escape' || e.key === 'a') {
+    e.preventDefault();
+    toggleAgents(false);
+    return true;
+  }
+  const rows = agentRows();
+  if (!rows.length) return true;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    let at = rows.findIndex(row => row.dataset.key === agentsSelectedKey);
+    if (at < 0) at = 0;
+    at = Math.max(0, Math.min(rows.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1)));
+    selectAgentRow(rows[at].dataset.key);
+    return true;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const row = selectAgentRow(agentsSelectedKey, false);
+    if (row) { toggleAgents(false); open(row.dataset.key); }
+    return true;
+  }
+  return true;
 }
 function toggleAgents(show) {
   const pop = $('agentsPop');
   pop.hidden = show !== undefined ? !show : !pop.hidden;
   clearInterval(agentsTimer);
   if (!pop.hidden) {
+    agentsSelectedKey = activeRel;
     renderAgentsPop(true);
     agentsTimer = setInterval(() => renderAgentsPop(true), 15000);
   }
@@ -8166,6 +8228,7 @@ async function showProjectOverview(name) {
   if (!name) return;
   if (name === LOOSE_PROJECT) return showLooseConversations();
   markSettingsClosed();
+  lastNavProject = name;
   projectOverviewName = name;
   setRoute('project', 'project=' + encodeURIComponent(name), [crumbHome(), { label: name, title: 'Project overview · ' + name }]);
   $('view').innerHTML = `<div class="project-overview"><div class="ptitle"><h1>${esc(name)}</h1></div><div class="pmeta">loading project overview…</div></div>`;
@@ -12518,6 +12581,14 @@ async function open(rel, scroll) {
     markSettingsClosed();
     if (progressStream) { progressStream.close(); progressStream = null; }
     activeRel = rel;
+    const navSession = sessions.find(s => s.key === rel);
+    if (navSession) {
+      const navProject = projectOf(navSession);
+      if (navProject && navProject !== '?') {
+        lastNavProject = navProject;
+        lastNavConversation.set(navProject, rel);
+      }
+    }
     // The live slash flag belongs to one conversation's terminal; never leak
     // it into the next one (a leaked flag streams every keystroke to a PTY).
     window._agentLiveOn = false;
@@ -14319,6 +14390,113 @@ $('brand').onclick = e => {
 $('winBtn').onclick = e => { e.stopPropagation(); toggleWindows(); };
 $('windowsPop').onclick = e => e.stopPropagation();
 
+// ---- search modal (Ctrl+F) ----
+let modalSearchCtl = null;
+let modalSearchSeq = 0;
+let modalSearchTimer = null;
+let modalSearchData = null;
+
+function searchModalOpen() {
+  $('searchOverlay').hidden = false;
+  const input = $('searchModalInput');
+  input.value = searchMode ? $('q').value : '';
+  input.focus();
+  input.select();
+  if (input.value.trim().length >= 2) runModalSearch();
+}
+function searchModalClose() {
+  $('searchOverlay').hidden = true;
+  clearTimeout(modalSearchTimer);
+  if (modalSearchCtl) modalSearchCtl.abort();
+}
+function searchModalOpenNow() { return !$('searchOverlay').hidden; }
+
+function modalSearchGroups(data) {
+  const roleLabel = r => r === 'toolresult' ? 'result' : r || '';
+  return (data.groups || []).map(g => {
+    const n = `${g.semantic ? '≈ ' : ''}${g.matchCount} match${g.matchCount === 1 ? '' : 'es'}`;
+    const headAttrs = g.kind === 'conversation' ? `data-rel="${esc(g.key)}"` : `data-md="${esc(g.file)}" data-md-kind="${esc(g.kind)}"`;
+    const head = `<div class="item sr-head" ${headAttrs}><span class="sr-kind">${g.kind === 'conversation' ? (g.source === 'pi' ? 'P' : g.source === 'pi-remote' ? 'R' : 'C') : (SR_KIND[g.kind] || '✓')}</span><span class="sr-title">${esc(g.title || g.file || '(untitled)')}</span><span class="sr-meta">${esc(g.project || g.kind || '')} · ${n}</span></div>`;
+    const hits = (g.matches || []).map(m => {
+      const attrs = g.kind === 'conversation'
+        ? `data-rel="${esc(g.key)}"${m.i != null ? ` data-i="${m.i}" data-role="${esc(m.role || '')}"` : ''}`
+        : `data-md="${esc(g.file)}" data-md-kind="${esc(g.kind)}"`;
+      return `<div class="sr-hit" tabindex="0" ${attrs}><span class="sr-role">${esc(roleLabel(m.role))}</span><span class="sr-snip">${m.semantic ? modalSemSnippet(m.snippet) : markSnippet(m.snippet)}</span>${m.semantic ? '<span class="sr-flag">≈ semantic</span>' : ''}</div>`;
+    }).join('');
+    return `<div class="sr-group">${head}${hits}</div>`;
+  }).join('');
+}
+function modalSemSnippet(text) {
+  const rx = termRegex($('searchModalInput').value.trim());
+  let html = esc(String(text || ''));
+  if (rx) html = html.replace(rx, m => `<mark>${m}</mark>`);
+  return html;
+}
+function renderModalSearch() {
+  const data = modalSearchData || { groups: [] };
+  const cards = modalSearchGroups(data);
+  $('searchModalResults').innerHTML = `<div class="sr-status">${data.total || 0} matches${data.tookMs != null ? ' · ' + data.tookMs + ' ms' : ''}${data.semMerged ? ' · semantic results added' : ''}</div>${cards || '<div class="search-modal-empty">No matches. Try fewer or different words.</div>'}`;
+}
+async function runModalSearch() {
+  const q = $('searchModalInput').value.trim();
+  if (q.length < 2) {
+    modalSearchData = null;
+    $('searchModalResults').innerHTML = '<div class="search-modal-empty">Type two or more characters. Query operators and semantic search are available.</div>';
+    return;
+  }
+  const seq = ++modalSearchSeq;
+  if (modalSearchCtl) modalSearchCtl.abort();
+  modalSearchCtl = new AbortController();
+  $('searchModalResults').innerHTML = '<div class="search-modal-empty">Searching…</div>';
+  try {
+    const out = await (await fetch('/api/search?q=' + encodeURIComponent(q), { signal: modalSearchCtl.signal })).json();
+    if (seq !== modalSearchSeq) return;
+    modalSearchData = out;
+    renderModalSearch();
+    if (out.sem) {
+      const sem = await (await fetch('/api/search/semantic?q=' + encodeURIComponent(q), { signal: modalSearchCtl.signal })).json();
+      if (seq !== modalSearchSeq) return;
+      if (sem.groups && sem.groups.length) { mergeSemantic(modalSearchData, sem); renderModalSearch(); }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') $('searchModalResults').innerHTML = '<div class="search-modal-empty">Search failed.</div>';
+  }
+}
+$('searchModalInput').addEventListener('input', () => {
+  clearTimeout(modalSearchTimer);
+  modalSearchTimer = setTimeout(runModalSearch, 180);
+});
+$('searchModalInput').addEventListener('keydown', e => {
+  const hits = [...$('searchModalResults').querySelectorAll('.sr-hit')];
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && hits.length) {
+    e.preventDefault();
+    const active = document.activeElement;
+    let i = hits.indexOf(active);
+    i = e.key === 'ArrowDown' ? Math.min(hits.length - 1, i + 1) : (i < 0 ? hits.length - 1 : Math.max(0, i - 1));
+    hits[i].focus();
+  } else if (e.key === 'Enter' && hits.length) { e.preventDefault(); hits[0].click(); }
+});
+$('searchModalResults').addEventListener('keydown', e => {
+  const hit = e.target.closest('.sr-hit');
+  if (!hit) return;
+  if (e.key === 'Enter') { e.preventDefault(); hit.click(); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const hits = [...$('searchModalResults').querySelectorAll('.sr-hit')];
+    const i = hits.indexOf(hit);
+    hits[Math.max(0, Math.min(hits.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].focus();
+  }
+});
+$('searchModalResults').addEventListener('click', e => {
+  const hit = e.target.closest('[data-rel], [data-md]');
+  if (!hit) return;
+  searchModalClose();
+  if (hit.dataset.md) openSearchDoc(hit.dataset.md, hit.dataset.mdKind);
+  else openSearchHit(hit.dataset.rel, hit.dataset.i, hit.dataset.role);
+});
+$('searchModalClose').onclick = searchModalClose;
+$('searchOverlay').addEventListener('click', e => { if (e.target.id === 'searchOverlay') searchModalClose(); });
+
 // ---- search wiring ----
 let t0;
 $('q').addEventListener('input', () => {
@@ -14371,43 +14549,47 @@ $('showBranches').addEventListener('change', () => {
 // The help renderer lives with the situated help (helpNow) further down:
 // one source of truth that follows the live view.
 
-function moveActive(dir) {
-  if (tab !== 'conv' || !shown.length) return;
-  const keys = shown.filter(s => s.key).map(s => s.key);
-  if (!keys.length) return;
-  let i = keys.indexOf(activeRel);
-  i = i < 0 ? (dir > 0 ? 0 : keys.length - 1) : Math.min(keys.length - 1, Math.max(0, i + dir));
-  open(keys[i]);
-  const el = $('list').querySelector(`[data-rel="${CSS.escape(keys[i])}"]`);
-  if (el) el.scrollIntoView({ block: 'center', inline: 'nearest' });
-  showNavHud();
+function scrollCurrentView(key) {
+  const target = viewKind === 'home' ? $('list') : $('view');
+  if (!target) return false;
+  const page = Math.max(120, target.clientHeight * 0.9);
+  const amount = key === 'PageDown' ? page : key === 'PageUp' ? -page : key === 'ArrowDown' ? 60 : -60;
+  target.scrollBy({ top: amount, behavior: isEink() ? 'auto' : 'smooth' });
+  return true;
 }
 
-// ---- arrow navigator popup: shows the landing spot and its neighbors ----
-// Bottom-right corner. It stacks above the pinned help hint. v pins it open.
-let navHudT;
-let navPinOn = false;
+function navProjectForConversation() {
+  const session = activeRel && sessions.find(s => s.key === activeRel);
+  const project = session && projectOf(session);
+  return project && project !== '?' ? project : lastNavProject;
+}
 
-function navHudHtml() {
-  if (tab !== 'conv') return '';
-  const items = shown.filter(s => s.key);
-  const i = items.findIndex(s => s.key === activeRel);
-  if (i < 0) return '';
-  const rows = [];
-  for (let d = -2; d <= 2; d++) {
-    const s = items[i + d];
-    if (!s) continue;
-    const dir = d === 0 ? '❯' : d < 0 ? '↑' : '↓';
-    const title = s.title || s.timelineTitle || '(untitled)';
-    const when = s.lastTs ? fmtDateShort(s.lastTs) : '';
-    rows.push(`<div class="nh-row${d === 0 ? ' on' : ''}"><span class="nh-dir">${d === 0 || Math.abs(d) === 1 ? dir : ''}</span>` +
-      `<span class="nh-title">${esc(title)}</span><span class="nh-meta">${esc(when)}</span></div>`);
+function moveViewLevel(dir) {
+  if (dir < 0) {
+    if (viewKind === 'conversation' || viewKind === 'tree' || viewKind === 'file') {
+      const project = navProjectForConversation();
+      if (project) showProjectOverview(project);
+      return true;
+    }
+    if (viewKind === 'project') { goHome(); return true; }
+    return viewKind === 'home';
   }
-  const pin = `<button type="button" data-nav-pin title="${navPinOn ? 'Unpin the navigator (v)' : 'Keep the navigator open (v)'}">${navPinOn ? '✗' : 'pin'}</button>`;
-  return `<div class="nh-head"><span>↑ ↓ move · ${i + 1} of ${items.length}</span>${pin}</div>` + rows.join('');
+  if (viewKind === 'home') {
+    const project = lastNavProject || navProjectForConversation();
+    if (project) showProjectOverview(project);
+    return true;
+  }
+  if (viewKind === 'project') {
+    const project = projectOverviewName || lastNavProject;
+    const recent = sessions.filter(s => projectOf(s) === project).sort((a, b) => (b.mtimeMs || b.lastTs || 0) - (a.mtimeMs || a.lastTs || 0))[0];
+    const key = lastNavConversation.get(project) || (activeRel && navProjectForConversation() === project ? activeRel : null) || (recent && recent.key);
+    if (key) open(key, 'bottom');
+    return true;
+  }
+  return viewKind === 'conversation';
 }
 
-// The bottom-right corner stack: #helpMini first (top), #navHud last (below).
+// The bottom-right corner stack: #helpMini first (top).
 function cornerStack() {
   let box = $('cornerStack');
   if (!box) { box = document.createElement('div'); box.id = 'cornerStack'; document.body.appendChild(box); }
@@ -14577,33 +14759,6 @@ document.addEventListener('touchend', e => {
   }
 }, { passive: false });
 
-function showNavHud() {
-  let el = $('navHud');
-  if (!el) { el = document.createElement('div'); el.id = 'navHud'; cornerStack().append(el); }
-  const html = navHudHtml();
-  if (!html) { el.hidden = true; return; }
-  if (el._nh !== html) {
-    el._nh = html;
-    el.innerHTML = html;
-    el.querySelector('[data-nav-pin]').onclick = e => { e.stopPropagation(); setNavPin(!navPinOn); };
-  }
-  el.hidden = false;
-  clearTimeout(navHudT);
-  if (!navPinOn) navHudT = setTimeout(() => { el.hidden = true; }, 1800);
-}
-
-function setNavPin(on) {
-  navPinOn = !!on;
-  try { localStorage.setItem('aiconvo-nav-pin', on ? '1' : '0'); } catch {}
-  const el = $('navHud');
-  if (!on) { clearTimeout(navHudT); if (el) el.hidden = true; return; }
-  showNavHud();
-}
-
-try { if (localStorage.getItem('aiconvo-nav-pin') === '1') navPinOn = true; } catch {}
-// A pinned navigator follows list changes and the help hint's height.
-setInterval(() => { if (navPinOn) showNavHud(); }, 800);
-
 // ← → outside a field: move between sibling branches at the newest branch
 // point — the open compare columns first, else the last branch pill.
 function nudgeBranch(dir) {
@@ -14699,6 +14854,15 @@ function helpNow() {
   const fine = !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
 
   // Full-screen surfaces claim every key.
+  if (searchModalOpenNow()) {
+    sections.push({ label: 'search', keys: [
+      ['type', 'search as you type'],
+      ['↑ ↓', 'select a result'],
+      ['enter', 'open the selected result'],
+      ['esc', 'close'],
+    ] });
+    return sections;
+  }
   if (readOverlayOpen()) {
     sections.push({ label: 'reading', keys: [
       ['↑ ↓ / j k', 'scroll'],
@@ -14810,7 +14974,7 @@ function helpNow() {
   if (settingsOpen) sections.push({ label: 'settings', keys: [['esc / ,', 'close settings']] });
   if (!$('jobsTray').hidden) sections.push({ label: 'jobs', keys: [['esc / j', 'close the jobs drawer']] });
   if (!$('filtersPop').hidden) sections.push({ label: 'filters', keys: [['esc / f', 'close the filters']] });
-  if (!$('agentsPop').hidden) sections.push({ label: 'agents', keys: [['esc / a', 'close the agents panel']] });
+  if (!$('agentsPop').hidden) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['esc / a', 'close the agents panel']] });
 
   // The view itself.
   if (document.body.classList.contains('file-full')) {
@@ -14847,7 +15011,8 @@ function helpNow() {
     ];
     if ($('matchHud')) keys.unshift(['n / shift+n', 'next / previous search match']);
     if (lastQuickFile && lastQuickFile.key === activeRel) keys.push(['t', 'reopen the last file view']);
-    if ($('view').querySelector('.branchpill, .cmpblock')) keys.push(['← →', 'switch branch / parallel reply']);
+    keys.push(['↑ ↓ / pgup pgdn', 'scroll']);
+    keys.push(['← →', 'conversation / project / home']);
     keys.push(['T', 'tree — walk branches, forks, and parallel replies']);
     if ($('agentMic') && !$('agentMic').hidden) keys.push(['m', 'start / stop dictation']);
     if ($('modelStrip')) keys.push(
@@ -14891,14 +15056,20 @@ function helpNow() {
     ] });
     return sections;
   }
+  if (viewKind === 'project') {
+    sections.push({ label: 'project', keys: [
+      ['↑ ↓ / pgup pgdn', 'scroll'],
+      ['←', 'home Gantt'],
+      ['→', 'last conversation in this project'],
+    ] });
+  }
   if (viewKind === 'home') {
     const listKeys = [
+      ['↑ ↓ / pgup pgdn', 'scroll'],
+      ['← →', 'Gantt / last project'],
       ['1 2 3 4', 'conversations / notes / epics / repos'],
     ];
-    if (tab === 'conv') listKeys.push(
-      ['↑ ↓', 'move in the list · a navigator shows where you land'],
-      ['v', 'pin / unpin the navigator'],
-      ['space', 'toggle selection']);
+    if (tab === 'conv') listKeys.push(['space', 'toggle selection']);
     listKeys.push(
       ['g', 'timeline layout: bottom / left / projects / off'],
       ['+ − 0', 'timeline zoom'],
@@ -14911,7 +15082,8 @@ function helpNow() {
 }
 
 const HELP_GLOBAL = [
-  ['/', 'search'],
+  ['/', 'search the home list'],
+  ['ctrl+f', 'search overlay — keeps this page'],
   ['x / X', 'fold / unfold everything on the screen'],
   ['`', 'fold / unfold the top bar'],
   ['w', 'windows overview'],
@@ -14986,7 +15158,13 @@ document.addEventListener('focusout', () => setTimeout(refreshHelp, 0));
 document.addEventListener('keydown', e => {
   // Shortcuts never fire while typing in a field or editable region.
   const inField = e.target.closest && e.target.closest('input, select, textarea, [contenteditable="true"]');
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    searchModalOpen();
+    return;
+  }
   if (e.key === 'Escape') {
+    if (searchModalOpenNow()) { searchModalClose(); return; }
     if (document.body.classList.contains('file-full')) { exitFileDiffFull(); return; }
     if (agentModalOpen()) {
       if (window._agentLiveOn || (($('agentText') || {}).value || '').startsWith('/')) return;
@@ -15018,8 +15196,10 @@ document.addEventListener('keydown', e => {
     if (searchMode) { $('q').value = ''; applyFilter(); }
     return;
   }
+  if (searchModalOpenNow()) return;
   if (readOverlayOpen()) { readingKeydown(e); return; }
   if (!$('windowsPop').hidden) { windowsPopKeydown(e); return; }
+  if (!$('agentsPop').hidden) { agentsPopKeydown(e); return; }
   if (agentModalOpen()) {
     const ta = $('agentText');
     if (!inField && ta) ta.focus();
@@ -15084,6 +15264,21 @@ document.addEventListener('keydown', e => {
     v.scrollBy({ top: dir * Math.max(120, v.clientHeight * 0.9), behavior: isEink() ? 'auto' : 'smooth' });
     return;
   }
+  if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.key) && ['home', 'project', 'conversation'].includes(viewKind)) {
+    if (searchMode && viewKind === 'home' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      moveSearchSel(e.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    e.preventDefault();
+    scrollCurrentView(e.key);
+    return;
+  }
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && ['home', 'project', 'conversation'].includes(viewKind)) {
+    e.preventDefault();
+    moveViewLevel(e.key === 'ArrowLeft' ? -1 : 1);
+    return;
+  }
   if ($('fgRoot') && ['+', '=', '-', '_', '0', 'n', 'b'].includes(e.key)) {
     e.preventDefault();
     if (e.key === '+' || e.key === '=') $('fgPlus').click();
@@ -15096,10 +15291,8 @@ document.addEventListener('keydown', e => {
   switch (e.key) {
     case '/': e.preventDefault(); if (viewKind !== 'home') goHome(); if ($('qwrap').checkVisibility()) $('q').focus(); break;
     case 'Enter': if (searchMode && viewKind === 'home' && openSearchSel()) e.preventDefault(); break;
-    case 'ArrowDown': e.preventDefault(); if (searchMode && viewKind === 'home') moveSearchSel(1); else moveActive(1); break;
-    case 'ArrowUp': e.preventDefault(); if (searchMode && viewKind === 'home') moveSearchSel(-1); else moveActive(-1); break;
-    case 'ArrowLeft': if (nudgeBranch(-1)) e.preventDefault(); break;
-    case 'ArrowRight': if (nudgeBranch(1)) e.preventDefault(); break;
+    case 'ArrowDown': if (searchMode && viewKind === 'home') { e.preventDefault(); moveSearchSel(1); } break;
+    case 'ArrowUp': if (searchMode && viewKind === 'home') { e.preventDefault(); moveSearchSel(-1); } break;
     case ' ': {
       if (!activeRel) return;
       e.preventDefault();
@@ -15190,7 +15383,6 @@ document.addEventListener('keydown', e => {
     case 'x': e.preventDefault(); collapseAllFolds(); break;
     case 'X': e.preventDefault(); expandAllFolds(); break;
     case 'z': e.preventDefault(); setZen(!document.body.classList.contains('zen')); break;
-    case 'v': e.preventDefault(); setNavPin(!navPinOn); break;
     case 'M': {
       const add = $('modelPick');
       if (add) { e.preventDefault(); add.click(); }
