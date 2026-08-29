@@ -8378,17 +8378,23 @@ async function waitForNewConversation(kind, cwd, sinceMs, existing, timeoutMs = 
 }
 
 async function startProjectConversation(options) {
-  const meta = projectMetaFor(options.project);
+  // A loose conversation is deliberately rooted at the user's home. It has
+  // no project registry entry, project model, memory, briefing, or Git root.
+  // Keep this path in the same session lifecycle as project starts so blank
+  // SDK sessions persist and open in the web composer in exactly one way.
+  const projectless = options.projectless === true;
+  const project = projectless ? LOOSE_PROJECT : options.project;
+  const meta = projectless ? { cwd: os.homedir() } : projectMetaFor(project);
   if (!meta) throw new Error('project not found');
-  const cwd = meta.cwd && fs.existsSync(meta.cwd) ? meta.cwd : os.homedir();
+  const cwd = projectless ? os.homedir() : (meta.cwd && fs.existsSync(meta.cwd) ? meta.cwd : os.homedir());
   const kind = options.agent === 'claude' ? 'claude' : 'pi';
-  const label = String(options.name || 'Project: ' + options.project).slice(0, 80);
-  const name = 'aiconvo-project-' + crypto.createHash('sha256').update(options.project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
+  const label = String(options.name || (projectless ? 'Loose conversation' : 'Project: ' + project)).slice(0, 80);
+  const name = 'aiconvo-' + (projectless ? 'loose-' : 'project-') + crypto.createHash('sha256').update(project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
   const mode = kind === 'pi' && typeof options.mode === 'string' && options.mode.trim() ? options.mode.trim() : null;
   // Lead model for the kickoff run; any further models stay in the project's
   // composer strip for later fan-out sends.
   const requestedModels = normalizePickedModels(options.models);
-  const inheritedModel = kind === 'pi' ? resolvedProjectDefaultModel(options.project) : null;
+  const inheritedModel = kind === 'pi' && !projectless ? resolvedProjectDefaultModel(project) : null;
   const launchModels = requestedModels.length
     ? requestedModels
     : inheritedModel ? [{ provider: inheritedModel.provider, modelId: inheritedModel.modelId }] : [];
@@ -8401,7 +8407,7 @@ async function startProjectConversation(options) {
   let contextFile = null;
   if (kind === 'pi' && typeof options.context === 'string' && options.context.trim()) {
     contextFile = path.join(BRIEFINGS_DIR,
-      new Date().toISOString().replace(/[:.]/g, '-') + '-' + String(options.project).replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 60) + '-context.md');
+      new Date().toISOString().replace(/[:.]/g, '-') + '-' + String(project).replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 60) + '-context.md');
     await fsp.writeFile(contextFile, options.context.trim() + '\n');
   }
   const wantMap = include.map !== false;
@@ -8426,9 +8432,9 @@ async function startProjectConversation(options) {
     text = `Your system prompt carries this project's work memory.` + focus +
       ' Reply with at most 3 lines on where the project stands, then wait for instructions.';
   } else if (wantBriefing) {
-    briefing = await buildProjectBriefing(options.project, include, options.name || '');
+    briefing = await buildProjectBriefing(project, include, options.name || '');
     const focus = options.name ? ` Today's focus: "${options.name}".` : '';
-    const memory = wantMap ? await projectMemoryInfo(options.project, meta) : null;
+    const memory = wantMap ? await projectMemoryInfo(project, meta) : null;
     const first = memory ? ' Read every file listed under "Project memory" first.' : '';
     const reading = wantNotes
       ? ' Read every file listed under "Fresh distilled notes".'
@@ -8515,7 +8521,7 @@ async function startProjectConversation(options) {
     if (key && launchModels.length) saveConversationModels(key, launchModels);
     return {
       name, kind, cwd, title: name, key, surface: 'rpc',
-      project: options.project, include, briefing, kickoff: wantBriefing || !!contextFile,
+      project, projectless, include, briefing, kickoff: wantBriefing || !!contextFile,
       contextFile, mode, models: launchModels,
     };
   }
@@ -8529,7 +8535,7 @@ async function startProjectConversation(options) {
   }
   return {
     name, kind, cwd, title: name, key, surface: 'alacritty',
-    project: options.project, include, briefing, kickoff: wantBriefing || !!contextFile,
+    project, projectless, include, briefing, kickoff: wantBriefing || !!contextFile,
     contextFile, mode, models: launchModels,
   };
 }
@@ -9561,8 +9567,19 @@ const server = http.createServer(async (req, res) => {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
+      parsed.projectless = false; // only the dedicated route can choose home
       try { json(res, 200, await startProjectConversation(parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/start-loose' && req.method === 'POST') {
+      // This endpoint accepts no cwd. A loose web start always uses the
+      // server user's home, which prevents clients from choosing an
+      // unexpected process directory.
+      try {
+        json(res, 200, await startProjectConversation({
+          project: LOOSE_PROJECT, projectless: true, agent: 'pi', surface: 'rpc',
+          models: [], include: { map: false }, silent: true,
+        }));
+      } catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/project/model' && req.method === 'PUT') {
       let body = '';
       for await (const chunk of req) body += chunk;

@@ -190,6 +190,7 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 #ticker.k-message { --tick-c: var(--accent); }
 #ticker.k-tool { --tick-c: var(--warn); }
 #activeBtn { position: relative; height: 26px; padding: 0 9px; border-color: transparent; background: transparent; color: var(--accent); }
+#activeBtn #agentUnreadCount { display: inline-block; min-width: 1ch; margin-left: 4px; text-align: left; }
 #activeBtn.work { animation: activepulse 2.4s ease-in-out infinite; }
 #activeBtn.unread::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 #activeBtn:hover { background: var(--surface-2); }
@@ -198,6 +199,9 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 #agentsPop[hidden] { display: none; }
 #agentsPop .ag-row.kbd-selected { background: var(--surface-2); outline: 1px solid var(--accent); outline-offset: -1px; }
 .ag-sec { color: var(--text-faint); font-size: var(--fs-micro); padding: 8px 10px 3px; border-bottom: 1px solid var(--border); }
+/* Keep one stable inbox slot. New replies never shift the rest of the menu. */
+.ag-unread-tray { min-height: 58px; border-bottom: 1px solid var(--border-strong); }
+.ag-unread-tray .ag-sec { border-bottom-color: var(--border); }
 .ag-sec.ag-active-sec { margin-top: 6px; border-top: 1px solid var(--border-strong); }
 .ag-row { display: flex; gap: 8px; align-items: center; padding: 5px 10px; cursor: pointer; font-size: var(--fs-meta); }
 .ag-row:hover { background: var(--surface-2); }
@@ -205,6 +209,7 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 .ag-row .ag-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ag-row .ag-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-row.unread .ag-title { font-weight: 700; }
+.ag-row.working .src i { background: var(--success); }
 .ag-unread-dot, .ag-read-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; }
 .ag-unread-dot { background: var(--accent); }
 .ag-read-dot { border: 1px solid var(--text-faint); background: transparent; }
@@ -240,6 +245,11 @@ body.home #brand { display: none !important; }
 #projSort button { height: 26px; min-width: 26px; padding: 0 7px; border-color: transparent; border-radius: 0; background: transparent; color: var(--text-dim); font: 12px var(--font); }
 #projSort button:hover { color: var(--text); background: var(--surface-2); }
 #projSort button.on { color: var(--accent); }
+/* A home-rooted conversation is not a project. Keep its entry point visible
+   on every home layout, including the portrait phone list. */
+#newLoose { display: none; }
+body.home #newLoose { display: inline-flex; align-items: center; height: 26px; padding: 0 7px; border-color: transparent; background: transparent; color: var(--text-dim); font-size: var(--fs-meta); }
+body.home #newLoose:hover { color: var(--accent); background: var(--surface-2); }
 /* gantt layout: left (vertical) */
 body.g-v main { flex-direction: row; }
 body.g-v #view { order: 2; }
@@ -1715,6 +1725,7 @@ window.aiconvoSyncTheme();
 <body class="home">
 <header>
   <div id="projSort" hidden></div>
+  <button id="newLoose" title="New projectless conversation · working directory: your home (C)">+ conversation</button>
   <button id="brand" aria-label="Home">⌂</button>
   <button id="chProject" title="Open the project overview"></button>
   <button id="chNew" title="New conversation in this project — same model and thinking level, the project map in the system prompt, an empty composer">+</button>
@@ -1728,7 +1739,7 @@ window.aiconvoSyncTheme();
   <span id="headSpace"></span>
   <button id="ticker" hidden title="Open the latest active conversation"></button>
   <span class="count" id="count"></span>
-  <button id="activeBtn" hidden title="Running, writing, and recent agents (a)">⚇ 0</button>
+  <button id="activeBtn" hidden title="Agents, replies, and notifications (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
   <button id="filtersBtn" title="Source, directory, and view filters">filters</button>
   <button id="settingsBtn" title="Settings (,)">⚙</button>
   <button id="barFold" title="Fold the top bar — click the rail to bring it back (`)">▴</button>
@@ -2570,12 +2581,13 @@ function updateActiveBtn() {
   const runningJobs = [...jobs.values()].filter(j => j.status === 'running').length;
   const working = activeRuns.size > 0 || sessions.some(isWorking) || runningJobs > 0;
   $('activeBtn').hidden = attention.size === 0 && !working && jobs.size === 0;
-  // Robot face: filled eyes while work runs, open eyes when results wait.
-  const activeCount = Math.max(attention.size + runningJobs, working ? 1 : 0);
-  $('activeBtn').textContent = (working ? '⚉' : '⚇') + (activeCount ? ' ' + activeCount : '');
+  // The number is an inbox count. Its reserved slot stays empty when clear,
+  // so activity changes never move the other header controls.
+  $('activeGlyph').textContent = working ? '⚉' : '⚇';
+  $('agentUnreadCount').textContent = unread.length ? String(unread.length) : '';
   $('activeBtn').title = unread.length
-    ? `${unread.length} finished unread · running, writing, and recent agents (a)`
-    : 'Agents and notifications (a)';
+    ? `${unread.length} unread ${unread.length === 1 ? 'reply' : 'replies'} · agents and notifications (a)`
+    : 'Agents, replies, and notifications (a)';
   // The gentle pulse runs only while something truly works (e-ink kills all
   // animation globally, so this stays static there).
   $('activeBtn').classList.toggle('work', working);
@@ -2620,7 +2632,7 @@ async function renderAgentsPop(refetch) {
     shownPids.add(pid);
     return `<button class="ag-kill" data-pid="${pid}" data-name="${esc(name || 'process')}" title="Stop this process (pid ${pid}). Web runs abort cleanly and keep partial output.">✗</button>`;
   };
-  const row = (s, key, status, pid, readState = '') => `<div class="ag-row${readState === 'unread' ? ' unread' : ''}" data-key="${esc(key || '')}">` +
+  const row = (s, key, status, pid, readState = '', working = false) => `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}" data-key="${esc(key || '')}">` +
     `<span class="src ${esc((s && s.source) || 'pi')}"><i></i></span>` +
     (readState === 'unread' ? '<span class="ag-unread-dot" title="Unread" aria-label="Unread"></span>' :
       readState === 'read' ? '<span class="ag-read-dot" title="Read" aria-label="Read"></span>' : '') +
@@ -2643,19 +2655,19 @@ async function renderAgentsPop(refetch) {
     const status = first.fanoutId
       ? rs.length + ' models · ' + rs.filter(r => r.status === 'running').length + ' working'
       : ((first.model || '').split('/').pop() || 'session model').slice(0, 16) + ' · ' + (first.statusText || 'working…').slice(0, 24);
-    return row(byKey(key), key, status, null);
+    return row(byKey(key), key, status, null, '', true);
   });
   const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) }));
   const termWork = termRows.filter(t => t.s && isActive(t.s));
   const termIdle = termRows.filter(t => !t.s || !isActive(t.s));
   const termStatus = t => {
     const pid = (t.p && t.p.pid) || agentsPids.get(t.k);
-    const wrote = t.s && t.s.mtimeMs ? 'wrote ' + secs(now - t.s.mtimeMs) : 'no writes yet';
-    return (pid ? 'pid ' + pid + ' · ' : '') + wrote;
+    const activity = t.s && t.s.mtimeMs ? 'activity ' + secs(now - t.s.mtimeMs) + ' ago' : 'waiting for activity';
+    return (pid ? 'pid ' + pid + ' · ' : '') + activity;
   };
   const unread = finishedUnreadSessions();
   const unreadKeys = new Set(unread.map(s => s.key));
-  const unreadSec = unread.map(s => row(s, s.key, 'finished ' + secs(now - agentUnreadAt(s)), null, 'unread')).join('');
+  const unreadSec = unread.map(s => row(s, s.key, 'replied ' + secs(now - agentUnreadAt(s)) + ' ago', null, 'unread')).join('');
   // "Writing" claims only sessions with a busy live process behind them. A
   // warm web process at the prompt is not work and must not hide a result.
   const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key)
@@ -2663,7 +2675,7 @@ async function renderAgentsPop(refetch) {
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const writeStatus = s => {
     const p = procByKey.get(s.key);
-    return 'wrote ' + secs(now - s.mtimeMs) + (p ? ' · pid ' + p.pid + ' · ' + p.owner : '');
+    return 'activity ' + secs(now - s.mtimeMs) + ' ago' + (p ? ' · pid ' + p.pid + ' · ' + p.owner : '');
   };
   const claimed = new Set([...runningKeys, ...webKeys, ...writing.map(s => s.key), ...unreadKeys]);
   // A result moves into the read section immediately after it opens. Keep a
@@ -2675,13 +2687,13 @@ async function renderAgentsPop(refetch) {
   }).sort((a, b) => Math.max(Number(agentReadState.read[b.key]) || 0, b.mtimeMs || 0)
     - Math.max(Number(agentReadState.read[a.key]) || 0, a.mtimeMs || 0)).slice(0, 15);
   const webSec = webRuns.join('');
-  const workSec = termWork.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
+  const workSec = termWork.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k), '', true)).join('');
   const idleSec = termIdle.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
-  const writeSec = writing.map(s => row(s, s.key, writeStatus(s), (procByKey.get(s.key) || {}).pid)).join('');
+  const writeSec = writing.map(s => row(s, s.key, writeStatus(s), (procByKey.get(s.key) || {}).pid, '', true)).join('');
   // Leftovers: processes no row above claimed — idle warm RPC sessions on
   // other conversations, server children, and untracked strays.
   const others = agentsProcs.filter(p => !shownPids.has(p.pid) && !unreadKeys.has(p.key));
-  const otherSec = others.map(p => `<div class="ag-row" data-key="${esc(p.key || '')}">` +
+  const otherSec = others.map(p => `<div class="ag-row${p.busy === true ? ' working' : ''}" data-key="${esc(p.key || '')}">` +
     `<span class="src ${esc(p.kind === 'claude' ? 'claude' : 'pi')}"><i></i></span>` +
     `<span class="ag-main"><span class="ag-title">${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span>` +
     `<span class="ag-dir">${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(secs(p.ageMs)) : ''}</span></span>` +
@@ -2689,18 +2701,18 @@ async function renderAgentsPop(refetch) {
     kill(p.pid, p.title || p.kind + ' pid ' + p.pid) + `</div>`).join('');
   const st = pop.scrollTop;
   const notificationsSec = jobsNotificationsHtml();
-  pop.innerHTML =
-    (unreadSec ? '<div class="ag-sec">● finished — unread</div>' + unreadSec : '') +
-    (recent.length ? '<div class="ag-sec">○ finished — read</div>' + recent.map(s => {
+  const unreadTray = '<div class="ag-unread-tray"><div class="ag-sec">● unread replies</div>' + unreadSec + '</div>';
+  pop.innerHTML = unreadTray +
+    (recent.length ? '<div class="ag-sec">○ read replies</div>' + recent.map(s => {
       const readAt = Number(agentReadState.read[s.key]) || 0;
-      return row(s, s.key, readAt ? 'read ' + secs(now - readAt) : 'finished ' + secs(now - s.mtimeMs), null, 'read');
+      return row(s, s.key, readAt ? 'read ' + secs(now - readAt) + ' ago' : 'replied ' + secs(now - s.mtimeMs) + ' ago', null, 'read');
     }).join('') : '') +
-    (webSec ? '<div class="ag-sec ag-active-sec">● web runs — working</div>' + webSec : '') +
-    (workSec ? '<div class="ag-sec ag-active-sec">● terminals — working</div>' + workSec : '') +
-    (writeSec ? '<div class="ag-sec ag-active-sec">█ writing</div>' + writeSec : '') +
-    (idleSec ? '<div class="ag-sec ag-active-sec">○ terminals — idle at the prompt</div>' + idleSec : '') +
-    (otherSec ? '<div class="ag-sec ag-active-sec">⚙ other agent processes</div>' + otherSec : '') +
-    notificationsSec || '<div class="ag-sec">nothing is running, writing, recent, unread, or notifying.</div>';
+    (webSec ? '<div class="ag-sec ag-active-sec">● web agents — responding</div>' + webSec : '') +
+    (workSec ? '<div class="ag-sec ag-active-sec">● terminal agents — active</div>' + workSec : '') +
+    (writeSec ? '<div class="ag-sec ag-active-sec">● agent activity</div>' + writeSec : '') +
+    (idleSec ? '<div class="ag-sec ag-active-sec">○ open terminals</div>' + idleSec : '') +
+    (otherSec ? '<div class="ag-sec ag-active-sec">⚙ background agent processes</div>' + otherSec : '') +
+    notificationsSec;
   const notifications = pop.querySelector('.ag-notifications');
   if (notifications) notifications.ontoggle = () => { agentNotificationsOpen = notifications.open; };
   pop.scrollTop = st;
@@ -7763,7 +7775,7 @@ function showLooseConversations() {
   const heroRows = rows.map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
   $('view').innerHTML = `<div class="project-overview loose-overview">
     ${miniGanttHtml(heroRows)}
-    <div class="ptitle"><h1>${LOOSE_PROJECT}</h1></div>
+    <div class="ptitle"><h1>${LOOSE_PROJECT}</h1><button id="looseNew" class="primary pnewbtn" title="Start a projectless conversation in your home directory">+ new conversation</button></div>
     <p class="loose-intro">These conversations started without a project. They have no shared memory, files, or Git history. Assign one when it belongs to existing work.</p>
     <div class="loose-tools"><input type="text" id="looseQ" placeholder="filter ${rows.length} conversations" autocomplete="off"><span class="dim" id="looseCount"></span></div>
     <div class="loose-list" id="looseList"></div>
@@ -7786,6 +7798,7 @@ function showLooseConversations() {
       button.onclick = e => { e.stopPropagation(); openLooseProjectPicker(button.dataset.looseAssign); });
   };
   $('looseQ').oninput = paint;
+  $('looseNew').onclick = startLooseConversation;
   paint();
 }
 
@@ -13448,6 +13461,33 @@ $('ganttGroup').onclick = () => {
   renderTabList();
 };
 
+// ---- loose conversation (home-rooted, no project context) ----
+async function startLooseConversation() {
+  if (window._looseStartBusy) return;
+  window._looseStartBusy = true;
+  setRouteKind('launch', [crumbHome(), { label: LOOSE_PROJECT }, { label: 'new conversation' }]);
+  $('view').innerHTML = `<div class="dprog" style="margin-top:70px;text-align:center">
+    <div style="font-size:15px"><span class="spin">░</span> new projectless conversation</div>
+    <div class="hint" style="margin-top:10px">starting in your home directory…</div>
+    <div class="hint" style="color:var(--text-faint);margin-top:6px">no project memory · empty composer</div>
+  </div>`;
+  try {
+    const out = await postJson('/api/conversation/start-loose', {});
+    if (out.error) throw new Error(out.error);
+    if (!out.key) throw new Error('no conversation came back');
+    await open(out.key, 'bottom');
+    toast('✓ projectless conversation · ' + (out.cwd || '~'));
+    const ta = $('agentText');
+    if (ta) ta.focus();
+  } catch (e) {
+    errToast('new conversation failed: ' + e.message);
+    goHome();
+  } finally {
+    window._looseStartBusy = false;
+  }
+}
+$('newLoose').onclick = startLooseConversation;
+
 // ---- new project (directory-first birth) ----
 // One form, one verb: folder + git init + vouched intent seed, and an
 // optional first prompt that starts the first conversation right away.
@@ -14622,6 +14662,7 @@ function helpNow() {
       ['g', 'timeline layout: bottom / left / projects / off'],
       ['+ − 0', 'timeline zoom'],
       ['n / b / t', 'timeline: now / beginning / date'],
+      ['C', 'new projectless conversation in your home directory'],
       ['P', 'new project — a folder is born'],
       ['f', 'filters']);
     sections.push({ label: 'list & timeline', keys: listKeys });
@@ -14883,6 +14924,9 @@ document.addEventListener('keydown', e => {
       if (project && project !== '?') showProjectOverview(project);
       break;
     }
+    case 'C':
+      if (viewKind === 'home') { e.preventDefault(); startLooseConversation(); }
+      break;
     case 'P':
       if (viewKind === 'home') { e.preventDefault(); openNewProjectForm(); }
       break;
