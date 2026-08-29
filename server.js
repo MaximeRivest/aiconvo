@@ -7341,7 +7341,51 @@ function spawnDesktop(command, args) {
   });
 }
 
+function runningOnWsl() {
+  try { return /microsoft/i.test(fs.readFileSync('/proc/version', 'utf8')); }
+  catch { return false; }
+}
+
+function windowsSystemPath(rel) {
+  return '/mnt/c/Windows/' + String(rel).replace(/\\/g, '/');
+}
+
+function wslWindowsPath(abs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('wslpath', ['-w', abs], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', err = '';
+    child.stdout.on('data', d => out += d);
+    child.stderr.on('data', d => err += d);
+    child.on('error', e => reject(new Error('wslpath failed: ' + e.message)));
+    child.on('close', code => {
+      const win = out.trim();
+      if (code === 0 && win) resolve(win);
+      else reject(new Error(err.trim() || 'wslpath failed'));
+    });
+  });
+}
+
+async function openOnWindows(abs, reveal, isDir) {
+  const win = await wslWindowsPath(abs);
+  const explorer = windowsSystemPath('explorer.exe');
+  if (reveal) {
+    await spawnDesktop(explorer, isDir ? [win] : ['/select,' + win]);
+    return;
+  }
+  const ps = windowsSystemPath('System32/WindowsPowerShell/v1.0/powershell.exe');
+  const literal = "'" + win.replace(/'/g, "''") + "'";
+  try {
+    await spawnDesktop(ps, ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -LiteralPath ' + literal]);
+  } catch {
+    await spawnDesktop(explorer, [win]);
+  }
+}
+
 async function revealNativePath(abs, stat) {
+  if (runningOnWsl()) {
+    await openOnWindows(abs, true, stat.isDirectory());
+    return;
+  }
   const uri = pathToFileURL(abs).href;
   try {
     await new Promise((resolve, reject) => {
@@ -7368,7 +7412,8 @@ async function nativePathAction(key, pathValue, action) {
   if (action !== 'open') throw new Error('unknown file action');
   if (stat.isFile() && path.extname(abs).toLowerCase() === '.desktop')
     throw new Error('desktop launcher files can only be shown in their folder');
-  await spawnDesktop('xdg-open', [abs]);
+  if (runningOnWsl()) await openOnWindows(abs, false, stat.isDirectory());
+  else await spawnDesktop('xdg-open', [abs]);
   return { ok: true, action, path: abs };
 }
 
