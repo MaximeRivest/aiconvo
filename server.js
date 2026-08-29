@@ -12,6 +12,7 @@ const os = require('os');
 const crypto = require('crypto');
 const readline = require('readline');
 const net = require('net');
+const { pathToFileURL } = require('url');
 const { execFile, execFileSync, spawn } = require('child_process');
 const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const settingsLib = require('./settings.js');
@@ -7251,58 +7252,124 @@ function pathWithoutLocation(pathValue) {
   return String(pathValue || '').replace(/:(\d+)(?::(\d+))?$/, '');
 }
 
-async function transcriptFilePath(key, pathValue, maxBytes = 32 * 1024 * 1024) {
-  if (!index[key]) throw new Error('conversation not found');
-  const clean = pathWithoutLocation(pathValue);
-  const expanded = expandHomePath(clean);
-  const abs = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(index[key].cwd || '', expanded));
-  let st;
-  try { st = await fsp.stat(abs); } catch { throw new Error('file not found on disk'); }
-  if (!st.isFile()) throw new Error('not a regular file');
-  if (st.size > maxBytes) throw new Error('file is too large to open here');
-  const inside = root => root && (abs === root || abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
-  if ((gitRepoIndexCache.repos || []).some(repo => inside(repo.root)) ||
-      Object.values(index).some(entry => inside(entry.cwd))) return { abs, stat: st };
-  const repos = await discoverGitRepos();
-  if (repos.some(repo => inside(repo.root))) return { abs, stat: st };
-  throw new Error('this path is outside every indexed repository and project');
+const pathRealRootCache = new Map();
+function pathInside(abs, root) {
+  if (!root) return false;
+  let realRoot = pathRealRootCache.get(root);
+  if (!realRoot) {
+    try { realRoot = fs.realpathSync(root); } catch { realRoot = path.resolve(root); }
+    pathRealRootCache.set(root, realRoot);
+    if (pathRealRootCache.size > 2000) pathRealRootCache.clear();
+  }
+  return abs === realRoot || abs.startsWith(realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep);
 }
 
-async function transcriptFileReadResponse(key, pathValue) {
-  const { abs } = await transcriptFilePath(key, pathValue, FILE_EDIT_MAX);
+// Resolve once, then apply the access policy to the canonical path. Local
+// app windows can preview paths under home and tmp. Authenticated LAN readers
+// keep the narrower project/repository policy and can never launch host apps.
+async function transcriptPathInfo(key, pathValue, { local = false, maxBytes = Infinity } = {}) {
+  const clean = pathWithoutLocation(pathValue);
+  const expanded = expandHomePath(clean);
+  const cwd = key && index[key] ? index[key].cwd || '' : '';
+  if (!path.isAbsolute(expanded) && !cwd) throw new Error('relative path without a conversation');
+  const wanted = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(cwd, expanded));
+  let abs, stat;
+  try {
+    abs = await fsp.realpath(wanted);
+    stat = await fsp.stat(abs);
+  } catch { throw new Error('file not found on disk'); }
+  if (!stat.isFile() && !stat.isDirectory()) throw new Error('not a regular file or directory');
+  if (stat.isFile() && stat.size > maxBytes) throw new Error('file is too large to open here');
+
+  let allowed = local && (pathInside(abs, os.homedir()) || pathInside(abs, os.tmpdir()));
+  if (!allowed) allowed = (gitRepoIndexCache.repos || []).some(repo => pathInside(abs, repo.root)) ||
+    Object.values(index).some(entry => pathInside(abs, entry.cwd));
+  if (!allowed) {
+    const repos = await discoverGitRepos();
+    allowed = repos.some(repo => pathInside(abs, repo.root));
+  }
+  if (!allowed) throw new Error(local
+    ? 'this path is outside your home, tmp, and projects'
+    : 'this path is outside every indexed repository and project');
+  return { abs, stat };
+}
+
+async function transcriptFilePath(key, pathValue, maxBytes = 32 * 1024 * 1024, local = false) {
+  const found = await transcriptPathInfo(key, pathValue, { local, maxBytes });
+  if (!found.stat.isFile()) throw new Error('not a regular file');
+  return found;
+}
+
+async function transcriptFileReadResponse(key, pathValue, local = false) {
+  const { abs } = await transcriptFilePath(key, pathValue, FILE_EDIT_MAX, local);
   const body = await fsp.readFile(abs);
   if (body.subarray(0, 8192).includes(0)) throw new Error('this is a binary file');
   const text = body.toString('utf8');
   return { path: abs, text, sha: sha256Hex(text) };
 }
 
-// A clicked transcript path opens on the host desktop: html in the
-// browser, png in the image viewer — whatever xdg-open resolves.
-// Session file edits keep their own ▤ diff buttons; this is for reading.
-async function openNativeResponse(key, pathValue) {
-  const clean = pathWithoutLocation(pathValue || '');
-  const expanded = expandHomePath(clean);
-  const cwd = key && index[key] ? index[key].cwd || '' : '';
-  if (!path.isAbsolute(expanded) && !cwd) throw new Error('relative path without a conversation');
-  const abs = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(cwd, expanded));
-  try { await fsp.stat(abs); } catch { throw new Error('file not found on disk'); }
-  const inside = root => root && (abs === root || abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
-  const allowed = inside(os.homedir()) || inside(os.tmpdir()) ||
-    (gitRepoIndexCache.repos || []).some(repo => inside(repo.root)) ||
-    Object.values(index).some(entry => inside(entry.cwd));
-  if (!allowed) throw new Error('this path is outside your home, tmp, and projects');
-  const child = spawn('xdg-open', [abs], { detached: true, stdio: 'ignore', env: agentEnv() });
-  child.unref();
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, 150);
-    child.on('error', err => { clearTimeout(timer); reject(new Error('xdg-open failed: ' + err.message)); });
-  });
-  return { ok: true, path: abs };
-}
-
 function imageMimeForPath(file) {
   return ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
     '.gif': 'image/gif', '.webp': 'image/webp' })[path.extname(file).toLowerCase()] || null;
+}
+
+async function pathInfoResponse(key, pathValue, local = false) {
+  const { abs, stat } = await transcriptPathInfo(key, pathValue, { local });
+  if (stat.isDirectory()) return { path: abs, kind: 'directory', preview: 'none', hostActions: local };
+  const mime = imageMimeForPath(abs);
+  let preview = mime ? 'image' : 'text';
+  if (!mime) {
+    if (stat.size > FILE_EDIT_MAX) preview = 'none';
+    else {
+      const fh = await fsp.open(abs, 'r');
+      try {
+        const sample = Buffer.alloc(Math.min(8192, stat.size));
+        if (sample.length) await fh.read(sample, 0, sample.length, 0);
+        if (sample.includes(0)) preview = 'none';
+      } finally { await fh.close(); }
+    }
+  }
+  return { path: abs, kind: 'file', preview, mime: mime || null, size: stat.size, hostActions: local };
+}
+
+function spawnDesktop(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', env: agentEnv() });
+    child.unref();
+    const timer = setTimeout(resolve, 150);
+    child.on('error', err => { clearTimeout(timer); reject(new Error(command + ' failed: ' + err.message)); });
+  });
+}
+
+async function revealNativePath(abs, stat) {
+  const uri = pathToFileURL(abs).href;
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn('dbus-send', ['--session', '--print-reply', '--dest=org.freedesktop.FileManager1',
+        '/org/freedesktop/FileManager1', 'org.freedesktop.FileManager1.ShowItems', `array:string:${uri}`, 'string:'],
+        { stdio: 'ignore', env: agentEnv() });
+      const timer = setTimeout(() => { child.kill(); reject(new Error('file manager timed out')); }, 2000);
+      child.on('error', err => { clearTimeout(timer); reject(err); });
+      child.on('close', code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error('file manager refused the request')); });
+    });
+  } catch {
+    await spawnDesktop('xdg-open', [stat.isDirectory() ? abs : path.dirname(abs)]);
+  }
+}
+
+// Explicit host actions. The operating system owns file-type associations;
+// aiconvo only checks the path and forwards the user's local gesture.
+async function nativePathAction(key, pathValue, action) {
+  const { abs, stat } = await transcriptPathInfo(key, pathValue, { local: true });
+  if (action === 'reveal') {
+    await revealNativePath(abs, stat);
+    return { ok: true, action, path: abs };
+  }
+  if (action !== 'open') throw new Error('unknown file action');
+  if (stat.isFile() && path.extname(abs).toLowerCase() === '.desktop')
+    throw new Error('desktop launcher files can only be shown in their folder');
+  await spawnDesktop('xdg-open', [abs]);
+  return { ok: true, action, path: abs };
 }
 
 async function fileReadResponse(pathValue) {
@@ -9263,14 +9330,25 @@ const server = http.createServer(async (req, res) => {
         res.end(media.body);
       } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/file' && req.method === 'GET') {
-      try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'))); }
+      try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
       catch (e) { json(res, 404, { error: e.message }); }
-    } else if (u.pathname === '/api/open-native' && req.method === 'GET') {
-      try { json(res, 200, await openNativeResponse(u.searchParams.get('id'), u.searchParams.get('path'))); }
-      catch (e) { json(res, 400, { error: e.message }); }
-    } else if (u.pathname === '/api/conversation/file-content' && req.method === 'GET') {
+    } else if (u.pathname === '/api/path/info' && req.method === 'GET') {
+      try { json(res, 200, await pathInfoResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/path/read' && req.method === 'GET') {
+      try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/path/action' && req.method === 'POST') {
+      if (!isLocalRequest(req)) return json(res, 403, { error: 'system file actions are available only on the laptop' });
+      let body = '';
+      for await (const chunk of req) body += chunk;
       try {
-        const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'));
+        const input = JSON.parse(body || '{}');
+        json(res, 200, await nativePathAction(input.id, input.path, input.action));
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if ((u.pathname === '/api/path/content' || u.pathname === '/api/conversation/file-content') && req.method === 'GET') {
+      try {
+        const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'), 32 * 1024 * 1024, isLocalRequest(req));
         const mime = imageMimeForPath(found.abs);
         if (!mime) throw new Error('this file is not a supported image');
         res.writeHead(200, { 'Content-Type': mime, 'Content-Length': found.stat.size,

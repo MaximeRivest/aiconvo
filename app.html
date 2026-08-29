@@ -1155,6 +1155,19 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .media-lightbox-head button { margin-left: auto; }
 .media-lightbox-body { min-height: 0; display: grid; place-items: center; padding: 12px; overflow: auto; }
 .media-lightbox-body img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; background: var(--surface-1); }
+/* One file grammar on every transcript surface: click previews or reviews,
+   Ctrl-click asks the desktop, and right-click/long-press opens this menu. */
+.file-action-menu { position: fixed; z-index: 10040; min-width: 230px; max-width: min(360px, calc(100vw - 16px)); padding: 4px; background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); box-shadow: 0 8px 28px var(--shadow-color); }
+.file-action-head { padding: 5px 8px 7px; color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.file-action-menu button { display: block; width: 100%; height: auto; min-height: 28px; padding: 5px 8px; border: 0; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 11px; }
+.file-action-menu button:hover, .file-action-menu button:focus-visible { background: var(--surface-2); color: var(--accent); }
+.file-preview { position: fixed; inset: 0; z-index: 10020; display: grid; grid-template-rows: auto minmax(0, 1fr); background: color-mix(in srgb, var(--bg) 94%, transparent); }
+.file-preview-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+.file-preview-head span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-body { min-height: 0; overflow: auto; padding: 16px; }
+.file-preview-body > .md { max-width: var(--read-max); margin: 0 auto; }
+.file-preview-body > pre { margin: 0; padding: 12px; min-width: min-content; white-space: pre; font: 12.5px/1.5 var(--font); }
+:root[data-theme-mode="binary"] .file-action-menu { box-shadow: none; border-width: 2px; }
 .msg.toolline { padding: 3px 14px; font-size: 11px; color: var(--text-faint); }
 .msg-file-inline { border: 0; background: transparent; color: var(--text-dim); font-size: 11px; padding: 0; height: auto; cursor: pointer; font-family: inherit; }
 .msg-file-inline:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
@@ -8051,46 +8064,200 @@ function openMediaLightbox(src, title = 'image') {
   const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = e => { if (e.key === 'Escape') close(); };
   box.querySelector('button').onclick = close;
+  box.querySelector('img').onerror = () => { close(); errToast('could not load this image'); };
   box.onclick = e => { if (e.target === box || e.target.classList.contains('media-lightbox-body')) close(); };
   document.addEventListener('keydown', onKey);
   document.body.appendChild(box);
 }
 
-async function openTranscriptPath(pathValue) {
-  // A clicked path opens natively on the laptop: html in the browser,
-  // png in the image viewer. Only the ▤ session-edit buttons open the
-  // in-app diff view. The in-app reader below is the fallback when the
-  // native open fails (file gone, path outside the allowed roots).
-  const key = activeRel || '';
-  let out;
-  try { out = await (await fetch('/api/open-native?id=' + encodeURIComponent(key) + '&path=' + encodeURIComponent(pathValue))).json(); }
-  catch { out = { error: 'network failure' }; }
-  if (out && out.ok) { toast('▤ opened ' + shortFilePath(out.path)); return; }
-  if (!key) return errToast(out.error || 'could not open ' + shortFilePath(pathValue));
-  if (/\.(png|jpe?g|gif|webp)(?::\d+(?::\d+)?)?$/i.test(pathValue)) {
-    const src = '/api/conversation/file-content?id=' + encodeURIComponent(key) + '&path=' + encodeURIComponent(pathValue);
-    return openMediaLightbox(src, pathValue);
-  }
-  const oldScroll = $('view').scrollTop;
-  $('view').innerHTML = `<div class="quick-file-view"><div class="qf-head"><button id="qfBack">← conversation</button><b>${esc(shortFilePath(pathValue))}</b></div><div class="qf-body"><div class="ff-loading">opening file…</div></div></div>`;
-  $('qfBack').onclick = async () => { await renderConv('top'); $('view').scrollTop = oldScroll; };
-  let data;
-  try { data = await (await fetch('/api/conversation/file?id=' + encodeURIComponent(key) + '&path=' + encodeURIComponent(pathValue))).json(); }
-  catch { data = { error: 'network failure' }; }
-  const body = $('view').querySelector('.qf-body');
-  if (!body) return;
-  if (data.error) { body.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
-  body.innerHTML = `<div class="ff-status"><code>${esc(data.path)}</code></div><pre class="md-code"><code>${esc(data.text)}</code></pre>`;
+const FILE_IMAGE_PATH = /\.(png|jpe?g|gif|webp)(?::\d+(?::\d+)?)?$/i;
+let fileClickSuppressedUntil = 0;
+
+function fileControlContext(button) {
+  const pathValue = button.dataset.fileDiff || button.dataset.transcriptPath || '';
+  return {
+    button, path: pathValue, key: activeRel || '', change: !!button.dataset.fileDiff,
+    ts: button.dataset.fileTs || '', anchor: button.dataset.fileAnchor || '', call: button.dataset.fileCall || '',
+  };
 }
 
-// Paths render in many surfaces (notes, project pages, chat prose) that
-// never run the transcript wiring: one delegate covers them all. The
-// transcript's own per-button handlers stopPropagation, so no double fire.
+function closeFileActionMenu() {
+  const menu = document.querySelector('.file-action-menu');
+  if (menu) menu.remove();
+}
+
+function viewFileChange(ctx) {
+  if (!ctx.change) return;
+  rememberConversationFileReturn(ctx.button);
+  openToolCallFile(ctx.key, ctx.path, ctx.ts, ctx.anchor, ctx.call);
+}
+
+function openTextFilePreview(data) {
+  document.querySelectorAll('.file-preview').forEach(el => el.remove());
+  const box = document.createElement('div');
+  box.className = 'file-preview';
+  const lang = fileHighlightLang(data.path);
+  const body = lang === 'md'
+    ? `<div class="md">${mdRender(data.text)}</div>`
+    : `<pre class="md-code"><code class="lang-${esc(lang)}">${highlightFileLines(data.text, lang).join('\n')}</code></pre>`;
+  box.innerHTML = `<div class="file-preview-head"><span>${esc(data.path)}</span><button type="button">close</button></div><div class="file-preview-body">${body}</div>`;
+  const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  box.querySelector('button').onclick = close;
+  box.onclick = e => { if (e.target === box) close(); };
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(box);
+}
+
+async function openPathInApp(ctx, quiet = false) {
+  const query = new URLSearchParams({ id: ctx.key || '', path: ctx.path });
+  let info;
+  try { info = await (await fetch('/api/path/info?' + query)).json(); }
+  catch { info = { error: 'network failure' }; }
+  if (info.error) {
+    if (!quiet) errToast(info.error);
+    return false;
+  }
+  if (info.kind === 'directory') {
+    if (!quiet) errToast('folders have no in-app preview — use Show in folder');
+    return false;
+  }
+  if (info.preview === 'image') {
+    openMediaLightbox('/api/path/content?' + query, info.path);
+    return true;
+  }
+  if (info.preview !== 'text') {
+    if (!quiet) errToast('this file has no in-app preview — use the system application');
+    return false;
+  }
+  let data;
+  try { data = await (await fetch('/api/path/read?' + query)).json(); }
+  catch { data = { error: 'network failure' }; }
+  if (data.error) {
+    if (!quiet) errToast(data.error);
+    return false;
+  }
+  openTextFilePreview(data);
+  return true;
+}
+
+async function runNativePathAction(ctx, action) {
+  const out = await postJson('/api/path/action', { id: ctx.key || '', path: ctx.path, action });
+  if (out.error) return errToast(out.error);
+  toast(action === 'reveal' ? 'shown in folder · ' + shortFilePath(out.path) : 'sent to system · ' + shortFilePath(out.path));
+}
+
+async function copyFullFilePath(ctx) {
+  const query = new URLSearchParams({ id: ctx.key || '', path: ctx.path });
+  let info;
+  try { info = await (await fetch('/api/path/info?' + query)).json(); }
+  catch { info = { error: 'network failure' }; }
+  const value = info.error ? ctx.path : info.path;
+  try { await navigator.clipboard.writeText(value); toast('copied path · ' + shortFilePath(value)); }
+  catch { errToast('could not copy the path'); }
+}
+
+async function primaryFileAction(ctx) {
+  // An image change is useful as a picture first. Text changes keep their
+  // exact historical diff. The menu always offers the other interpretation.
+  if (ctx.change && !FILE_IMAGE_PATH.test(ctx.path)) return viewFileChange(ctx);
+  const opened = await openPathInApp(ctx, ctx.change);
+  if (!opened && ctx.change) viewFileChange(ctx);
+}
+
+function handleFileControlClick(e, button) {
+  e.stopPropagation();
+  e.preventDefault();
+  if (Date.now() < fileClickSuppressedUntil) return;
+  const ctx = fileControlContext(button);
+  if (e.ctrlKey || e.metaKey) return runNativePathAction(ctx, 'open');
+  primaryFileAction(ctx);
+}
+
+function openFileActionMenu(ctx, x, y) {
+  closeFileActionMenu();
+  const menu = document.createElement('div');
+  menu.className = 'file-action-menu';
+  menu.setAttribute('role', 'menu');
+  const image = FILE_IMAGE_PATH.test(ctx.path);
+  const items = [];
+  if (ctx.change && !image) items.push(['View this change', () => viewFileChange(ctx)]);
+  items.push([image ? 'Open image in aiconvo' : 'Open current file in aiconvo', () => openPathInApp(ctx)]);
+  if (ctx.change && image) items.push(['View this change', () => viewFileChange(ctx)]);
+  items.push(['Open with system application', () => runNativePathAction(ctx, 'open')]);
+  items.push(['Show in folder', () => runNativePathAction(ctx, 'reveal')]);
+  items.push(['Copy full path', () => copyFullFilePath(ctx)]);
+  menu.innerHTML = `<div class="file-action-head">${esc(ctx.path)}</div>` +
+    items.map((item, i) => `<button type="button" role="menuitem" data-file-action="${i}">${esc(item[0])}</button>`).join('');
+  document.body.appendChild(menu);
+  const width = menu.offsetWidth, height = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(x, window.innerWidth - width - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(y, window.innerHeight - height - 8)) + 'px';
+  menu.querySelectorAll('[data-file-action]').forEach(button => button.onclick = () => {
+    const item = items[Number(button.dataset.fileAction)];
+    closeFileActionMenu();
+    item[1]();
+  });
+  menu.querySelector('button').focus();
+}
+
+// Paths occur in transcripts, notes, and project pages. This delegate covers
+// surfaces without local wiring. Conversation controls stop propagation after
+// they use the same handler.
 document.addEventListener('click', e => {
-  const b = e.target && e.target.closest ? e.target.closest('[data-transcript-path]') : null;
+  const b = e.target && e.target.closest ? e.target.closest('[data-file-diff], [data-transcript-path]') : null;
+  if (!b) { if (!e.target.closest || !e.target.closest('.file-action-menu')) closeFileActionMenu(); return; }
+  handleFileControlClick(e, b);
+});
+
+document.addEventListener('contextmenu', e => {
+  const b = e.target && e.target.closest ? e.target.closest('[data-file-diff], [data-transcript-path]') : null;
   if (!b) return;
   e.preventDefault();
-  openTranscriptPath(b.dataset.transcriptPath);
+  e.stopPropagation();
+  openFileActionMenu(fileControlContext(b), e.clientX, e.clientY);
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !document.querySelector('.file-action-menu')) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  closeFileActionMenu();
+});
+
+// Android WebView does not always emit contextmenu. A still touch opens the
+// same action menu and suppresses the synthetic click which follows it.
+let fileLongPress = null;
+document.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'touch' || !e.target.closest) return;
+  const b = e.target.closest('[data-file-diff], [data-transcript-path]');
+  if (!b) return;
+  const start = { x: e.clientX, y: e.clientY, button: b };
+  start.timer = setTimeout(() => {
+    if (fileLongPress !== start) return;
+    fileClickSuppressedUntil = Date.now() + 700;
+    openFileActionMenu(fileControlContext(b), start.x, start.y);
+    if (navigator.vibrate) navigator.vibrate(20);
+  }, 550);
+  fileLongPress = start;
+});
+document.addEventListener('pointermove', e => {
+  if (!fileLongPress) return;
+  if (Math.hypot(e.clientX - fileLongPress.x, e.clientY - fileLongPress.y) > 10) {
+    clearTimeout(fileLongPress.timer);
+    fileLongPress = null;
+  }
+});
+for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, () => {
+  if (!fileLongPress) return;
+  clearTimeout(fileLongPress.timer);
+  fileLongPress = null;
+});
+document.addEventListener('pointerover', e => {
+  const b = e.target && e.target.closest ? e.target.closest('[data-file-diff], [data-transcript-path]') : null;
+  if (!b || b.dataset.fileHinted) return;
+  const ctx = fileControlContext(b);
+  b.title = `${ctx.change ? (FILE_IMAGE_PATH.test(ctx.path) ? 'Click: preview image' : 'Click: view this change') : 'Click: open in aiconvo'}\nCtrl-click: open with system application\nRight-click: more file actions\n${ctx.path}`;
+  b.dataset.fileHinted = '1';
 });
 
 function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
@@ -11220,20 +11387,12 @@ async function renderConv(scroll) {
     try { newTa.setSelectionRange(keepCompose.start, keepCompose.end); } catch {}
   }
   if (keepCompose && newTa && keepCompose.focused) newTa.focus();
-  $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => {
-    e.stopPropagation();
-    e.preventDefault(); // a link inside a <summary> must not toggle the fold
-    rememberConversationFileReturn(b);
-    openToolCallFile(activeRel, b.dataset.fileDiff, b.dataset.fileTs, b.dataset.fileAnchor, b.dataset.fileCall);
-  });
+  $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
   $('view').querySelectorAll('[data-media-src]').forEach(b => b.onclick = e => {
     e.stopPropagation(); e.preventDefault();
     openMediaLightbox(b.dataset.mediaSrc, b.title || 'image');
   });
-  $('view').querySelectorAll('[data-transcript-path]').forEach(b => b.onclick = e => {
-    e.stopPropagation(); e.preventDefault();
-    openTranscriptPath(b.dataset.transcriptPath);
-  });
+  $('view').querySelectorAll('[data-transcript-path]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
   $('view').querySelectorAll('.toolgroup').forEach(g =>
     g.addEventListener('toggle', () => toolGroupOpen.set(activeRel + '|' + g.dataset.gkey, g.open)));
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
@@ -12319,9 +12478,9 @@ function mdRender(src, q = '') {
   // Multi-word queries mark each term (matching the AND search semantics).
   const qr = q ? termRegex(q) : null;
   const mark = h => qr ? h.replace(qr, m => `<mark>${m}</mark>`) : h;
-  // Absolute file paths in chat prose become open buttons: html lands in
-  // the browser, png in the image viewer — native apps on the laptop
-  // (openTranscriptPath). The text is already HTML-escaped here, so the
+  // Absolute file paths in chat prose become open buttons. A plain click
+  // previews in aiconvo; Ctrl-click sends the current path to the desktop.
+  // The text is already HTML-escaped here, so the
   // match is safe inside an attribute. The last char must be a word char:
   // this drops sentence punctuation glued to the path.
   const pathify = h => h.replace(/(^|[\s(*`>;])((?:~\/|\/)(?:[\w.@+-]+\/)+[\w.@+-]*[A-Za-z0-9_])/g,
@@ -14810,6 +14969,13 @@ document.addEventListener('keydown', e => {
   if (e.altKey && !e.ctrlKey && !e.metaKey && /^[1-5]$/.test(e.key) && searchMode && viewKind === 'home') {
     e.preventDefault();
     setSearchScope(SEARCH_SCOPES[Number(e.key) - 1][1]);
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && filePick >= 0 && viewKind === 'conversation') {
+    e.preventDefault();
+    const b = filePickButtons()[filePick];
+    clearFilePick();
+    if (b) runNativePathAction(fileControlContext(b), 'open');
     return;
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
