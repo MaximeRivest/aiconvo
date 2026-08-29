@@ -250,16 +250,8 @@ body.home #brand { display: none !important; }
 #newLoose { display: none; }
 body.home #newLoose { display: inline-flex; align-items: center; height: 26px; padding: 0 7px; border-color: transparent; background: transparent; color: var(--text-dim); font-size: var(--fs-meta); }
 body.home #newLoose:hover { color: var(--accent); background: var(--surface-2); }
-/* gantt layout: left (vertical) */
-body.g-v main { flex-direction: row; }
-body.g-v #view { order: 2; }
-body.g-v #left { order: 1; width: var(--list-w, 400px); height: auto; border-top: 0; border-right: 1px solid var(--border); }
-/* gantt layout: full project swimlanes */
-body.g-full #view { display: none; }
-body.g-full #left { order: 1; width: 100%; height: auto; min-height: 0; flex: 1 1 auto; border-top: 0; }
-/* gantt layout: off (chart hidden, tabs stay) */
-body.g-off #list { display: none; }
-body.g-off #left { height: auto; }
+/* Home is the timeline. Old G-key layouts (left / full / off) hid #view
+   after a conversation opened. Those body classes must never come back. */
 
 /* ---- home / away layout (design: home is the whole-system view) ----
    Home fills the work area with the timeline tray; every other view
@@ -315,7 +307,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 #tabs button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
 #selShown { height: 28px; padding: 0 8px; border: 0; border-left: 1px solid var(--border); border-radius: 0; }
 #ganttBar { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--surface-1); }
-body.g-off #ganttBar { display: none; }
 #ganttBar button { flex: 0 0 auto; height: 24px; min-width: 26px; padding: 0 6px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text-dim); font: 12px var(--font); }
 #ganttBar button:hover { color: var(--text); background: var(--surface-2); }
 #ganttBar .gsep { width: 1px; background: var(--border); }
@@ -329,17 +320,10 @@ body.g-off #ganttBar { display: none; }
 #ganttResize { height: 7px; flex: 0 0 7px; cursor: row-resize; background: var(--surface-2); border-bottom: 1px solid var(--border); position: relative; touch-action: none; }
 #ganttResize::after { content: ""; position: absolute; width: 40px; height: 2px; left: calc(50% - 20px); top: 2px; background: var(--border-strong); }
 #ganttResize:hover, #ganttResize.dragging { background: var(--surface-3); }
-body.g-v #ganttResize, body.g-full #ganttResize, body.g-off #ganttResize { display: none; }
 #scaleSeg { display: inline-flex; flex-shrink: 0; }
 #scaleSeg button { flex: 0 0 auto; height: 24px; padding: 0 7px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text-dim); font-size: 10px; }
 #scaleSeg button:hover { color: var(--text); }
 #scaleSeg button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
-#ganttSeg { display: inline-flex; flex-shrink: 0; border-left: 1px solid var(--border); }
-#ganttSeg button { flex: 0 0 28px; width: 28px; height: 28px; padding: 0; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text-dim); display: inline-flex; align-items: center; justify-content: center; }
-#ganttSeg button:last-child { border-right: 0; }
-#ganttSeg button:hover { color: var(--text); }
-#ganttSeg button.on { background: var(--accent-strong); color: var(--accent-ink); }
-#ganttSeg button svg { width: 14px; height: 14px; display: block; }
 
 #list { flex: 1; min-height: 0; overflow: auto; }
 /* Horizontal timeline: now is at the right edge. Older work extends left. */
@@ -1526,7 +1510,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   #qBtn { display: inline-flex; }
   #qwrap { display: none; }
   body.q-open #qwrap { display: flex; }
-  #selShown, #ganttSeg, #ganttBar, #ganttResize { display: none !important; }
+  #selShown, #ganttBar, #ganttResize { display: none !important; }
   #list { overscroll-behavior: contain; }
   .mobile-home section { background: var(--bg); }
   .mobile-home section + section { margin-top: 10px; border-top: 1px solid var(--border-strong); }
@@ -1769,7 +1753,7 @@ window.aiconvoSyncTheme();
   <div id="left">
     <div id="ganttResize" title="Drag to resize the timeline tray. Double-click to reset."></div>
     <div id="tabs">
-      <button data-tab="conv" class="on">conversations</button><button data-tab="notes">notes</button><button data-tab="epics">epics</button><button data-tab="repos">repos</button><button id="selShown" class="ghost" title="Select all shown conversations">select shown</button><span id="ganttSeg"><button data-g="h" title="Timeline at the bottom"></button><button data-g="v" title="Timeline on the left"></button><button data-g="full" title="Full-screen project timeline"></button><button data-g="off" title="Timeline hidden"></button></span>
+      <button data-tab="conv" class="on">conversations</button><button data-tab="notes">notes</button><button data-tab="epics">epics</button><button data-tab="repos">repos</button><button id="selShown" class="ghost" title="Select all shown conversations">select shown</button>
     </div>
     <div id="ganttBar">
       <button id="jumpStart" title="Jump to the oldest conversation (b)">«</button>
@@ -3189,8 +3173,12 @@ const MARGIN_R = 60;  // room past "now" for labels
 const LANE_W = 42;    // horizontal pixels per lane (left layout)
 const SIDE_W = 42;
 const LABEL_V = 20;
-let ganttMode = localStorage.getItem('aiconvo.gantt') || 'h'; // h (bottom) | v (left) | full | off
-if (!['h', 'v', 'full', 'off'].includes(ganttMode)) ganttMode = 'h';
+// Home is the timeline. Older builds stored left/full/off; full hid #view.
+let ganttMode = 'h';
+try {
+  const saved = localStorage.getItem('aiconvo.gantt');
+  if (saved && saved !== 'h') localStorage.setItem('aiconvo.gantt', 'h');
+} catch {}
 let ganttGroup = localStorage.getItem('aiconvo.ganttGroup') || 'project'; // project | compact
 if (!['project', 'compact'].includes(ganttGroup)) ganttGroup = 'project';
 const CLOSE_MS = 10 * 1000;
@@ -13362,24 +13350,15 @@ try {
   });
 } catch {}
 
-// ---- Gantt layout: bottom / left / full project swimlanes / off ----
+// Home is the timeline. Drop leftover left/full/off classes from older sessions.
 function applyGanttMode(persist = true) {
   document.body.classList.remove('g-v', 'g-full', 'g-off');
-  if (ganttMode !== 'h') document.body.classList.add('g-' + ganttMode);
-  if (persist) localStorage.setItem('aiconvo.gantt', ganttMode);
-  document.querySelectorAll('#ganttSeg button').forEach(b => b.classList.toggle('on', b.dataset.g === ganttMode));
+  ganttMode = 'h';
+  if (persist) {
+    try { localStorage.setItem('aiconvo.gantt', 'h'); } catch {}
+  }
   renderTabList();
 }
-const GICON = {
-  h:   '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" fill="none" stroke="currentColor"/><rect x="1.5" y="8.5" width="11" height="4" fill="currentColor"/></svg>',
-  v:   '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" fill="none" stroke="currentColor"/><rect x="1.5" y="1.5" width="4" height="11" fill="currentColor"/></svg>',
-  full:'<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" fill="none" stroke="currentColor"/><line x1="2.5" y1="4" x2="11.5" y2="4" stroke="currentColor"/><line x1="2.5" y1="7" x2="11.5" y2="7" stroke="currentColor"/><line x1="2.5" y1="10" x2="11.5" y2="10" stroke="currentColor"/></svg>',
-  off: '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" fill="none" stroke="currentColor"/><line x1="2.5" y1="11.5" x2="11.5" y2="2.5" stroke="currentColor"/></svg>',
-};
-document.querySelectorAll('#ganttSeg button').forEach(b => {
-  b.innerHTML = GICON[b.dataset.g];
-  b.onclick = () => { ganttMode = b.dataset.g; applyGanttMode(); };
-});
 // ---- Gantt zoom and navigation (design/07-gantt-ergonomics.md) ----
 function updateScaleSeg() {
   const near = nearPreset();
@@ -14659,7 +14638,6 @@ function helpNow() {
     ];
     if (tab === 'conv') listKeys.push(['space', 'toggle selection']);
     listKeys.push(
-      ['g', 'timeline layout: bottom / left / projects / off'],
       ['+ − 0', 'timeline zoom'],
       ['n / b / t', 'timeline: now / beginning / date'],
       ['C', 'new projectless conversation in your home directory'],
@@ -14898,10 +14876,6 @@ document.addEventListener('keydown', e => {
       if (!pop.hidden) $('src').focus();
       break;
     }
-    case 'g':
-      ganttMode = ganttMode === 'h' ? 'v' : ganttMode === 'v' ? 'full' : ganttMode === 'full' ? 'off' : 'h';
-      applyGanttMode();
-      break;
     case '+': case '=': zoomBy(1.4); break;
     case '-': case '_': zoomBy(1 / 1.4); break;
     case '0': zoomTo(1); break;
