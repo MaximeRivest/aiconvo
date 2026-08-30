@@ -1119,7 +1119,12 @@ async function familyEntryGraph(key) {
 // nearest visible box. File order alone would ignore an in-file branch.
 function leafBoxFor(graph, k) {
   let n = graph.lastEntryOf.get(k) || null;
-  while (n && !(n.box || n.work)) n = n.parent ? graph.byId.get(n.parent) : null;
+  const seen = new Set();
+  while (n && !(n.box || n.work)) {
+    if (seen.has(n.id)) { n = null; break; } // cyclic parent chain in bad data
+    seen.add(n.id);
+    n = n.parent ? graph.byId.get(n.parent) : null;
+  }
   return n || graph.lastBoxOf.get(k) || null;
 }
 
@@ -1132,7 +1137,12 @@ async function sessionTreeFor(key, opts = {}) {
   const childCount = new Map();
   for (const b of boxes) {
     let p = b.parent && byId.get(b.parent);
-    while (p && !(p.box || p.work)) p = p.parent && byId.get(p.parent);
+    const seen = new Set([b.id]);
+    while (p && !(p.box || p.work)) {
+      if (seen.has(p.id)) { p = null; break; } // cyclic parent chain in bad data
+      seen.add(p.id);
+      p = p.parent && byId.get(p.parent);
+    }
     b.bparent = p || null;
     if (p) childCount.set(p.id, (childCount.get(p.id) || 0) + 1);
   }
@@ -1152,7 +1162,7 @@ async function sessionTreeFor(key, opts = {}) {
   // The active branch: the path from the viewed file's resume leaf to the root.
   const active = new Set();
   const viewedLeaf = leafBoxFor(graph, key);
-  for (let g = viewedLeaf ? groupOf.get(viewedLeaf.id) : null; g;) {
+  for (let g = viewedLeaf ? groupOf.get(viewedLeaf.id) : null; g && !active.has(g);) {
     active.add(g);
     const up = g.members[0].bparent;
     g = up ? groupOf.get(up.id) : null;
@@ -1170,10 +1180,14 @@ async function sessionTreeFor(key, opts = {}) {
   const tailOf = last => {
     let tail = last, calls = 0;
     if (!childCount.get(last.id)) { // no box below: every descendant is loose tail
+      const seen = new Set([tail.id]);
       for (;;) {
         const kids = kidsOf.get(tail.id) || [];
         if (!kids.length) break;
-        tail = [...kids].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))[kids.length - 1];
+        const next = [...kids].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))[kids.length - 1];
+        if (seen.has(next.id)) break; // cyclic child chain in bad data
+        seen.add(next.id);
+        tail = next;
         calls += tail.calls || 0;
       }
     }
