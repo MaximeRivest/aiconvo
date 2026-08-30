@@ -20,6 +20,7 @@ const { openSearchIndex, SearchIndex } = require('./searchindex.js');
 const foldsLib = require('./projectfolds.js');
 const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
+const fanoutMerge = require('./fanoutmerge.js');
 const usageLib = require('./usageanalytics.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
@@ -2027,6 +2028,12 @@ async function startFanOut(key, { node, models, message, images, force, context 
 // it and becomes one branch. The fork files retire as .merged (bytes kept,
 // never indexed). Result: ONE conversation that holds every opinion as a
 // branch — no session-list, agent-menu, or tree pollution survives.
+//
+// Crash discipline (fanoutmerge.js owns the pure logic and its rationale):
+//  1. compute the WHOLE new root in memory — deterministic, cycle-checked;
+//  2. write it with tmp + atomic rename — a kill never tears a line;
+//  3. only then retire the forks. A crash between 2 and 3 re-runs the same
+//     computation and converges to the same file.
 async function reintegrateFanout(rootKey, fanoutId) {
   const entry = index[rootKey];
   if (!entry) return false;
@@ -2040,85 +2047,24 @@ async function reintegrateFanout(rootKey, fanoutId) {
   return withSessionOp(rootPath, async () => {
     stopAnyWarmSession(rootPath);
     const rootRaw = await fsp.readFile(rootPath, 'utf8');
-    const have = new Set();
-    for (const line of rootRaw.split('\n')) {
-      if (!line.trim()) continue;
-      try { const d = JSON.parse(line); if (d.id) have.add(d.id); } catch {}
-    }
-    // Each fork's new tail reads: [settings: model_change, thinking, …] →
-    // prompt → work/reply chain. The prompts are copies of ONE fan-out prompt,
-    // but their parents differ — every fork wrote its own model_change first.
-    // Restructure: one canonical prompt attached at the shared branch point;
-    // every fork's settings chain re-parents BELOW the prompt, in front of its
-    // own reply chain. One prompt box, then per-branch model switch, then reply.
-    let canonical = null; // { id, text }
-    const out = [];
+    const forkRaws = [];
     for (const [k] of forks) {
       const absF = absPathForKey(k);
       stopAnyWarmSession(absF);
-      let raw;
-      try { raw = await fsp.readFile(absF, 'utf8'); } catch { continue; }
-      const fresh = [];
-      const freshById = new Map();
-      for (const line of raw.split('\n')) {
-        if (!line.trim()) continue;
-        let d;
-        try { d = JSON.parse(line); } catch { continue; }
-        if (!d.id || d.type === 'session' || have.has(d.id) || freshById.has(d.id)) continue;
-        fresh.push(d);
-        freshById.set(d.id, d);
-      }
-      if (!fresh.length) continue;
-      const prompt = fresh.find(d => d.type === 'message' && d.message && d.message.role === 'user');
-      if (prompt) {
-        // The prompt's fresh ancestors are the fork's start-of-run settings.
-        const settings = [];
-        let cur = prompt.parentId;
-        while (cur && freshById.has(cur)) { settings.push(freshById.get(cur)); cur = freshById.get(cur).parentId; }
-        settings.reverse(); // topmost first; `cur` is now the SHARED branch point
-        const nearest = settings.length ? settings[settings.length - 1] : null;
-        // The prompt's direct children (first work/reply entry) move under the
-        // settings chain, which now hangs off the canonical prompt.
-        const promptText = textOf(prompt.message.content);
-        const keepOwnPrompt = !canonical || canonical.text !== promptText;
-        const promptId = keepOwnPrompt ? prompt.id : canonical.id;
-        for (const d of fresh) {
-          if (d !== prompt && d.parentId === prompt.id) d.parentId = nearest ? nearest.id : promptId;
-        }
-        if (settings.length) settings[0].parentId = promptId;
-        if (keepOwnPrompt) {
-          prompt.parentId = cur || null; // attach at the shared branch point
-          if (!canonical) canonical = { id: prompt.id, text: promptText };
-        } else {
-          const at = fresh.indexOf(prompt);
-          fresh.splice(at, 1);
-        }
-      }
-      for (const d of fresh) {
-        have.add(d.id);
-        out.push(JSON.stringify(d));
-      }
+      try { forkRaws.push(await fsp.readFile(absF, 'utf8')); } catch {}
     }
-    if (out.length) {
-      const nl = !rootRaw || rootRaw.endsWith('\n') ? '' : '\n';
-      await fsp.appendFile(rootPath, nl + out.join('\n') + '\n');
+    // Pure and deterministic; throws before anything is written when the
+    // result would carry a parent cycle.
+    const merged = fanoutMerge.computeFanoutMerge(rootRaw, forkRaws);
+    if (merged.healed) console.error('fan-out merge healed', merged.healed, 'torn line(s) in', rootKey);
+    if (merged.changed) {
+      const tmp = rootPath + '.tmp-' + process.pid;
+      await fsp.writeFile(tmp, merged.content);
+      await fsp.rename(tmp, rootPath);
     }
-    // A "both" assistant keeps every opinion in context. Continue from it
-    // to send with all replies present, without synthesizing them.
-    let bothId = null;
-    if (canonical) {
-      const folded = await sessionTreeFor(rootKey, { withTexts: true });
-      const quoted = answerBranchesUnder(folded, canonical.id)
-        .map(a => ({ model: a.model || 'model', text: a.fullText || '' }))
-        .filter(a => a.text.trim());
-      if (quoted.length >= 2) {
-        const both = makeBothEntry(canonical.id, quoted);
-        bothId = both.id;
-        await fsp.appendFile(rootPath, JSON.stringify(both) + '\n');
-      }
-    }
-    // Retire the scaffolding. Bytes stay on disk as .merged for recovery;
-    // the scanner and watcher only see .jsonl files.
+    const bothId = merged.bothId;
+    // Root is durable — NOW retire the scaffolding. Bytes stay on disk as
+    // .merged for recovery; the scanner and watcher only see .jsonl files.
     for (const [k] of forks) {
       const absF = absPathForKey(k);
       try { await fsp.rename(absF, absF + '.merged'); } catch {}
@@ -2179,20 +2125,8 @@ function bridgeKindOf(text) {
 function isFanoutBridgeText(text) {
   return !!(isMergeBridgeText(text) || isBothBridgeText(text));
 }
-function makeBothEntry(parentId, answers) {
-  const body = answers.map(a => `=== ${a.model || 'model'} ===\n${String(a.text || '').trim()}`).join('\n\n')
-    + '\n\n<!-- aiconvo:both -->';
-  return {
-    type: 'message',
-    id: crypto.randomBytes(4).toString('hex'),
-    parentId,
-    timestamp: new Date().toISOString(),
-    message: {
-      role: 'assistant',
-      content: [{ type: 'text', text: body }],
-    },
-  };
-}
+// The "both" entry writer lives in fanoutmerge.js with the rest of the
+// reintegration logic.
 
 // One assistant answer per direct branch. The pure fan-out classifier owns
 // bridge scope, so a merge above this node cannot hide a later fan-out.
@@ -2259,7 +2193,7 @@ async function ensureBothBridge(key, node) {
     if (existing) return { id: existing.id, existed: true };
     const answers = answerBranchesUnder(tree, node);
     if (answers.length < 2) throw new Error('need two replies to keep both in context');
-    const both = makeBothEntry(node, answers.map(a => ({ model: a.model, text: a.fullText })));
+    const both = fanoutMerge.makeBothEntry(node, answers.map(a => ({ model: a.model, text: a.fullText })));
     stopAnyWarmSession(sessionPath);
     const raw = await fsp.readFile(sessionPath, 'utf8');
     const nl = !raw || raw.endsWith('\n') ? '' : '\n';
