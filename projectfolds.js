@@ -32,10 +32,12 @@ function isLooseCwd(cwd) {
 
 // The one place the raw name comes from. The segment after /Projects/ wins;
 // other real folders use their last segment. General folders stay loose.
+// Case-insensitive, the same rule as isLooseCwd: ~/projects and ~/Projects
+// are one convention, not two.
 function rawProjectOf(cwd) {
   if (isLooseCwd(cwd)) return LOOSE_PROJECT;
   const c = String(cwd).replace(/\\/g, '/').replace(/\/$/, '');
-  const m = c.match(/\/Projects\/([^/]+)/);
+  const m = c.match(/\/Projects\/([^/]+)/i);
   if (m) return m[1];
   const parts = c.split('/').filter(Boolean);
   return parts[parts.length - 1] || LOOSE_PROJECT;

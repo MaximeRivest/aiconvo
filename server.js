@@ -2579,11 +2579,21 @@ async function foldProjects(from, into) {
   if (from === LOOSE_PROJECT || into === LOOSE_PROJECT) throw new Error('loose conversations are a collection, not a project');
   foldsLib.foldAlias(foldStore, from, into);
   saveFoldStore();
-  // Fast fold, no history: the folded project's memory dir dies here and the
-  // next memory build absorbs the merged conversation set.
-  try { fs.rmSync(projectMemoryPaths(from).dir, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(projectMemoryPaths(from).inputs, { force: true }); } catch {}
+  // The folded project's memory dir may hold human-written, vouched intent
+  // (and area docs). Never delete it: archive it under .folded/, out of the
+  // active name space. The docs are regenerable, the human words are not.
+  const fromDir = projectMemoryPaths(from).dir;
+  if (fs.existsSync(fromDir)) {
+    try {
+      const graveyard = path.join(PROJECT_MEMORY_DIR, '.folded');
+      fs.mkdirSync(graveyard, { recursive: true });
+      fs.renameSync(fromDir, path.join(graveyard, projectMemorySlug(from) + '-' + Date.now()));
+    } catch { try { fs.rmSync(fromDir, { recursive: true, force: true }); } catch {} }
+  }
+  try { fs.rmSync(projectMemoryPaths(from).inputs, { force: true }); } catch {} // derived cache only
   applyProjectFoldChange();
+  // The target's memory (when built) absorbs the merged conversation set soon.
+  scheduleDocsRegen(into, 60 * 1000);
   return projectFoldsResponse();
 }
 

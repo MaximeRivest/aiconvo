@@ -3286,7 +3286,7 @@ function projectOf(s) {
   if (s && s.project) return s.project;
   const cwd = String((s && s.cwd) || '').replace(/\\/g, '/').replace(/\/$/, '');
   if (looseCwd(cwd)) return LOOSE_PROJECT;
-  const inProjects = cwd.match(/\/Projects\/([^/]+)/);
+  const inProjects = cwd.match(/\/Projects\/([^/]+)/i);
   const name = inProjects ? inProjects[1]
     : (cwd.split('/').filter(Boolean).pop() || LOOSE_PROJECT);
   // Folds collapse worktrees and merged projects into one canonical name.
@@ -3298,7 +3298,7 @@ function projectOf(s) {
 // share the same areas as the main checkout.
 function projectRelOf(cwd) {
   const c = String(cwd || '').replace(/\\/g, '/').replace(/\/+$/, '');
-  const m = c.match(/^.*\/Projects\/[^/]+(?:\/(.*))?$/);
+  const m = c.match(/^.*?\/Projects\/[^/]+(?:\/(.*))?$/i);
   return m ? (m[1] || '') : '';
 }
 function areaOfSession(s) {
@@ -9273,8 +9273,15 @@ function convHead(d) {
   // d distill, T tree).
   const title = d.title || '(untitled)';
   const project = projectOf(d);
-  $('chProject').textContent = shortDir(d.cwd);
-  $('chProject').title = project === LOOSE_PROJECT ? 'Open loose conversations' : 'Open the project overview · ' + project;
+  // An explicit assignment can differ from what the cwd says. Show the
+  // split: new messages still run tools in the true cwd.
+  const cwdProject = projectOf({ cwd: d.cwd });
+  const assignedAway = project !== LOOSE_PROJECT && project !== cwdProject;
+  $('chProject').textContent = shortDir(d.cwd) + (assignedAway ? ' ⇢ ' + project : '');
+  $('chProject').title = project === LOOSE_PROJECT ? 'Open loose conversations'
+    : assignedAway
+      ? `Open the project overview · ${project}\nAssigned to “${project}” — tools still run in ${d.cwd || 'the original directory'}`
+      : 'Open the project overview · ' + project;
   $('chNew').style.display = project === LOOSE_PROJECT ? 'none' : '';
   $('chTitle').textContent = title;
   $('chTitle').title = chTitleHint(title);

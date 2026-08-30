@@ -17,6 +17,12 @@ test('rawProjectOf: /Projects/ segment wins, else last part', () => {
   assert.strictEqual(rawProjectOf(null), LOOSE_PROJECT);
 });
 
+test('rawProjectOf: /projects/ matches case-insensitively, like isLooseCwd', () => {
+  assert.strictEqual(rawProjectOf('/home/u/projects/foo/sub'), 'foo');
+  assert.strictEqual(rawProjectOf('/home/u/PROJECTS/foo'), 'foo');
+  assert.strictEqual(isLooseCwd('/home/u/projects'), true);
+});
+
 test('isLooseCwd: general launch and temporary folders stay out of projects', () => {
   assert.strictEqual(isLooseCwd('/home/u'), true);
   assert.strictEqual(isLooseCwd('/home/u/Projects'), true);

@@ -27,12 +27,13 @@ function normalizeAreaRel(rel) {
 }
 
 // The project root a cwd sits under: the path up to and including the
-// /Projects/<name> segment. Outside ~/Projects the cwd names itself, so the
-// cwd IS the root and no rel path exists.
+// FIRST /Projects/<name> segment (case-insensitive, the same rule as
+// rawProjectOf). Outside ~/Projects the cwd names itself, so the cwd IS the
+// root and no rel path exists.
 function projectRootOfCwd(cwd) {
   if (foldsLib.isLooseCwd(cwd)) return null;
   const c = String(cwd || '').replace(/\\/g, '/').replace(/\/+$/, '');
-  const m = c.match(/^(.*\/Projects\/[^/]+)(?:\/|$)/);
+  const m = c.match(/^(.*?\/Projects\/[^/]+)(?:\/|$)/i);
   return m ? m[1] : c;
 }
 

@@ -24,6 +24,9 @@ test('projectRootOfCwd: /Projects/<name> wins; other dirs are their own root', (
   assert.strictEqual(projectRootOfCwd('/home/u/work/thing'), '/home/u/work/thing');
   assert.strictEqual(projectRootOfCwd('/home/u'), null); // loose
   assert.strictEqual(projectRootOfCwd('/tmp/x'), null); // loose
+  // Case-insensitive and first-match, the same rule as rawProjectOf.
+  assert.strictEqual(projectRootOfCwd('/home/u/projects/foo/sub'), '/home/u/projects/foo');
+  assert.strictEqual(projectRootOfCwd('/home/u/Projects/foo/Projects/bar'), '/home/u/Projects/foo');
 });
 
 test('relOfCwd: rel path under the root, empty at the root', () => {
