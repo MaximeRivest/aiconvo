@@ -556,6 +556,14 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pepicstrip a { color: var(--text-dim); text-decoration: none; }
 .pepicstrip a:hover { color: var(--accent); }
 .pepicstrip .pes-n { color: var(--text-faint); font-size: var(--fs-micro); margin-left: 4px; }
+.pareas h3 .dim { font-weight: normal; font-size: var(--fs-meta); }
+.pareacards { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-2); }
+.pareacard { border: 1px solid var(--border); padding: var(--sp-2) var(--sp-3); cursor: pointer; min-width: 220px; max-width: 340px; }
+.pareacard:hover, .pareacard:focus-visible { border-color: var(--accent); outline: none; }
+.pareacard .pa-name { font-weight: 600; }
+.pareacard .pa-meta { font-size: var(--fs-meta); margin: 2px 0 var(--sp-2); overflow-wrap: anywhere; }
+.pareacard .pa-start { height: auto; min-height: 0; padding: 2px 8px; font-size: var(--fs-micro); }
+.cc-meta .cc-area { font: inherit; max-width: 260px; }
 .pdocbody > :first-child { margin-top: 0; }
 .pdocbody h1, .pdocbody h2 { font-size: calc(var(--fs-body) * 1.15); font-weight: 700; margin: var(--sp-4) 0 8px; scroll-margin-top: var(--sp-2); }
 .pdocbody h3, .pdocbody h4 { font-size: var(--fs-body); margin: var(--sp-3) 0 6px; }
@@ -2035,6 +2043,8 @@ function dispatchHash(h) {
   if (h.startsWith('epic=')) return showEpic(h.slice(5));
   if (h.startsWith('project=')) {
     const project = h.slice(8);
+    const areaAt = project.indexOf('&area=');
+    if (areaAt >= 0) return showAreaView(project.slice(0, areaAt), project.slice(areaAt + 6));
     if (project.endsWith('&files')) return showProjectFileHistory(project.slice(0, -6));
     if (project.endsWith('&diffs')) return showProjectDiffs(project.slice(0, -6));
     if (project.endsWith('&tree')) return showProjectTree(project.slice(0, -5));
@@ -2058,6 +2068,7 @@ let routeSegs = [];
 
 const crumbHome = () => ({ label: '❯ home', title: 'The whole-system timeline', go: () => goHome() });
 const crumbProject = name => ({ label: name, title: name === LOOSE_PROJECT ? 'Conversations without a project' : 'Project overview · ' + name, go: () => showProjectOverview(name) });
+const crumbArea = (project, rel) => ({ label: rel, title: 'Area · ' + project + '/' + rel, go: () => showAreaView(project, rel) });
 
 function crumbConversation(key) {
   const s = sessions.find(x => x.key === key);
@@ -2069,7 +2080,11 @@ function crumbConversation(key) {
 function convCrumbs(key, ...tail) {
   const s = sessions.find(x => x.key === key);
   const segs = [crumbHome()];
-  if (s) segs.push(crumbProject(projectOf(s)));
+  if (s) {
+    segs.push(crumbProject(projectOf(s)));
+    const areaRel = areaOfSession(s);
+    if (areaRel) segs.push(crumbArea(projectOf(s), areaRel));
+  }
   segs.push(crumbConversation(key));
   return segs.concat(tail);
 }
@@ -3276,6 +3291,26 @@ function projectOf(s) {
     : (cwd.split('/').filter(Boolean).pop() || LOOSE_PROJECT);
   // Folds collapse worktrees and merged projects into one canonical name.
   return projectFolds.map[name] || name;
+}
+
+// ---- areas: declared inner scopes of a project ----
+// Membership is rel-path based (mirror of the server), so worktree checkouts
+// share the same areas as the main checkout.
+function projectRelOf(cwd) {
+  const c = String(cwd || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  const m = c.match(/^.*\/Projects\/[^/]+(?:\/(.*))?$/);
+  return m ? (m[1] || '') : '';
+}
+function areaOfSession(s) {
+  const declared = (projectFolds.areas || {})[projectOf(s)];
+  if (!declared) return null;
+  const rel = projectRelOf(s && s.cwd);
+  let best = null;
+  for (const a of Object.keys(declared)) {
+    if (rel !== a && !rel.startsWith(a + '/')) continue;
+    if (!best || a.length > best.length) best = a;
+  }
+  return best;
 }
 
 // POST one fold-family change, absorb the fresh fold map, reload the list.
@@ -7629,14 +7664,23 @@ async function startReviewedConversation(project, opts = {}) {
   if (!project || project === '?') return errToast('no project to start in');
   document.querySelectorAll('.ctx-confirm').forEach(el => el.remove());
   const include = { map: true, epics: opts.epicId ? [opts.epicId] : [], notes: false, evidenceKeys: [], epicMemory: opts.epicId || null };
+  // The "where" of the start: project root, a declared area (identity +
+  // scope — area memory briefs first), or a plain subfolder (scope only).
+  const areaRels = Object.keys((projectFolds.areas || {})[project] || {});
+  let where = opts.area || '';
+  let subRel = '';
+  const fetchBundle = () => postJson('/api/project/context', { project, name: '', include, area: where || undefined });
   let bundle = null;
-  try { bundle = await postJson('/api/project/context', { project, name: '', include }); } catch {}
+  try { bundle = await fetchBundle(); } catch {}
   if (!bundle || bundle.error) return errToast('could not build context: ' + ((bundle && bundle.error) || 'network error'));
   const ov = document.createElement('div');
   ov.className = 'ctx-confirm';
+  const whereHtml = (areaRels.length || where)
+    ? `where <select class="cc-area" title="Working folder for the new conversation"><option value="">project root</option>${areaRels.map(r => `<option value="${esc(r)}"${r === where ? ' selected' : ''}>area · ${esc(r)}</option>`).join('')}<option value="__sub">subfolder (scope only)…</option></select> · `
+    : '';
   ov.innerHTML = `<div class="cc-card">
     <div class="cc-head"><b>review the context before it goes</b><span class="dim cc-size"></span></div>
-    <div class="cc-meta dim">project map${opts.epicId ? ' + epic memory' : ''} · injected into the system prompt · project default model</div>
+    <div class="cc-meta dim">${whereHtml}project map${opts.epicId ? ' + epic memory' : ''} · injected into the system prompt · project default model</div>
     <textarea class="cc-text" spellcheck="false"></textarea>
     <div class="hint">Edit freely — what you see is what the model gets.</div>
     <div class="cc-foot">
@@ -7653,13 +7697,27 @@ async function startReviewedConversation(project, opts = {}) {
   };
   sizeLine();
   ta.oninput = sizeLine;
+  const areaSel = ov.querySelector('.cc-area');
+  if (areaSel) areaSel.onchange = async () => {
+    if (areaSel.value === '__sub') {
+      const rel = (window.prompt('Subfolder, relative to the project root (scope only — no area memory):', subRel) || '').trim().replace(/^\/+|\/+$/g, '');
+      if (!rel) { areaSel.value = where; return; }
+      subRel = rel; where = '';
+      areaSel.options[areaSel.options.length - 1].textContent = 'subfolder · ' + subRel;
+    } else {
+      where = areaSel.value; subRel = '';
+    }
+    const b = await fetchBundle().catch(() => null);
+    if (b && !b.error) { ta.value = b.text; sizeLine(); }
+  };
   ov.querySelector('.cc-cancel').onclick = () => ov.remove();
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
   ov.querySelector('.cc-go').onclick = async () => {
     ov.remove();
-    toast('starting conversation · ' + project);
+    toast('starting conversation · ' + project + (where ? '/' + where : subRel ? '/' + subRel : ''));
     const out = await postJson('/api/project/start', {
       project, agent: 'pi', name: '', surface: 'rpc', mode: null, models: [],
+      area: where || undefined, cwd: subRel || undefined,
       context: ta.value, include, silent: true,
     });
     if (out.error) return errToast(out.error);
@@ -7691,6 +7749,12 @@ function renderProjectPanel(d) {
         : '<p class="psummary dim">No project vision yet. Build the memory leaves once — after that, the documents stay current automatically.</p>'}
       ${d.epics.length ? `<div class="pepicstrip"><span class="pes-label">epics</span>${d.epics.map(e => `<a href="#" data-p-epic-open="${esc(e.id)}" title="Open the epic · ${e.sessionIds.length} conversations · updated ${fmtDate(e.updatedAt)}">▸ ${esc(e.title)}<span class="pes-n">${e.sessionIds.length}</span></a>`).join('')}</div>` : ''}
     </section>
+    ${(d.areas || []).length ? `<section class="psection pareas"><h3>areas <span class="dim">declared inner scopes — own memory, own briefing</span></h3><div class="pareacards">${d.areas.map(a => `
+      <div class="pareacard" data-area-open="${esc(a.rel)}" tabindex="0" title="Open the area · ${a.conversations} conversations">
+        <div class="pa-name">▸ ${esc(a.title || a.rel)}</div>
+        <div class="pa-meta dim">${esc(a.rel)} · ${a.conversations} conversation${a.conversations === 1 ? '' : 's'}${a.lastTs ? ' · ' + fmtDate(a.lastTs) : ''}${a.memory ? (a.memory.stale ? ' · memory ⚠' : ' · memory ✓') : ''}</div>
+        <button type="button" class="ghost pa-start" data-area-start="${esc(a.rel)}" title="Start a conversation in this area — area memory briefs first">+ start here</button>
+      </div>`).join('')}</div></section>` : ''}
     ${projectSwitchHtml('documents')}
     <section class="psection" id="pDocsSection">
       <h3>documents <button id="pDocNew" class="ghost pfoldbtn" title="Create a markdown document in ${esc(d.project)}/documents/">+ new document</button></h3>
@@ -7705,7 +7769,7 @@ function renderProjectPanel(d) {
         ${memory ? `memory ${fmtDate(memory.builtAt)} · ${pyramid.docs && pyramid.docs.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}
         ${pyramid.backfillRunning ? '<span><span class="spin">░</span> extracting leaves…</span>' : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : ''}
         ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : ''}
-        <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
+        <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
       </div>
       ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
       ${(d.foldSuggestions || []).map((x, i) => `<div class="pfold-suggest">same project as <b>${esc(x.other)}</b>? <span class="dim">${esc(x.reason)}</span><button data-p-fold-accept="${i}" title="Fold ${esc(x.from)} into ${esc(x.into)}">⇄ fold</button><button class="ghost" data-p-fold-dismiss="${i}" title="Not the same project · stop suggesting this pair">✕</button></div>`).join('')}
@@ -7765,6 +7829,15 @@ function renderProjectPanel(d) {
     pDocsRegen.outerHTML = '<span><span class="spin">░</span> regenerating docs…</span>';
   };
   $('pNew').onclick = () => startReviewedConversation(d.project);
+  $('pAreaNew').onclick = () => openNewAreaForm(d.project);
+  $('view').querySelectorAll('[data-area-open]').forEach(c => {
+    c.onclick = e => { if (!e.target.closest('[data-area-start]')) showAreaView(d.project, c.dataset.areaOpen); };
+    c.onkeydown = e => { if (e.key === 'Enter') showAreaView(d.project, c.dataset.areaOpen); };
+  });
+  $('view').querySelectorAll('[data-area-start]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    startReviewedConversation(d.project, { area: b.dataset.areaStart });
+  });
 }
 
 function realProjectNames() {
@@ -7871,6 +7944,154 @@ async function showProjectOverview(name) {
   }
   projectOverview = d;
   return renderProjectPanel(d);
+}
+
+// ---- area view: the project panel shape, scoped to one declared area ----
+async function showAreaView(project, rel) {
+  if (!project || !rel) return;
+  markSettingsClosed();
+  lastNavProject = project;
+  projectOverviewName = null;
+  setRoute('project', 'project=' + encodeURIComponent(project) + '&area=' + encodeURIComponent(rel),
+    [crumbHome(), crumbProject(project), { label: rel, title: 'Area · ' + project + '/' + rel }]);
+  $('view').innerHTML = `<div class="project-overview"><div class="ptitle"><h1>${esc(project)} / ${esc(rel)}</h1></div><div class="pmeta">loading area…</div></div>`;
+  const d = await (await fetch('/api/area?project=' + encodeURIComponent(project) + '&rel=' + encodeURIComponent(rel))).json();
+  if (d.error) {
+    $('view').innerHTML = `<div class="empty">could not open the area.<div class="hint">${esc(d.error)}</div></div>`;
+    return;
+  }
+  renderAreaPanel(d);
+}
+
+function renderAreaPanel(d) {
+  const color = projectColor(d.project);
+  const inArea = s => {
+    if (projectOf(s) !== d.project) return false;
+    const r = projectRelOf(s.cwd);
+    return r === d.rel || r.startsWith(d.rel + '/');
+  };
+  const heroRows = sessions.filter(inArea)
+    .map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
+  const memory = d.memory;
+  const o = (memory && memory.overview) || {};
+  const vision = memory && (memory.coreIntent || o.vision || o.summary);
+  $('view').innerHTML = `<div class="project-overview">
+    ${miniGanttHtml(heroRows)}
+    <div class="ptitle"><h1><a href="#" id="aUp" title="Back to the project">${esc(d.project)}</a> / ${esc(d.title || d.rel)}</h1><button id="aNew" class="primary pnewbtn" title="Start a conversation in ${esc(d.rel)} — area memory briefs first, then project memory">+ new in ${esc(d.rel)}</button></div>
+    <section class="psection pdesc">
+      <div class="pmeta dim">${esc(d.cwd || '')} · ${d.conversations} conversation${d.conversations === 1 ? '' : 's'}${d.latestTs ? ' · last ' + fmtDate(d.latestTs) : ''} · area of ${esc(d.project)}</div>
+      ${memory
+        ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(vision || '(no area vision yet)')}</p>`
+        : '<p class="psummary dim">No area memory yet. Area documents regenerate from the same conversation leaves as the project — scoped to this folder.</p>'}
+    </section>
+    <section class="psection">
+      <h3>conversations</h3>
+      <div class="loose-list">${(d.recent || []).map(s => `<div class="loose-row" data-area-row="${esc(s.key)}" tabindex="0">
+        <div class="loose-main"><div class="loose-title">${s.active ? '● ' : ''}${esc(s.title || '(untitled)')}</div>
+        <div class="loose-meta">${esc(s.cwd || '')} · ${esc(s.source || '')} · ${fmtDate(s.lastTs || s.firstTs)}</div></div>
+      </div>`).join('') || '<div class="empty">no conversations in this area yet.</div>'}</div>
+    </section>
+    <div class="pdoclayout"><nav id="pToc" class="ptoc" hidden></nav><div class="pdocmain">
+    <div id="pDocBody">${memory ? '<div class="dim">reading the area documents…</div>' : ''}</div>
+    <footer class="pfoot"><div class="pmemline dim">
+      ${memory ? `memory ${fmtDate(memory.builtAt)} · ${memory.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}
+      ${d.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : `<button id="aDocsRegen" class="ghost">${memory ? 'regenerate' : 'build'} area docs</button>`}
+      <button id="aRemove" class="ghost pfoldbtn" title="Remove the area declaration. The folder and its conversations stay; they fall back to the project.">un-declare</button>
+    </div></footer>
+    </div></div>
+  </div>`;
+  wireMiniGantt($('view'), heroRows, color, 'a:' + d.project + '/' + d.rel);
+  $('aUp').onclick = e => { e.preventDefault(); showProjectOverview(d.project); };
+  $('aNew').onclick = () => startReviewedConversation(d.project, { area: d.rel });
+  $('view').querySelectorAll('[data-area-row]').forEach(row => {
+    row.onclick = () => open(row.dataset.areaRow);
+    row.onkeydown = e => { if (e.key === 'Enter') open(row.dataset.areaRow); };
+  });
+  const aDocsRegen = $('aDocsRegen');
+  if (aDocsRegen) aDocsRegen.onclick = async () => {
+    const out = await postJson('/api/project/memory/regenerate', { project: d.project, area: d.rel });
+    if (out.error) return errToast('regeneration failed to start: ' + out.error);
+    updateJob(out);
+    toggleJobs(true);
+    aDocsRegen.outerHTML = '<span><span class="spin">░</span> regenerating docs…</span>';
+  };
+  $('aRemove').onclick = async () => {
+    if (!confirm(`Un-declare the area “${d.rel}”? The folder and its conversations stay; they fall back to “${d.project}”.`)) return;
+    const out = await postJson('/api/area/remove', { project: d.project, rel: d.rel });
+    if (out.error) return errToast(out.error);
+    toast('✓ area un-declared · folder kept');
+    await load();
+    showProjectOverview(d.project);
+  };
+  if (memory) renderAreaDocs(d);
+}
+
+async function renderAreaDocs(d) {
+  const texts = await Promise.all(P_DOC_KINDS.map(async ([kind]) => {
+    try {
+      const data = await (await fetch('/api/project/memory/file?name=' + encodeURIComponent(d.project) + '&kind=' + encodeURIComponent(kind) + '&area=' + encodeURIComponent(d.rel))).json();
+      return data.error ? '' : cleanProjectDoc(data.text);
+    } catch { return ''; }
+  }));
+  const chapters = [];
+  P_DOC_KINDS.forEach(([kind, label], i) => {
+    if (texts[i]) chapters.push({ id: 'pdoc-' + kind, label, md: texts[i] });
+  });
+  const body = $('pDocBody'), toc = $('pToc');
+  if (!body || !toc) return;
+  if (!chapters.length) { toc.hidden = true; body.innerHTML = ''; return; }
+  renderDocChapters('area:' + d.project + '/' + d.rel, chapters);
+}
+
+// ---- new area (the project birth ritual, one level down) ----
+function openNewAreaForm(project) {
+  document.querySelectorAll('.ctx-confirm').forEach(el => el.remove());
+  const ov = document.createElement('div');
+  ov.className = 'ctx-confirm';
+  ov.innerHTML = `<div class="cc-card np-card">
+    <div class="cc-head"><b>new area in ${esc(project)}</b><span class="dim">a subfolder becomes an inner scope</span></div>
+    <div class="mf-body np-body">
+      <label><span class="np-cap">folder — relative to the project root; created if missing, adopted if it exists</span>
+        <input class="na-rel" type="text" placeholder="experiments/vector-search" autocomplete="off"></label>
+      <label><span class="np-cap">title — optional display name</span>
+        <input class="na-title" type="text" autocomplete="off"></label>
+      <label><span class="np-cap">intent — why does this area exist? (becomes the vouched area intent.md)</span>
+        <textarea class="na-intent" rows="3" placeholder="Optional — area briefings read it first."></textarea></label>
+      <label><span class="np-cap">first prompt — starts the first conversation in the area</span>
+        <textarea class="na-first" rows="3" placeholder="Optional."></textarea></label>
+    </div>
+    <div class="cc-foot">
+      <span class="mf-err na-err"></span>
+      <button type="button" class="ghost na-cancel">cancel</button>
+      <button type="button" class="primary na-go">declare area</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  const q = sel => ov.querySelector(sel);
+  q('.na-first').oninput = () => { q('.na-go').textContent = q('.na-first').value.trim() ? 'declare + start' : 'declare area'; };
+  q('.na-cancel').onclick = () => ov.remove();
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  q('.na-go').onclick = async () => {
+    const rel = q('.na-rel').value.trim();
+    if (!rel) { q('.na-err').textContent = 'give the area a folder path.'; return; }
+    q('.na-go').disabled = true;
+    q('.na-err').textContent = 'declaring…';
+    const out = await postJson('/api/area/create', {
+      project, rel, title: q('.na-title').value.trim(),
+      intent: q('.na-intent').value.trim(), firstPrompt: q('.na-first').value.trim(),
+    }).catch(e => ({ error: e.message }));
+    if (!out || out.error) {
+      q('.na-go').disabled = false;
+      q('.na-err').textContent = (out && out.error) || 'network error';
+      return;
+    }
+    ov.remove();
+    toast('✓ area declared · ' + out.project + '/' + out.rel + (out.adopted ? ' (existing folder adopted)' : '') + (out.started ? ' · first conversation started' : ''));
+    await load();
+    if (out.started && out.started.key) await open(out.started.key, 'bottom');
+    else showAreaView(out.project, out.rel);
+  };
+  q('.na-rel').focus();
 }
 
 // ---- the shared document body (project page and epic page) ----
@@ -9315,23 +9536,25 @@ async function startSiblingConversation() {
     if (c && c.provider && c.model) models = [{ provider: c.provider, modelId: c.model }];
   }
   const thinking = thinkLevels.get(prevKey) || null;
+  // A sibling stays in place: it inherits the current conversation's area.
+  const areaRel = areaOfSession(current);
   // The press answers instantly: leave the transcript and show the launch
   // progress full-screen, staged as it truly happens.
   setRouteKind('launch', [crumbHome(), crumbProject(project), { label: 'new conversation' }]);
   $('view').innerHTML = `<div class="dprog" style="margin-top:70px;text-align:center">
-    <div style="font-size:15px"><span class="spin">░</span> new conversation · <b>${esc(project)}</b></div>
+    <div style="font-size:15px"><span class="spin">░</span> new conversation · <b>${esc(project)}${areaRel ? '/' + esc(areaRel) : ''}</b></div>
     <div class="hint" id="launchStatus" style="margin-top:10px">composing the project map…</div>
     <div class="hint" style="color:var(--text-faint);margin-top:6px">${esc(models.length ? models[0].modelId : 'project default model')}${thinking && thinking !== 'off' ? ' · thinking ' + esc(thinking) : ''} · map in the system prompt</div>
   </div>`;
   const stage = t => { const el = $('launchStatus'); if (el) el.textContent = t; };
   try {
     const include = { map: true, epics: [], notes: false, evidenceKeys: [] };
-    const bundle = await postJson('/api/project/context', { project, name: '', include });
+    const bundle = await postJson('/api/project/context', { project, name: '', include, area: areaRel || undefined });
     if (bundle.error) throw new Error(bundle.error);
     stage('starting the session…');
     const out = await postJson('/api/project/start', {
       project, agent: 'pi', name: '', surface: 'rpc', mode: null,
-      models, context: bundle.text, include, silent: true,
+      models, area: areaRel || undefined, context: bundle.text, include, silent: true,
     });
     if (out.error) throw new Error(out.error);
     if (!out.key) throw new Error('no conversation came back');

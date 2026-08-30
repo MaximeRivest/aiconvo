@@ -18,6 +18,7 @@ const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const settingsLib = require('./settings.js');
 const { openSearchIndex, SearchIndex } = require('./searchindex.js');
 const foldsLib = require('./projectfolds.js');
+const areasLib = require('./areas.js');
 const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
 const fanoutMerge = require('./fanoutmerge.js');
@@ -2625,6 +2626,59 @@ function createdProjectsList() {
   }));
 }
 
+// ---- areas (declared inner scopes) ----
+// An area is the inverse of a fold: it splits one project into declared
+// inner places. The registry is user data under the notes tree. Membership
+// is a pure function of cwd + registry, so declaring an area over an
+// existing folder adopts its past conversations retroactively, and removing
+// an area only removes the scope — folders and conversations stay.
+const PROJECT_AREAS_FILE = path.join(NOTES_DIR, 'projects', 'areas.json');
+let areaStore = {}; // project name (as declared) -> { rel: { createdAt, title? } }
+try { areaStore = JSON.parse(fs.readFileSync(PROJECT_AREAS_FILE, 'utf8')); } catch { areaStore = {}; }
+if (!areaStore || typeof areaStore !== 'object' || Array.isArray(areaStore)) areaStore = {};
+function saveAreaStore() {
+  fs.mkdirSync(path.dirname(PROJECT_AREAS_FILE), { recursive: true });
+  fs.writeFileSync(PROJECT_AREAS_FILE, JSON.stringify(areaStore, null, 2) + '\n');
+}
+// Declared areas of a canonical project. Registry keys canonicalize, so
+// areas survive project folds. Matching is rel-path based, so worktree
+// checkouts share the same areas as the main checkout.
+function declaredAreasFor(project) {
+  const out = {};
+  for (const [name, areas] of Object.entries(areaStore)) {
+    if (name !== project && canonicalProjectName(name) !== project) continue;
+    for (const [rel, rec] of Object.entries(areas || {})) out[rel] = rec || {};
+  }
+  return out;
+}
+function areaOfCwdIn(project, cwd, declaredRels = Object.keys(declaredAreasFor(project))) {
+  if (!declaredRels.length || !cwd) return null;
+  return areasLib.deepestAreaOf(areasLib.relOfCwd(cwd), declaredRels);
+}
+function areaMemoryPaths(project, rel) {
+  const dir = path.join(PROJECT_MEMORY_DIR, projectMemorySlug(project), 'areas', areasLib.areaSlug(rel));
+  return {
+    dir,
+    manifest: path.join(dir, 'manifest.json'),
+    overview: path.join(dir, 'overview.md'),
+    intent: path.join(dir, 'intent.md'),
+    environment: path.join(dir, 'environment.md'),
+    status: path.join(dir, 'status.md'),
+    inputs: path.join(PROJECT_MEMORY_INPUTS_DIR, projectMemorySlug(project) + '-area-' + areasLib.areaSlug(rel) + '-pyramid.json'),
+  };
+}
+// The area's slice of the project: entries whose cwd sits under the area
+// folder (inclusive), plus the resolved area folder itself.
+function areaMetaFor(project, rel) {
+  const meta = projectMetaFor(project);
+  if (!meta) return null;
+  const declared = declaredAreasFor(project);
+  if (!(rel in declared)) return null;
+  const entries = meta.entries.filter(({ entry }) =>
+    entry.cwd && areasLib.relInArea(areasLib.relOfCwd(entry.cwd), rel));
+  return { project, rel, record: declared[rel], entries, cwd: meta.cwd ? path.join(meta.cwd, rel) : null, meta };
+}
+
 // ---- project display titles (auto + manual + AI retitle) ----
 // The big human-facing headline on the project panel. It is durable human/AI
 // intent, so it lives in ~/notes next to the created-project registry.
@@ -2724,8 +2778,22 @@ async function projectFoldsResponse() {
     map: foldsLib.flattenMap(rawProjectNames(), foldStore.aliases, autoFolds),
     aliases: foldStore.aliases, auto: autoFolds, dismissed: foldStore.dismissed || [],
     created: createdProjectsList(),
+    areas: clientAreasMap(),
     suggestions: await projectFoldSuggestions(),
   };
+}
+
+// Canonical project -> declared area rels, for the client's area labels
+// and grouping. Small: only declared areas appear.
+function clientAreasMap() {
+  const out = {};
+  for (const name of Object.keys(areaStore)) {
+    const project = canonicalProjectName(name);
+    for (const [rel, rec] of Object.entries(areaStore[name] || {})) {
+      (out[project] = out[project] || {})[rel] = { title: (rec && rec.title) || null };
+    }
+  }
+  return out;
 }
 
 // Raw names that fold into this canonical project, with the fold kind.
@@ -4085,6 +4153,20 @@ async function regenerateProjectDocs(project, emit = () => {}) {
   }, emit);
 }
 
+// An area is one more aggregation scope over the same leaves: same core,
+// scoped entries, own document directory. No new extraction happens.
+async function regenerateAreaDocs(project, rel, emit = () => {}) {
+  const am = areaMetaFor(project, rel);
+  if (!am) throw new Error('area not found');
+  if (!am.entries.length) throw new Error('this area has no conversations yet');
+  const paths = areaMemoryPaths(project, rel);
+  return regenerateDocsCore({
+    label: `${project}/${rel}`, entries: am.entries, paths,
+    existingEpics: [], discoverCandidates: false,
+    inputsPath: paths.inputs,
+  }, emit);
+}
+
 async function regenerateEpicDocs(epicId, emit = () => {}) {
   const epic = epics[epicId];
   if (!epic) throw new Error('epic not found');
@@ -4235,6 +4317,13 @@ async function projectMemoryDocument(project, kind) {
   const file = ({ overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status })[kind];
   if (!file) throw new Error('unknown project memory document');
   return { project, kind, path: file, text: await fsp.readFile(file, 'utf8') };
+}
+
+async function areaMemoryDocument(project, rel, kind) {
+  const paths = areaMemoryPaths(project, rel);
+  const file = ({ overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status })[kind];
+  if (!file) throw new Error('unknown area memory document');
+  return { project, area: rel, kind, path: file, text: await fsp.readFile(file, 'utf8') };
 }
 
 // Cheap catalog for the @ palette: every known project plus which of the
@@ -4667,6 +4756,12 @@ function startMemoryDocsJob(project) {
     emit => regenerateProjectDocs(project, emit));
 }
 
+function startAreaDocsJob(project, rel) {
+  if (!areaMetaFor(project, rel)) throw new Error('area not found');
+  return startDocsJobCore('area:' + project + '\0' + rel, `${project}/${rel}: regenerate area memory`, project, null,
+    emit => regenerateAreaDocs(project, rel, emit));
+}
+
 function startEpicDocsJob(epicId) {
   const epic = epics[epicId];
   if (!epic) throw new Error('epic not found');
@@ -4805,6 +4900,18 @@ function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
       () => { try { startMemoryDocsJob(project); } catch {} },
       () => {});
   }, delayMs));
+  // Declared areas with built memory refresh on the same debounce. Area docs
+  // are pure functions of the same leaves, only over a narrower entry set.
+  for (const rel of Object.keys(declaredAreasFor(project))) {
+    const mapKey = 'area:' + project + '\0' + rel;
+    clearTimeout(docsRegenTimers.get(mapKey));
+    docsRegenTimers.set(mapKey, setTimeout(() => {
+      docsRegenTimers.delete(mapKey);
+      fsp.access(areaMemoryPaths(project, rel).manifest).then(
+        () => { try { startAreaDocsJob(project, rel); } catch {} },
+        () => {});
+    }, delayMs));
+  }
 }
 
 // Epics are recursive projects: an epic whose manifest exists keeps itself
@@ -7964,11 +8071,11 @@ function projectMetaFor(project) {
     return { project, cwd: rec.cwd || null, entries: [], epics: [], latestMs: rec.createdAt || 0, created: true };
   }
   // Prefer a cwd whose own raw name IS the canonical project (the main
-  // worktree), so folded worktree paths do not become the project root.
+  // worktree), and among those the project ROOT itself — a conversation run
+  // in a subfolder must never make that subfolder the project root.
+  const rootScore = c => (foldsLib.rawProjectOf(c) === project ? 2 : 0) + (areasLib.relOfCwd(c) === '' ? 1 : 0);
   const cwds = [...new Set(entries.map(({ entry }) => entry.cwd).filter(Boolean))]
-    .sort((a, b) =>
-      (foldsLib.rawProjectOf(b) === project) - (foldsLib.rawProjectOf(a) === project)
-      || b.length - a.length);
+    .sort((a, b) => rootScore(b) - rootScore(a) || a.length - b.length);
   const registered = createdRecordFor(project);
   const cwd = (registered && registered.cwd) || cwds[0] || null;
   const epicsForProject = Object.values(epics)
@@ -7992,6 +8099,8 @@ async function projectResponse(project) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
   const { cwd, entries, epics: projectEpics, latestMs } = meta;
+  const declaredAreas = declaredAreasFor(project);
+  const declaredRels = Object.keys(declaredAreas);
   const now = Date.now();
   let notes = 0, freshNotes = 0, evidenceCards = 0, freshEvidence = 0;
   const recent = [];
@@ -8049,16 +8158,34 @@ async function projectResponse(project) {
       recent.push({
         key, title: entry.timelineTitle || entry.title || key, source: entry.source || 'claude',
         cwd: entry.cwd || null, lastTs: entry.lastTs || null, active: !!(entry.mtimeMs && now - entry.mtimeMs < 5 * 60 * 1000),
+        area: areaOfCwdIn(project, entry.cwd, declaredRels),
         notePath: entry.notePath || null, note: noteState, evidence: evidenceState, leaf: leafMarks[si],
       });
     }
   }
+  // Areas: one card per declared inner scope, with its own conversation
+  // count, last activity, and memory freshness.
+  const areas = [];
+  for (const [rel, rec] of Object.entries(declaredAreas)) {
+    const scoped = entries.filter(({ entry }) => entry.cwd && areasLib.relInArea(areasLib.relOfCwd(entry.cwd), rel));
+    const last = scoped.reduce((max, { entry }) => Math.max(max, Date.parse(entry.lastTs || '') || 0), 0);
+    let areaMemory = null;
+    try {
+      const m = JSON.parse(await fsp.readFile(areaMemoryPaths(project, rel).manifest, 'utf8'));
+      areaMemory = { builtAt: m.builtAt, stale: m.sourceHash !== projectSourceHash({ entries: scoped }) };
+    } catch {}
+    areas.push({
+      rel, title: rec.title || null, createdAt: rec.createdAt || 0,
+      conversations: scoped.length, lastTs: last ? new Date(last).toISOString() : null, memory: areaMemory,
+    });
+  }
+  areas.sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || '')) || a.rel.localeCompare(b.rel));
   const memory = await projectMemoryInfo(project, meta);
   const backfill = memoryBackfillJobs.get(project);
   const docsJob = memoryDocsJobs.get(project);
   const explicitDefault = projectDefaultModel(project);
   return {
-    project, cwd, conversations: entries.length, notes, epics: projectEpics, memory,
+    project, cwd, conversations: entries.length, notes, epics: projectEpics, memory, areas,
     title: (projectTitles[project] && projectTitles[project].title) || null,
     created: !!meta.created,
     defaultModel: explicitDefault,
@@ -8137,6 +8264,107 @@ function unregisterProject(name) {
   return { ok: true, removed }; // the folder stays; disk is truth
 }
 
+// "Create area" mirrors the project birth ritual, one level down: a folder
+// inside the project root, an optional vouched intent seed, and an optional
+// first prompt that starts the first conversation in that folder.
+async function createArea(body) {
+  const project = canonicalProjectName(String(body.project || '').trim());
+  if (!project || project === '?' || project === LOOSE_PROJECT) throw new Error('areas need a real project');
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  if (!meta.cwd || !fs.existsSync(meta.cwd)) throw new Error('the project folder is missing: ' + (meta.cwd || '(unknown)'));
+  const rel = areasLib.normalizeAreaRel(body.rel || body.name || '');
+  if (!rel) throw new Error('area path: a relative folder — letters, digits, ". _ -", spaces, and "/" only');
+  if (rel in declaredAreasFor(project)) throw new Error(`area "${rel}" already exists`);
+  const cwd = path.join(meta.cwd, rel);
+  const adopted = fs.existsSync(cwd);
+  await fsp.mkdir(cwd, { recursive: true });
+  const title = String(body.title || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!areaStore[project]) areaStore[project] = {};
+  areaStore[project][rel] = { createdAt: Date.now(), ...(title ? { title } : {}) };
+  saveAreaStore();
+  // Human-written intent seeds the area's intent.md before turn one. Human
+  // origin means vouched: no [unverified] label, ever.
+  const intent = String(body.intent || '').trim();
+  let intentPath = null;
+  if (intent) {
+    const paths = areaMemoryPaths(project, rel);
+    await fsp.mkdir(paths.dir, { recursive: true });
+    const text = `# ${project}/${rel} \u2014 intent\n\nWritten by the user at area creation (${new Date().toISOString().slice(0, 10)}).\n\n${intent}\n`;
+    await fsp.writeFile(paths.intent, text);
+    await vouchApply({ path: paths.intent, text, source: 'area-create', note: 'human-written intent at area creation' });
+    intentPath = paths.intent;
+  }
+  let started = null;
+  const firstPrompt = String(body.firstPrompt || '').trim();
+  if (firstPrompt) {
+    started = await startProjectConversation({
+      project, area: rel, agent: body.agent === 'claude' ? 'claude' : 'pi',
+      mode: body.mode || null, models: Array.isArray(body.models) ? body.models : [],
+      surface: body.surface || 'rpc',
+      include: { map: false }, // no area memory exists yet; nothing to brief
+      context: `# Project: ${project} \u2014 area: ${rel}\n\n- Area folder: ${cwd}\n- Born today \u2014 a declared inner scope of the project.` +
+        (intent ? `\n\n## Area intent (human-written at creation, vouched)\n\n${intent}` : ''),
+      kickoffText: firstPrompt, name: '',
+    });
+  }
+  // Reuse the folds channel: the client refetches /api/project-folds (which
+  // carries the area map) and repaints without navigating.
+  broadcast({ type: 'project-folds' });
+  return { ok: true, project, rel, cwd, adopted, intentPath, started };
+}
+
+function removeArea(rawProject, rawRel) {
+  const project = canonicalProjectName(String(rawProject || '').trim());
+  const rel = areasLib.normalizeAreaRel(rawRel || '');
+  let removed = false;
+  for (const [name, areas] of Object.entries(areaStore)) {
+    if (name !== project && canonicalProjectName(name) !== project) continue;
+    if (areas && rel in areas) {
+      delete areas[rel];
+      if (!Object.keys(areas).length) delete areaStore[name];
+      removed = true;
+    }
+  }
+  if (removed) { saveAreaStore(); broadcast({ type: 'project-folds' }); }
+  return { ok: true, removed }; // folder and conversations stay; only the scope goes
+}
+
+// The area view payload: the project view shape, scoped to one area.
+async function areaResponse(rawProject, rawRel) {
+  const project = canonicalProjectName(String(rawProject || '').trim());
+  const rel = areasLib.normalizeAreaRel(rawRel || '');
+  const am = areaMetaFor(project, rel);
+  if (!am) throw new Error('area not found');
+  const now = Date.now();
+  const sorted = [...am.entries].sort((a, b) => Date.parse(b.entry.lastTs || '') - Date.parse(a.entry.lastTs || ''));
+  const recent = sorted.slice(0, 40).map(({ key, entry }) => ({
+    key, title: entry.timelineTitle || entry.title || key, source: entry.source || 'claude',
+    cwd: entry.cwd || null, firstTs: entry.firstTs || null, lastTs: entry.lastTs || null,
+    mtimeMs: entry.mtimeMs || 0, active: !!(entry.mtimeMs && now - entry.mtimeMs < 5 * 60 * 1000),
+    notePath: entry.notePath || null,
+  }));
+  const paths = areaMemoryPaths(project, rel);
+  let memory = null;
+  try {
+    const m = JSON.parse(await fsp.readFile(paths.manifest, 'utf8'));
+    memory = {
+      builtAt: m.builtAt, stale: m.sourceHash !== projectSourceHash({ entries: am.entries }),
+      overview: m.overview || {}, coreIntent: m.coreIntent || null, paths: m.paths || {},
+    };
+  } catch {}
+  const docs = {};
+  for (const kind of MEMORY_DOC_KINDS) docs[kind] = fs.existsSync(paths[kind]);
+  const latest = am.entries.reduce((max, { entry }) => Math.max(max, Date.parse(entry.lastTs || '') || 0), 0);
+  const docsJob = memoryDocsJobs.get('area:' + project + '\0' + rel);
+  return {
+    project, rel, title: am.record.title || null, cwd: am.cwd,
+    conversations: am.entries.length, recent, memory, docs,
+    latestTs: latest ? new Date(latest).toISOString() : null,
+    docsRunning: !!(docsJob && !docsJob.finished),
+  };
+}
+
 // The "memory to include" selection becomes a briefing FILE, not an inline
 // prompt: aiconvo's provenance pattern. The briefing maps the project's work
 // memory (notes, epics, evidence) to real file paths; the agent reads what it
@@ -8157,6 +8385,24 @@ async function buildProjectBriefing(project, include, focusName) {
   if (focusName) lines.push(`- Focus for this new conversation: ${focusName}`);
   lines.push('');
   lines.push("This file maps the project's AI work memory. Every path below is a readable file on this machine. Read what you need; do not guess file content.");
+
+  // Narrow before wide: when the conversation starts inside a declared area,
+  // its own memory documents come first.
+  const briefAreaRel = typeof include.area === 'string' && include.area ? include.area : null;
+  if (briefAreaRel) {
+    const ap = areaMemoryPaths(project, briefAreaRel);
+    lines.push('', `## Area memory: ${briefAreaRel} (this conversation's inner scope — read these first)`);
+    if (fs.existsSync(ap.manifest)) {
+      lines.push(`- Area overview: ${ap.overview}`);
+      lines.push(`- Area intent: ${ap.intent}`);
+      lines.push(`- Area environment: ${ap.environment}`);
+      lines.push(`- Area todo and current work: ${ap.status}`);
+    } else if (fs.existsSync(ap.intent)) {
+      lines.push(`- Area intent: ${ap.intent}`);
+    } else {
+      lines.push('- No area memory documents yet.');
+    }
+  }
 
   lines.push('', '## Recent conversations');
   for (const r of info.recent) {
@@ -8304,11 +8550,28 @@ async function buildProjectContextBundle(project, include, focusName) {
   parts.push(`- Generated: ${new Date().toISOString()}`);
   parts.push(`- Project root: ${info.cwd || '(unknown)'}`);
   parts.push(`- On record: ${info.conversations} conversations · ${info.notes} distilled notes (${info.freshness.freshNotes} fresh) · ${info.epics.length} epics`);
+  if (typeof include.area === 'string' && include.area) parts.push(`- Working area (inner scope): ${include.area} — the conversation runs inside this subfolder`);
   if (focusName) parts.push(`- Focus for this new conversation: ${focusName}`);
   parts.push('');
   parts.push('Injected by aiconvo at conversation start. This is AI-generated work memory — a map, not verified truth. Items labeled [unverified] were never human-reviewed.');
 
   let docCount = 0;
+  // Narrow before wide: area memory (when the start targets a declared area)
+  // rides in front of the project memory.
+  const ctxAreaRel = typeof include.area === 'string' && include.area ? include.area : null;
+  if (ctxAreaRel && include.map !== false) {
+    const blocks = [];
+    for (const kind of MEMORY_DOC_KINDS) {
+      try {
+        const doc = await areaMemoryDocument(project, ctxAreaRel, kind);
+        blocks.push(`### area ${kind} · ${doc.path} ${trustLabel(doc.path)}\n\n${doc.text.trim()}`);
+        docCount++;
+      } catch {}
+    }
+    if (blocks.length) {
+      parts.push('', `## Area memory: ${ctxAreaRel} (this conversation's inner scope — narrowest first)`, '', blocks.join('\n\n---\n\n'));
+    }
+  }
   if (include.map !== false) {
     const docs = [];
     for (const kind of ['overview', 'intent', 'environment', 'status']) {
@@ -8550,7 +8813,31 @@ async function startProjectConversation(options) {
   const project = projectless ? LOOSE_PROJECT : options.project;
   const meta = projectless ? { cwd: os.homedir() } : projectMetaFor(project);
   if (!meta) throw new Error('project not found');
-  const cwd = projectless ? os.homedir() : (meta.cwd && fs.existsSync(meta.cwd) ? meta.cwd : os.homedir());
+  // The "where" of a project start. Never fall back to home in silence: a
+  // conversation rooted at home would index as Loose, not as the project.
+  let cwd = os.homedir();
+  let areaRel = null;
+  if (!projectless) {
+    if (!meta.cwd || !fs.existsSync(meta.cwd)) {
+      throw new Error(`the project folder is missing: ${meta.cwd || '(unknown)'} — re-create or adopt it first`);
+    }
+    cwd = meta.cwd;
+    // options.area: a declared area — identity + scope (memory, briefing order).
+    // options.cwd: a plain subfolder — scope only, no identity.
+    if (options.area) {
+      areaRel = areasLib.normalizeAreaRel(options.area);
+      if (!areaRel) throw new Error('bad area path');
+      if (!(areaRel in declaredAreasFor(project))) throw new Error('unknown area: ' + areaRel);
+      cwd = path.join(meta.cwd, areaRel);
+      await fsp.mkdir(cwd, { recursive: true }); // the folder is the scope; restore it if it vanished
+    } else if (options.cwd) {
+      const subRel = areasLib.normalizeAreaRel(options.cwd);
+      if (!subRel) throw new Error('bad subfolder path — give a relative path inside the project');
+      cwd = path.join(meta.cwd, subRel);
+      if (!fs.existsSync(cwd)) throw new Error('subfolder not found: ' + subRel);
+      areaRel = areaOfCwdIn(project, cwd); // an undeclared subfolder may still sit inside a declared area
+    }
+  }
   const kind = options.agent === 'claude' ? 'claude' : 'pi';
   const label = String(options.name || (projectless ? 'Loose conversation' : 'Project: ' + project)).slice(0, 80);
   const name = 'aiconvo-' + (projectless ? 'loose-' : 'project-') + crypto.createHash('sha256').update(project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
@@ -8563,7 +8850,8 @@ async function startProjectConversation(options) {
     ? requestedModels
     : inheritedModel ? [{ provider: inheritedModel.provider, modelId: inheritedModel.modelId }] : [];
   const leadModel = kind === 'pi' ? (launchModels[0] || null) : null;
-  const include = options.include || {};
+  const include = { ...(options.include || {}) };
+  if (areaRel) include.area = areaRel; // briefing and context go narrow-first
   // Inline-context path (pi only): the user composed and approved the bundle
   // in the UI. It rides in the system prompt via --append-system-prompt, so
   // the agent spends zero fetch turns. Claude has no equivalent through our
@@ -8685,7 +8973,7 @@ async function startProjectConversation(options) {
     if (key && launchModels.length) saveConversationModels(key, launchModels);
     return {
       name, kind, cwd, title: name, key, surface: 'rpc',
-      project, projectless, include, briefing, kickoff: wantBriefing || !!contextFile,
+      project, projectless, area: areaRel, include, briefing, kickoff: wantBriefing || !!contextFile,
       contextFile, mode, models: launchModels,
     };
   }
@@ -8699,7 +8987,7 @@ async function startProjectConversation(options) {
   }
   return {
     name, kind, cwd, title: name, key, surface: 'alacritty',
-    project, projectless, include, briefing, kickoff: wantBriefing || !!contextFile,
+    project, projectless, area: areaRel, include, briefing, kickoff: wantBriefing || !!contextFile,
     contextFile, mode, models: launchModels,
   };
 }
@@ -9695,8 +9983,12 @@ const server = http.createServer(async (req, res) => {
       if (!memory) return json(res, 404, { error: 'no project memory yet' });
       json(res, 200, memory);
     } else if (u.pathname === '/api/project/memory/file' && req.method === 'GET') {
-      try { json(res, 200, await projectMemoryDocument(u.searchParams.get('name') || '', u.searchParams.get('kind') || '')); }
-      catch (e) { json(res, 404, { error: e.message }); }
+      try {
+        const area = u.searchParams.get('area');
+        json(res, 200, area
+          ? await areaMemoryDocument(u.searchParams.get('name') || '', area, u.searchParams.get('kind') || '')
+          : await projectMemoryDocument(u.searchParams.get('name') || '', u.searchParams.get('kind') || ''));
+      } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/epic/memory/file' && req.method === 'GET') {
       try { json(res, 200, await epicMemoryDocument(u.searchParams.get('id') || '', u.searchParams.get('kind') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
@@ -9715,8 +10007,11 @@ const server = http.createServer(async (req, res) => {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
-      try { json(res, 202, jobView(startMemoryDocsJob(parsed.project || ''))); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try {
+        json(res, 202, jobView(parsed.area
+          ? startAreaDocsJob(parsed.project || '', areasLib.normalizeAreaRel(parsed.area))
+          : startMemoryDocsJob(parsed.project || '')));
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/memory/backfill' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -9794,6 +10089,21 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       try { json(res, 200, await createProject(JSON.parse(body || '{}'))); }
       catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/area' && req.method === 'GET') {
+      try { json(res, 200, await areaResponse(u.searchParams.get('project') || '', u.searchParams.get('rel') || '')); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/area/create' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await createArea(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/area/remove' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, removeArea(p.project, p.rel));
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/unregister' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -9805,8 +10115,11 @@ const server = http.createServer(async (req, res) => {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
-      try { json(res, 200, await buildProjectContextBundle(parsed.project, parsed.include || {}, parsed.name || '')); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try {
+        const include = { ...(parsed.include || {}) };
+        if (parsed.area) include.area = areasLib.normalizeAreaRel(parsed.area);
+        json(res, 200, await buildProjectContextBundle(parsed.project, include, parsed.name || ''));
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/modes' && req.method === 'GET') {
       json(res, 200, { modes: listPromptModes() });
     } else if (u.pathname === '/api/modes' && (req.method === 'PUT' || req.method === 'POST')) {
