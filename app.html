@@ -569,6 +569,58 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pfoldbtn { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); margin-left: 6px; }
 .settings-view { max-width: var(--read-max); margin: 0 auto; }
 .settings-view .hint { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
+.set-usage-open { width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-4); border: 2px solid var(--accent); font-weight: 700; }
+
+/* Usage dashboard. Cost always means a catalog estimate, not an invoice. */
+.usage-view { max-width: 1240px; margin: 0 auto; }
+.usage-head { display: flex; align-items: flex-end; gap: var(--sp-3); flex-wrap: wrap; border-bottom: 2px solid var(--border-strong); padding-bottom: var(--sp-3); }
+.usage-head h1 { margin: 0; font-size: var(--fs-title); }
+.usage-head .pmeta { margin-right: auto; }
+.usage-filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: end; }
+.usage-filters label { display: grid; gap: 2px; color: var(--text-dim); font-size: var(--fs-micro); }
+.usage-filters select { min-width: 110px; max-width: 210px; }
+.usage-progress { margin: var(--sp-3) 0; border: 1px solid var(--border-strong); padding: 8px 10px; font-size: var(--fs-meta); }
+.usage-progress b { color: var(--accent); }
+.usage-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin: var(--sp-3) 0 var(--sp-4); }
+.usage-card { border: 1px solid var(--border-strong); padding: 10px; min-width: 0; }
+.usage-card .k { display: block; color: var(--text-dim); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: .04em; }
+.usage-card .v { display: block; margin-top: 4px; font-size: 22px; font-weight: 700; overflow-wrap: anywhere; }
+.usage-card .sub { display: block; color: var(--text-faint); font-size: var(--fs-micro); margin-top: 3px; }
+.usage-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr); gap: var(--sp-4); align-items: start; }
+.usage-panel { border-top: 2px solid var(--border-strong); padding-top: 8px; margin-bottom: var(--sp-4); min-width: 0; }
+.usage-panel h2 { margin: 0 0 8px; font-size: var(--fs-label); }
+.usage-legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--text-dim); font-size: var(--fs-micro); margin-bottom: 8px; }
+.usage-key { display: inline-flex; align-items: center; gap: 4px; }
+.usage-swatch { width: 18px; height: 8px; display: inline-block; border: 1px solid var(--border-strong); }
+.usage-swatch.api, .usage-seg.api { background: var(--accent); }
+.usage-swatch.subscription, .usage-seg.subscription { background: var(--surface-3); border: 2px dashed var(--accent); }
+.usage-swatch.other, .usage-seg.other { background: var(--surface-2); border: 1px dotted var(--text-dim); }
+.usage-days { display: grid; gap: 4px; }
+.usage-day { display: grid; grid-template-columns: 82px minmax(80px, 1fr) 76px; gap: 7px; align-items: center; font-size: var(--fs-micro); }
+.usage-track { height: 13px; display: flex; background: var(--surface-1); border: 1px solid var(--border); }
+.usage-seg { min-width: 0; height: 100%; box-sizing: border-box; }
+.usage-day-value { text-align: right; white-space: nowrap; }
+.usage-table-wrap { overflow-x: auto; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
+.usage-table th { text-align: right; color: var(--text-dim); font-size: var(--fs-micro); border-bottom: 1px solid var(--border-strong); padding: 5px 6px; white-space: nowrap; }
+.usage-table th:first-child, .usage-table td:first-child { text-align: left; }
+.usage-table td { text-align: right; border-bottom: 1px solid var(--border); padding: 6px; white-space: nowrap; }
+.usage-table td:first-child { white-space: normal; overflow-wrap: anywhere; }
+.usage-quality { margin: 0; padding-left: 18px; color: var(--text-dim); font-size: var(--fs-meta); }
+.usage-quality li { margin: 4px 0; }
+.usage-rules summary { cursor: pointer; font-weight: 700; }
+.usage-rule { display: grid; grid-template-columns: minmax(120px, 1fr) 140px 110px; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: var(--fs-meta); }
+.usage-rule input { width: 100%; box-sizing: border-box; }
+.usage-note { color: var(--text-dim); font-size: var(--fs-meta); line-height: 1.45; }
+@media (max-width: 760px) {
+  .usage-grid { grid-template-columns: 1fr; }
+  .usage-head { align-items: stretch; }
+  .usage-filters { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .usage-filters select { width: 100%; max-width: none; }
+  .usage-day { grid-template-columns: 66px minmax(70px, 1fr) 66px; }
+  .usage-rule { grid-template-columns: 1fr 120px; }
+  .usage-rule .usage-fee { grid-column: 1 / -1; }
+}
 .settings-tools { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: 0 0 var(--sp-2); }
 .settings-tools input[type=search] { flex: 1; min-width: 220px; }
 .settings-tools label { color: var(--text); font-size: var(--fs-meta); white-space: nowrap; }
@@ -1958,6 +2010,7 @@ function goHome() {
 function dispatchHash(h) {
   if (!h) return goHome();
   if (h === 'settings') { goHome(); return showSettings(); }
+  if (h === 'usage') return showUsageDashboard();
   if (h.startsWith('q=')) {
     // A search is a home state: restore the query and rerun it.
     if (window.fileInk && fileInk.teardown) fileInk.teardown();
@@ -9216,11 +9269,10 @@ function paintCtxMeter(el, c) {
   }
   if (c.traceCost > 0) {
     const extra = c.familyCost - c.traceCost;
-    parts.push(money(c.traceCost) + (extra > 0.0005 ? ` (+${money(extra)} branches)` : ''));
+    parts.push('est. ' + money(c.traceCost) + (extra > 0.0005 ? ` (+${money(extra)} branches)` : ''));
   } else if (c.usedTokens > 0) {
-    // A zero price table (for example the claude-code extension) does not
-    // mean the tokens were free — the subscription pays for them.
-    parts.push('subscription');
+    // Zero can mean local, subscription, free, or missing pricing.
+    parts.push('cost unknown');
   }
   const warn = c.usedTokens > 0 && c.pctLeft != null && c.pctLeft < 15;
   el.className = 'ctxmeter' + (warn ? ' warn' : '');
@@ -9229,7 +9281,7 @@ function paintCtxMeter(el, c) {
     + (c.usedTokens ? `${c.usedTokens.toLocaleString()} of ${c.ctxTokens.toLocaleString()} tokens used · ${left.toLocaleString()} left`
                     : `no reply counted yet · window ${c.ctxTokens.toLocaleString()} tokens`)
     + (c.estimate ? ' (estimate: the counters come from ' + (c.usedModel || 'no reply') + ')' : '')
-    + ` · cost on this path ${money(c.traceCost)} · all branches ${money(c.familyCost)}`;
+    + ` · Pi catalog estimate on this path ${money(c.traceCost)} · all branches ${money(c.familyCost)}`;
   el.hidden = false;
 }
 
@@ -13916,6 +13968,169 @@ async function buildEvidence(ids = [...selected], force = false) {
 }
 $('buildEvidence').onclick = () => buildEvidence();
 
+// ---- usage and cost dashboard ----
+let usageDashboardState = null;
+let usagePollTimer = null;
+const usageMoney = value => '$' + (Number(value || 0) >= 100 ? Number(value).toFixed(0)
+  : Number(value || 0) >= 1 ? Number(value).toFixed(2) : Number(value || 0).toFixed(4));
+const usageNum = value => Number(value || 0).toLocaleString();
+
+function usageOption(value, label, selected) {
+  return `<option value="${esc(value)}"${value === selected ? ' selected' : ''}>${esc(label)}</option>`;
+}
+
+function usageBreakdownTable(rows, key, label) {
+  const body = (rows || []).slice(0, 30).map(row => `<tr>
+    <td>${esc(row[key])}</td><td>${usageNum(row.calls)}</td><td>${fmtTokens(row.input)}</td>
+    <td>${fmtTokens(row.cacheRead)}</td><td>${fmtTokens(row.cacheWrite)}</td><td>${fmtTokens(row.output)}</td>
+    <td>${usageMoney(row.apiCost)}</td><td>${usageMoney(row.subscriptionValue)}</td><td>${usageMoney(row.equivalentCost)}</td>
+  </tr>`).join('');
+  return `<div class="usage-table-wrap"><table class="usage-table"><thead><tr><th>${esc(label)}</th><th>calls</th><th>input</th><th>cache read</th><th>cache write</th><th>output</th><th>API est.</th><th>subscription value</th><th>total value</th></tr></thead><tbody>${body || '<tr><td colspan="9">no matching calls</td></tr>'}</tbody></table></div>`;
+}
+
+function usageDailyChart(rows) {
+  const max = Math.max(0.000001, ...(rows || []).map(row => row.equivalentCost || 0));
+  const visible = (rows || []).slice(-62);
+  return `<div class="usage-legend">
+    <span class="usage-key"><i class="usage-swatch api"></i> API estimate</span>
+    <span class="usage-key"><i class="usage-swatch subscription"></i> subscription API value</span>
+    <span class="usage-key"><i class="usage-swatch other"></i> free, local, or unknown</span>
+  </div><div class="usage-days">${visible.map(row => {
+    const other = row.freeValue + row.localValue + row.unknownValue;
+    return `<div class="usage-day" title="${esc(row.day)} · ${usageNum(row.tokens)} tokens · ${usageNum(row.calls)} calls">
+      <span>${esc(row.day.slice(5))}</span><span class="usage-track">
+        <i class="usage-seg api" style="width:${100 * row.apiCost / max}%"></i>
+        <i class="usage-seg subscription" style="width:${100 * row.subscriptionValue / max}%"></i>
+        <i class="usage-seg other" style="width:${100 * other / max}%"></i>
+      </span><span class="usage-day-value">${usageMoney(row.equivalentCost)}</span>
+    </div>`;
+  }).join('') || '<div class="empty">no usage in this period</div>'}</div>`;
+}
+
+async function saveUsageBilling(provider, mode, fee) {
+  const current = usageDashboardState && usageDashboardState.billingConfig || { providerModes: {}, monthlyFees: {} };
+  const next = {
+    providerModes: { ...(current.providerModes || {}) },
+    monthlyFees: { ...(current.monthlyFees || {}) },
+  };
+  if (mode !== undefined) {
+    if (mode === 'auto') delete next.providerModes[provider];
+    else next.providerModes[provider] = mode;
+  }
+  if (fee !== undefined) {
+    const value = Number(fee);
+    if (Number.isFinite(value) && value > 0) next.monthlyFees[provider] = value;
+    else delete next.monthlyFees[provider];
+  }
+  const response = await postJsonMethod('/api/usage/billing', 'PUT', next);
+  if (response.error) return errToast(response.error);
+  if (settingsState && settingsState.settings) settingsState.settings.usageBilling = response.usageBilling;
+  await loadUsageDashboard();
+}
+
+function renderUsageDashboard(data) {
+  usageDashboardState = data;
+  if (viewKind !== 'usage') return;
+  if (data.error) {
+    $('view').innerHTML = `<div class="empty">could not build usage analytics.<div class="hint">${esc(data.error)}</div></div>`;
+    return;
+  }
+  const s = data.summary || {};
+  const facets = data.facets || {};
+  const filters = data.filters || {};
+  const status = data.status || {};
+  const billingConfig = data.billingConfig || { providerModes: {}, monthlyFees: {} };
+  const period = String(data.range && data.range.days || 30);
+  const progress = status.running ? `<div class="usage-progress"><b>building the usage index</b> · ${usageNum(status.done)}/${usageNum(status.total)} changed transcripts · ${usageNum(status.indexedEvents)} unique calls indexed${status.errors ? ` · ${usageNum(status.errors)} errors` : ''}. Recent conversations load first.</div>` : '';
+  const selectors = [
+    ['usageProject', 'project', facets.projects || [], filters.project || ''],
+    ['usageProvider', 'provider', facets.providers || [], filters.provider || ''],
+    ['usageModel', 'model', facets.models || [], filters.model || ''],
+    ['usageBilling', 'billing', facets.billing || [], filters.billing || ''],
+  ];
+  const providerRules = (data.providers || []).map(row => {
+    const mode = billingConfig.providerModes[row.provider] || 'auto';
+    const fee = billingConfig.monthlyFees[row.provider] || '';
+    return `<div class="usage-rule" data-usage-provider="${esc(row.provider)}"><b>${esc(row.provider)}</b>
+      <select class="usage-mode" title="How this provider bills you">
+        ${usageOption('auto', 'auto-detect', mode)}${usageOption('api', 'API billed', mode)}${usageOption('subscription', 'subscription', mode)}${usageOption('free', 'free', mode)}${usageOption('local', 'local', mode)}${usageOption('unknown', 'unknown', mode)}
+      </select><label class="usage-fee"><input class="usage-fee-input" type="number" min="0" step="0.01" value="${esc(fee)}" placeholder="monthly fee"> </label>
+    </div>`;
+  }).join('');
+  const q = data.quality || {};
+  const sourceNotes = (data.catalogSources || []).map(source => `${source.source}: ${source.updatedAt ? new Date(source.updatedAt).toLocaleDateString() : 'unknown date'}`).join(' · ');
+  $('view').innerHTML = `<div class="usage-view">
+    <div class="usage-head"><div><h1>usage and cost</h1><div class="pmeta">tokens, API-route estimates, and subscription API-equivalent value</div></div>
+      <div class="usage-filters">
+        <label>period<select id="usageDays">${[['7','7 days'],['30','30 days'],['90','90 days'],['365','1 year'],['all','all time']].map(([v,l]) => usageOption(v,l,period)).join('')}</select></label>
+        ${selectors.map(([id,label,values,selected]) => `<label>${label}<select id="${id}">${usageOption('', 'all', selected)}${values.map(v => usageOption(v,v,selected)).join('')}</select></label>`).join('')}
+      </div>
+    </div>${progress}
+    <div class="usage-cards">
+      <div class="usage-card"><span class="k">total tokens</span><span class="v">${fmtTokens(s.tokens)}</span><span class="sub">${usageNum(s.calls)} model calls</span></div>
+      <div class="usage-card"><span class="k">API-route estimate</span><span class="v">${usageMoney(s.apiCost)}</span><span class="sub">catalog estimate, not invoice data</span></div>
+      <div class="usage-card"><span class="k">subscription API value</span><span class="v">${usageMoney(s.subscriptionValue)}</span><span class="sub">retail equivalent, not money charged</span></div>
+      <div class="usage-card"><span class="k">subscription fees</span><span class="v">${usageMoney(s.subscriptionFees)}</span><span class="sub">configured monthly fees, prorated</span></div>
+      <div class="usage-card"><span class="k">all API-equivalent value</span><span class="v">${usageMoney(s.equivalentCost)}</span><span class="sub">${usageNum(s.unpricedCalls)} calls have no safe price</span></div>
+    </div>
+    <div class="usage-grid"><div>
+      <section class="usage-panel"><h2>daily API-equivalent value</h2>${usageDailyChart(data.daily)}</section>
+      <section class="usage-panel"><h2>by model</h2>${usageBreakdownTable(data.models, 'model', 'provider / model')}</section>
+      <section class="usage-panel"><h2>by project</h2>${usageBreakdownTable(data.projects, 'project', 'project')}</section>
+    </div><aside>
+      <section class="usage-panel"><h2>billing split</h2>${usageBreakdownTable(data.billing, 'billing', 'type')}</section>
+      <section class="usage-panel"><h2>token classes</h2><div class="usage-table-wrap"><table class="usage-table"><tbody>
+        <tr><td>input</td><td>${fmtTokens(s.input)}</td></tr><tr><td>cache read</td><td>${fmtTokens(s.cacheRead)}</td></tr>
+        <tr><td>cache write</td><td>${fmtTokens(s.cacheWrite)}</td></tr><tr><td>output</td><td>${fmtTokens(s.output)}</td></tr>
+        <tr><td>reasoning within output</td><td>${fmtTokens(s.reasoning)}</td></tr>
+      </tbody></table></div></section>
+      <section class="usage-panel"><h2>data quality</h2><ul class="usage-quality">
+        <li>${usageNum(status.indexedEvents)} unique usage records after fork deduplication</li>
+        <li>${usageNum(q.historicalPrices)} stored Pi estimates</li><li>${usageNum(q.exactPrices)} exact fallback price matches</li>
+        <li>${usageNum(q.mappedPrices)} mapped fallback prices</li><li>${usageNum(q.unpricedCalls)} unpriced calls in this view</li>
+        <li>${usageNum(status.storedErrors)} transcript scan errors</li><li>${esc(sourceNotes || 'no fallback price catalogs found')}</li>
+      </ul></section>
+      <section class="usage-panel usage-rules"><details><summary>billing rules and monthly fees</summary>
+        <p class="usage-note">A rule changes classification only. It does not change Pi's estimated retail value. Historical OAuth classification can be uncertain.</p>
+        ${providerRules || '<p class="usage-note">No providers in this period.</p>'}
+      </details></section>
+      <section class="usage-panel"><p class="usage-note"><b>Meaning:</b> Pi calculates catalog cost for every route. This includes subscription calls. API-route cost is still an estimate. Confirm actual spending with provider invoices.</p></section>
+    </aside></div>
+  </div>`;
+  $('usageDays').onchange = loadUsageDashboard;
+  for (const [id] of selectors) $(id).onchange = loadUsageDashboard;
+  $('view').querySelectorAll('[data-usage-provider]').forEach(row => {
+    const provider = row.dataset.usageProvider;
+    row.querySelector('.usage-mode').onchange = event => saveUsageBilling(provider, event.target.value, undefined);
+    row.querySelector('.usage-fee-input').onchange = event => saveUsageBilling(provider, undefined, event.target.value);
+  });
+  clearTimeout(usagePollTimer);
+  if (status.running) usagePollTimer = setTimeout(() => { if (viewKind === 'usage') loadUsageDashboard(); }, 1400);
+}
+
+async function loadUsageDashboard() {
+  if (viewKind !== 'usage') return;
+  const params = new URLSearchParams();
+  params.set('days', $('usageDays') ? $('usageDays').value : (usageDashboardState && usageDashboardState.range && usageDashboardState.range.days) || '30');
+  for (const [id, key] of [['usageProject','project'],['usageProvider','provider'],['usageModel','model'],['usageBilling','billing']]) {
+    if ($(id) && $(id).value) params.set(key, $(id).value);
+  }
+  try {
+    const response = await fetch('/api/usage?' + params.toString());
+    renderUsageDashboard(await response.json());
+  } catch (error) {
+    renderUsageDashboard({ error: error.message });
+  }
+}
+
+async function showUsageDashboard() {
+  markSettingsClosed();
+  clearTimeout(usagePollTimer);
+  setRoute('usage', 'usage', [crumbHome(), { label: 'usage and cost', title: 'Usage and cost dashboard' }]);
+  $('view').innerHTML = '<div class="empty">building usage analytics…<div class="hint">recent conversations load first</div></div>';
+  await loadUsageDashboard();
+}
+
 // ---- settings: memory model ----
 let settingsState = null;
 let modelsState = null;
@@ -13980,6 +14195,7 @@ function renderSettings() {
             </details>`;
           }).join('')}</div>`;
   $('settingsRoot').innerHTML = `<div class="settings-view">
+    <button type="button" id="setUsage" class="set-usage-open"><span>usage and cost dashboard</span><span>open →</span></button>
     <section class="psection">
       <h3>memory model</h3>
       <div class="pmeta" style="margin-bottom:var(--sp-2)">${esc(resolved.label || 'not set')} · ${esc(fmtTokens(resolved.contextTokens))} · thinking ${esc(resolved.thinking || 'off')}</div>
@@ -14015,6 +14231,7 @@ function renderSettings() {
       <div id="setModels">${catalog}</div>
     </section>
   </div>`;
+  $('setUsage').onclick = () => { closeSettings(); showUsageDashboard(); };
   $('setVoiceMute').onchange = () => voiceSetMuted($('setVoiceMute').checked);
   $('setSemantic').onchange = () => saveSettings({ semanticSearch: $('setSemantic').checked }, 'semantic search ' + ($('setSemantic').checked ? 'on — backfill starts now' : 'off'));
   $('setSemanticUrl').onchange = () => saveSettings({ semanticUrl: $('setSemanticUrl').value.trim() }, 'semantic server saved');

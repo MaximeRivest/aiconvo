@@ -64,6 +64,17 @@ test('normalizeSettings can follow the pi default', () => {
   assert.strictEqual(s.thinking, 'low');
 });
 
+test('normalizeSettings keeps safe usage billing rules', () => {
+  const s = normalizeSettings({ usageBilling: {
+    providerModes: { anthropic: 'subscription', openai: 'bad' },
+    monthlyFees: { anthropic: 100, openai: -2 },
+  } });
+  assert.deepStrictEqual(s.usageBilling, {
+    providerModes: { anthropic: 'subscription' },
+    monthlyFees: { anthropic: 100 },
+  });
+});
+
 test('buildPiArgs includes the selected model', () => {
   const args = buildPiArgs({ provider: 'xai', model: 'grok-4.6', thinking: 'high' });
   assert.deepStrictEqual(args.slice(-6), ['--thinking', 'high', '--provider', 'xai', '--model', 'grok-4.6']);

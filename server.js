@@ -20,6 +20,7 @@ const { openSearchIndex, SearchIndex } = require('./searchindex.js');
 const foldsLib = require('./projectfolds.js');
 const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
+const usageLib = require('./usageanalytics.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
@@ -31,6 +32,8 @@ const CACHE_DIR = path.join(os.homedir(), '.cache', 'aiconvo');
 const NOTES_DIR = path.join(os.homedir(), 'notes', 'aiconvo');
 const SESS_DIR = path.join(CACHE_DIR, 'sessions');
 const INDEX_FILE = path.join(CACHE_DIR, 'index.json');
+const USAGE_DB_FILE = path.join(CACHE_DIR, 'usage.db');
+const INTERNAL_USAGE_FILE = path.join(CACHE_DIR, 'internal-usage.jsonl');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7433;
 const HOST = process.env.AICONVO_HOST || (process.env.AICONVO_LAN === '1' ? '0.0.0.0' : '127.0.0.1');
 const TLS_PORT = process.env.AICONVO_TLS_PORT ? Number(process.env.AICONVO_TLS_PORT) : 7443;
@@ -103,6 +106,22 @@ fs.mkdirSync(SESS_DIR, { recursive: true });
 // database and the next boot rebuilds it. Null when node:sqlite is missing;
 // /api/search then falls back to the old scan.
 const searchIdx = openSearchIndex(path.join(CACHE_DIR, 'search.db'));
+const usageIdx = usageLib.openUsageIndex(USAGE_DB_FILE);
+let usagePricingCatalog = null;
+function pricingCatalog() {
+  if (!usagePricingCatalog) usagePricingCatalog = usageLib.loadPricingCatalog();
+  return usagePricingCatalog;
+}
+function usageAuthTypes() {
+  const out = {};
+  try {
+    const auth = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.pi', 'agent', 'auth.json'), 'utf8'));
+    for (const [provider, value] of Object.entries(auth || {})) {
+      if (value && typeof value === 'object' && typeof value.type === 'string') out[provider] = value.type;
+    }
+  } catch {}
+  return out;
+}
 
 // Explicit conversation assignments are durable user data. They let a loose
 // conversation join a real project without changing its true tool cwd.
@@ -1203,7 +1222,7 @@ async function sessionTreeFor(key, opts = {}) {
 // and what the conversation cost so far. Ground truth only: the provider's own
 // usage counters from the newest assistant reply on the trace, and the context
 // sizes pi reports for its models. Context is trace-scoped (siblings do not
-// share a window); cost is family-scoped (every branch spent real money).
+// share a window); Pi cost is a catalog estimate, including subscription routes.
 async function conversationContextResponse(key, leafId) {
   const graph = await familyEntryGraph(key);
   const { entry, byId, all } = graph;
@@ -2905,6 +2924,61 @@ function settingsResponse() {
     path: SETTINGS_FILE,
   };
 }
+
+function usageRange(searchParams) {
+  const now = Date.now();
+  const raw = searchParams.get('days') || '30';
+  if (raw === 'all') return { fromMs: 0, toMs: now, days: 'all' };
+  const days = Math.max(1, Math.min(3650, Number(raw) || 30));
+  return { fromMs: now - days * 86400000, toMs: now, days };
+}
+
+function usageIndexEntries() {
+  const entries = Object.entries(index).map(([key, entry]) => [key, {
+    ...entry,
+    project: projectNameOf(entry.cwd, key) || 'Unknown project',
+  }]);
+  try {
+    const stat = fs.statSync(INTERNAL_USAGE_FILE);
+    entries.push(['aiconvo:internal', {
+      source: 'pi', mtimeMs: stat.mtimeMs, size: stat.size,
+      firstTs: null, lastTs: new Date(stat.mtimeMs).toISOString(), project: 'Aiconvo system',
+    }]);
+  } catch {}
+  return entries;
+}
+
+function usageDashboardResponse(searchParams) {
+  if (!usageIdx) return { error: 'Token analytics needs node:sqlite, which is unavailable.' };
+  const catalog = pricingCatalog();
+  usageIdx.startSync(usageIndexEntries(), absPathForKey, catalog).catch(error => {
+    console.error('usage index', error.message);
+  });
+  const range = usageRange(searchParams);
+  const filters = {};
+  for (const key of ['project', 'provider', 'model', 'billing']) {
+    const value = searchParams.get(key);
+    if (value) filters[key] = value;
+  }
+  const facts = usageIdx.facts(range.fromMs, range.toMs);
+  const data = usageLib.aggregateFacts(facts, {
+    ...range, filters, billing: appSettings.usageBilling, authTypes: usageAuthTypes(),
+  });
+  return {
+    ...data,
+    range,
+    filters,
+    billingConfig: appSettings.usageBilling,
+    status: usageIdx.status(),
+    catalogSources: catalog.sources,
+    generatedAt: Date.now(),
+    terminology: {
+      estimatedCost: 'Catalog API-equivalent value. It is not a provider invoice.',
+      apiCost: 'Catalog estimate for calls classified as API billed.',
+      subscriptionValue: 'Estimated API retail value for subscription calls.',
+    },
+  };
+}
 // Code and JSON can use close to one token per two bytes. This is safer than chars / 4.
 const estimateInputTokens = text => Math.max(
   Math.ceil(Buffer.byteLength(String(text), 'utf8') / 2),
@@ -2937,14 +3011,43 @@ function runPi(fileContent, prompt, onChunk) {
   return new Promise((resolve, reject) => {
     const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
     fs.writeFileSync(tmp, fileContent);
-    const child = execFile('pi', [...piArgs(), '@' + tmp, prompt], { maxBuffer: 64 * 1024 * 1024, timeout: 1800000 },
+    // JSON mode gives the final provider usage. These no-session calls were
+    // previously invisible to every cost report.
+    const child = execFile('pi', [...piArgs(), '--mode', 'json', '@' + tmp, prompt], { maxBuffer: 64 * 1024 * 1024, timeout: 1800000 },
       (err, stdout, stderr) => {
         fs.unlink(tmp, () => {});
-        if (err) reject(new Error(stderr.trim() || err.message));
-        else resolve(stdout.trim());
+        let finalMessage = null;
+        for (const line of String(stdout).split('\n')) {
+          let event; try { event = JSON.parse(line); } catch { continue; }
+          if (event.type === 'message_end' && event.message && event.message.role === 'assistant') finalMessage = event.message;
+        }
+        if (finalMessage && finalMessage.usage) {
+          const record = {
+            type: 'message', id: crypto.randomUUID(), parentId: null,
+            timestamp: new Date(finalMessage.timestamp || Date.now()).toISOString(),
+            aiconvoCategory: 'internal',
+            message: { ...finalMessage, content: [] },
+          };
+          try { fs.appendFileSync(INTERNAL_USAGE_FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); } catch {}
+        }
+        if (err) return reject(new Error(stderr.trim() || err.message));
+        if (!finalMessage) return resolve(String(stdout).trim());
+        resolve(textOf(finalMessage.content).trim());
       });
     child.stdin.end(); // pi -p waits for stdin EOF otherwise
-    if (onChunk) child.stdout.on('data', d => onChunk(String(d)));
+    if (onChunk) {
+      let carry = '';
+      child.stdout.on('data', data => {
+        carry += String(data);
+        const lines = carry.split('\n');
+        carry = lines.pop() || '';
+        for (const line of lines) {
+          let event; try { event = JSON.parse(line); } catch { continue; }
+          const update = event.type === 'message_update' && event.assistantMessageEvent;
+          if (update && update.type === 'text_delta') onChunk(String(update.delta || ''));
+        }
+      });
+    }
   });
 }
 
@@ -4258,6 +4361,7 @@ async function buildEpicStory(evidenceInputs, focus, emit = () => {}) {
 
 // Absolute path of the original transcript behind an index key ("source:relPath").
 function absPathForKey(key) {
+  if (key === 'aiconvo:internal') return INTERNAL_USAGE_FILE;
   const i = key.indexOf(':');
   const base = SOURCES[key.slice(0, i)];
   return base ? path.join(base, key.slice(i + 1)) : null;
@@ -10045,6 +10149,16 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { key, title: data.title, cwd: data.cwd, firstTs: data.firstTs, lastTs: data.lastTs, ...evidence });
     } else if (u.pathname === '/api/jobs') {
       json(res, 200, allJobs());
+    } else if (u.pathname === '/api/usage' && req.method === 'GET') {
+      const data = usageDashboardResponse(u.searchParams);
+      json(res, data.error ? 503 : 200, data);
+    } else if (u.pathname === '/api/usage/billing' && (req.method === 'PUT' || req.method === 'POST')) {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || '{}');
+      appSettings = settingsLib.normalizeSettings({ ...appSettings, usageBilling: parsed });
+      saveAppSettings();
+      json(res, 200, { usageBilling: appSettings.usageBilling });
     } else if (u.pathname === '/api/settings' && req.method === 'GET') {
       json(res, 200, settingsResponse());
     } else if (u.pathname === '/api/settings' && (req.method === 'PUT' || req.method === 'POST')) {

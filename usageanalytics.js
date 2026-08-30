@@ -1,0 +1,564 @@
+'use strict';
+// Token and cost analytics over Pi and Claude Code JSONL transcripts.
+// The SQLite database is derived data. Delete it to rebuild from transcripts.
+
+const fs = require('fs');
+const fsp = fs.promises;
+const path = require('path');
+const os = require('os');
+const readline = require('readline');
+const { execFileSync } = require('child_process');
+
+let DatabaseSync = null;
+try { ({ DatabaseSync } = require('node:sqlite')); } catch {}
+
+const SCHEMA_VERSION = 1;
+const BILLING_MODES = new Set(['api', 'subscription', 'free', 'local', 'unknown']);
+const SUBSCRIPTION_PROVIDERS = new Set([
+  'openai-codex', 'github-copilot', 'claude-code', 'kimi-coding',
+  'qwen-token-plan', 'qwen-token-plan-cn', 'qwen-token-plan-individual',
+  'xiaomi-token-plan-cn', 'xiaomi-token-plan-ams', 'xiaomi-token-plan-sgp',
+]);
+const LOCAL_PROVIDER_RE = /^(ollama|llamacpp|lmstudio|lm-studio|vllm|local|faux)(?:[-_/]|$)/i;
+
+function number(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function timestampMs(value, fallback) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Date.parse(value || '');
+  return Number.isFinite(parsed) ? parsed : number(fallback);
+}
+
+function normalizeUsage(raw, source) {
+  const u = raw && typeof raw === 'object' ? raw : {};
+  if (source === 'claude') {
+    const input = number(u.input_tokens);
+    const output = number(u.output_tokens);
+    const cacheRead = number(u.cache_read_input_tokens);
+    const cacheWrite = number(u.cache_creation_input_tokens);
+    return {
+      input, output, cacheRead, cacheWrite, cacheWrite1h: 0,
+      reasoning: number(u.reasoning_tokens),
+      totalTokens: input + output + cacheRead + cacheWrite,
+      cost: null,
+    };
+  }
+  const input = number(u.input);
+  const output = number(u.output);
+  const cacheRead = number(u.cacheRead);
+  const cacheWrite = number(u.cacheWrite);
+  const rawCost = u.cost && typeof u.cost === 'object' ? u.cost : null;
+  const cost = rawCost ? {
+    input: number(rawCost.input), output: number(rawCost.output),
+    cacheRead: number(rawCost.cacheRead), cacheWrite: number(rawCost.cacheWrite),
+    total: number(rawCost.total),
+  } : null;
+  if (cost && !cost.total) cost.total = cost.input + cost.output + cost.cacheRead + cost.cacheWrite;
+  return {
+    input, output, cacheRead, cacheWrite,
+    cacheWrite1h: Math.min(cacheWrite, number(u.cacheWrite1h)),
+    reasoning: u.reasoning == null ? null : number(u.reasoning),
+    totalTokens: input + output + cacheRead + cacheWrite,
+    cost,
+  };
+}
+
+function calculateCost(rates, usage) {
+  if (!rates) return null;
+  let selected = rates;
+  const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+  let threshold = -1;
+  for (const tier of rates.tiers || []) {
+    if (inputTokens > number(tier.inputTokensAbove) && number(tier.inputTokensAbove) > threshold) {
+      selected = tier;
+      threshold = number(tier.inputTokensAbove);
+    }
+  }
+  const inputRate = number(selected.input);
+  const outputRate = number(selected.output);
+  const readRate = number(selected.cacheRead);
+  const writeRate = number(selected.cacheWrite);
+  const longWrite = Math.min(usage.cacheWrite, number(usage.cacheWrite1h));
+  const shortWrite = usage.cacheWrite - longWrite;
+  const cost = {
+    input: inputRate * usage.input / 1e6,
+    output: outputRate * usage.output / 1e6,
+    cacheRead: readRate * usage.cacheRead / 1e6,
+    // Pi applies Anthropic's one-hour rate as twice the base input rate.
+    cacheWrite: (writeRate * shortWrite + inputRate * 2 * longWrite) / 1e6,
+  };
+  cost.total = cost.input + cost.output + cost.cacheRead + cost.cacheWrite;
+  return cost;
+}
+
+function normalizeProvider(value) {
+  const v = String(value || '').toLowerCase();
+  return ({
+    bedrock: 'amazon-bedrock', bedrock_converse: 'amazon-bedrock',
+    vertex_ai: 'google-vertex', vertex_ai_beta: 'google-vertex',
+    gemini: 'google', azure: 'azure-openai-responses',
+  })[v] || v;
+}
+
+class PricingCatalog {
+  constructor() {
+    this.exact = new Map();
+    this.byModel = new Map();
+    this.sources = [];
+  }
+
+  add(provider, model, rates, meta = {}) {
+    provider = normalizeProvider(provider);
+    model = String(model || '');
+    if (!provider || !model || !rates) return;
+    const normalized = {
+      input: number(rates.input), output: number(rates.output),
+      cacheRead: number(rates.cacheRead), cacheWrite: number(rates.cacheWrite),
+      tiers: Array.isArray(rates.tiers) ? rates.tiers.map(t => ({
+        inputTokensAbove: number(t.inputTokensAbove), input: number(t.input), output: number(t.output),
+        cacheRead: number(t.cacheRead), cacheWrite: number(t.cacheWrite),
+      })) : [],
+    };
+    const rec = { provider, model, rates: normalized, source: meta.source || 'unknown', updatedAt: meta.updatedAt || null };
+    const key = provider + '\0' + model;
+    if (!this.exact.has(key) || meta.preferred) this.exact.set(key, rec);
+    if (!this.byModel.has(model)) this.byModel.set(model, []);
+    this.byModel.get(model).push(rec);
+  }
+
+  resolve(provider, model) {
+    provider = normalizeProvider(provider);
+    model = String(model || '');
+    let hit = this.exact.get(provider + '\0' + model);
+    if (hit) return { ...hit, confidence: 'exact' };
+    // Claude Code and subscription routes often use the direct model id.
+    const aliases = [];
+    if (provider === 'claude-code' || provider === 'github-copilot') aliases.push('anthropic');
+    if (provider === 'openai-codex' || provider === 'github-copilot') aliases.push('openai');
+    for (const alias of aliases) {
+      hit = this.exact.get(alias + '\0' + model);
+      if (hit) return { ...hit, confidence: 'mapped' };
+    }
+    const matches = this.byModel.get(model) || [];
+    const direct = matches.filter(r => ['anthropic', 'openai', 'google'].includes(r.provider));
+    const choices = direct.length ? direct : matches;
+    if (choices.length === 1) return { ...choices[0], confidence: 'model-only' };
+    return null;
+  }
+}
+
+function fileMtime(file) {
+  try { return fs.statSync(file).mtimeMs; } catch { return null; }
+}
+
+function findPiDataDir() {
+  try {
+    const bin = fs.realpathSync(execFileSync('which', ['pi'], { encoding: 'utf8' }).trim());
+    const packageDir = path.dirname(path.dirname(bin));
+    const direct = path.join(packageDir, 'node_modules', '@earendil-works', 'pi-ai', 'dist', 'providers', 'data');
+    if (fs.existsSync(direct)) return direct;
+  } catch {}
+  return null;
+}
+
+function loadPricingCatalog(options = {}) {
+  const catalog = new PricingCatalog();
+  const piDir = options.piDataDir || findPiDataDir();
+  if (piDir) {
+    for (const file of fs.readdirSync(piDir).filter(name => name.endsWith('.json'))) {
+      const abs = path.join(piDir, file);
+      let payload; try { payload = JSON.parse(fs.readFileSync(abs, 'utf8')); } catch { continue; }
+      for (const models of Object.values(payload)) {
+        if (!models || typeof models !== 'object') continue;
+        for (const [id, model] of Object.entries(models)) {
+          if (!model || typeof model !== 'object' || !model.cost) continue;
+          catalog.add(model.provider, model.id || id, model.cost, { source: 'pi', updatedAt: fileMtime(abs), preferred: true });
+        }
+      }
+    }
+    catalog.sources.push({ source: 'pi', updatedAt: fileMtime(piDir), path: piDir });
+  }
+
+  const aimoDir = options.aimoCacheDir || path.join(os.homedir(), '.cache', 'aimo');
+  const liteFile = path.join(aimoDir, 'litellm_models.json');
+  if (fs.existsSync(liteFile)) {
+    let payload; try { payload = JSON.parse(fs.readFileSync(liteFile, 'utf8')); } catch { payload = {}; }
+    for (const [id, m] of Object.entries(payload)) {
+      if (!m || typeof m !== 'object' || id === 'sample_spec') continue;
+      const rates = {
+        input: number(m.input_cost_per_token) * 1e6,
+        output: number(m.output_cost_per_token) * 1e6,
+        cacheRead: number(m.cache_read_input_token_cost) * 1e6,
+        cacheWrite: number(m.cache_creation_input_token_cost || m.cache_write_input_token_cost) * 1e6,
+      };
+      if (rates.input || rates.output) catalog.add(m.litellm_provider || m.provider, id, rates, { source: 'aimo/litellm', updatedAt: fileMtime(liteFile) });
+    }
+    catalog.sources.push({ source: 'aimo/litellm', updatedAt: fileMtime(liteFile), path: liteFile });
+  }
+
+  const modelsDevFile = path.join(aimoDir, 'models_dev.json');
+  if (fs.existsSync(modelsDevFile)) {
+    let payload; try { payload = JSON.parse(fs.readFileSync(modelsDevFile, 'utf8')); } catch { payload = {}; }
+    for (const [provider, block] of Object.entries(payload)) {
+      const models = block && block.models;
+      const entries = Array.isArray(models) ? models.map(m => [m && (m.id || m.name), m]) : Object.entries(models || {});
+      for (const [id, m] of entries) {
+        if (!id || !m || typeof m !== 'object') continue;
+        const c = m.cost || m.pricing;
+        if (!c || typeof c !== 'object') continue;
+        const rates = {
+          input: number(c.input != null ? c.input : c.prompt),
+          output: number(c.output != null ? c.output : c.completion),
+          cacheRead: number(c.cache_read != null ? c.cache_read : c.cacheRead),
+          cacheWrite: number(c.cache_write != null ? c.cache_write : c.cacheWrite),
+        };
+        if (rates.input || rates.output) catalog.add(provider, id, rates, { source: 'aimo/models.dev', updatedAt: fileMtime(modelsDevFile) });
+      }
+    }
+    catalog.sources.push({ source: 'aimo/models.dev', updatedAt: fileMtime(modelsDevFile), path: modelsDevFile });
+  }
+  return catalog;
+}
+
+async function parseUsageFile(file, context = {}, catalog = new PricingCatalog()) {
+  const facts = [];
+  const source = context.source === 'claude' ? 'claude' : 'pi';
+  let currentProvider = null;
+  let currentModel = null;
+  let ordinal = 0;
+  const stream = fs.createReadStream(file, { encoding: 'utf8' });
+  const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  for await (const line of lines) {
+    if (!line) continue;
+    let d; try { d = JSON.parse(line); } catch { continue; }
+    if (source === 'pi' && d.type === 'model_change') {
+      currentProvider = d.provider || currentProvider;
+      currentModel = d.modelId || currentModel;
+      continue;
+    }
+    let rawUsage = null;
+    let provider = currentProvider;
+    let model = currentModel;
+    let api = null;
+    let category = 'assistant';
+    let stopReason = null;
+    let id = d.id || d.uuid || 'line-' + (++ordinal);
+    let ts = d.timestamp;
+    if (source === 'pi') {
+      if (d.type === 'message' && d.message && d.message.role === 'assistant' && d.message.usage) {
+        rawUsage = d.message.usage;
+        provider = d.message.provider || provider;
+        model = d.message.model || model;
+        api = d.message.api || null;
+        stopReason = d.message.stopReason || null;
+        if (d.aiconvoCategory === 'internal') category = 'internal';
+        currentProvider = provider || currentProvider;
+        currentModel = model || currentModel;
+      } else if ((d.type === 'compaction' || d.type === 'branch_summary') && d.usage) {
+        rawUsage = d.usage;
+        category = d.type === 'compaction' ? 'compaction' : 'branch-summary';
+      }
+    } else if (d.type === 'assistant' && d.message && d.message.usage) {
+      rawUsage = d.message.usage;
+      provider = d.message.provider || 'anthropic';
+      model = d.message.model || model;
+      api = d.message.api || 'anthropic-messages';
+      stopReason = d.message.stop_reason || d.message.stopReason || null;
+      ts = d.timestamp || d.message.timestamp;
+      category = d.isSidechain ? 'subagent' : 'assistant';
+    }
+    if (!rawUsage) continue;
+    const usage = normalizeUsage(rawUsage, source);
+    if (!usage.totalTokens && !(usage.cost && usage.cost.total)) continue;
+    let cost = usage.cost && usage.cost.total > 0 ? usage.cost : null;
+    let priceSource = cost ? 'pi-stored' : null;
+    let priceConfidence = cost ? 'historical' : null;
+    if (!cost) {
+      const price = catalog.resolve(provider, model);
+      if (price) {
+        cost = calculateCost(price.rates, usage);
+        priceSource = price.source;
+        priceConfidence = price.confidence;
+      }
+    }
+    facts.push({
+      eventKey: source + ':' + id + ':' + category,
+      id: String(id), ts: timestampMs(ts, context.mtimeMs), source,
+      provider: String(provider || (source === 'claude' ? 'anthropic' : 'unknown')),
+      model: String(model || 'unknown'), api: String(api || ''), category, stopReason: String(stopReason || ''),
+      ...usage, estimatedCost: cost ? cost.total : null,
+      costInput: cost ? cost.input : null, costOutput: cost ? cost.output : null,
+      costCacheRead: cost ? cost.cacheRead : null, costCacheWrite: cost ? cost.cacheWrite : null,
+      priceSource, priceConfidence,
+    });
+  }
+  return facts;
+}
+
+function normalizeBillingConfig(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const providerModes = {};
+  for (const [provider, mode] of Object.entries(src.providerModes || {})) {
+    const key = String(provider).trim();
+    if (key && BILLING_MODES.has(mode)) providerModes[key] = mode;
+  }
+  const monthlyFees = {};
+  for (const [provider, value] of Object.entries(src.monthlyFees || {})) {
+    const key = String(provider).trim();
+    const fee = number(value);
+    if (key && fee > 0) monthlyFees[key] = Math.round(fee * 100) / 100;
+  }
+  return { providerModes, monthlyFees };
+}
+
+function classifyBilling(fact, config, authTypes = {}) {
+  const provider = String(fact.provider || 'unknown');
+  const explicit = config.providerModes && config.providerModes[provider];
+  if (BILLING_MODES.has(explicit)) return { mode: explicit, basis: 'user rule' };
+  if (fact.source === 'claude') return { mode: 'subscription', basis: 'Claude Code transcript' };
+  if (LOCAL_PROVIDER_RE.test(provider)) return { mode: 'local', basis: 'local provider' };
+  if (SUBSCRIPTION_PROVIDERS.has(provider) || /(?:^|-)token-plan(?:-|$)/.test(provider)) {
+    return { mode: 'subscription', basis: 'subscription provider' };
+  }
+  if (provider === 'anthropic' && authTypes.anthropic === 'oauth') {
+    return { mode: 'subscription', basis: 'current Anthropic OAuth; historical inference' };
+  }
+  if (provider === 'openrouter') return { mode: 'api', basis: 'OpenRouter bills API use, including OAuth keys' };
+  if (fact.estimatedCost != null && fact.estimatedCost > 0) return { mode: 'api', basis: 'priced provider route' };
+  return { mode: 'unknown', basis: 'no billing evidence' };
+}
+
+function localDay(ts) {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function blankTotals() {
+  return { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, tokens: 0,
+    equivalentCost: 0, apiCost: 0, subscriptionValue: 0, freeValue: 0, localValue: 0, unknownValue: 0,
+    unpricedCalls: 0 };
+}
+
+function addFact(total, fact, billing) {
+  total.calls++;
+  total.input += fact.input;
+  total.output += fact.output;
+  total.cacheRead += fact.cacheRead;
+  total.cacheWrite += fact.cacheWrite;
+  total.reasoning += fact.reasoning || 0;
+  total.tokens += fact.totalTokens;
+  if (fact.estimatedCost == null) total.unpricedCalls++;
+  else {
+    total.equivalentCost += fact.estimatedCost;
+    if (billing.mode === 'api') total.apiCost += fact.estimatedCost;
+    else if (billing.mode === 'subscription') total.subscriptionValue += fact.estimatedCost;
+    else if (billing.mode === 'free') total.freeValue += fact.estimatedCost;
+    else if (billing.mode === 'local') total.localValue += fact.estimatedCost;
+    else total.unknownValue += fact.estimatedCost;
+  }
+}
+
+function mapRows(map, keyName) {
+  return [...map.entries()].map(([key, totals]) => ({ [keyName]: key, ...totals }))
+    .sort((a, b) => b.equivalentCost - a.equivalentCost || b.tokens - a.tokens);
+}
+
+function aggregateFacts(facts, options = {}) {
+  const config = normalizeBillingConfig(options.billing);
+  const authTypes = options.authTypes || {};
+  const filters = options.filters || {};
+  const summary = blankTotals();
+  const daily = new Map(), models = new Map(), projects = new Map(), providers = new Map(), billing = new Map(), categories = new Map();
+  const facets = { projects: new Set(), providers: new Set(), models: new Set(), billing: new Set() };
+  const quality = { pricedCalls: 0, unpricedCalls: 0, exactPrices: 0, mappedPrices: 0, historicalPrices: 0, inferredBillingCalls: 0 };
+  let minTs = null, maxTs = null;
+  for (const fact of facts) {
+    const mode = classifyBilling(fact, config, authTypes);
+    const project = fact.project || 'Unknown project';
+    facets.projects.add(project); facets.providers.add(fact.provider); facets.models.add(fact.model); facets.billing.add(mode.mode);
+    if (filters.project && project !== filters.project) continue;
+    if (filters.provider && fact.provider !== filters.provider) continue;
+    if (filters.model && fact.model !== filters.model) continue;
+    if (filters.billing && mode.mode !== filters.billing) continue;
+    minTs = minTs == null ? fact.ts : Math.min(minTs, fact.ts);
+    maxTs = maxTs == null ? fact.ts : Math.max(maxTs, fact.ts);
+    addFact(summary, fact, mode);
+    const day = localDay(fact.ts);
+    if (!daily.has(day)) daily.set(day, blankTotals());
+    addFact(daily.get(day), fact, mode);
+    const modelKey = fact.provider + '/' + fact.model;
+    if (!models.has(modelKey)) models.set(modelKey, blankTotals());
+    addFact(models.get(modelKey), fact, mode);
+    if (!projects.has(project)) projects.set(project, blankTotals());
+    addFact(projects.get(project), fact, mode);
+    if (!providers.has(fact.provider)) providers.set(fact.provider, blankTotals());
+    addFact(providers.get(fact.provider), fact, mode);
+    if (!billing.has(mode.mode)) billing.set(mode.mode, blankTotals());
+    addFact(billing.get(mode.mode), fact, mode);
+    if (!categories.has(fact.category)) categories.set(fact.category, blankTotals());
+    addFact(categories.get(fact.category), fact, mode);
+    if (fact.estimatedCost == null) quality.unpricedCalls++;
+    else quality.pricedCalls++;
+    if (fact.priceConfidence === 'historical') quality.historicalPrices++;
+    else if (fact.priceConfidence === 'exact') quality.exactPrices++;
+    else if (fact.priceConfidence) quality.mappedPrices++;
+    if (/inference|provider|transcript|route/.test(mode.basis)) quality.inferredBillingCalls++;
+  }
+  const fromMs = number(options.fromMs) || minTs;
+  const toMs = number(options.toMs) || maxTs;
+  const periodDays = fromMs != null && toMs != null ? Math.max(1, (toMs - fromMs) / 86400000) : 0;
+  summary.subscriptionFees = Object.values(config.monthlyFees).reduce((n, v) => n + number(v), 0) * periodDays / 30.4375;
+  summary.subscriptionFees = Math.round(summary.subscriptionFees * 1e6) / 1e6;
+  return {
+    summary,
+    daily: mapRows(daily, 'day').sort((a, b) => a.day.localeCompare(b.day)),
+    models: mapRows(models, 'model'), projects: mapRows(projects, 'project'), providers: mapRows(providers, 'provider'),
+    billing: mapRows(billing, 'billing'), categories: mapRows(categories, 'category'), quality,
+    facets: Object.fromEntries(Object.entries(facets).map(([k, set]) => [k, [...set].sort()])),
+  };
+}
+
+class UsageIndex {
+  constructor(dbPath) {
+    if (!DatabaseSync) throw new Error('node:sqlite is unavailable');
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;');
+    const version = this.db.prepare('PRAGMA user_version').get().user_version;
+    if (version !== SCHEMA_VERSION) {
+      this.db.exec('DROP TABLE IF EXISTS usage_owners; DROP TABLE IF EXISTS usage_events; DROP TABLE IF EXISTS usage_files;');
+      this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+    }
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS usage_files (
+        session_key TEXT PRIMARY KEY, source TEXT NOT NULL, mtime_ms REAL NOT NULL, size INTEGER NOT NULL,
+        project TEXT, first_ts TEXT, scanned_at INTEGER NOT NULL, error TEXT
+      );
+      CREATE TABLE IF NOT EXISTS usage_events (
+        event_key TEXT PRIMARY KEY, ts INTEGER NOT NULL, source TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+        api TEXT, category TEXT NOT NULL, stop_reason TEXT,
+        input_tokens INTEGER, output_tokens INTEGER, cache_read INTEGER, cache_write INTEGER, cache_write_1h INTEGER,
+        reasoning INTEGER, total_tokens INTEGER, estimated_cost REAL, cost_input REAL, cost_output REAL,
+        cost_cache_read REAL, cost_cache_write REAL, price_source TEXT, price_confidence TEXT
+      );
+      CREATE TABLE IF NOT EXISTS usage_owners (
+        event_key TEXT NOT NULL, session_key TEXT NOT NULL,
+        PRIMARY KEY (event_key, session_key)
+      );
+      CREATE INDEX IF NOT EXISTS usage_events_ts ON usage_events(ts);
+      CREATE INDEX IF NOT EXISTS usage_owners_session ON usage_owners(session_key);
+    `);
+    this.progress = { running: false, total: 0, done: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
+    this.syncPromise = null;
+  }
+
+  status() {
+    const files = this.db.prepare('SELECT COUNT(*) n, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) errors FROM usage_files').get();
+    const events = this.db.prepare('SELECT COUNT(*) n FROM usage_events WHERE event_key IN (SELECT event_key FROM usage_owners)').get();
+    return { ...this.progress, indexedFiles: number(files.n), indexedEvents: number(events.n), storedErrors: number(files.errors) };
+  }
+
+  needs(entry, key) {
+    const row = this.db.prepare('SELECT mtime_ms,size,project FROM usage_files WHERE session_key=?').get(key);
+    const project = entry.project || 'Unknown project';
+    return !row || row.mtime_ms !== entry.mtimeMs || row.size !== entry.size || row.project !== project;
+  }
+
+  async updateFile(key, entry, absPath, catalog) {
+    let facts = [], error = null;
+    try { facts = await parseUsageFile(absPath, { source: entry.source, mtimeMs: entry.mtimeMs }, catalog); }
+    catch (e) { error = String(e.message || e).slice(0, 500); }
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('DELETE FROM usage_owners WHERE session_key=?').run(key);
+      const putEvent = this.db.prepare(`INSERT INTO usage_events
+        (event_key,ts,source,provider,model,api,category,stop_reason,input_tokens,output_tokens,cache_read,cache_write,cache_write_1h,reasoning,total_tokens,estimated_cost,cost_input,cost_output,cost_cache_read,cost_cache_write,price_source,price_confidence)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(event_key) DO UPDATE SET ts=excluded.ts,source=excluded.source,provider=excluded.provider,model=excluded.model,
+        api=excluded.api,category=excluded.category,stop_reason=excluded.stop_reason,input_tokens=excluded.input_tokens,
+        output_tokens=excluded.output_tokens,cache_read=excluded.cache_read,cache_write=excluded.cache_write,
+        cache_write_1h=excluded.cache_write_1h,reasoning=excluded.reasoning,total_tokens=excluded.total_tokens,
+        estimated_cost=excluded.estimated_cost,cost_input=excluded.cost_input,cost_output=excluded.cost_output,
+        cost_cache_read=excluded.cost_cache_read,cost_cache_write=excluded.cost_cache_write,
+        price_source=excluded.price_source,price_confidence=excluded.price_confidence`);
+      const putOwner = this.db.prepare('INSERT OR IGNORE INTO usage_owners(event_key,session_key) VALUES (?,?)');
+      for (const f of facts) {
+        putEvent.run(f.eventKey, f.ts, f.source, f.provider, f.model, f.api, f.category, f.stopReason,
+          f.input, f.output, f.cacheRead, f.cacheWrite, f.cacheWrite1h, f.reasoning, f.totalTokens,
+          f.estimatedCost, f.costInput, f.costOutput, f.costCacheRead, f.costCacheWrite, f.priceSource, f.priceConfidence);
+        putOwner.run(f.eventKey, key);
+      }
+      this.db.prepare(`INSERT INTO usage_files(session_key,source,mtime_ms,size,project,first_ts,scanned_at,error)
+        VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(session_key) DO UPDATE SET source=excluded.source,mtime_ms=excluded.mtime_ms,
+        size=excluded.size,project=excluded.project,first_ts=excluded.first_ts,scanned_at=excluded.scanned_at,error=excluded.error`)
+        .run(key, entry.source, entry.mtimeMs, entry.size, entry.project || 'Unknown project', entry.firstTs || null, Date.now(), error);
+      this.db.exec('COMMIT');
+    } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+    if (error) throw new Error(error);
+  }
+
+  startSync(entries, absPathForKey, catalog) {
+    if (this.syncPromise) return this.syncPromise;
+    const live = new Set(entries.map(([key]) => key));
+    for (const row of this.db.prepare('SELECT session_key FROM usage_files').all()) {
+      if (live.has(row.session_key)) continue;
+      this.db.prepare('DELETE FROM usage_owners WHERE session_key=?').run(row.session_key);
+      this.db.prepare('DELETE FROM usage_files WHERE session_key=?').run(row.session_key);
+    }
+    this.db.exec('DELETE FROM usage_events WHERE event_key NOT IN (SELECT event_key FROM usage_owners)');
+    const pending = entries.filter(([key, entry]) => this.needs(entry, key))
+      .sort((a, b) => String(b[1].lastTs || '').localeCompare(String(a[1].lastTs || '')));
+    if (!pending.length) {
+      this.progress = { running: false, total: 0, done: 0, errors: 0, current: null, startedAt: null, finishedAt: Date.now() };
+      return Promise.resolve();
+    }
+    this.progress = { running: true, total: pending.length, done: 0, errors: 0, current: null, startedAt: Date.now(), finishedAt: null };
+    this.syncPromise = (async () => {
+      let next = 0;
+      const worker = async () => {
+        while (next < pending.length) {
+          const [key, entry] = pending[next++];
+          this.progress.current = key;
+          try { await this.updateFile(key, entry, absPathForKey(key), catalog); }
+          catch { this.progress.errors++; }
+          this.progress.done++;
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(2, pending.length) }, worker));
+      this.progress.running = false;
+      this.progress.current = null;
+      this.progress.finishedAt = Date.now();
+      this.syncPromise = null;
+    })();
+    return this.syncPromise;
+  }
+
+  facts(fromMs, toMs) {
+    return this.db.prepare(`
+      WITH chosen AS (
+        SELECT event_key, MIN(session_key) AS session_key FROM usage_owners GROUP BY event_key
+      )
+      SELECT e.ts,e.source,e.provider,e.model,e.api,e.category,e.stop_reason AS stopReason,
+        e.input_tokens AS input,e.output_tokens AS output,e.cache_read AS cacheRead,e.cache_write AS cacheWrite,
+        e.cache_write_1h AS cacheWrite1h,e.reasoning,e.total_tokens AS totalTokens,e.estimated_cost AS estimatedCost,
+        e.price_source AS priceSource,e.price_confidence AS priceConfidence,f.project
+      FROM usage_events e JOIN chosen c ON c.event_key=e.event_key
+      JOIN usage_files f ON f.session_key=c.session_key
+      WHERE e.ts>=? AND e.ts<=? ORDER BY e.ts`).all(fromMs, toMs);
+  }
+}
+
+function openUsageIndex(dbPath) {
+  if (!DatabaseSync) return null;
+  try { return new UsageIndex(dbPath); } catch { return null; }
+}
+
+module.exports = {
+  PricingCatalog, UsageIndex, aggregateFacts, calculateCost, classifyBilling, loadPricingCatalog,
+  normalizeBillingConfig, normalizeUsage, openUsageIndex, parseUsageFile,
+};

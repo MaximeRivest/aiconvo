@@ -26,6 +26,9 @@ const DEFAULT_SETTINGS = {
   // pi theme for hosted extension views (custom TUI components rendered
   // in the browser). 'light' matches aiconvo's paper look.
   piTheme: 'light',
+  // Cost analytics keeps billing classification separate from Pi's retail
+  // cost estimate. Rules are provider-scoped and never contain credentials.
+  usageBilling: { providerModes: {}, monthlyFees: {} },
 };
 
 function parseTokenCount(raw) {
@@ -112,6 +115,23 @@ function findModel(models, provider, model) {
     || null;
 }
 
+function normalizeUsageBilling(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const allowed = new Set(['api', 'subscription', 'free', 'local', 'unknown']);
+  const providerModes = {};
+  for (const [provider, mode] of Object.entries(src.providerModes || {})) {
+    const key = String(provider).trim();
+    if (key && allowed.has(mode)) providerModes[key] = mode;
+  }
+  const monthlyFees = {};
+  for (const [provider, value] of Object.entries(src.monthlyFees || {})) {
+    const key = String(provider).trim();
+    const fee = Number(value);
+    if (key && Number.isFinite(fee) && fee > 0) monthlyFees[key] = Math.round(fee * 100) / 100;
+  }
+  return { providerModes, monthlyFees };
+}
+
 function normalizeSettings(input) {
   const src = input && typeof input === 'object' ? input : {};
   const thinking = THINKING_LEVELS.includes(src.thinking) ? src.thinking : DEFAULT_SETTINGS.thinking;
@@ -125,8 +145,9 @@ function normalizeSettings(input) {
   const semanticNs = String(src.semanticNs || DEFAULT_SETTINGS.semanticNs).trim().replace(/[^\w.-]+/g, '-') || 'default';
   const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
   const piTheme = typeof src.piTheme === 'string' && src.piTheme.trim() ? src.piTheme.trim() : DEFAULT_SETTINGS.piTheme;
+  const usageBilling = normalizeUsageBilling(src.usageBilling);
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling };
   }
   return {
     usePiDefault: false,
@@ -139,6 +160,7 @@ function normalizeSettings(input) {
     semanticNs,
     piEngine,
     piTheme,
+    usageBilling,
   };
 }
 
@@ -203,6 +225,7 @@ module.exports = {
   usageContextTokens,
   parseListModels,
   findModel,
+  normalizeUsageBilling,
   normalizeSettings,
   buildPiArgs,
   modelLabel,
