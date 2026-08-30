@@ -8080,14 +8080,28 @@ function projectMetaFor(project) {
     if (!rec) return null;
     return { project, cwd: rec.cwd || null, entries: [], epics: [], latestMs: rec.createdAt || 0, created: true };
   }
-  // Prefer a cwd whose own raw name IS the canonical project (the main
-  // worktree), and among those the project ROOT itself — a conversation run
-  // in a subfolder must never make that subfolder the project root.
-  const rootScore = c => (foldsLib.rawProjectOf(c) === project ? 2 : 0) + (areasLib.relOfCwd(c) === '' ? 1 : 0);
-  const cwds = [...new Set(entries.map(({ entry }) => entry.cwd).filter(Boolean))]
-    .sort((a, b) => rootScore(b) - rootScore(a) || a.length - b.length);
+  // The project root is DERIVED, not chosen among conversation cwds: any
+  // member cwd under /Projects/<name>/… yields the root by truncation. A
+  // project whose conversations ALL live in subfolders still roots at the
+  // project folder itself. Prefer roots whose own raw name IS the canonical
+  // project (the main worktree beats folded worktree checkouts).
   const registered = createdRecordFor(project);
-  const cwd = (registered && registered.cwd) || cwds[0] || null;
+  let cwd = (registered && registered.cwd) || null;
+  if (!cwd) {
+    const roots = new Map(); // derived root -> best score seen
+    for (const { entry } of entries) {
+      const c = entry.cwd;
+      if (!c) continue;
+      const root = areasLib.projectRootOfCwd(c) || c;
+      const score = (foldsLib.rawProjectOf(c) === project ? 2 : 0) + (areasLib.relOfCwd(c) === '' ? 1 : 0);
+      const prev = roots.get(root);
+      if (prev === undefined || score > prev) roots.set(root, score);
+    }
+    let bestScore = -1;
+    for (const [root, score] of roots) {
+      if (score > bestScore || (score === bestScore && cwd && root.length < cwd.length)) { cwd = root; bestScore = score; }
+    }
+  }
   const epicsForProject = Object.values(epics)
     .map(epic => ({
       id: epic.id, title: epic.title, abstract: epic.abstract || '',
