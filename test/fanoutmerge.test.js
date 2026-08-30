@@ -120,3 +120,61 @@ test('tolerates unreadable or tail-less forks', () => {
   assert.equal(p.get('pr1'), 'a0');
   assert.equal(r.bothId, null); // one answer only -> no both entry
 });
+
+test('fan-out from an unwritten merge chain: backfills history, skips bridges', () => {
+  // Replay of the second llmfor_r corruption: the merge stage's bridge chain
+  // (model_change -> "N models answered..." -> merged answer) lived only in
+  // the forks' copied history, never in the root. The old code took the
+  // bridge as the fan-out prompt, made it canonical in fork 1, then dropped
+  // its shared id as a "duplicate" in forks 2-5 — deleting the entry every
+  // branch hung from.
+  const bridgeChain = [
+    mc('mcb', 'a0', 'model-a'),
+    msg('br', 'mcb', 'user', '4 models answered my last message in parallel. Merge them.'),
+    msg('ma', 'br', 'assistant', 'merged answer', { model: 'model-a' }),
+  ];
+  const fork2 = (k, model) => file(
+    { ...header, parentSession: '/root.jsonl' },
+    ...chain, ...bridgeChain,
+    mc('mc' + k, 'ma', model),
+    msg('pr' + k, 'mc' + k, 'user', 'next question'),
+    msg('an' + k, 'pr' + k, 'assistant', 'answer ' + k, { model }),
+  );
+  const forks = [fork2(1, 'model-a'), fork2(2, 'model-b')];
+  const r = computeFanoutMerge(root, forks, { newId: 'both1', now: 't' });
+  const p = parentsOf(r.content);
+  assert.equal(p.get('mcb'), 'a0');   // shared history backfilled verbatim
+  assert.equal(p.get('br'), 'mcb');   // the bridge survives — never dropped
+  assert.equal(p.get('ma'), 'br');
+  assert.equal(r.canonicalId, 'pr1'); // the REAL prompt, not the bridge
+  assert.equal(p.get('pr1'), 'ma');   // canonical prompt at the merged answer
+  assert.equal(p.get('mc1'), 'pr1');
+  assert.equal(p.get('an1'), 'mc1');
+  assert.equal(p.get('mc2'), 'pr1');
+  assert.equal(p.get('an2'), 'mc2');
+  assert.equal(p.has('pr2'), false);  // duplicate prompt still collapses
+  assert.equal(bothOf(r.content).parentId, 'pr1');
+  assertAcyclic(p);
+  const again = computeFanoutMerge(r.content, forks, { newId: 'both2', now: 't2' });
+  assert.equal(again.changed, false); // and the merge converges
+});
+
+test('the settings walk stops at real history, not just at the tail edge', () => {
+  // An assistant entry between the prompt and the branch point is history:
+  // the prompt must attach to IT, and it must stay un-reparented.
+  const forkX = file(
+    { ...header, parentSession: '/root.jsonl' },
+    ...chain,
+    msg('extra', 'a0', 'assistant', 'an answer the root never saw', { model: 'model-a' }),
+    mc('mcx', 'extra', 'model-a'),
+    msg('prx', 'mcx', 'user', 'question'),
+    msg('anx', 'prx', 'assistant', 'answer', { model: 'model-a' }),
+  );
+  const r = computeFanoutMerge(root, [forkX], { newId: 'b', now: 't' });
+  const p = parentsOf(r.content);
+  assert.equal(p.get('extra'), 'a0'); // backfilled, not dragged under the prompt
+  assert.equal(p.get('prx'), 'extra');
+  assert.equal(p.get('mcx'), 'prx');
+  assert.equal(p.get('anx'), 'mcx');
+  assertAcyclic(p);
+});

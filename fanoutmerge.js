@@ -47,6 +47,23 @@ function parseLines(raw) {
 function entryId(d) { return d && d.type !== 'session' && typeof d.id === 'string' ? d.id : null; }
 function parentOf(d) { return (d && d.parentId) || null; }
 function isUserMessage(d) { return !!(d && d.type === 'message' && d.message && d.message.role === 'user'); }
+// Bridge entries are machinery with a user role: the merge stage writes
+// "N models answered my last message in parallel." and the both entry carries
+// its marker comment. A fork whose copied history holds a bridge must never
+// mistake it for the fan-out prompt (2026-08-30, second llmfor_r corruption:
+// the bridge became "canonical", its shared id landed in droppedIds, and the
+// merge deleted the very entry the whole tree hung from).
+function isBridgeText(t) {
+  const s = String(t || '');
+  if (/<!--\s*aiconvo:(both|merge)\s*-->/.test(s)) return true;
+  return /^\d+ models answered my last message in parallel\./i.test(s.trim());
+}
+function isPromptMessage(d) { return isUserMessage(d) && !isBridgeText(textOf(d.message.content)); }
+// Start-of-run settings entries — the only things that may sit between the
+// branch point and the prompt. Anything else (an assistant answer, a tool
+// result) is real history and ends the settings walk.
+const SETTINGS_TYPES = new Set(['model_change', 'thinking_level_change', 'custom', 'label']);
+function isSettingsEntry(d) { return !!(d && SETTINGS_TYPES.has(d.type)); }
 function isAssistantText(d) {
   return !!(d && d.type === 'message' && d.message && d.message.role === 'assistant'
     && textOf(d.message.content).trim());
@@ -79,13 +96,16 @@ function splitForkTail(forkItems, rootById) {
 function restructureTail(tail, canonical) {
   const byId = new Map(tail.map(d => [d.id, d]));
   const originalParent = new Map(tail.map(d => [d.id, parentOf(d)]));
-  const prompt = tail.find(isUserMessage);
+  const prompt = tail.find(isPromptMessage);
   if (!prompt) return { canonical, dropped: null };
-  // The prompt's in-tail ancestors are the fork's start-of-run settings.
+  // The prompt's settings-only ancestors are the fork's start-of-run chain.
+  // Stop at the first non-settings ancestor: that entry is the branch point
+  // (it may sit inside the tail when the root lacks the copied history — the
+  // assembler backfills it verbatim).
   const settings = [];
   const seen = new Set([prompt.id]);
   let cur = parentOf(prompt);
-  while (cur && byId.has(cur) && !seen.has(cur)) {
+  while (cur && byId.has(cur) && !seen.has(cur) && isSettingsEntry(byId.get(cur))) {
     seen.add(cur);
     settings.push(byId.get(cur));
     cur = parentOf(byId.get(cur));
@@ -107,7 +127,9 @@ function restructureTail(tail, canonical) {
     if (!canonical) canonical = { id: prompt.id, text };
   } else {
     tail.splice(tail.indexOf(prompt), 1);
-    dropped = prompt.id;
+    // Forks share ids for copied history. Deleting the canonical id would
+    // orphan every branch that hangs from it — never record it as dropped.
+    if (prompt.id !== canonical.id) dropped = prompt.id;
   }
   return { canonical, dropped };
 }
