@@ -245,6 +245,8 @@ body.home #brand { display: none !important; }
 #projSort button { height: 26px; min-width: 26px; padding: 0 7px; border-color: transparent; border-radius: 0; background: transparent; color: var(--text-dim); font: 12px var(--font); }
 #projSort button:hover { color: var(--text); background: var(--surface-2); }
 #projSort button.on { color: var(--accent); }
+#projSort input { height: 26px; width: 120px; border: 1px solid var(--border); border-radius: 0; background: var(--surface-1); color: var(--text); padding: 0 6px; font: 12px var(--font); }
+#projSort input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 /* A home-rooted conversation is not a project. Keep its entry point visible
    on every home layout, including the portrait phone list. */
 #newLoose { display: none; }
@@ -3364,6 +3366,18 @@ function timelineLanes(items) {
 let projSortMode = localStorage.getItem('aiconvo.projSort') || 'recent';
 if (!['recent', 'alpha', 'born', 'size'].includes(projSortMode)) projSortMode = 'recent';
 let projSortAsc = null; // null = the mode's default direction
+let projFilterOn = false;   // the magnifier toggles the filter input
+let projFilterText = '';    // fuzzy query over home project names
+const projFilterActive = () => projFilterOn && !!projFilterText.trim();
+// Subsequence fuzzy match: every query character appears in order.
+function projFuzzyMatch(name) {
+  const q = projFilterText.trim().toLowerCase();
+  if (!q) return true;
+  const t = String(name || '').toLowerCase();
+  let i = 0;
+  for (const ch of q) { i = t.indexOf(ch, i); if (i < 0) return false; i += 1; }
+  return true;
+}
 const defaultProjAsc = mode => mode === 'alpha';
 let projectStats = {};        // project name → { born, size } from disk
 let projectStatsAsked = false;
@@ -3403,13 +3417,28 @@ const PROJ_SORT_DEFS = [
   ['recent', '●', 'latest activity'],
 ];
 function renderProjSortBtns() {
+  const wasFocused = document.activeElement && document.activeElement.id === 'projFilterInput';
   $('projSort').innerHTML = PROJ_SORT_DEFS.map(([id, icon, label]) => {
     const on = projSortMode === id;
     const asc = projSortAsc === null ? defaultProjAsc(id) : projSortAsc;
     return `<button data-psort="${id}" class="${on ? 'on' : ''}" title="Order projects by ${label} — click again to flip the direction">${icon}${on ? (asc ? '▴' : '▾') : ''}</button>`;
-  }).join('');
+  }).join('') +
+    `<button data-pfilter class="${projFilterOn ? 'on' : ''}" title="Filter projects — fuzzy match on the name">⌕</button>` +
+    (projFilterOn ? `<input id="projFilterInput" type="text" value="${esc(projFilterText)}" placeholder="filter projects" spellcheck="false" autocomplete="off">` : '');
+  if (projFilterOn && wasFocused) {
+    const i = $('projFilterInput');
+    if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+  }
 }
 $('projSort').addEventListener('click', e => {
+  const f = e.target.closest('[data-pfilter]');
+  if (f) {
+    projFilterOn = !projFilterOn;
+    if (!projFilterOn) projFilterText = '';
+    render();
+    if (projFilterOn) { const i = $('projFilterInput'); if (i) i.focus(); }
+    return;
+  }
   const b = e.target.closest('[data-psort]');
   if (!b) return;
   const id = b.dataset.psort;
@@ -3417,6 +3446,20 @@ $('projSort').addEventListener('click', e => {
   else { projSortMode = id; projSortAsc = null; }
   localStorage.setItem('aiconvo.projSort', projSortMode);
   render();
+});
+$('projSort').addEventListener('input', e => {
+  if (e.target.id !== 'projFilterInput') return;
+  projFilterText = e.target.value;
+  render(); // renderProjSortBtns restores the focus and the caret
+});
+$('projSort').addEventListener('keydown', e => {
+  if (e.target.id !== 'projFilterInput') return;
+  e.stopPropagation();
+  if (e.key === 'Escape') {
+    projFilterOn = false; projFilterText = '';
+    e.target.blur();
+    render();
+  }
 });
 
 function timelineProjectLanes(items) {
@@ -3438,6 +3481,7 @@ function timelineProjectLanes(items) {
   for (const c of (projectFolds.created || [])) {
     if (!c.name || byProject.has(c.name)) continue;
     if (projectFilter && projectFilter !== c.name) continue;
+    if (projFilterActive() && !projFuzzyMatch(c.name)) continue;
     if (sessions.some(s => projectOf(s) === c.name)) continue; // real lanes exist
     byProject.set(c.name, { project: c.name, latest: c.createdAt || Date.now(), count: 0, items: [], born: c.createdAt || 0 });
   }
@@ -3634,7 +3678,9 @@ function renderTimeline() {
   const list = $('list');
   const st = list.scrollTop, sl = list.scrollLeft;
   const noteHits = shown.filter(s => s.kind === 'note');
-  const convRows = shown.filter(s => s.key && s.firstTs);
+  let convRows = shown.filter(s => s.key && s.firstTs);
+  // The magnifier next to the sort buttons narrows the home rows by project.
+  if (viewKind === 'home' && projFilterActive()) convRows = convRows.filter(s => projFuzzyMatch(projectOf(s)));
   const rawRows = (showBranchRows() ? convRows : collapseFamilies(convRows)).map(s => {
     const first = Date.parse(s.firstTs), last = Date.parse(s.lastTs || s.firstTs);
     return { s, start: Math.min(first, last), end: Math.max(first, last) };
@@ -3699,7 +3745,7 @@ function renderTimeline() {
   const defs = `<defs><pattern id="selHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="var(--bg)"/><line x1="0" y1="0" x2="0" y2="5" stroke="var(--text)" stroke-width="1.6"/></pattern></defs>`;
   list.innerHTML = notes + (rows.length ? `<div class="timeline" style="width:${chartW}px;height:${chartH}px">${projectLabelsHtml(pos)}${svgTagFor(list, chartW, chartH)}${defs}${projectRowsSvg(pos, chartW)}${daysSvg}${nowLine}${marks}${glyphs}</svg></div>` : `<div class="empty">${searchMode ? 'no matches. try different words.' : 'no conversations match.'}</div>`);
   // Order buttons live in the top-left gutter of the home project chart.
-  const showSort = viewKind === 'home' && pos && pos.type === 'project' && rows.length > 0;
+  const showSort = viewKind === 'home' && pos && pos.type === 'project' && (rows.length > 0 || projFilterOn);
   $('projSort').hidden = !showSort;
   if (showSort) { renderProjSortBtns(); ensureProjectStats(); }
   applyProjectRowHl();
