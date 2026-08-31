@@ -11037,6 +11037,47 @@ async function shutdownGracefully() {
 process.on('SIGTERM', () => { shutdownGracefully(); });
 process.on('SIGINT', () => { shutdownGracefully(); });
 
+// ---------- speech preview relay ----------
+// The live dictation preview is a WebSocket to the GPU speech stage. Phones
+// and HTTPS clients cannot reach that LAN address (Tailscale routes only to
+// this laptop; wss: from an HTTPS page cannot use a plain-ws LAN target), so
+// the browser connects to this same-origin path and the server pipes bytes
+// both ways. No frame parsing: a relay only needs the raw TCP stream.
+function speechStreamUpgrade(req, socket, head) {
+  const u = new URL(req.url, 'http://x');
+  if (u.pathname !== '/api/speech/stream') { socket.destroy(); return; }
+  if (LAN_TOKEN && !isLocalRequest(req) && !hasLanToken(req)) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  const target = new URL(SPEECH_URL);
+  const upstream = net.connect(Number(target.port) || 80, target.hostname);
+  const drop = () => { try { socket.destroy(); } catch {} try { upstream.destroy(); } catch {} };
+  upstream.on('connect', () => {
+    const lines = [
+      'GET /stream HTTP/1.1',
+      `Host: ${target.host}`,
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+    ];
+    for (const name of ['sec-websocket-key', 'sec-websocket-version', 'sec-websocket-protocol', 'sec-websocket-extensions']) {
+      if (req.headers[name]) lines.push(name + ': ' + req.headers[name]);
+    }
+    upstream.write(lines.join('\r\n') + '\r\n\r\n');
+    if (head && head.length) upstream.write(head);
+    socket.pipe(upstream);
+    upstream.pipe(socket);
+  });
+  upstream.on('error', drop);
+  socket.on('error', drop);
+  upstream.setTimeout(0);
+  socket.setTimeout(0);
+  socket.setNoDelay(true);
+  upstream.setNoDelay(true);
+}
+server.on('upgrade', speechStreamUpgrade);
+
 server.listen(PORT, HOST, () => {
   console.log(`aiconvo → http://localhost:${PORT}`);
   if (HOST !== '127.0.0.1' && HOST !== '::1') {
@@ -11044,7 +11085,9 @@ server.listen(PORT, HOST, () => {
     console.log(`aiconvo LAN token file → ${LAN_TOKEN_FILE}`);
     try {
       const tls = ensureLanTls();
-      https.createServer(tls, (req, res) => server.emit('request', req, res)).listen(TLS_PORT, HOST, () => {
+      const tlsServer = https.createServer(tls, (req, res) => server.emit('request', req, res));
+      tlsServer.on('upgrade', speechStreamUpgrade);
+      tlsServer.listen(TLS_PORT, HOST, () => {
         for (const ip of lanAddresses()) console.log(`aiconvo PWA → https://${ip}:${TLS_PORT}/?token=${LAN_TOKEN}`);
         console.log('Install the tablet icon from the HTTPS URL: browser menu → Add to Home screen.');
       });

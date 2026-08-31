@@ -11084,8 +11084,10 @@ async function startBrowserAgentSpeech() {
     };
     window._agentBrowserSpeech = state;
     try {
+      // Same origin: the server relays to the speech stage. A direct LAN
+      // address here breaks phones on Tailscale and every HTTPS page.
       const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(scheme + '//192.168.2.24:8078/stream');
+      const ws = new WebSocket(scheme + '//' + location.host + '/api/speech/stream');
       ws.binaryType = 'arraybuffer';
       state.ws = ws;
       ws.onopen = () => {
