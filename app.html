@@ -2821,7 +2821,7 @@ function agentsPopKeydown(e) {
   if (e.key === 'Enter') {
     e.preventDefault();
     const row = selectAgentRow(agentsSelectedKey, false);
-    if (row) { toggleAgents(false); open(row.dataset.key); }
+    if (row) { toggleAgents(false); open(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined); }
     return true;
   }
   return true;
@@ -2860,7 +2860,8 @@ $('agentsPop').onclick = async e => {
   const row = e.target.closest('.ag-row[data-key]');
   if (!row || !row.dataset.key) return;
   toggleAgents(false);
-  open(row.dataset.key);
+  // An unread reply opens at the start of the answer, ready to read.
+  open(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined);
 };
 
 // ---- index + filtering ----
@@ -11644,9 +11645,19 @@ async function renderConv(scroll) {
     `<div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
     (offNewest ? `<div class="tracebanner">⑂ you follow an older branch — new messages continue from its end <button id="traceReset">back to newest</button></div>` : '') +
     agentComposerHtml(d);
+  // 'reply' lands on the START of the newest assistant answer, so an unread
+  // result is read from its first line instead of its tail.
+  const replyAnchorTop = () => {
+    const list = $('view').querySelectorAll('#conversationTranscript .msg.assistant');
+    const el = list.length ? list[list.length - 1] : null;
+    if (!el) return null;
+    const v = $('view');
+    return Math.max(0, el.getBoundingClientRect().top - v.getBoundingClientRect().top + v.scrollTop - 12);
+  };
   // Land provisionally NOW: if any wiring below throws, or the browser
   // squeezes in a paint, a bottom-bound reader never sees the top flash.
   if (scroll == null || scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
+  else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
   try {
   if ($('traceReset')) $('traceReset').onclick = () => { traceLeaves.delete(d.key); renderConv('bottom'); };
   $('view').querySelectorAll('[data-pill-go]').forEach(b => b.onclick = () => {
@@ -11701,6 +11712,7 @@ async function renderConv(scroll) {
     else if (pillEl) pillEl.scrollIntoView({ block: 'center' });
     else if (scroll === 'top') $('view').scrollTop = 0;
     else if (scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
+    else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
     else if (scroll === 'compare' || (typeof scroll === 'string' && scroll.startsWith('compare:'))) {
       const wanted = typeof scroll === 'string' && scroll.startsWith('compare:') ? scroll.slice(8) : '';
       const row = wanted ? $('view').querySelector(`.cmp-row[data-cmp-node="${CSS.escape(wanted)}"]`) : null;
@@ -11723,6 +11735,23 @@ async function renderConv(scroll) {
       im.addEventListener('load', () => {
         const v = $('view');
         if (Date.now() < until && v.scrollHeight - v.scrollTop - v.clientHeight < v.clientHeight) v.scrollTop = v.scrollHeight;
+      }, { once: true });
+    }
+  }
+  // A reply landing must survive late image loads above it. Re-anchor for a
+  // short window — but only while the reader has not scrolled away, so this
+  // never captures a scroll the user started.
+  if (scroll === 'reply') {
+    const until = Date.now() + 2500;
+    let lastSet = $('view').scrollTop;
+    for (const im of $('view').querySelectorAll('img')) {
+      if (im.complete) continue;
+      im.addEventListener('load', () => {
+        const v = $('view');
+        if (Date.now() > until) return;
+        if (Math.abs(v.scrollTop - lastSet) > 4) return; // the reader moved
+        const t = replyAnchorTop();
+        if (t != null) { v.scrollTop = t; lastSet = t; }
       }, { once: true });
     }
   }
