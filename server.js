@@ -5103,13 +5103,43 @@ function claudeBin() {
     || 'claude';
 }
 
-function agentEnv() {
-  const extra = [
+// Build the PATH agents run with. User tool dirs go first; system dirs go
+// last so they never shadow what the service already has. On NixOS this
+// matters: /run/wrappers/bin (setuid sudo, ping, mount…) must stay ahead of
+// /run/current-system/sw/bin, whose sudo is the unwrapped binary and refuses
+// to run. Every dir appears once, so the result is idempotent: feeding the
+// output back in as process.env.PATH yields the same string. pisdk.mergeEnv
+// depends on that to stop rewriting process.env after the first call.
+function agentPath(current) {
+  const exists = d => { try { return fs.existsSync(d); } catch { return false; } };
+  const userDirs = [
     path.join(os.homedir(), '.local/bin'),
     path.join(os.homedir(), '.nvm/versions/node/v22.23.1/bin'),
+  ].filter(exists);
+  const systemDirs = [
+    '/run/wrappers/bin',          // NixOS setuid wrappers; must precede sw/bin
     '/run/current-system/sw/bin', // NixOS: xdg-open, git… live here
     '/snap/bin',
-  ].filter(d => fs.existsSync(d));
+  ].filter(exists);
+  const base = (current || '/usr/bin:/bin').split(':').filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const d of [...userDirs, ...base, ...systemDirs]) {
+    if (seen.has(d)) continue;
+    seen.add(d);
+    out.push(d);
+  }
+  // Enforce the NixOS invariant even when the inherited PATH had it wrong.
+  const w = out.indexOf('/run/wrappers/bin');
+  const s = out.indexOf('/run/current-system/sw/bin');
+  if (w > s && s >= 0) {
+    out.splice(w, 1);
+    out.splice(s, 0, '/run/wrappers/bin');
+  }
+  return out.join(':');
+}
+
+function agentEnv() {
   const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
   const xauthority = process.env.XAUTHORITY
     || firstExisting([
@@ -5121,7 +5151,7 @@ function agentEnv() {
     HOME: os.homedir(),
     DISPLAY: process.env.DISPLAY || ':0',
     ...(xauthority ? { XAUTHORITY: xauthority } : {}),
-    PATH: [...extra, process.env.PATH || '/usr/bin:/bin'].join(':'),
+    PATH: agentPath(process.env.PATH),
   };
 }
 

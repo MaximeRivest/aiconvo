@@ -107,11 +107,22 @@ function sdkInfo() {
 
 // The SDK runs in the server process, so provider keys and tool spawning
 // use the server environment. Merge the agent environment the terminal
-// launches get (PATH with nvm/local bins, DISPLAY) into this process once.
+// launches get (PATH with nvm/local bins, DISPLAY) into this process.
+// agentEnv() derives PATH from process.env.PATH, so this must not grow it:
+// agentPath() is idempotent (every dir once, fixed order), and PATH is
+// only ever written once per process as a second guard. Before that guard,
+// each pi run prepended three dirs and after ~50 runs PATH had 150+
+// entries with /run/current-system/sw/bin ahead of /run/wrappers/bin,
+// which broke sudo for every agent shell.
+let pathMerged = false;
 function mergeEnv(env) {
   if (!env) return;
-  for (const k of ['PATH', 'DISPLAY', 'XAUTHORITY', 'HOME']) {
+  for (const k of ['DISPLAY', 'XAUTHORITY', 'HOME']) {
     if (env[k] && process.env[k] !== env[k]) process.env[k] = env[k];
+  }
+  if (env.PATH && !pathMerged) {
+    pathMerged = true;
+    if (process.env.PATH !== env.PATH) process.env.PATH = env.PATH;
   }
 }
 
