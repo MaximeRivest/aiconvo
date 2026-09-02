@@ -14,11 +14,14 @@ const readline = require('readline');
 const net = require('net');
 const { pathToFileURL } = require('url');
 const { execFile, execFileSync, spawn } = require('child_process');
+const zlib = require('zlib');
 const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const settingsLib = require('./settings.js');
+const snippetsLib = require('./snippets.js');
 const { openSearchIndex, SearchIndex } = require('./searchindex.js');
 const foldsLib = require('./projectfolds.js');
 const areasLib = require('./areas.js');
+const gitmeta = require('./gitmeta.js');
 const { agentPath } = require('./agentpath.js');
 const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
@@ -149,11 +152,19 @@ try { index = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf8')); } catch { index =
 // Atomic write: temp file + rename. The temp name must be unique per call:
 // document regen writes several files in one folder at the same time, and a
 // shared Date.now() name made the second rename lose its temp file.
+// With { sync: true } the temp file is fsynced before the rename, so a power
+// loss right after the call cannot leave an empty file under the final name.
+// Caches skip the fsync (they are rebuilt from the transcripts anyway).
 let atomicWriteSeq = 0;
-async function writeFileAtomic(p, data) {
+async function writeFileAtomic(p, data, { sync = false } = {}) {
   const tmp = p + '.tmp-' + process.pid + '-' + (++atomicWriteSeq) + '-' + Math.random().toString(36).slice(2, 8);
   try {
-    await fsp.writeFile(tmp, data);
+    if (sync) {
+      const fh = await fsp.open(tmp, 'w');
+      try { await fh.writeFile(data); await fh.sync(); } finally { await fh.close(); }
+    } else {
+      await fsp.writeFile(tmp, data);
+    }
     await fsp.rename(tmp, p);
   } catch (e) {
     await fsp.unlink(tmp).catch(() => {});
@@ -540,7 +551,7 @@ async function indexFile(source, relPath, stat) {
     scheduleProjectFoldRefresh(meta.cwd);
     await writeFileAtomic(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages, entryParents }));
     saveIndexSoon();
-    broadcast({ type: 'update', key, ...entry });
+    broadcast({ type: 'update', key, ...entry, project: projectNameOf(entry.cwd, key) });
     markLeafDirty(key, prev, entry, stat.mtimeMs);
     if (searchIdx) {
       try {
@@ -589,45 +600,170 @@ async function fullScan() {
     }
   }
   for (const key of Object.keys(index)) {
-    if (!seen.has(key)) {
-      delete index[key];
-      fsp.unlink(cachePathFor(key)).catch(() => {});
-      if (searchIdx) try { searchIdx.removeConversation(key); } catch {}
-      saveIndexSoon();
-    }
+    if (!seen.has(key)) dropIndexed(key);
   }
   console.log(`scan done: ${Object.keys(index).length} conversations, ${n} (re)indexed`);
   scheduleTimelineTitles();
 }
 
+// A transcript left the disk: forget it everywhere (index, parse cache,
+// search). Shared by the scan, the watcher, and the drift sweep.
+function dropIndexed(key) {
+  if (!index[key]) return;
+  delete index[key];
+  fsp.unlink(cachePathFor(key)).catch(() => {});
+  if (searchIdx) try { searchIdx.removeConversation(key); } catch {}
+  saveIndexSoon();
+}
+
+// Live re-index scheduling.
+//
+// This is a trailing-edge THROTTLE, not a debounce. The old 1.5 s quiet
+// timer restarted on every write, so a terminal agent that streamed tool
+// output for a minute produced no transcript update for that minute. Now:
+//  - the first change is indexed WATCH_SETTLE_MS after the last write;
+//  - while writes keep coming, the file is still re-indexed at least every
+//    WATCH_MAX_WAIT_MS (stretched to 3x the last parse time, so a 50 MB
+//    transcript cannot pin a core);
+//  - one parse per file at a time; a call that lands mid-parse runs after
+//    it, never alongside it (the hosted-run finisher and the fan-out merge
+//    use the same queue, so they can no longer race the watcher);
+//  - a stat equal to the index (same mtime and size) is not parsed again.
+//    The finisher indexes, then the watcher fires for the same bytes: that
+//    second parse, cache write, and broadcast are gone.
+const WATCH_SETTLE_MS = 250;
+const WATCH_MAX_WAIT_MS = 1200;
+const pending = new Map();     // key → { timer, firstAt }
+const indexing = new Map();    // key → Promise: tail of this file's parse queue
+const parseCostMs = new Map(); // key → duration of the last parse
+
+function splitKey(key) {
+  const i = key.indexOf(':');
+  return [key.slice(0, i), key.slice(i + 1)];
+}
+
+function scheduleIndex(key) {
+  const now = Date.now();
+  let p = pending.get(key);
+  if (!p) { p = { firstAt: now, timer: null }; pending.set(key, p); }
+  clearTimeout(p.timer);
+  const maxWait = Math.max(WATCH_MAX_WAIT_MS, (parseCostMs.get(key) || 0) * 3);
+  const delay = Math.max(0, Math.min(WATCH_SETTLE_MS, p.firstAt + maxWait - now));
+  p.timer = setTimeout(() => { pending.delete(key); reindexIfChanged(key); }, delay);
+}
+
+// Stat the file; parse only when the bytes differ from what the index holds.
+// Resolves after THIS call's pass ran (or was skipped as unchanged), so a
+// caller that needs the index fresh before it continues can await it.
+function reindexIfChanged(key) {
+  const [source, relPath] = splitKey(key);
+  const pass = async () => {
+    const baseDir = SOURCES[source];
+    if (!baseDir) return;
+    let stat;
+    try { stat = await fsp.stat(path.join(baseDir, relPath)); }
+    catch (e) { if (e.code === 'ENOENT') dropIndexed(key); else console.error('reindex stat failed:', key, e.message); return; }
+    const cur = index[key];
+    if (cur && cur.v === CACHE_VERSION && cur.mtimeMs === stat.mtimeMs && cur.size === stat.size) return;
+    const t0 = Date.now();
+    await indexFile(source, relPath, stat);
+    parseCostMs.set(key, Date.now() - t0);
+  };
+  const tail = (indexing.get(key) || Promise.resolve()).then(pass)
+    .catch(e => console.error('reindex failed:', key, e.message));
+  indexing.set(key, tail);
+  tail.finally(() => { if (indexing.get(key) === tail) indexing.delete(key); });
+  return tail;
+}
+
+// Recursive watch built from one plain inotify watch per directory.
+// Node's own { recursive: true } follows files by inode on Linux: after a
+// tmp-file + rename replacement it never reports that path again (verified
+// on Node 22: every later append is silent). The fan-out merge rewrites the
+// parent transcript exactly that way, so live updates for that conversation
+// froze until a restart. A directory watch reports children by NAME, so it
+// survives any rename, and atomic writes stay allowed everywhere.
+// Directories that appear later get their own watch; directories that
+// vanish drop theirs. Files already inside a newly watched directory are
+// handed to onFile once (the scheduler skips unchanged bytes).
+function watchTree(baseDir, onFile) {
+  const watchers = new Map(); // absolute directory → FSWatcher
+  const remove = dir => {
+    for (const [d, w] of watchers) {
+      if (d === dir || d.startsWith(dir + path.sep)) { w.close(); watchers.delete(d); }
+    }
+  };
+  const add = dir => {
+    if (watchers.has(dir)) return;
+    let w;
+    try {
+      w = fs.watch(dir, (event, name) => {
+        if (!name) return;
+        const abs = path.join(dir, name);
+        const rel = path.relative(baseDir, abs);
+        if (isMainTranscript(rel)) { onFile(rel); return; }
+        // Only a rename (create, delete, move) can change the directory set.
+        if (event !== 'rename') return;
+        fs.stat(abs, (err, st) => {
+          if (err) { if (watchers.has(abs)) remove(abs); return; }
+          if (st.isDirectory()) add(abs);
+        });
+      });
+    } catch (e) { console.error('watch failed:', dir, e.message); return; }
+    w.on('error', () => remove(dir));
+    watchers.set(dir, w);
+    fs.readdir(dir, { withFileTypes: true }, (err, entries) => {
+      if (err) return;
+      for (const e of entries) {
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) add(abs);
+        else if (e.isFile()) { const rel = path.relative(baseDir, abs); if (isMainTranscript(rel)) onFile(rel); }
+      }
+    });
+  };
+  add(baseDir);
+  return { close: () => remove(baseDir), count: () => watchers.size };
+}
+
 // Watcher: re-index a file shortly after it changes.
-const pending = new Map();
+const treeWatchers = new Map(); // source → watchTree handle
 function watch() {
   for (const [source, baseDir] of Object.entries(SOURCES)) {
     if (!fs.existsSync(baseDir)) continue;
-    try {
-      fs.watch(baseDir, { recursive: true }, (event, filename) => {
-        if (!filename || !isMainTranscript(filename)) return;
-        const key = source + ':' + filename;
-        clearTimeout(pending.get(key));
-        pending.set(key, setTimeout(async () => {
-          pending.delete(key);
-          try {
-            const stat = await fsp.stat(path.join(baseDir, filename));
-            await indexFile(source, filename, stat);
-          } catch {
-            delete index[key];
-            fsp.unlink(cachePathFor(key)).catch(() => {});
-            if (searchIdx) try { searchIdx.removeConversation(key); } catch {}
-            saveIndexSoon();
-          }
-        }, 1500));
-      });
-      console.log('watching', baseDir);
-    } catch (e) {
-      console.error('watch failed:', baseDir, e.message);
-    }
+    treeWatchers.set(source, watchTree(baseDir, rel => scheduleIndex(source + ':' + rel)));
+    console.log('watching', baseDir);
   }
+  setInterval(() => { sweepIndexDrift().catch(e => console.error('drift sweep failed:', e.message)); }, DRIFT_SWEEP_MS);
+}
+
+// Safety net under the watcher. Recursive fs.watch on Linux stops reporting
+// a file once a rename replaced its inode (verified on Node 22: appends after
+// the rename emit nothing), and any missed event used to leave a transcript
+// stale until its next write. Every DRIFT_SWEEP_MS, stat every indexed file
+// and hand the ones whose mtime or size drifted to the same scheduler. The
+// stats are async and yield every 64 files; ~2000 files cost a few ms.
+const DRIFT_SWEEP_MS = 20000;
+let driftSweepRunning = false;
+async function sweepIndexDrift() {
+  if (driftSweepRunning) return;
+  driftSweepRunning = true;
+  const t0 = Date.now();
+  let drifted = 0, i = 0;
+  try {
+    for (const key of Object.keys(index)) {
+      const e = index[key];
+      if (!e || pending.has(key) || indexing.has(key)) continue;
+      const [source, relPath] = splitKey(key);
+      const baseDir = SOURCES[source];
+      if (!baseDir) continue;
+      let stat;
+      try { stat = await fsp.stat(path.join(baseDir, relPath)); }
+      catch (err) { if (err.code === 'ENOENT') dropIndexed(key); continue; }
+      if (e.mtimeMs !== stat.mtimeMs || e.size !== stat.size) { drifted++; scheduleIndex(key); }
+      if ((++i & 63) === 0) await new Promise(r => setImmediate(r));
+    }
+  } finally { driftSweepRunning = false; }
+  if (drifted) console.log(`drift sweep: ${drifted} file(s) changed without a watch event (${Date.now() - t0} ms)`);
 }
 
 // ---------- search ----------
@@ -1463,8 +1599,7 @@ async function branchSession(key, nodeId) {
     // Refresh the index and the parse cache NOW: the next fetch must already
     // fold the old continuation as an other branch. Waiting for the file
     // watcher leaves a stale transcript for a debounce beat.
-    try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(absPath)); }
-    catch (e) { console.error('post-branch reindex failed:', e.message); }
+    await reindexIfChanged(key);
     return { ok: true, key, node: nodeId };
   });
 }
@@ -1937,7 +2072,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     job.uiRequests = [];
     if (error) job.error = error;
     job.finishedAt = Date.now();
-    try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
+    await reindexIfChanged(key);
     if (status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
     endLiveRunTail(job.id);
     jobChanged(job);
@@ -2000,7 +2135,7 @@ function markFanoutFork(key, fanout) {
   saveIndexSoon();
   // Correct the eager indexNewSessionFile update: clients remove this
   // temporary backing conversation as soon as its group identity is known.
-  broadcast({ type: 'update', key, ...e });
+  broadcast({ type: 'update', key, ...e, project: projectNameOf(e.cwd, key) });
 }
 
 async function startFanOut(key, { node, models, message, images, force, context }) {
@@ -2075,8 +2210,7 @@ async function reintegrateFanout(rootKey, fanoutId) {
       if (searchIdx) try { searchIdx.removeConversation(k); } catch {}
     }
     saveIndexSoon();
-    try { await indexFile(entry.source, rootKey.slice(entry.source.length + 1), await fsp.stat(rootPath)); }
-    catch (e) { console.error('post-reintegration reindex failed:', e.message); }
+    await reindexIfChanged(rootKey);
     return { bothId };
   });
 }
@@ -2200,9 +2334,7 @@ async function ensureBothBridge(key, node) {
     const raw = await fsp.readFile(sessionPath, 'utf8');
     const nl = !raw || raw.endsWith('\n') ? '' : '\n';
     await fsp.appendFile(sessionPath, nl + JSON.stringify(both) + '\n');
-    const entry = index[key];
-    try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); }
-    catch (e) { console.error('both-bridge reindex failed:', e.message); }
+    await reindexIfChanged(key);
     return { id: both.id, existed: false };
   });
 }
@@ -2226,7 +2358,7 @@ async function setConversationModel(key, provider, modelId, force) {
   }
   if (headlessRuns.has(sessionPath)) throw new Error('A web run is active on this conversation. Wait or abort it.');
   await withSessionOp(sessionPath, () => piEng().piSetModel({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, provider, modelId));
-  try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
+  await reindexIfChanged(key);
   if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
   return { ok: true, model: provider + '/' + modelId, reopened: reopen };
 }
@@ -2250,7 +2382,7 @@ async function setConversationThinking(key, level, force) {
   }
   if (headlessRuns.has(sessionPath)) throw new Error('A web run is active on this conversation. Wait or abort it.');
   const out = await withSessionOp(sessionPath, () => piEng().piSetThinking({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, level));
-  try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(sessionPath)); } catch {}
+  await reindexIfChanged(key);
   if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
   return { ok: true, level: out.level, levels: out.levels, reopened: reopen };
 }
@@ -2541,7 +2673,7 @@ async function gitRemoteFor(root) {
   const hit = remoteUrlCache.get(root);
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.remote;
   let remote = '';
-  try { remote = (await gitText(root, ['config', '--get', 'remote.origin.url'])).trim(); } catch {}
+  try { remote = await gitmeta.readRemoteUrl(root); } catch {} // .git/config read, no spawn
   remoteUrlCache.set(root, { at: Date.now(), remote });
   return remote;
 }
@@ -4647,7 +4779,7 @@ function startDistillJob(key, data, options = {}) {
       const file = (index[key] && index[key].notePath) || noteFileFor(data, title);
       await fsp.writeFile(file, finalNote);
       if (index[key]) { index[key].notePath = file; index[key].notedAt = sourceMtime; saveIndexSoon(); }
-      broadcast({ type: 'update', key, ...index[key] });
+      broadcast({ type: 'update', key, ...index[key], project: projectNameOf(index[key].cwd, key) });
       emit({ type: 'saved', notePath: file, title: title || data.title });
     } catch (e) {
       emit({ type: 'error', error: e.message });
@@ -6036,6 +6168,50 @@ const worktreeCache = new Map();
 const GIT_REPOS_FILE = path.join(CACHE_DIR, 'git-repos.json');
 const GIT_HIST_DIR = path.join(CACHE_DIR, 'git-history');
 
+// ---- project folder stats (home Gantt "born" / "size" sort) ----
+// `born` is one stat. `size` is `du -sb` over the whole folder: ~45 GB across
+// ~100 projects on this machine, so it is cached on disk for a day and the
+// walks run two at a time. Every process start blocks the loop ~10 ms; the
+// old handler started ~100 at once and froze the server for seconds.
+const PROJECT_STATS_FILE = path.join(CACHE_DIR, 'project-stats.json');
+const PROJECT_SIZE_TTL_MS = 24 * 60 * 60 * 1000;
+let projectSizeCache = {}; // path -> { size, at }
+try { projectSizeCache = JSON.parse(fs.readFileSync(PROJECT_STATS_FILE, 'utf8')) || {}; } catch { projectSizeCache = {}; }
+let projectSizeSaveTimer = null;
+function saveProjectSizeCacheSoon() {
+  clearTimeout(projectSizeSaveTimer);
+  projectSizeSaveTimer = setTimeout(() => {
+    writeFileAtomic(PROJECT_STATS_FILE, JSON.stringify(projectSizeCache)).catch(() => {});
+  }, 1000);
+}
+function duBytes(p) {
+  return new Promise(resolve => {
+    const child = spawn('/run/current-system/sw/bin/du', ['-sb', p], { timeout: 60000 });
+    let out = '';
+    child.stdout.on('data', c => { out += c; });
+    child.on('error', () => resolve(0));
+    child.on('close', code => { const m = out.match(/^(\d+)/); resolve(code === 0 && m ? Number(m[1]) : 0); });
+  });
+}
+async function projectStatsFor(paths, wantSize) {
+  const stats = {};
+  const now = Date.now();
+  await mapLimit(paths, 2, async p => {
+    let st;
+    try { st = await fsp.stat(p); } catch { stats[p] = null; return; }
+    let size = null;
+    const hit = projectSizeCache[p];
+    if (hit && now - (hit.at || 0) < PROJECT_SIZE_TTL_MS) size = hit.size;
+    else if (wantSize) {
+      size = await duBytes(p);
+      projectSizeCache[p] = { size, at: Date.now() };
+      saveProjectSizeCacheSoon();
+    }
+    stats[p] = { born: st.birthtimeMs, size };
+  });
+  return stats;
+}
+
 function execText(file, args, options = {}) {
   return new Promise((resolve, reject) => {
     execFile(file, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 30000, ...options },
@@ -6050,10 +6226,8 @@ async function gitText(root, args) {
 async function projectGitRepositories(meta) {
   const roots = new Set();
   for (const cwd of [...new Set(meta.entries.map(({ entry }) => entry.cwd).filter(Boolean))]) {
-    try {
-      const root = (await gitText(cwd, ['rev-parse', '--show-toplevel'])).trim();
-      if (root && fs.existsSync(root)) roots.add(path.resolve(root));
-    } catch {}
+    const root = await gitRootForCwd(cwd); // cached .git walk-up, no spawn
+    if (root && fs.existsSync(root)) roots.add(root);
   }
   return [...roots].sort((a, b) => b.length - a.length);
 }
@@ -6238,15 +6412,12 @@ async function walkGitRoots(dir, depth, maxDepth, out) {
 }
 
 async function worktreeRoots(root) {
-  const dir = await resolveGitDir(root);
-  const stamp = (await stampPath(path.join(dir, 'worktrees'))) + '|' + (await stampPath(path.join(dir, 'HEAD')));
+  // File reads only (gitmeta): no `git worktree list` spawn.
+  const stamp = await gitmeta.worktreesStamp(root);
   const hit = worktreeCache.get(root);
   if (hit && hit.stamp === stamp) return hit.roots;
-  const text = await gitText(root, ['worktree', 'list', '--porcelain']).catch(() => '');
-  const roots = [];
-  for (const line of String(text).split('\n')) {
-    if (line.startsWith('worktree ')) roots.push(path.resolve(line.slice(9).trim()));
-  }
+  let roots = [];
+  try { roots = await gitmeta.listWorktrees(root); } catch {}
   const value = roots.length ? roots : [path.resolve(root)];
   worktreeCache.set(root, { stamp, roots: value });
   return value;
@@ -6257,15 +6428,11 @@ const CWD_GIT_ROOT_TTL_MS = 5 * 60 * 1000;
 async function gitRootForCwd(cwd) {
   const cached = cwdGitRootCache.get(cwd);
   if (cached && Date.now() - cached.at < CWD_GIT_ROOT_TTL_MS) return cached.root;
-  try {
-    const root = (await gitText(cwd, ['rev-parse', '--show-toplevel'])).trim();
-    const resolved = root ? path.resolve(root) : '';
-    cwdGitRootCache.set(cwd, { at: Date.now(), root: resolved });
-    return resolved;
-  } catch {
-    cwdGitRootCache.set(cwd, { at: Date.now(), root: '' });
-    return '';
-  }
+  // Walk up to `.git` instead of `git rev-parse --show-toplevel`: same answer
+  // for every checkout the server meets, and no child process.
+  const root = await gitmeta.findGitRoot(cwd);
+  cwdGitRootCache.set(cwd, { at: Date.now(), root });
+  return root;
 }
 
 async function scanGitRoots() {
@@ -6282,15 +6449,20 @@ async function scanGitRoots() {
   return found;
 }
 
-async function refreshGitRepoCard(root, prev) {
-  let head = '';
-  try { head = (await gitText(root, ['rev-parse', 'HEAD'])).trim(); } catch { return null; }
+// One card per checkout. HEAD and branch come from the .git files (no
+// spawn). `git log -1` runs only when HEAD moved since the last card, which
+// is a commit — rare next to page loads. `known` is the set of project names
+// that have conversations or a created record, computed once per pass so
+// this does not rescan the whole index per repository.
+async function refreshGitRepoCard(root, prev, known) {
+  let head = '', branch = null;
+  try { ({ head, branch } = await gitmeta.readHead(root)); } catch { return null; }
   if (!head) return null;
-  let branch = null;
-  try { branch = (await gitText(root, ['branch', '--show-current'])).trim() || null; } catch {}
-  if (prev && prev.head === head && prev.branch === branch && prev.lastTs) {
+  const project = projectNameForPath(root);
+  const hasMemory = known ? known.has(project) : !!projectMetaFor(project);
+  if (prev && prev.head === head && prev.lastTs) {
     // project recomputes every pass: a fold can re-attribute a cached card.
-    return { ...prev, head, branch, project: projectNameForPath(root), hasMemory: !!projectMetaFor(projectNameForPath(root)) };
+    return { ...prev, head, branch, project, hasMemory };
   }
   let lastTs = null, subject = '';
   try {
@@ -6301,8 +6473,7 @@ async function refreshGitRepoCard(root, prev) {
   } catch {}
   return {
     id: crypto.createHash('sha256').update(root).digest('hex').slice(0, 12),
-    root, name: path.basename(root), project: projectNameForPath(root), branch, head,
-    lastTs, subject, hasMemory: !!projectMetaFor(projectNameForPath(root)),
+    root, name: path.basename(root), project, branch, head, lastTs, subject, hasMemory,
   };
 }
 
@@ -6310,29 +6481,82 @@ function projectNameForPath(dir) {
   return projectOfEntry({ cwd: dir });
 }
 
-async function discoverGitRepos(force = false) {
-  if (!force && Date.now() - gitRepoIndexCache.at < 45000 && gitRepoIndexCache.repos.length) return gitRepoIndexCache.repos;
-  let disk = null;
-  try { disk = JSON.parse(await fsp.readFile(GIT_REPOS_FILE, 'utf8')); } catch {}
-  const now = Date.now();
-  let roots;
-  if (!force && disk && Array.isArray(disk.roots) && disk.roots.length && now - (disk.scannedAt || 0) < 10 * 60 * 1000) {
-    roots = new Set(disk.roots);
-  } else {
-    roots = await scanGitRoots();
-    disk = { ...(disk || {}), scannedAt: now, roots: [...roots] };
-  }
-  const expanded = new Set();
-  await mapLimit([...roots], 8, async root => {
-    for (const wt of await worktreeRoots(root)) expanded.add(wt);
-  });
-  const prevByRoot = new Map((disk.repos || gitRepoIndexCache.repos || []).map(repo => [repo.root, repo]));
-  const repos = (await mapLimit([...expanded], 8, root => refreshGitRepoCard(root, prevByRoot.get(root)))).filter(Boolean);
-  repos.sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || '')) || a.root.localeCompare(b.root));
-  gitRepoIndexCache = { at: now, repos };
-  fsp.writeFile(GIT_REPOS_FILE, JSON.stringify({ scannedAt: disk.scannedAt, roots: disk.roots || [...roots], repos })).catch(() => {});
-  return repos;
+// Project names that own conversations or a created record: the cheap
+// answer to "does projectMetaFor(name) exist" for a whole pass.
+function knownProjectNames() {
+  const known = new Set();
+  for (const [key, entry] of Object.entries(index)) if (entry) known.add(projectOfEntry(entry, key));
+  for (const name of Object.keys(createdProjects)) known.add(canonicalProjectName(name));
+  return known;
 }
+
+// ---- repo index: stale-while-revalidate ----
+// Readers get the last known list at once (memory, else disk). A refresh
+// runs in the background when the list is older than GIT_REPOS_FRESH_MS,
+// with one pass in flight at a time. Root discovery (the directory walk)
+// repeats every GIT_REPOS_RESCAN_MS. Only `force` (the refresh button)
+// makes a caller wait for a new pass.
+const GIT_REPOS_FRESH_MS = 5 * 60 * 1000;
+const GIT_REPOS_RESCAN_MS = 10 * 60 * 1000;
+let gitRepoDisk = null;       // { scannedAt, roots, repos } as last written
+let gitRepoRefresh = null;    // in-flight pass, or null
+let gitRepoDiskLoaded = false;
+
+async function loadGitRepoDisk() {
+  if (gitRepoDiskLoaded) return;
+  gitRepoDiskLoaded = true;
+  try { gitRepoDisk = JSON.parse(await fsp.readFile(GIT_REPOS_FILE, 'utf8')); } catch { gitRepoDisk = null; }
+  if (gitRepoDisk && Array.isArray(gitRepoDisk.repos) && gitRepoDisk.repos.length) {
+    gitRepoIndexCache = { at: Number(gitRepoDisk.refreshedAt || 0), repos: gitRepoDisk.repos };
+  }
+}
+
+async function refreshGitRepoIndex(rescan = false) {
+  if (gitRepoRefresh) return gitRepoRefresh;
+  gitRepoRefresh = (async () => {
+    const now = Date.now();
+    let disk = gitRepoDisk;
+    let roots;
+    if (!rescan && disk && Array.isArray(disk.roots) && disk.roots.length && now - (disk.scannedAt || 0) < GIT_REPOS_RESCAN_MS) {
+      roots = new Set(disk.roots);
+    } else {
+      roots = await scanGitRoots();
+      disk = { ...(disk || {}), scannedAt: now, roots: [...roots] };
+    }
+    const expanded = new Set();
+    await mapLimit([...roots], 4, async root => {
+      for (const wt of await worktreeRoots(root)) expanded.add(wt);
+    });
+    const prevByRoot = new Map(((disk && disk.repos) || gitRepoIndexCache.repos || []).map(repo => [repo.root, repo]));
+    const known = knownProjectNames();
+    // Concurrency 2: the only spawn left is `git log -1` on a moved HEAD,
+    // and each spawn still blocks the loop ~10 ms. Keep them spread out.
+    const repos = (await mapLimit([...expanded], 2, root => refreshGitRepoCard(root, prevByRoot.get(root), known))).filter(Boolean);
+    repos.sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || '')) || a.root.localeCompare(b.root));
+    gitRepoIndexCache = { at: now, repos };
+    gitRepoDisk = { scannedAt: disk.scannedAt, roots: disk.roots || [...roots], repos, refreshedAt: now };
+    fsp.writeFile(GIT_REPOS_FILE, JSON.stringify(gitRepoDisk)).catch(() => {});
+    return repos;
+  })().finally(() => { gitRepoRefresh = null; });
+  return gitRepoRefresh;
+}
+
+async function discoverGitRepos(force = false) {
+  await loadGitRepoDisk();
+  if (force) return refreshGitRepoIndex(true);
+  const age = Date.now() - gitRepoIndexCache.at;
+  if (gitRepoIndexCache.repos.length) {
+    if (age > GIT_REPOS_FRESH_MS) refreshGitRepoIndex(false).catch(e => console.error('git repo refresh', e.message));
+    return gitRepoIndexCache.repos;
+  }
+  // First run on this machine: nothing to serve yet, so build it now.
+  return refreshGitRepoIndex(false);
+}
+
+// Warm the cards a few seconds after boot, then keep them fresh on a timer,
+// so no page load has to pay for the first pass after a restart.
+setTimeout(() => { discoverGitRepos().catch(() => {}); }, 5000);
+setInterval(() => { loadGitRepoDisk().then(() => refreshGitRepoIndex(false)).catch(() => {}); }, GIT_REPOS_FRESH_MS);
 
 function gitRowsFromRepo(repo) {
   const rows = new Map();
@@ -7381,20 +7605,6 @@ function expandHomePath(p) {
 
 const sha256Hex = text => crypto.createHash('sha256').update(text).digest('hex');
 
-// In-place rewrite: truncate + write + fsync on the SAME inode. A rename
-// replacement orphans recursive fs.watch on Linux (verified empirically:
-// appends after the rename emit no events), which froze live transcript
-// updates. Transcript edits therefore write in place; the backup taken
-// before the write is the crash-recovery path.
-async function writeFileInPlace(abs, text) {
-  const fh = await fsp.open(abs, 'r+');
-  try {
-    await fh.truncate(0);
-    await fh.writeFile(text);
-    await fh.sync();
-  } finally { await fh.close(); }
-}
-
 async function editableFilePath(pathValue) {
   const abs = path.resolve(expandHomePath(pathValue));
   let st;
@@ -7406,6 +7616,9 @@ async function editableFilePath(pathValue) {
   // directories answer without spawning any git process. The full
   // discovery below is the slow fallback for unknown paths only.
   if ((gitRepoIndexCache.repos || []).some(repo => inside(repo.root))) return abs;
+  // Snippet files are user-owned prompt text; they open in the editor even
+  // when no repository or conversation covers their folder.
+  if (snippetsLib.isSnippetPath(abs)) return abs;
   for (const entry of Object.values(index)) if (inside(entry.cwd)) return abs;
   const repos = await discoverGitRepos();
   if (repos.some(repo => inside(repo.root))) return abs;
@@ -7983,12 +8196,13 @@ async function transcriptEditResponse(body) {
   await fsp.copyFile(target.abs, backup);
   target.apply(text);
   target.lines[target.lineAt] = JSON.stringify(target.d);
-  await writeFileInPlace(target.abs, target.lines.join('\n'));
+  // Atomic replace: the transcript is either the old bytes or the new bytes,
+  // never a truncated file, even if the process dies mid-write. The session
+  // watcher (watchTree) follows the path by name, so the rename does not
+  // detach live updates the way Node's recursive watcher once did.
+  await writeFileAtomic(target.abs, target.lines.join('\n'), { sync: true });
   // Reindex now: the client reloads at once and must not see the stale cache.
-  try {
-    const at = key.indexOf(':');
-    await indexFile(key.slice(0, at), key.slice(at + 1), await fsp.stat(target.abs));
-  } catch {}
+  await reindexIfChanged(key);
   let reopened = false;
   if (running) {
     try { await openConversationInTerminal(key, { focus: true }); reopened = true; }
@@ -8497,6 +8711,7 @@ function includeFlag(include, name) {
 // set. aiconvo only reads and writes the same JSON files with the same
 // validation, so the TUI and this UI stay one source of truth.
 const MODES_DIR = path.join(os.homedir(), '.pi', 'agent', 'modes');
+const SNIPPET_USES_FILE = path.join(CACHE_DIR, 'snippet-uses.json');
 const MODE_SECTIONS = ['available_tools', 'custom_tools_note', 'guidelines', 'pi_docs', 'append_prompt', 'project_context', 'skills', 'date', 'cwd'];
 const BUILTIN_MODES = [
   { key: 'coding', label: 'Coding', appendix: 'Focus on concise, practical coding help.' },
@@ -8971,7 +9186,7 @@ async function startProjectConversation(options) {
         else if (handle.uiAutoCancelled) { job.status = 'done'; job.statusText = 'settled · ' + handle.uiAutoCancelled + ' unanswered dialog(s) cancelled'; }
         else { job.status = 'done'; job.statusText = 'settled'; }
         job.finishedAt = Date.now();
-        try { await indexFile(entry.source, key.slice(entry.source.length + 1), await fsp.stat(begun.file)); } catch {}
+        await reindexIfChanged(key);
         if (job.status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
         endLiveRunTail(job.id);
         jobChanged(job);
@@ -9598,10 +9813,78 @@ async function voiceListen(item) {
 }
 
 // ---------- HTTP ----------
+// ---- response helpers: gzip and cache validation ----
+// Text bodies above COMPRESS_MIN go out gzip-compressed when the client
+// accepts it (app.html 868 KB -> 229 KB, /api/sessions 1.7 MB -> 362 KB).
+// Compression runs in the zlib threadpool, never on the event loop. Streams
+// (SSE, media, downloads) do not come through here.
+const COMPRESS_MIN = 1024;
+const acceptsGzip = req => /\bgzip\b/i.test(String((req && req.headers['accept-encoding']) || ''));
+const gzipAsync = (buf, level) => new Promise((ok, bad) => zlib.gzip(buf, { level }, (e, out) => e ? bad(e) : ok(out)));
+
+function sendBody(req, res, code, headers, body, { compress = true } = {}) {
+  if (res.headersSent || res.writableEnded || res.__sending) return;
+  res.__sending = true;
+  const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
+  const h = { ...headers, Vary: 'Accept-Encoding' };
+  const plain = () => { h['Content-Length'] = buf.length; res.writeHead(code, h); res.end(buf); };
+  if (!compress || buf.length < COMPRESS_MIN || !req || !acceptsGzip(req) || req.method === 'HEAD') return plain();
+  zlib.gzip(buf, { level: 6 }, (err, out) => {
+    if (err || res.writableEnded) return plain();
+    h['Content-Encoding'] = 'gzip';
+    h['Content-Length'] = out.length;
+    res.writeHead(code, h);
+    res.end(out);
+  });
+}
+
 function json(res, code, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
-  res.end(body);
+  sendBody(res.req, res, code, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify(obj));
+}
+
+// Static files with an ETag, a 304 path, and a compressed copy kept in
+// memory per (mtime, size). `no-cache` means "always revalidate": the
+// browser keeps the bytes AND its compiled-script cache for app.html, and a
+// 304 confirms them on every load. `no-store` (the old header) threw both
+// away, so each load re-parsed ~800 KB of JavaScript.
+const staticCache = new Map(); // file -> { key, raw, gz, etag }
+const STATIC_CACHE_MAX = 16 * 1024 * 1024;
+async function sendStatic(req, res, file, type, cacheControl, { compress = true } = {}) {
+  let st;
+  try { st = await fsp.stat(file); } catch { return json(res, 404, { error: 'not found' }); }
+  const key = st.mtimeMs + ':' + st.size;
+  const etag = '"' + st.size.toString(36) + '-' + Math.round(st.mtimeMs).toString(36) + '"';
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': cacheControl, Vary: 'Accept-Encoding' });
+    return res.end();
+  }
+  const headers = { 'Content-Type': type, 'Cache-Control': cacheControl, ETag: etag };
+  if (st.size > STATIC_CACHE_MAX || !compress) {
+    return sendBody(req, res, 200, headers, await fsp.readFile(file), { compress: false });
+  }
+  let hit = staticCache.get(file);
+  if (!hit || hit.key !== key) {
+    hit = { key, raw: await fsp.readFile(file), gz: null, etag };
+    staticCache.set(file, hit);
+  }
+  if (hit.raw.length < COMPRESS_MIN || !acceptsGzip(req) || req.method === 'HEAD') {
+    return sendBody(req, res, 200, headers, hit.raw, { compress: false });
+  }
+  if (!hit.gz) hit.gz = gzipAsync(hit.raw, 9).catch(() => null);
+  const gz = await hit.gz;
+  if (!gz) return sendBody(req, res, 200, headers, hit.raw, { compress: false });
+  res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip', 'Content-Length': gz.length, Vary: 'Accept-Encoding' });
+  res.end(gz);
+}
+
+// A generated text body (themes.css) validated by a content hash.
+function sendValidated(req, res, type, cacheControl, text) {
+  const etag = '"' + crypto.createHash('sha1').update(text).digest('hex').slice(0, 16) + '"';
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': cacheControl, Vary: 'Accept-Encoding' });
+    return res.end();
+  }
+  sendBody(req, res, 200, { 'Content-Type': type, 'Cache-Control': cacheControl, ETag: etag }, text);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -9638,26 +9921,28 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-store' });
       return res.end(JSON.stringify(manifest));
     }
+    // Cache policy: `no-cache` = keep a copy, revalidate with the ETag on
+    // every load (a 304 keeps the compiled-script cache warm). Vendor
+    // bundles are immutable per version path, so a day of max-age is safe.
+    // Images and the APK are not text: no gzip.
     const staticFile = {
-      '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-store' },
-      '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-store' },
-      '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400' },
-      '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400' },
-      '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400' },
+      '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
+      '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
+      '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon.svg': { file: 'icon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
       '/vendor/mermaid.min.js': { file: 'vendor/mermaid.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
-      '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store' },
+      '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
     if (staticFile) {
-      res.writeHead(200, { 'Content-Type': staticFile.type, 'Cache-Control': staticFile.cache });
-      return res.end(await fsp.readFile(path.join(__dirname, staticFile.file)));
+      return sendStatic(req, res, path.join(__dirname, staticFile.file), staticFile.type, staticFile.cache, { compress: staticFile.compress !== false });
     }
     if (u.pathname === '/') {
-      // no-store: without it the browser heuristically caches this page and
-      // can keep serving a stale app.html after the file changes on disk.
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end(await fsp.readFile(path.join(__dirname, 'app.html')));
+      // no-cache + ETag: the browser revalidates on every load, so a changed
+      // app.html is never served stale, and an unchanged one costs a 304.
+      return sendStatic(req, res, path.join(__dirname, 'app.html'), 'text/html; charset=utf-8', 'no-cache');
     } else if (u.pathname === '/api/themes') {
       const themes = themesLib.readCustomThemes(THEMES_DIR);
       json(res, 200, {
@@ -9666,31 +9951,20 @@ const server = http.createServer(async (req, res) => {
         invalid: themes.invalid.map(({ id, file, errors }) => ({ id, file, errors })),
       });
     } else if (u.pathname === '/api/themes.css') {
-      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' });
-      res.end(themesLib.bundleCustomThemes(THEMES_DIR));
+      sendValidated(req, res, 'text/css; charset=utf-8', 'no-cache', themesLib.bundleCustomThemes(THEMES_DIR));
     } else if (u.pathname === '/api/projects/memory-index' && req.method === 'GET') {
       json(res, 200, { projects: projectMemoryIndex() });
     } else if (u.pathname === '/api/projects/stats' && req.method === 'POST') {
       // Folder birth date and disk size per project path, for home Gantt ordering.
       let body = '';
       for await (const chunk of req) body += chunk;
-      let paths = [];
-      try { paths = (JSON.parse(body).paths || []).filter(p => typeof p === 'string').slice(0, 500); } catch {}
-      const stats = {};
-      await Promise.all(paths.map(async p => {
-        try {
-          const st = await fsp.stat(p);
-          const size = await new Promise(resolve => {
-            const child = spawn('/run/current-system/sw/bin/du', ['-sb', p], { timeout: 10000 });
-            let out = '';
-            child.stdout.on('data', c => { out += c; });
-            child.on('error', () => resolve(0));
-            child.on('close', code => { const m = out.match(/^(\d+)/); resolve(code === 0 && m ? Number(m[1]) : 0); });
-          });
-          stats[p] = { born: st.birthtimeMs, size };
-        } catch { stats[p] = null; }
-      }));
-      json(res, 200, { stats });
+      let paths = [], wantSize = true;
+      try {
+        const parsed = JSON.parse(body);
+        paths = (parsed.paths || []).filter(p => typeof p === 'string').slice(0, 500);
+        if (parsed.size === false) wantSize = false;
+      } catch {}
+      json(res, 200, { stats: await projectStatsFor(paths, wantSize) });
     } else if (u.pathname === '/api/sessions') {
       // Temporary fan-out files do not enlarge the visible fork family.
       let n = 0, last = '', mt = 0;
@@ -9715,9 +9989,7 @@ const server = http.createServer(async (req, res) => {
         return f && f.size > 1 ? { key, ...e, project, family: f.primary, familySize: f.size } : { key, ...e, project };
       });
       list.sort((a, b) => (b.lastTs || '').localeCompare(a.lastTs || ''));
-      const body = JSON.stringify(list);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ETag: etag });
-      res.end(body);
+      sendBody(req, res, 200, { 'Content-Type': 'application/json; charset=utf-8', ETag: etag }, JSON.stringify(list));
     } else if (u.pathname === '/api/session') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
@@ -10493,6 +10765,42 @@ const server = http.createServer(async (req, res) => {
       writing.sort((a, b) => a.ageMs - b.ageMs);
       recent.sort((a, b) => a.ageMs - b.ageMs);
       json(res, 200, { running, writing, recent: recent.slice(0, 15), procs: agentProcsView(running) });
+    } else if (u.pathname === '/api/snippets' && req.method === 'GET') {
+      // Snippets and prompt templates visible from this conversation's cwd:
+      // pi's own prompt folders, read from disk each time (a handful of
+      // small files — no cache to go stale).
+      const key = u.searchParams.get('id');
+      let cwd = null;
+      if (key && index[key]) cwd = sessionPathsFor(key).cwd;
+      const out = snippetsLib.listSnippets({ cwd, uses: snippetsLib.loadUses(SNIPPET_USES_FILE) });
+      json(res, 200, out);
+    } else if (u.pathname === '/api/snippets' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        let dir = snippetsLib.GLOBAL_DIR;
+        if (p.scope === 'project') {
+          const key = String(p.id || '');
+          if (!key || !index[key]) throw new Error('project snippets need a conversation with a project folder');
+          dir = snippetsLib.projectDirFor(sessionPathsFor(key).cwd);
+          if (!dir) throw new Error('this conversation has no project folder — save it as a global snippet');
+        }
+        const made = await snippetsLib.createSnippet({
+          dir, name: p.name, body: p.body, description: p.description,
+          kind: p.kind, argumentHint: p.argumentHint, overwrite: p.overwrite === true,
+        });
+        json(res, 200, { ok: true, ...made, scope: p.scope === 'project' ? 'project' : 'global' });
+      } catch (e) { json(res, e.code === 'EXISTS' ? 409 : 400, { error: e.message, exists: e.code === 'EXISTS', path: e.path }); }
+    } else if (u.pathname === '/api/snippets/used' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const abs = path.resolve(expandHomePath(String(p.path || '')));
+        if (!snippetsLib.isSnippetPath(abs)) throw new Error('not a snippet path');
+        json(res, 200, await snippetsLib.bumpUse(SNIPPET_USES_FILE, abs));
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/node/commands') {
       // pi's slash commands for this conversation's cwd, for the composer
       // palette. Cached per cwd; a --no-session probe process fills it.

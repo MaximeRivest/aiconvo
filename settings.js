@@ -26,6 +26,9 @@ const DEFAULT_SETTINGS = {
   // pi theme for hosted extension views (custom TUI components rendered
   // in the browser). 'light' matches aiconvo's paper look.
   piTheme: 'light',
+  // Typed in the composer, this opens the snippet picker inline. Two
+  // semicolons: almost never in prose or code, and one key on most layouts.
+  snippetTrigger: ';;',
   // Cost analytics keeps billing classification separate from Pi's retail
   // cost estimate. Rules are provider-scoped and never contain credentials.
   usageBilling: { providerModes: {}, monthlyFees: {} },
@@ -146,8 +149,9 @@ function normalizeSettings(input) {
   const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
   const piTheme = typeof src.piTheme === 'string' && src.piTheme.trim() ? src.piTheme.trim() : DEFAULT_SETTINGS.piTheme;
   const usageBilling = normalizeUsageBilling(src.usageBilling);
+  const snippetTrigger = normalizeSnippetTrigger(src.snippetTrigger);
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger };
   }
   return {
     usePiDefault: false,
@@ -161,7 +165,16 @@ function normalizeSettings(input) {
     piEngine,
     piTheme,
     usageBilling,
+    snippetTrigger,
   };
+}
+
+// 1–4 visible characters; never a bare / or @, which already own the
+// composer's other palettes.
+function normalizeSnippetTrigger(raw) {
+  const t = typeof raw === 'string' ? raw.trim() : '';
+  if (!t || t.length > 4 || /\s/.test(t) || t === '/' || t === '@') return DEFAULT_SETTINGS.snippetTrigger;
+  return t;
 }
 
 function hasClaudeCodeCredential(data) {

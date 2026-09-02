@@ -214,7 +214,7 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 .ag-unread-dot { background: var(--accent); }
 .ag-read-dot { border: 1px solid var(--text-faint); background: transparent; }
 .ag-row .ag-dir { color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ag-row .ag-age { color: var(--text-faint); font-size: var(--fs-micro); white-space: nowrap; }
+.ag-row .ag-age { flex: 0 0 auto; color: var(--text-faint); font-size: var(--fs-micro); white-space: nowrap; }
 .ag-notifications { margin-top: 7px; border-top: 1px solid var(--border-strong); }
 .ag-notifications > summary { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; color: var(--text-dim); font-size: var(--fs-meta); list-style: none; }
 .ag-notifications > summary::-webkit-details-marker { display: none; }
@@ -458,6 +458,14 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .project-switch button:hover { background: var(--surface-1); color: var(--text); }
 .project-switch button.on { border-bottom-color: var(--accent); color: var(--text); font-weight: 700; }
 :root[data-theme-mode="binary"] .project-switch button.on { border-bottom: 4px double var(--text); }
+/* Overview toolbar: tabs left, memory status + rare actions right. One
+   row of chrome, so the title and vision above stay prose-only. */
+.ptoolbar { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; border-bottom: 1px solid var(--border-strong); margin: 0 0 var(--sp-3); }
+.ptoolbar .project-switch { margin: 0; border-bottom: 0; }
+.ptoolbar .pmemline { margin-left: auto; padding: 4px 0; }
+.ptoolbar .psep { width: 1px; height: 12px; background: var(--border); margin: 0 2px; }
+.ptoolbar + .pfolds, .ptoolbar + .pfold-suggest { margin-top: 0; }
+.pfolds, .pfold-suggest, #pFoldPanel { margin-bottom: var(--sp-3); }
 .project-code-bar { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-3); min-height: 38px; padding: 0 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
 .project-code-bar > b { font-size: var(--fs-body); }
 .project-code-bar .project-switch { margin: 0; align-self: stretch; border-bottom: 0; }
@@ -466,6 +474,16 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .project-code .ff-tree summary { padding: 2px 1px; }
 .project-code .ff-tree .ff-file { padding-top: 2px; padding-bottom: 2px; font-size: inherit; }
 .project-code .ff-tree .ff-lines { font-size: 8.5px; }
+/* project documents: the complete markdown list beside the editor */
+.project-docs .doc-view { height: 100%; min-height: 0; margin: 0; }
+.project-docs .ff-tree { font-size: var(--fs-meta); }
+.project-docs .ff-tree .pdocs-list { margin: 4px 0 0; }
+.project-docs .ff-tree .pdocs-row { padding: 6px 8px; }
+.pdocs-tools { display: flex; gap: 5px; margin-bottom: 5px; }
+.pdocs-tools input[type=search] { flex: 1; min-width: 0; margin: 0; }
+.pdocs-row.on { background: var(--accent-strong); color: var(--accent-ink); }
+.pdocs-row.on .pd-dir, .pdocs-row.on .pd-delta, .pdocs-row.on .pd-when { color: var(--accent-ink); }
+:root[data-theme-mode="binary"] .pdocs-row.on { outline: 2px solid var(--text); outline-offset: -2px; }
 /* ---- document view: aiconvo chrome around the MRMD editing surface ---- */
 .doc-view { height: calc(100vh - 82px); min-height: 400px; display: flex; flex-direction: column; margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-6)); }
 .doc-head { flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
@@ -523,7 +541,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pdocs-row .pd-name .pd-dir { color: var(--text-faint); font-weight: 400; }
 .pdocs-row .pd-delta { color: var(--accent); font-size: var(--fs-micro); white-space: nowrap; }
 .pdocs-row .pd-when { color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; }
-.pdocs-more { color: var(--text-dim); font-size: var(--fs-meta); padding: 4px 1px; }
 /* The project page reads like programming documentation: a sticky table of
    contents on the left, the document with big headings on the right. */
 .pdoclayout { display: flex; gap: var(--sp-4); align-items: flex-start; }
@@ -1412,6 +1429,18 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-thumb button { position: absolute; top: 0; right: 0; height: 18px; padding: 0 5px; font-size: 11px; }
 .agent-compose-row { display: flex; gap: var(--sp-2); align-items: center; }
 #agentAt.on { color: var(--accent); border-color: var(--accent); }
+/* snippet rows: the name, then the first line of the text it inserts */
+.slash-row.snip-new .slash-name { color: var(--text-dim); }
+.slash-meta { color: var(--text-faint); font-size: 10px; white-space: nowrap; }
+.slash-row.sel .slash-meta { color: var(--accent-ink); }
+.snip-form textarea { min-height: 120px; font-family: ui-monospace, monospace; font-size: 12.5px; line-height: 1.45; resize: vertical; }
+.snip-scope { display: flex; gap: 12px; align-items: center; }
+.snip-scope label { display: flex; gap: 4px; align-items: center; flex-direction: row; }
+.snip-list { display: flex; flex-direction: column; gap: 2px; }
+.snip-item { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.snip-item .snip-name { font-weight: 600; white-space: nowrap; }
+.snip-item .snip-desc { flex: 1 1 auto; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snip-item .snip-tag { color: var(--text-faint); font-size: 10px; white-space: nowrap; }
 .agent-mic { width: 34px; min-width: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .agent-mic[hidden] { display: none; }
 .agent-mic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: square; }
@@ -1624,7 +1653,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-compose.compose-min .think-pick, .agent-compose.compose-min .mode-pick,
   .agent-compose.compose-min .ctxmeter,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min .agent-ctx, .agent-compose.compose-min #agentAttach,
-  .agent-compose.compose-min #agentSlash, .agent-compose.compose-min #agentAt, .agent-compose.compose-min #agentTree,
+  .agent-compose.compose-min #agentSlash, .agent-compose.compose-min #agentAt, .agent-compose.compose-min #agentSnip, .agent-compose.compose-min #agentTree,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
   .agent-compose.compose-min textarea { flex: 1 1 auto; min-width: 0; min-height: 46px; height: 46px; max-height: 46px; }
   .agent-compose.compose-min .agent-compose-row { flex: 0 0 auto; }
@@ -1666,6 +1695,10 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .pdocbody { overflow-wrap: anywhere; }
   .pactions { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .pactions button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
+  /* The toolbar's status line drops under the tabs and scrolls sideways. */
+  .ptoolbar .pmemline { margin-left: 0; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px 0 8px; }
+  .ptoolbar .pmemline > * { flex: 0 0 auto; white-space: nowrap; }
+  .ptoolbar .pmemline button { min-height: 32px; }
   .pfolds { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .pfolds .fold-chip { flex: 0 0 auto; white-space: nowrap; }
   /* Note/memory reader: stack the section tree above the content. Side by
@@ -1963,10 +1996,9 @@ function unlockLandscape() {
 
 function setRouteKind(kind, crumbs) {
   // Leaving a document flushes its pending autosave and destroys the editor.
-  if (viewKind === 'doc' && kind !== 'doc' && typeof docState !== 'undefined' && docState) {
-    if (docState.dirty) autosaveDocument();
-    closeDocument();
-  }
+  // The document surfaces ('doc', 'project-docs') flush themselves when they
+  // swap one document for another.
+  if (kind !== 'doc' && kind !== 'project-docs' && typeof docState !== 'undefined' && docState) flushAndCloseDocument();
   viewKind = kind;
   // Systematic: every navigation starts at the top. #view is the scroller;
   // without this, a new view inherits the old scroll offset and opens
@@ -2047,6 +2079,13 @@ function dispatchHash(h) {
     const project = h.slice(8);
     const areaAt = project.indexOf('&area=');
     if (areaAt >= 0) return showAreaView(project.slice(0, areaAt), project.slice(areaAt + 6));
+    const docsAt = project.indexOf('&docs');
+    if (docsAt >= 0) {
+      // `&doc=` is always last: a document path may itself contain `&`.
+      const rest = project.slice(docsAt + 5);
+      const docAt = rest.indexOf('&doc=');
+      return showProjectDocuments(project.slice(0, docsAt), docAt >= 0 ? rest.slice(docAt + 5) : null);
+    }
     if (project.endsWith('&files')) return showProjectFileHistory(project.slice(0, -6));
     if (project.endsWith('&diffs')) return showProjectDiffs(project.slice(0, -6));
     if (project.endsWith('&tree')) return showProjectTree(project.slice(0, -5));
@@ -2699,14 +2738,16 @@ async function renderAgentsPop(refetch) {
     shownPids.add(pid);
     return `<button class="ag-kill" data-pid="${pid}" data-name="${esc(name || 'process')}" title="Stop this process (pid ${pid}). Web runs abort cleanly and keep partial output.">✗</button>`;
   };
+  // The full title, not the 10-char Gantt label: the row has room for it.
+  const rowTitle = s => (s && (s.title || s.timelineTitle)) || '(untitled)';
   const row = (s, key, status, pid, readState = '', working = false) => `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}" data-key="${esc(key || '')}">` +
     `<span class="src ${esc((s && s.source) || 'pi')}"><i></i></span>` +
     (readState === 'unread' ? '<span class="ag-unread-dot" title="Unread" aria-label="Unread"></span>' :
       readState === 'read' ? '<span class="ag-read-dot" title="Read" aria-label="Read"></span>' : '') +
-    `<span class="ag-main"><span class="ag-title">${esc((s && (s.timelineTitle || s.title)) || '(untitled)')}</span>` +
+    `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}">${esc(rowTitle(s))}</span>` +
     `<span class="ag-dir">${esc(shortDir((s && s.cwd) || ''))}</span></span>` +
     `<span class="ag-age">${esc(status)}</span>` +
-    kill(pid, s && (s.timelineTitle || s.title)) + `</div>`;
+    kill(pid, rowTitle(s)) + `</div>`;
   const webKeys = new Set([...activeRuns.values()].map(r => r.fanoutRootKey || r.key));
   const webGroups = new Map();
   for (const r of activeRuns.values()) {
@@ -2791,8 +2832,10 @@ function agentRows() {
 function selectAgentRow(key, scroll = true) {
   const rows = agentRows();
   if (!rows.length) { agentsSelectedKey = null; return null; }
+  // The cursor starts on the conversation that is open now. A stale or
+  // missing key must not send it to the first row.
   let row = key ? rows.find(item => item.dataset.key === key) : null;
-  if (!row) row = key ? (rows.find(item => item.dataset.key === activeRel) || rows[0]) : rows[0];
+  if (!row) row = rows.find(item => item.dataset.key === activeRel) || rows[0];
   agentsSelectedKey = row.dataset.key;
   rows.forEach(item => item.classList.toggle('kbd-selected', item === row));
   if (scroll) row.scrollIntoView({ block: 'nearest' });
@@ -2870,21 +2913,38 @@ $('agentsPop').onclick = async e => {
 // The session list is 1–2 MB. Polling it every 30s rebuilt the Gantt even
 // when nothing changed. ETag + 304 keeps RAM and CPU flat on a quiet desk.
 let sessionsEtag = '';
+// The fold map arrives on its own. The timeline never waits for it: the
+// first paint uses the sessions alone, and a changed map redraws once.
+let projectFoldsSig = '';
+function applyProjectFolds(folds) {
+  if (!folds || !folds.map) return false;
+  projectFolds = folds;
+  const sig = JSON.stringify([folds.map, folds.created, folds.areas]);
+  const changed = sig !== projectFoldsSig;
+  projectFoldsSig = sig;
+  return changed;
+}
+
 async function load() {
   if (document.hidden) return;
-  let sessRes, folds;
-  try {
-    [sessRes, folds] = await Promise.all([
-      fetch('/api/sessions', sessionsEtag ? { headers: { 'If-None-Match': sessionsEtag } } : {}),
-      fetch('/api/project-folds').then(r => r.json()).catch(() => null),
-    ]);
-  } catch { return; }
+  let foldsDone = false, foldsResult = null;
+  const foldsReq = fetch('/api/project-folds').then(r => r.json()).catch(() => null)
+    .then(f => { foldsDone = true; foldsResult = f; return f; });
+  let sessRes;
+  try { sessRes = await fetch('/api/sessions', sessionsEtag ? { headers: { 'If-None-Match': sessionsEtag } } : {}); }
+  catch { return; }
   if (!sessRes.ok && sessRes.status !== 304) return;
   const unchanged = sessRes.status === 304;
   const tag = sessRes.headers.get('ETag');
   if (tag) sessionsEtag = tag;
   if (!unchanged) sessions = await sessRes.json();
-  if (folds && folds.map) projectFolds = folds;
+  // Folds: apply now if they already landed, else when they do.
+  if (foldsDone) applyProjectFolds(foldsResult);
+  else foldsReq.then(f => {
+    if (!applyProjectFolds(f)) return;
+    refreshFilterOptions();
+    if (!searchMode && tab === 'conv') applyFilter();
+  });
   // Notes and epics paint as marks on the home timeline: keep them fresh.
   Promise.all([
     fetch('/api/notes').then(r => r.json()).catch(() => null),
@@ -2897,8 +2957,17 @@ async function load() {
     else if (Array.isArray(epics)) epicsList = epics;
     if (changed && viewKind === 'home' && !searchMode && tab === 'conv') render();
   });
+  // The list is the reconnect and tab-wake safety net for the open transcript.
+  reconcileTranscript();
   if (unchanged) return;
   projectTreeCache.clear(); // the tree may change while agents work
+  refreshFilterOptions();
+  if (!searchMode && tab === 'conv') applyFilter();
+}
+
+// The directory / project / source selects follow the session list and the
+// fold map. Current choices survive a rebuild.
+function refreshFilterOptions() {
   const dirs = [...new Set(sessions.map(s => shortDir(s.cwd)))].sort();
   const keepDir = $('dir').value, keepSrc = $('src').value, keepProject = $('ganttProject').value;
   $('dir').innerHTML = '<option value="">all directories</option>' +
@@ -2913,7 +2982,6 @@ async function load() {
   $('src').innerHTML = '<option value="">all sources</option>' +
     srcs.map(d => `<option>${esc(d)}</option>`).join('');
   $('src').value = keepSrc;
-  if (!searchMode && tab === 'conv') applyFilter();
 }
 
 function applyFilter() {
@@ -3223,6 +3291,55 @@ function famIsActive(s) { return s._famMembers ? s._famMembers.some(m => m.key =
 let runningKeys = new Set(); // keys owned by a live terminal agent (SSE 'agents')
 let serverBoot = null;       // server boot id — change after reconnect = offer reload
 const hasLiveRun = key => { for (const r of activeRuns.values()) if (r.key === key) return true; return false; };
+
+// ---- transcript freshness ----
+// One rule decides when the open transcript reloads. The server stamps every
+// index entry (and the /api/session payload) with mtimeMs + size; `current`
+// carries the version of what is on screen. Every signal — SSE update, run
+// end, SSE reconnect, tab wake, the periodic list load — calls
+// reconcileTranscript(). It reloads only when the server copy is newer than
+// the screen, only when the reader is at the live tail (otherwise it offers
+// a button), and never twice for the same bytes. This replaced four
+// hand-written if-chains with different thresholds and no recovery path.
+const TAIL_PIN_PX = 160;
+function transcriptNewer(entry, shown) {
+  if (!entry || !shown) return false;
+  const em = Number(entry.mtimeMs) || 0, sm = Number(shown.mtimeMs) || 0;
+  return em > sm || (em === sm && (Number(entry.size) || 0) !== (Number(shown.size) || 0));
+}
+function readerAtTail() {
+  const v = $('view');
+  return !!v && v.scrollHeight - v.scrollTop - v.clientHeight < TAIL_PIN_PX;
+}
+function showTranscriptReloadButton() {
+  const host = $('convHeadExtra');
+  if (!host || $('convReload')) return;
+  const b = document.createElement('button');
+  b.id = 'convReload';
+  b.textContent = '↻ new messages';
+  b.title = 'This conversation changed on disk. Reload it and jump to the end.';
+  b.onclick = () => refreshTranscript();
+  host.appendChild(b);
+}
+function refreshTranscript() {
+  const key = activeRel;
+  if (!key) return;
+  // A failed reload (network blip) must leave a way back: the button stays.
+  return open(key, 'bottom').catch(err => {
+    console.error('transcript reload failed', err);
+    if (activeRel === key) showTranscriptReloadButton();
+  });
+}
+function reconcileTranscript(entry, { force = false } = {}) {
+  if (viewKind !== 'conversation' || !current || !activeRel || current.key !== activeRel) return false;
+  if (!entry || entry.key !== activeRel) entry = sessions.find(s => s.key === activeRel);
+  if (!transcriptNewer(entry, current)) return false;
+  // A hosted run patches the live pane in place; the settled transcript
+  // lands once, on the final run event (which passes force).
+  if (hasLiveRun(activeRel) && !force) return false;
+  if (readerAtTail()) refreshTranscript(); else showTranscriptReloadButton();
+  return true;
+}
 const isWorking = s => !!(s && s.key) && (hasLiveRun(s.key) ||
   (runningKeys.has(s.key) && isActive(s)) ||
   (s.mtimeMs && Date.now() - s.mtimeMs < WORKING_MS));
@@ -3380,20 +3497,26 @@ function projFuzzyMatch(name) {
 }
 const defaultProjAsc = mode => mode === 'alpha';
 let projectStats = {};        // project name → { born, size } from disk
-let projectStatsAsked = false;
+let projectStatsAsked = '';   // '' | 'born' | 'size': the deepest level fetched
 const projStatOf = name => projectStats[name] || {};
+// Folder stats are only for the "born" and "size" sorts. "size" walks every
+// project folder on disk (du), so it is asked for only when that sort is on;
+// "born" is one stat per folder. The default "recent" sort asks for nothing.
 async function ensureProjectStats() {
-  if (projectStatsAsked || !sessions.length) return;
-  projectStatsAsked = true;
+  if (!sessions.length) return;
+  const need = projSortMode === 'size' ? 'size' : projSortMode === 'born' ? 'born' : '';
+  if (!need || projectStatsAsked === 'size' || projectStatsAsked === need) return;
+  projectStatsAsked = need;
   const paths = new Map();
   for (const s of sessions) { const p = projectOf(s); if (p !== LOOSE_PROJECT && s.cwd && !paths.has(p)) paths.set(p, s.cwd); }
   for (const c of (projectFolds.created || [])) if (c.path && !paths.has(c.name)) paths.set(c.name, c.path);
   try {
-    const r = await fetch('/api/projects/stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths: [...paths.values()] }) });
+    const r = await fetch('/api/projects/stats', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: [...paths.values()], size: need === 'size' }) });
     const d = await r.json();
     const byPath = d.stats || {};
-    for (const [name, p] of paths) if (byPath[p]) projectStats[name] = byPath[p];
-  } catch {}
+    for (const [name, p] of paths) if (byPath[p]) projectStats[name] = { ...projectStats[name], ...byPath[p] };
+  } catch { projectStatsAsked = ''; }
   render();
 }
 function sortProjectRows(projects) {
@@ -3435,7 +3558,7 @@ $('projSort').addEventListener('click', e => {
   if (f) {
     projFilterOn = !projFilterOn;
     if (!projFilterOn) projFilterText = '';
-    render();
+    renderNow();
     if (projFilterOn) { const i = $('projFilterInput'); if (i) i.focus(); }
     return;
   }
@@ -3910,7 +4033,19 @@ window.addEventListener('resize', () => {
   }, 120);
 });
 
+// render() coalesces: every caller marks the list dirty, and one draw runs
+// on the next animation frame. Boot used to draw the whole timeline six
+// times (sessions, notes, epics, repos, stats, folds each arrived and drew);
+// now those land in one frame. renderNow() is for the few callers that
+// must read the fresh DOM right after (focus into a new input).
+let renderQueued = false;
 function render() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(renderNow);
+}
+function renderNow() {
+  renderQueued = false;
   if (tab !== 'conv') return;
   updateActiveBtn();
   if (searchMode) { renderSearchResults(); renderSelbar(); return; }
@@ -6610,6 +6745,16 @@ async function showProjectDiffs(name) {
 // lazily: normal aiconvo startup never pays for the editor.
 const MRMD_DOC_SRC = '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
+// Warm the HTTP cache with the editor bundle once the app is idle, so the
+// first documents page does not wait on a 1.3 MB download. Fetch only: the
+// script is parsed when a document actually opens. Phones and data-saver
+// connections skip it.
+function prefetchDocumentEditor() {
+  if (window.mrmdDocument || mrmdDocLoad || phoneLayout()) return;
+  if (navigator.connection && navigator.connection.saveData) return;
+  const go = () => { fetch(MRMD_DOC_SRC, { priority: 'low' }).catch(() => {}); };
+  (window.requestIdleCallback || (cb => setTimeout(cb, 3000)))(go, { timeout: 15000 });
+}
 function loadMrmdDocument() {
   if (window.mrmdDocument) return Promise.resolve(window.mrmdDocument);
   if (!mrmdDocLoad) {
@@ -6801,6 +6946,15 @@ function closeDocument() {
   clearTimeout(docState.saveTimer);
   if (docState.editor) { try { docState.editor.destroy(); } catch {} }
   docState = null;
+}
+
+// Every path that replaces the editor goes through here: unsaved edits are
+// written first (autosave reads the text synchronously, before the editor
+// is destroyed), then the editor goes away.
+function flushAndCloseDocument() {
+  if (!docState) return;
+  if (docState.dirty) autosaveDocument();
+  closeDocument();
 }
 
 function docStatusLine(text) {
@@ -7066,44 +7220,120 @@ async function offerPackageInstall(dock, r, cell, docDir) {
   dock.insertAdjacentElement('afterend', fix);
 }
 
+// Agents hard-wrap prose at ~80 columns. CommonMark renders a single
+// newline inside a paragraph as a space, but the editor shows source
+// lines, so wrapped paragraphs read as ragged short lines. This joins
+// continuation lines back into their paragraph or list item. It never
+// touches front matter, fenced code, tables, headings, quotes, HTML
+// blocks, reference definitions, indented code, or hard breaks (trailing
+// double space / backslash) — for those, not joining is always safe.
+// Joining is lossless for the rendered document, but it does rewrite the
+// author's line layout, so it only runs on an explicit click.
+function unwrapHardLines(text) {
+  const lines = String(text).split('\n');
+  const out = [];
+  let joins = 0;
+  let inFront = false;
+  let fence = null;
+  // A line that starts a block no paragraph line may absorb.
+  const breaksParagraph = s =>
+    /^\s*$/.test(s) ||                                  // blank
+    /^ {0,3}#{1,6}(\s|$)/.test(s) ||                    // ATX heading
+    /^ {0,3}(`{3,}|~{3,})/.test(s) ||                   // fence
+    /^ {0,3}>/.test(s) ||                               // blockquote
+    /^ {0,3}([*+-]|\d{1,9}[.)])(\s|$)/.test(s) ||       // list marker
+    /^\s*\|/.test(s) ||                                 // table row
+    (/^ {0,3}[-:| ]+$/.test(s) && s.includes('|') && s.includes('-')) || // table delimiter row without leading pipe
+    /^ {0,3}(=+|-+)\s*$/.test(s) ||                     // setext underline
+    /^ {0,3}([*_])(\s*\1){2,}\s*$/.test(s) ||           // thematic break
+    /^ {0,3}<\S/.test(s) ||                             // HTML block
+    /^ {0,3}\[[^\]]*\]:/.test(s) ||                     // reference definition
+    /^ {4,}/.test(s);                                   // indented code / deep continuation
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (i === 0 && /^---\s*$/.test(line)) { inFront = true; out.push(line); continue; }
+    if (inFront) { out.push(line); if (/^(---|\.\.\.)\s*$/.test(line)) inFront = false; continue; }
+    if (fence) {
+      out.push(line);
+      const close = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const open = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (open) { fence = open[1]; out.push(line); continue; }
+    // Lines that may absorb continuations: plain prose and list items.
+    const listItem = /^ {0,3}([*+-]|\d{1,9}[.)])\s+\S/.test(line);
+    if (breaksParagraph(line) && !listItem) { out.push(line); continue; }
+    let acc = line;
+    while (i + 1 < lines.length) {
+      if (/(\s{2}|\\)$/.test(acc)) break;               // hard line break stays
+      if (breaksParagraph(lines[i + 1])) break;
+      acc = acc.replace(/\s+$/, '') + ' ' + lines[i + 1].trim();
+      joins++;
+      i++;
+    }
+    out.push(acc);
+  }
+  return { text: out.join('\n'), joins };
+}
+
+// The standalone document view (a markdown link from a conversation, or a
+// #doc= hash). Project documents normally open inside the project's
+// documents page instead, where the complete list sits beside the editor.
 async function openDocument(docPath, project = null) {
   if (!docPath) return;
   markSettingsClosed();
-  closeDocument();
+  flushAndCloseDocument();
   if (project) projectOverviewName = project;
   const name = String(docPath).split('/').pop();
   setRoute('doc', 'doc=' + encodeURIComponent(docPath) + (project ? '&' + encodeURIComponent(project) : ''),
     project ? [crumbHome(), crumbProject(project), { label: '☰ ' + name, title: docPath }]
       : [crumbHome(), { label: '☰ ' + name, title: docPath }]);
-  $('view').innerHTML = `<div class="doc-view">
-    <div class="doc-head">
-      ${project ? `<button id="docBack">← documents</button>` : ''}
+  $('view').innerHTML = `<div class="doc-view">${documentHeadHtml(docPath, project ? '← documents' : null)}
+    <div class="doc-editor-host"><div id="docEditor"></div></div>
+  </div>`;
+  if ($('docBack')) $('docBack').onclick = () => showProjectDocuments(project, docPath);
+  await mountDocumentEditor(docPath, project);
+}
+
+// The editor head bar. Ids are shared with the project documents page, so
+// docStatusLine / commitDocument / reloadDocumentFromDisk work in both.
+function documentHeadHtml(docPath, back) {
+  const name = String(docPath).split('/').pop();
+  return `<div class="doc-head">
+      ${back ? `<button id="docBack">${esc(back)}</button>` : ''}
       <b class="doc-title" title="${esc(docPath)}">${esc(name)}</b>
       <span class="dim" id="docStatus">loading…</span>
       <button id="docReload" hidden title="The disk file changed — reload it (your unsaved edits are lost)">reload from disk</button>
       <button id="docRun" title="Run the code block at the cursor through rat · Ctrl+Enter (Shift+Enter runs and advances)">▶ run cell</button>
       <button id="docRunAll" title="Run every code cell, top to bottom, in one kernel — stops at the first error">▶▶ run all</button>
+      <button id="docUnwrap" hidden title="This file has prose hard-wrapped at ~80 columns. Markdown renders those newlines as spaces — join the wrapped lines into full paragraphs (one undo step, Ctrl+Z reverts)">⤶ unwrap lines</button>
       <button id="docSource" title="Toggle raw markdown source">source</button>
       <button id="docSave" class="primary" title="Save a named revision (Git commit) · Ctrl+S">save revision</button>
-    </div>
-    <div class="doc-editor-host"><div id="docEditor"></div></div>
-  </div>`;
-  if ($('docBack')) $('docBack').onclick = () => showProjectOverview(project);
+    </div>`;
+}
+
+// Load the bundle and the file, then build the editor into #docEditor.
+// A newer mount (the user picked another document while this one loaded)
+// wins: the stale load returns without touching the page.
+let docMountSeq = 0;
+async function mountDocumentEditor(docPath, project = null) {
+  const seq = ++docMountSeq;
+  const fail = (label, detail) => {
+    const host = $('docEditor');
+    const box = host && host.closest('.doc-view');
+    if (!box || seq !== docMountSeq) return;
+    box.innerHTML = `<div class="empty">${label}<div class="hint">${esc(detail)}</div></div>`;
+  };
   let bundle, d;
   try {
     [bundle, d] = await Promise.all([
       loadMrmdDocument(),
       (await fetch('/api/file/read?path=' + encodeURIComponent(docPath))).json(),
     ]);
-  } catch (e) {
-    $('view').innerHTML = `<div class="empty">could not open the document.<div class="hint">${esc(e.message)}</div></div>`;
-    return;
-  }
-  if (d.error) {
-    $('view').innerHTML = `<div class="empty">could not read the document.<div class="hint">${esc(d.error)}</div></div>`;
-    return;
-  }
-  if (viewKind !== 'doc' || !$('docEditor')) return; // user navigated away during load
+  } catch (e) { return fail('could not open the document.', e.message); }
+  if (seq !== docMountSeq || !$('docEditor')) return; // user navigated away during load
+  if (d.error) return fail('could not read the document.', d.error);
   const st = { path: d.path, project, sha: d.sha, dirty: false, saveTimer: 0, saving: false, source: false };
   st.editor = bundle.createDocumentEditor($('docEditor'), {
     doc: d.text,
@@ -7117,6 +7347,16 @@ async function openDocument(docPath, project = null) {
   docState = st;
   docStatusLine('autosaves after a 2 s pause · save revision = Git commit');
   $('docSave').onclick = commitDocument;
+  // The unwrap affordance appears only when the file actually looks
+  // machine-wrapped (2+ joinable pairs), so hand-written docs stay quiet.
+  if (unwrapHardLines(d.text).joins >= 2) $('docUnwrap').hidden = false;
+  $('docUnwrap').onclick = () => {
+    const now = unwrapHardLines(st.editor.getContent());
+    $('docUnwrap').hidden = true;
+    if (!now.joins) return toast('no wrapped lines to join');
+    st.editor.setContent(now.text); // one transaction → one undo step; onChange schedules the autosave
+    toast('joined ' + now.joins + ' wrapped line' + (now.joins === 1 ? '' : 's') + ' · Ctrl+Z reverts');
+  };
   $('docReload').onclick = reloadDocumentFromDisk;
   $('docRun').onclick = () => {
     const cell = st.editor.codeBlockAtCursor && st.editor.codeBlockAtCursor();
@@ -7133,34 +7373,103 @@ async function openDocument(docPath, project = null) {
   st.editor.focus();
 }
 
-// The documents list on the project panel: every markdown file in the
-// project's repositories, newest activity first. Rendered async so the
-// panel itself never waits on git.
-async function renderProjectDocsList(project) {
+// ---- project documents (home ▸ project ▸ documents) ----
+// Authored markdown is a primary project object, like code, so it gets its
+// own surface: the complete list of every .md file in the project's
+// repositories on the left (newest activity first, filterable), the MRMD
+// editor on the right. The generated memory stays on the overview.
+let projectDocsSeq = 0;
+const projectDocsHash = (name, docPath) => 'project=' + encodeURIComponent(name) + '&docs' + (docPath ? '&doc=' + encodeURIComponent(docPath) : '');
+const projectDocsCrumbs = name => [crumbHome(), crumbProject(name), { label: 'documents', title: 'Every markdown document in ' + name }];
+
+async function showProjectDocuments(name, docPath = null) {
+  if (!name) return;
+  markSettingsClosed();
+  flushAndCloseDocument();
+  projectOverviewName = name;
+  const seq = ++projectDocsSeq;
+  setRoute('project-docs', projectDocsHash(name, docPath), projectDocsCrumbs(name));
+  // Phone: the list first when nothing was asked for, the editor when a
+  // document was (same show-tree switch as the code surface).
+  const listFirst = phoneLayout() && !docPath;
+  $('view').innerHTML = `<div class="focused-file-view project-code project-docs${listFirst ? ' show-tree' : ''}">
+    <div class="project-code-bar"><b>${esc(name)}</b>${projectSwitchHtml('documents')}<button id="pdTreeToggle" class="mobile-only" type="button">${listFirst ? 'editor' : 'documents'}</button><span class="dim" id="pdTitle">reading project documents…</span></div>
+    <div class="ff-layout"><aside class="ff-tree" id="pdTree">
+      <div class="pdocs-tools"><input id="pdFilter" type="search" placeholder="filter documents"><button id="pDocNew" class="ghost" title="Create a markdown document in ${esc(name)}/documents/">+ new</button></div>
+      <div class="ff-tree-summary" id="pdSummary"></div><div id="pDocsList" class="dim">reading project documents…</div></aside>
+      <main class="ff-main" id="pdMain"></main></div></div>`;
+  wireProjectSwitch(name);
+  const state = { name, docs: [], current: docPath, seq };
+  $('pDocNew').onclick = () => createProjectDocument(name);
+  $('pdTreeToggle').onclick = () => setProjectDocsPane(!$('view').querySelector('.project-docs').classList.contains('show-tree'));
   let d;
-  try { d = await (await fetch('/api/project/docs?name=' + encodeURIComponent(project))).json(); }
+  try { d = await (await fetch('/api/project/docs?name=' + encodeURIComponent(name))).json(); }
   catch { d = { error: 'network failure' }; }
+  if (seq !== projectDocsSeq || viewKind !== 'project-docs') return;
+  if (d.error) { $('pDocsList').textContent = 'could not list documents: ' + d.error; return; }
+  state.docs = d.docs || [];
+  $('pdSummary').textContent = state.docs.length + ' markdown document' + (state.docs.length === 1 ? '' : 's') + ' · newest activity first';
+  $('pdFilter').oninput = () => renderProjectDocsList(state);
+  renderProjectDocsList(state);
+  // Like the code surface: land on the most recently active document.
+  // On the phone the auto-pick loads behind the list; only an explicit
+  // choice (or a document in the hash) reveals the editor pane.
+  const first = docPath || (state.docs[0] && state.docs[0].path);
+  if (first) openProjectDocument(state, first, { reveal: !listFirst });
+  else $('pdMain').innerHTML = '<div class="empty">no markdown documents yet.<div class="hint">+ new creates the first one in documents/.</div></div>';
+}
+
+// Phone only: show the list (true) or the editor (false).
+function setProjectDocsPane(list) {
+  const root = $('view').querySelector('.project-docs');
+  if (!root) return;
+  root.classList.toggle('show-tree', list);
+  const b = $('pdTreeToggle');
+  if (b) b.textContent = list ? 'editor' : 'documents';
+}
+
+// The complete list — never capped. The filter narrows by path.
+function renderProjectDocsList(state) {
   const host = $('pDocsList');
-  if (!host || projectOverviewName !== project || viewKind !== 'project') return;
-  if (d.error) { host.textContent = 'could not list documents: ' + d.error; return; }
-  const docs = d.docs || [];
-  if (!docs.length) { host.innerHTML = '<span class="dim">no markdown documents yet — create the first one.</span>'; return; }
-  const shown = docs.slice(0, 12);
-  host.innerHTML = `<div class="pdocs-list">${shown.map((doc, i) => {
+  if (!host) return;
+  const q = (($('pdFilter') && $('pdFilter').value) || '').trim().toLowerCase();
+  const docs = q ? state.docs.filter(doc => doc.rel.toLowerCase().includes(q)) : state.docs;
+  host.classList.remove('dim');
+  if (!state.docs.length) { host.innerHTML = '<span class="dim">no markdown documents yet — create the first one.</span>'; return; }
+  if (!docs.length) { host.innerHTML = '<span class="dim">no document matches the filter.</span>'; return; }
+  host.innerHTML = `<div class="pdocs-list">${docs.map(doc => {
     const parts = doc.rel.split('/');
     const base = parts.pop();
     const delta = doc.recent24 && doc.recent24.events
       ? `${doc.recent24.added ? '+' + doc.recent24.added : ''}${doc.recent24.added && doc.recent24.removed ? ' ' : ''}${doc.recent24.removed ? '−' + doc.recent24.removed : ''}`
       : '';
     const when = doc.recent24 && doc.recent24.latestTs ? ago(Date.now() - doc.recent24.latestTs) : ago(Date.now() - doc.mtimeMs);
-    return `<button type="button" class="pdocs-row" data-p-doc="${esc(String(i))}" title="${esc(doc.path)}">
+    return `<button type="button" class="pdocs-row${doc.path === state.current ? ' on' : ''}" data-p-doc="${esc(doc.path)}" title="${esc(doc.path)}">
       <span class="pd-name">${parts.length ? `<span class="pd-dir">${esc(parts.join('/'))}/</span>` : ''}${esc(base)}</span>
       <span class="pd-delta">${esc(delta)}</span><span class="pd-when">${esc(when)}</span></button>`;
-  }).join('')}</div>${docs.length > shown.length ? `<div class="pdocs-more">… ${docs.length - shown.length} more in the code view</div>` : ''}`;
-  host.querySelectorAll('[data-p-doc]').forEach(b => b.onclick = () => openDocument(shown[Number(b.dataset.pDoc)].path, project));
+  }).join('')}</div>`;
+  host.querySelectorAll('[data-p-doc]').forEach(b => b.onclick = () => openProjectDocument(state, b.dataset.pDoc));
 }
 
-// New document: ask for a name, create <project>/documents/<name>.md, open it.
+// Open one document in the right pane. The hash follows, so a reload or a
+// shared link lands on the same document.
+async function openProjectDocument(state, docPath, { reveal = true } = {}) {
+  if (!docPath || viewKind !== 'project-docs' || state.seq !== projectDocsSeq) return;
+  flushAndCloseDocument();
+  state.current = docPath;
+  setRoute('project-docs', projectDocsHash(state.name, docPath), projectDocsCrumbs(state.name));
+  const doc = state.docs.find(x => x.path === docPath);
+  $('pdTitle').textContent = doc ? doc.rel : docPath;
+  $('pdTitle').title = docPath;
+  const list = $('pDocsList');
+  if (list) list.querySelectorAll('.pdocs-row').forEach(b => b.classList.toggle('on', b.dataset.pDoc === docPath));
+  $('pdMain').innerHTML = `<div class="doc-view">${documentHeadHtml(docPath, null)}<div class="doc-editor-host"><div id="docEditor"></div></div></div>`;
+  if (phoneLayout() && reveal) setProjectDocsPane(false);
+  await mountDocumentEditor(docPath, state.name);
+}
+
+// New document: ask for a name, create <project>/documents/<name>.md, open it
+// on the documents page (the list refreshes so the new file appears).
 async function createProjectDocument(project) {
   const name = prompt('Document name (a .md file in ' + project + '/documents/):');
   if (!name || !name.trim()) return;
@@ -7169,20 +7478,23 @@ async function createProjectDocument(project) {
   catch { out = { error: 'network failure' }; }
   if (out.error) return errToast(out.error);
   toast('✓ created ' + name.trim());
-  openDocument(out.path, project);
+  showProjectDocuments(project, out.path);
 }
 
-// One stable switch joins project documents and code. File history and the
-// whole-file diff live inside the code surface.
+// One stable switch joins the three project surfaces: the overview (vision,
+// epics, areas, generated memory), the authored documents, and the code.
+// File history and the whole-file diff live inside the code surface.
 function projectSwitchHtml(active) {
   const item = (key, label) => `<button type="button" role="tab" data-project-surface="${key}" class="${active === key ? 'on' : ''}" aria-selected="${active === key}">${label}</button>`;
-  return `<nav class="project-switch" role="tablist" aria-label="Project view">${item('documents', 'documents')}${item('code', 'code')}</nav>`;
+  return `<nav class="project-switch" role="tablist" aria-label="Project view">${item('overview', 'overview')}${item('documents', 'documents')}${item('code', 'code')}</nav>`;
 }
 
 function wireProjectSwitch(name, root = $('view')) {
   if (!root) return;
   root.querySelectorAll('[data-project-surface]').forEach(button => button.onclick = () => {
-    if (button.dataset.projectSurface === 'documents') showProjectOverview(name);
+    const key = button.dataset.projectSurface;
+    if (key === 'overview') showProjectOverview(name);
+    else if (key === 'documents') showProjectDocuments(name);
     else showProjectTree(name);
   });
 }
@@ -7802,33 +8114,28 @@ function renderProjectPanel(d) {
         <div class="pa-meta dim">${esc(a.rel)} · ${a.conversations} conversation${a.conversations === 1 ? '' : 's'}${a.lastTs ? ' · ' + fmtDate(a.lastTs) : ''}${a.memory ? (a.memory.stale ? ' · memory ⚠' : ' · memory ✓') : ''}</div>
         <button type="button" class="ghost pa-start" data-area-start="${esc(a.rel)}" title="Start a conversation in this area — area memory briefs first">+ start here</button>
       </div>`).join('')}</div></section>` : ''}
-    ${projectSwitchHtml('documents')}
-    <section class="psection" id="pDocsSection">
-      <h3>documents <button id="pDocNew" class="ghost pfoldbtn" title="Create a markdown document in ${esc(d.project)}/documents/">+ new document</button></h3>
-      <div id="pDocsList" class="dim">reading project documents…</div>
-    </section>
+    <div class="ptoolbar">
+      ${projectSwitchHtml('overview')}
+      <div class="pmemline dim">
+        <span title="${memory ? 'The generated project memory: overview, intent, environment, status' : 'No generated memory yet'}">${memory ? `memory ${fmtDate(memory.builtAt)} · ${pyramid.docs && pyramid.docs.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}</span>
+        ${pyramid.backfillRunning ? '<span><span class="spin">░</span> extracting leaves…</span>' : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : ''}
+        ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : ''}
+        <span class="psep"></span>
+        <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
+      </div>
+    </div>
+    ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
+    ${(d.foldSuggestions || []).map((x, i) => `<div class="pfold-suggest">same project as <b>${esc(x.other)}</b>? <span class="dim">${esc(x.reason)}</span><button data-p-fold-accept="${i}" title="Fold ${esc(x.from)} into ${esc(x.into)}">⇄ fold</button><button class="ghost" data-p-fold-dismiss="${i}" title="Not the same project · stop suggesting this pair">✕</button></div>`).join('')}
+    <div id="pFoldPanel" hidden></div>
     <div class="pdoclayout">
     <nav id="pToc" class="ptoc" hidden></nav>
     <div class="pdocmain">
     <div id="pDocBody">${memory ? '<div class="dim">reading the project documents…</div>' : ''}</div>
-    <footer class="pfoot">
-      <div class="pmemline dim">
-        ${memory ? `memory ${fmtDate(memory.builtAt)} · ${pyramid.docs && pyramid.docs.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}
-        ${pyramid.backfillRunning ? '<span><span class="spin">░</span> extracting leaves…</span>' : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : ''}
-        ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : ''}
-        <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
-      </div>
-      ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
-      ${(d.foldSuggestions || []).map((x, i) => `<div class="pfold-suggest">same project as <b>${esc(x.other)}</b>? <span class="dim">${esc(x.reason)}</span><button data-p-fold-accept="${i}" title="Fold ${esc(x.from)} into ${esc(x.into)}">⇄ fold</button><button class="ghost" data-p-fold-dismiss="${i}" title="Not the same project · stop suggesting this pair">✕</button></div>`).join('')}
-      <div id="pFoldPanel" hidden></div>
-    </footer>
     </div>
     </div>
   </div>`;
   wireMiniGantt($('view'), heroRows, color, 'p:' + d.project);
   wireProjectSwitch(d.project);
-  $('pDocNew').onclick = () => createProjectDocument(d.project);
-  renderProjectDocsList(d.project);
   $('pTitleBig').ondblclick = e => { e.preventDefault(); startProjectTitleEdit(d.project); };
   $('pFold').onclick = () => openFoldPicker(d);
   const pUnregister = $('pUnregister');
@@ -8392,6 +8699,9 @@ function openMediaLightbox(src, title = 'image') {
 }
 
 const FILE_IMAGE_PATH = /\.(png|jpe?g|gif|webp)(?::\d+(?::\d+)?)?$/i;
+// Case-sensitive on purpose: the document save endpoint accepts exactly
+// '.md', so anything the editor opens is guaranteed to autosave.
+const FILE_MARKDOWN_PATH = /\.md(?::\d+(?::\d+)?)?$/;
 let fileClickSuppressedUntil = 0;
 
 function fileControlContext(button) {
@@ -8478,10 +8788,30 @@ async function copyFullFilePath(ctx) {
   catch { errToast('could not copy the path'); }
 }
 
+// Markdown opens in the MRMD document editor when the server can edit it
+// (any file inside an indexed repository or project). The probe uses the
+// same endpoint the editor itself loads through, so a refusal never
+// navigates away from the current view — callers fall back to the
+// read-only preview instead.
+async function openMarkdownInEditor(ctx, quiet = false) {
+  const clean = ctx.path.replace(/:(\d+)(?::(\d+))?$/, '');
+  let probe;
+  try { probe = await (await fetch('/api/file/read?path=' + encodeURIComponent(clean))).json(); }
+  catch { probe = { error: 'network failure' }; }
+  if (probe.error) {
+    if (!quiet) errToast(probe.error);
+    return false;
+  }
+  const s = sessions.find(x => x.key === ctx.key);
+  openDocument(probe.path, s ? projectOf(s) : null);
+  return true;
+}
+
 async function primaryFileAction(ctx) {
   // An image change is useful as a picture first. Text changes keep their
   // exact historical diff. The menu always offers the other interpretation.
   if (ctx.change && !FILE_IMAGE_PATH.test(ctx.path)) return viewFileChange(ctx);
+  if (FILE_MARKDOWN_PATH.test(ctx.path) && await openMarkdownInEditor(ctx, true)) return;
   const opened = await openPathInApp(ctx, ctx.change);
   if (!opened && ctx.change) viewFileChange(ctx);
 }
@@ -8501,9 +8831,11 @@ function openFileActionMenu(ctx, x, y) {
   menu.className = 'file-action-menu';
   menu.setAttribute('role', 'menu');
   const image = FILE_IMAGE_PATH.test(ctx.path);
+  const markdown = !image && FILE_MARKDOWN_PATH.test(ctx.path);
   const items = [];
   if (ctx.change && !image) items.push(['View this change', () => viewFileChange(ctx)]);
-  items.push([image ? 'Open image in aiconvo' : 'Open current file in aiconvo', () => openPathInApp(ctx)]);
+  if (markdown) items.push(['Edit in document editor', () => openMarkdownInEditor(ctx)]);
+  items.push([image ? 'Open image in aiconvo' : markdown ? 'Open read-only preview' : 'Open current file in aiconvo', () => openPathInApp(ctx)]);
   if (ctx.change && image) items.push(['View this change', () => viewFileChange(ctx)]);
   items.push(['Open with system application', () => runNativePathAction(ctx, 'open')]);
   items.push(['Show in folder', () => runNativePathAction(ctx, 'reveal')]);
@@ -8647,6 +8979,7 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
       `<button type="button" class="msg-read" data-msg-index="${copyIndex}" title="Read this message aloud">read</button>` +
       `<button type="button" class="msg-edit" data-msg-index="${copyIndex}" title="Edit this message in the session file">edit</button>` +
       (m.role === 'assistant' ? `<button type="button" class="msg-regenerate" data-msg-index="${copyIndex}" title="Create another answer from the node before this reply">regenerate</button>` : '') +
+      (m.role === 'user' ? `<button type="button" class="msg-snippet" data-msg-index="${copyIndex}" title="Save this message as a snippet you can insert later">snippet</button>` : '') +
       `</div>`;
     const words = m.text.split(/\s+/).length;
     return `<div class="msg ${m.role}${keepOpen ? '' : ' can-fold'}" tabindex="0" data-words="${words}"${anchor}${idxAttr}>${role}${full}${actions}</div>`;
@@ -8971,6 +9304,13 @@ $('view').addEventListener('click', async e => {
   if (regenBtn) {
     e.stopPropagation();
     regenerateMessage(regenBtn);
+    return;
+  }
+  const snipBtn = e.target.closest('.msg-snippet');
+  if (snipBtn) {
+    e.stopPropagation();
+    const message = current && current.messages[Number(snipBtn.dataset.msgIndex)];
+    if (message) openSnippetForm({ body: message.text || '' });
     return;
   }
   const copy = e.target.closest('.msg-copy');
@@ -9862,6 +10202,7 @@ function agentComposerHtml(d) {
       ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
       <button id="agentAt" type="button" title="Add project map sections or conversation chat (@). They ride in the system prompt.">@</button>
+      <button id="agentSnip" type="button" title="Insert a snippet at the cursor (alt+;). Or type the trigger while writing.">;;</button>
       <button id="agentTree" type="button" title="Open the conversation tree (shift+T): branches, forks, parallel replies">tree</button>
       <button id="agentAttach" type="button">attach image</button>
       <input id="agentFiles" type="file" accept="image/*" multiple hidden>
@@ -10166,6 +10507,7 @@ function openSlashPalette() {
   if (!pop) return;
   if (window._slashDetached && !pop.hidden) return hideSlashPop(); // toggle
   hideAtPop({ silent: true });
+  hideSnipPop({ silent: true });
   window._slashOpen = false;
   window._slashDetached = true;
   window._slashSel = 0;
@@ -10448,6 +10790,7 @@ function openAtPalette(seed) {
   if (!pop) return;
   if (window._atDetached && !pop.hidden) return hideAtPop();
   hideSlashPop();
+  hideSnipPop({ silent: true });
   window._slashOpen = false;
   window._slashDetached = false;
   window._atOpen = true;
@@ -10551,6 +10894,356 @@ async function paintAtPop() {
     : '<div class="slash-hint">' + (needle.length >= 2 ? 'no matching project, section, or conversation' : 'no matching project or section') + '</div>';
   wireAtRows(host);
   placeComposerPalette($('slashPop'));
+}
+
+// ---- snippets: reusable prompt text, inserted at the cursor ----
+// Two doors, one list. Typing the trigger (default ;;) mid-sentence opens
+// the list inline: the letters after the trigger filter it, enter or tab
+// replaces the token with the snippet, esc leaves the text exactly as typed.
+// The ;; button and alt+; open the same list detached, with its own query
+// box, for phones and e-ink. The draft is never borrowed or cleared.
+function snippetTrigger() {
+  const t = settingsState && settingsState.settings && settingsState.settings.snippetTrigger;
+  return (typeof t === 'string' && t.trim()) ? t.trim() : ';;';
+}
+const SNIP_STOP_RE = /\$\{[^}]*\}|\$(?:\d+|@|ARGUMENTS)(?![\w])/g;
+
+async function loadSnippets(force) {
+  const c = window._snipCache;
+  if (!force && c && c.id === activeRel && Date.now() - c.at < 4000) return c.data;
+  const r = await fetch('/api/snippets' + (activeRel ? '?id=' + encodeURIComponent(activeRel) : ''));
+  const data = await r.json();
+  if (data.error) throw new Error(data.error);
+  window._snipCache = { id: activeRel, at: Date.now(), data };
+  return data;
+}
+
+// The trigger token under the caret: `;;rem` → { start, query: 'rem' }.
+// Only at a word start, so `a;;b` inside code stays text.
+function snipQueryAt(ta) {
+  if (!ta || ta.selectionStart !== ta.selectionEnd) return null;
+  const trig = snippetTrigger();
+  const before = ta.value.slice(0, ta.selectionStart);
+  const at = before.lastIndexOf(trig);
+  if (at < 0) return null;
+  const prev = at > 0 ? before[at - 1] : '';
+  if (prev && !/[\s(\["'«—-]/.test(prev)) return null;
+  const query = before.slice(at + trig.length);
+  if (/[\s\n]/.test(query)) return null; // a space closes the token
+  return { start: at, query };
+}
+
+// Inline mode, driven by the composer's own input. Returns true while the
+// snippet list owns the pop, so the / and @ handlers stand back.
+function updateSnipPop(ta) {
+  // The blank-walking session ends by itself once no blank is left.
+  if (window._snipStops) { SNIP_STOP_RE.lastIndex = 0; window._snipStops = SNIP_STOP_RE.test(ta.value); SNIP_STOP_RE.lastIndex = 0; }
+  const hit = snipQueryAt(ta);
+  if (!hit) { if (window._snipOpen) hideSnipPop({ silent: true }); return false; }
+  if (!window._snipOpen) {
+    hideSlashPop();
+    hideAtPop({ silent: true });
+    window._snipOpen = true;
+    window._snipDetached = false;
+    window._snipSel = 0;
+    const pop = $('slashPop');
+    if (pop) { pop.innerHTML = '<div id="slashRows"></div>'; showComposerPalette(pop); }
+  }
+  window._snipRange = [hit.start, ta.selectionStart];
+  window._snipQuery = hit.query;
+  paintSnipPop();
+  return true;
+}
+
+function openSnipPalette() {
+  const pop = $('slashPop'), ta = $('agentText');
+  if (!pop) return;
+  if (window._snipDetached && !pop.hidden) return hideSnipPop();
+  hideSlashPop();
+  hideAtPop({ silent: true });
+  window._slashOpen = false;
+  window._snipOpen = true;
+  window._snipDetached = true;
+  window._snipSel = 0;
+  window._snipQuery = '';
+  // Remember where the text goes: the caret (or selection) as it was.
+  window._snipRange = ta ? [ta.selectionStart, ta.selectionEnd] : [0, 0];
+  pop.innerHTML = '<div class="slash-inp-row"><span class="slash-lead">' + esc(snippetTrigger()) + '</span>' +
+    '<input id="slashInput" type="text" placeholder="snippet · enter inserts · esc closes" spellcheck="false" autocomplete="off"></div>' +
+    '<div id="slashRows"></div>';
+  showComposerPalette(pop);
+  const inp = $('slashInput');
+  inp.oninput = () => { window._snipSel = 0; window._snipQuery = inp.value; paintSnipPop(); };
+  inp.onkeydown = e => {
+    e.stopPropagation();
+    if (snipListKeydown(e)) return;
+    if (e.key === 'Escape') { e.preventDefault(); hideSnipPop(); }
+  };
+  inp.focus();
+  paintSnipPop();
+}
+
+// Shared list keys for both doors. Returns true when the key was used.
+function snipListKeydown(e) {
+  const n = (window._snipList || []).length;
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
+    e.preventDefault();
+    window._snipSel = ((window._snipSel || 0) + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    paintSnipRows();
+    return true;
+  }
+  if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey && !e.ctrlKey && !e.metaKey && n) {
+    e.preventDefault();
+    pickSnip(window._snipSel || 0);
+    return true;
+  }
+  return false;
+}
+
+function hideSnipPop(opts) {
+  if (!window._snipOpen && !window._snipDetached) return;
+  const p = $('slashPop');
+  if (p) { p.hidden = true; p.innerHTML = ''; }
+  const was = window._snipDetached;
+  window._snipOpen = false;
+  window._snipDetached = false;
+  window._snipList = [];
+  if (was && !(opts && opts.silent)) { const ta = $('agentText'); if (ta) ta.focus(); }
+}
+
+async function paintSnipPop() {
+  const host = $('slashRows');
+  if (!host || !window._snipOpen) return;
+  const q = window._snipQuery || '';
+  let data;
+  try {
+    if (!host.childElementCount) host.innerHTML = '<div class="slash-hint">loading…</div>';
+    data = await loadSnippets();
+  } catch (e) { host.innerHTML = `<div class="slash-hint">${esc(e.message || 'could not load snippets')}</div>`; return; }
+  if (!window._snipOpen || (window._snipQuery || '') !== q) return;
+  const ranked = rankSnippetsClient(data.items || [], q);
+  const list = ranked.slice(0, 20).map(s => ({ ...s, row: 'snip' }));
+  // Nothing matches: offer to save a new snippet under the typed name.
+  if (q && !ranked.length && /^[a-z0-9_-]+$/i.test(q)) list.push({ row: 'new', name: q.toLowerCase() });
+  window._snipList = list;
+  window._snipSel = Math.min(window._snipSel || 0, Math.max(0, list.length - 1));
+  if (!list.length) {
+    host.innerHTML = '<div class="slash-hint">' + (q ? 'no snippet matches' : 'no snippets yet — select text in the composer and press alt+shift+; to save one') + '</div>';
+    placeComposerPalette($('slashPop'));
+    return;
+  }
+  paintSnipRows();
+}
+
+// Same order as the server helper: prefix, substring, description, then
+// letters in order; ties by use count so favorites come first.
+function rankSnippetsClient(items, query) {
+  const q = String(query || '').trim().toLowerCase();
+  const sub = (hay, n) => { let i = 0; for (const ch of hay) if (ch === n[i]) { i++; if (i === n.length) return true; } return false; };
+  const scored = [];
+  for (const s of items) {
+    const name = s.name.toLowerCase(), desc = String(s.description || '').toLowerCase();
+    let score;
+    if (!q) score = 3;
+    else if (name === q) score = 6;
+    else if (name.startsWith(q)) score = 5;
+    else if (name.includes(q)) score = 4;
+    else if (desc.includes(q)) score = 2;
+    else if (sub(name, q)) score = 1;
+    else continue;
+    scored.push({ s, score });
+  }
+  scored.sort((a, b) => b.score - a.score || (b.s.uses || 0) - (a.s.uses || 0) || (b.s.lastUsed || 0) - (a.s.lastUsed || 0) || a.s.name.localeCompare(b.s.name));
+  return scored.map(x => x.s);
+}
+
+function paintSnipRows() {
+  const host = $('slashRows');
+  if (!host) return;
+  const list = window._snipList || [], sel = window._snipSel || 0;
+  let html = '', lastGroup = null;
+  list.forEach((s, i) => {
+    const group = s.row === 'new' ? 'new' : (s.kind === 'snippet' ? 'snippets' : 'templates');
+    if (group !== lastGroup) { html += `<div class="slash-group">${group}</div>`; lastGroup = group; }
+    if (s.row === 'new') {
+      html += `<div class="slash-row snip-new${i === sel ? ' sel' : ''}" data-i="${i}"><span class="slash-name">＋ ${esc(s.name)}</span><span class="slash-desc">save a new snippet with this name</span></div>`;
+      return;
+    }
+    const meta = [s.scope === 'project' ? 'project' : '', s.uses ? s.uses + '×' : ''].filter(Boolean).join(' · ');
+    html += `<div class="slash-row${i === sel ? ' sel' : ''}" data-i="${i}" title="${esc(s.body.slice(0, 400))}">` +
+      `<span class="slash-name">${esc(s.name)}</span>` +
+      `<span class="slash-desc">${esc(s.description || '')}</span>` +
+      (meta ? `<span class="slash-meta">${esc(meta)}</span>` : '') + '</div>';
+  });
+  host.innerHTML = html;
+  host.querySelectorAll('.slash-row').forEach(r => {
+    r.onmousedown = e => { e.preventDefault(); pickSnip(Number(r.dataset.i)); };
+  });
+  const cur = host.querySelector('.slash-row.sel');
+  if (cur) cur.scrollIntoView({ block: 'nearest' });
+  placeComposerPalette($('slashPop'));
+}
+
+function pickSnip(i) {
+  const s = (window._snipList || [])[i];
+  if (!s) return;
+  const range = window._snipRange || [0, 0];
+  const ta = $('agentText');
+  const inline = window._snipOpen && !window._snipDetached;
+  if (s.row === 'new') {
+    hideSnipPop({ silent: true });
+    // The typed trigger token is the name, not draft text: drop it.
+    if (ta && inline) replaceComposerRange(ta, range, '');
+    openSnippetForm({ name: s.name, body: '' });
+    return;
+  }
+  hideSnipPop({ silent: true });
+  if (!ta) return;
+  insertSnippetText(ta, s.body, range);
+  fetch('/api/snippets/used', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: s.path }) }).catch(() => {});
+  if (window._snipCache) window._snipCache.at = 0; // use counts changed
+}
+
+// Replace [start,end] in the textarea through the editing command so the
+// browser's own undo stack keeps the step (ctrl+z reverts the insert).
+function replaceComposerRange(ta, range, text) {
+  ta.focus();
+  const [a, b] = range;
+  ta.setSelectionRange(Math.min(a, ta.value.length), Math.min(b, ta.value.length));
+  let done = false;
+  try { done = document.execCommand('insertText', false, text); } catch {}
+  if (!done) {
+    ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, 'end');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+function insertSnippetText(ta, body, range) {
+  let text = String(body || '').replace(/\s+$/, '');
+  const [a, b] = range;
+  const after = ta.value.slice(b, b + 1);
+  const before = a > 0 ? ta.value[a - 1] : '';
+  if (before && !/\s/.test(before)) text = ' ' + text;
+  if (after && !/\s/.test(after)) text += ' ';
+  else if (!after && !text.includes('\n')) text += ' ';
+  replaceComposerRange(ta, range, text);
+  const insertedFrom = a;
+  const insertedTo = a + text.length;
+  autoGrowCompose();
+  updateComposeMin();
+  // Blanks ($1, $@, ${...}) become tab stops: the first is selected now,
+  // tab moves to the next, and the session ends when none remain.
+  window._snipStops = SNIP_STOP_RE.test(text.slice(0));
+  SNIP_STOP_RE.lastIndex = 0;
+  if (window._snipStops) selectNextSnipStop(ta, insertedFrom, insertedTo);
+}
+
+function selectNextSnipStop(ta, from, to) {
+  const start = typeof from === 'number' ? from : ta.selectionEnd;
+  const scan = (lo, hi) => {
+    SNIP_STOP_RE.lastIndex = 0;
+    const slice = ta.value.slice(lo, hi);
+    const m = SNIP_STOP_RE.exec(slice);
+    SNIP_STOP_RE.lastIndex = 0;
+    return m ? [lo + m.index, lo + m.index + m[0].length] : null;
+  };
+  let hit = scan(start, typeof to === 'number' ? to : ta.value.length) || scan(0, ta.value.length);
+  if (!hit) { window._snipStops = false; return false; }
+  ta.focus();
+  ta.setSelectionRange(hit[0], hit[1]);
+  return true;
+}
+
+// Save the composer's selection (or the whole draft) as a new snippet.
+function saveSelectionAsSnippet() {
+  const ta = $('agentText');
+  if (!ta) return errToast('open a conversation first');
+  const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+  const body = sel.trim() ? sel : ta.value;
+  if (!body.trim()) return errToast('nothing to save — type or select some text first');
+  openSnippetForm({ body });
+}
+
+// The small form: name, one-line description, where it lives, the text.
+async function openSnippetForm(seed, onSaved) {
+  document.querySelectorAll('.mode-form.snip-form').forEach(el => el.remove());
+  const def = { name: '', description: '', body: '', scope: 'global', ...(seed || {}) };
+  // The server knows whether this conversation has a project folder.
+  let hasProject = false, trusted = false;
+  try { const d = await loadSnippets(); hasProject = !!d.projectDir; trusted = !!d.projectTrusted; } catch {}
+  const ov = document.createElement('div');
+  ov.className = 'mode-form snip-form';
+  const guess = def.name || (def.body ? def.body.trim().split(/\s+/).slice(0, 3).join('-').toLowerCase().replace(/[^a-z0-9-]+/g, '') : '');
+  ov.innerHTML = `<div class="mf-card np-card">
+    <div class="mm-head"><b>new snippet</b><span class="hint">saved as a Markdown file pi also reads as /name</span><button type="button" class="ghost mf-cancel">cancel</button></div>
+    <div class="mf-body np-body">
+      <div class="mf-pair">
+        <label>name<span class="np-cap">letters, digits, dash</span><input id="sf-name" type="text" value="${esc(guess)}" spellcheck="false" autocomplete="off"></label>
+        <label>description<span class="np-cap">shown in the list</span><input id="sf-desc" type="text" value="${esc(def.description)}" spellcheck="false"></label>
+      </div>
+      <div class="snip-scope">
+        <label><input type="radio" name="sf-scope" value="global"${def.scope !== 'project' ? ' checked' : ''}> everywhere <span class="np-cap">~/.pi/agent/prompts</span></label>
+        <label${hasProject ? '' : ' class="dim" title="this conversation has no project folder"'}><input type="radio" name="sf-scope" value="project"${def.scope === 'project' && hasProject ? ' checked' : ''}${hasProject ? '' : ' disabled'}> this project <span class="np-cap">.pi/prompts</span></label>
+      </div>
+      ${hasProject && !trusted ? '<div class="hint">aiconvo inserts project snippets either way. The pi terminal shows them as /name only after you trust this project in pi.</div>' : ''}
+      <label>text<span class="np-cap">$1, $2 or $@ become blanks you tab through after inserting</span><textarea id="sf-body" spellcheck="false">${esc(def.body)}</textarea></label>
+    </div>
+    <div class="mf-foot"><span class="hint mf-err"></span>
+      <button type="button" class="ghost mf-cancel2">cancel</button>
+      <button type="button" class="primary mf-save">save snippet</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.querySelector('.mf-cancel').onclick = close;
+  ov.querySelector('.mf-cancel2').onclick = close;
+  ov.onkeydown = e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ov.querySelector('.mf-save').click(); }
+  };
+  const err = ov.querySelector('.mf-err');
+  let overwrite = false;
+  ov.querySelector('.mf-save').onclick = async () => {
+    const payload = {
+      name: $('sf-name').value.trim(), description: $('sf-desc').value.trim(), body: $('sf-body').value,
+      scope: (ov.querySelector('[name=sf-scope]:checked') || {}).value || 'global', kind: 'snippet', id: activeRel, overwrite,
+    };
+    const res = await fetch('/api/snippets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const out = await res.json();
+    if (out.exists && !overwrite) {
+      overwrite = true;
+      err.textContent = out.error + ' — save again to replace it';
+      ov.querySelector('.mf-save').textContent = 'replace existing';
+      return;
+    }
+    if (out.error) { err.textContent = out.error; overwrite = false; return; }
+    toast('saved snippet: ' + out.name + ' · ' + snippetTrigger() + out.name);
+    window._snipCache = null;
+    close();
+    if (settingsOpen) renderSettingsSnippets();
+    if (onSaved) onSaved(out);
+  };
+  const first = $('sf-name');
+  if (first) { first.focus(); first.select(); }
+}
+
+// Settings: the list, each row opening its file in the Markdown editor.
+async function renderSettingsSnippets() {
+  const host = $('setSnipList');
+  if (!host) return;
+  let data;
+  try { data = await loadSnippets(true); }
+  catch (e) { host.innerHTML = `<span class="hint">${esc(e.message)}</span>`; return; }
+  if (!$('setSnipList')) return;
+  const items = (data.items || []).slice().sort((a, b) => (b.uses || 0) - (a.uses || 0) || a.name.localeCompare(b.name));
+  if (!items.length) { host.innerHTML = `<span class="hint">none yet. folder: ${esc(data.globalDir || '')}</span>`; return; }
+  host.innerHTML = items.map(s => `<div class="snip-item">` +
+      `<button type="button" class="ghost snip-open" data-path="${esc(s.path)}" title="Open in the editor\n${esc(s.path)}"><span class="snip-name">${esc(s.name)}</span></button>` +
+      `<span class="snip-desc">${esc(s.description || '')}</span>` +
+      `<span class="snip-tag">${esc([s.kind === 'template' ? 'template' : '', s.scope === 'project' ? 'project' : '', s.uses ? s.uses + '×' : ''].filter(Boolean).join(' · '))}</span>` +
+    `</div>`).join('') +
+    `<div class="hint" style="margin-top:var(--sp-2)">global folder: ${esc(data.globalDir || '')}${data.projectDir ? ' · project folder: ' + esc(data.projectDir) : ''}</div>`;
+  host.querySelectorAll('.snip-open').forEach(b => b.onclick = () => { closeSettings(); openDocument(b.dataset.path); });
 }
 
 function fileToImage(file) {
@@ -11332,6 +12025,11 @@ function wireAgentComposer() {
   if (slashBtn) slashBtn.onclick = () => openSlashPalette();
   const atBtn = $('agentAt');
   if (atBtn) atBtn.onclick = () => openAtPalette();
+  const snipBtn = $('agentSnip');
+  if (snipBtn) snipBtn.onclick = () => openSnipPalette();
+  window._snipOpen = false;
+  window._snipDetached = false;
+  window._snipStops = false;
   renderAgentContext();
   const treeBtn = $('agentTree');
   if (treeBtn) treeBtn.onclick = () => { if (activeRel) showTree(activeRel); };
@@ -11358,6 +12056,10 @@ function wireAgentComposer() {
   if (ta) {
     ta.oninput = () => {
       const v = ta.value;
+      // The snippet trigger works in every composer and never touches a
+      // terminal: it only edits the draft. While its list is open the /
+      // and @ handlers stand back.
+      if (!window._agentLiveOn && updateSnipPop(ta)) return;
       if (isPi) {
         // pi: the palette autocompletes pi's real commands over RPC. No
         // hidden terminal, no keystroke streaming — the TUI adapter is
@@ -11400,6 +12102,17 @@ function wireAgentComposer() {
     ta.onkeydown = e => {
       // Shift+tab cycles the reasoning level, TUI-style, even while typing.
       if (isPi && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleThinking(); return; }
+      // Inline snippet list: arrows, enter or tab insert, esc keeps the text.
+      if (window._snipOpen && !window._snipDetached) {
+        if (snipListKeydown(e)) return;
+        // One esc closes the list and keeps the caret; a second leaves the composer.
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hideSnipPop({ silent: true }); return; }
+      }
+      // After an insert with blanks, tab walks the blanks; when none remain
+      // the key is the browser's again.
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && window._snipStops) {
+        if (selectNextSnipStop(ta)) { e.preventDefault(); return; }
+      }
       if (isPi && window._slashOpen) {
         const n = (window._slashList || []).length;
         if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
@@ -14529,6 +15242,14 @@ function renderSettings() {
       <div class="pmeta" id="semStatus" style="margin-top:var(--sp-2)"></div>
     </section>
     <section class="psection">
+      <h3>snippets</h3>
+      <p class="hint">Sentences you type often. Type the trigger in the composer to insert one at the cursor; alt+; opens the picker; alt+shift+; saves the selected text as a new one. Files live in pi's prompt folders, so the pi terminal sees them as /name too.</p>
+      <label for="setSnipTrigger">trigger typed in the composer</label>
+      <input id="setSnipTrigger" type="text" value="${esc(snippetTrigger())}" spellcheck="false" maxlength="4" style="width:6ch">
+      <div class="pactions" style="margin-top:var(--sp-2)"><button id="setSnipNew" class="ghost">new snippet</button></div>
+      <div id="setSnipList" class="snip-list" style="margin-top:var(--sp-2)"><span class="hint">loading…</span></div>
+    </section>
+    <section class="psection">
       <h3>pi catalog</h3>
       <div class="settings-tools">
         <input id="setModelQ" type="search" placeholder="search provider or model" value="${esc(settingsQuery)}">
@@ -14545,6 +15266,9 @@ function renderSettings() {
   $('setSemanticNs').onchange = () => saveSettings({ semanticNs: $('setSemanticNs').value.trim() }, 'semantic namespace saved — full re-push starts');
   refreshSemanticStatus();
   $('setThinking').onchange = () => saveSettings({ thinking: $('setThinking').value });
+  $('setSnipTrigger').onchange = () => saveSettings({ snippetTrigger: $('setSnipTrigger').value.trim() }, 'snippet trigger: ' + ($('setSnipTrigger').value.trim() || ';;'));
+  $('setSnipNew').onclick = () => openSnippetForm({ body: '' });
+  renderSettingsSnippets();
   $('setPiDefault').onclick = () => saveSettings({ usePiDefault: true, provider: '', model: '' });
   $('setModelQ').oninput = () => { settingsQuery = $('setModelQ').value; renderSettings(); $('setModelQ').focus(); const el = $('setModelQ'); el.setSelectionRange(el.value.length, el.value.length); };
   $('setReadyOnly').onchange = () => { settingsReadyOnly = $('setReadyOnly').checked; renderSettings(); };
@@ -15160,6 +15884,15 @@ function helpNow() {
     return sections;
   }
 
+  if (window._snipDetached && ae && ae.id === 'slashInput') {
+    sections.push({ label: 'composer · snippets', keys: [
+      ['type', 'filter snippets by name or text'],
+      ['↑ ↓', 'highlight a row'],
+      ['enter · tab', 'insert the highlighted snippet at the cursor'],
+      ['esc', 'close'],
+    ] });
+    return sections;
+  }
   if (window._atDetached && ae && ae.id === 'slashInput') {
     sections.push({ label: 'composer · project context', keys: [
       ['type', 'filter projects or search conversations'],
@@ -15173,6 +15906,15 @@ function helpNow() {
   // The focused element decides: while typing, only its keys are live.
   if (ae && ae.id === 'agentText') {
     const pi = !!$('agentRun');
+    if (window._snipOpen && !window._snipDetached) {
+      sections.push({ label: 'composer · snippet', keys: [
+        ['type', 'filter snippets'],
+        ['↑ ↓', 'highlight a row'],
+        ['enter · tab', 'insert it in place of the typed trigger'],
+        ['esc', 'close · the typed text stays'],
+      ] });
+      return sections;
+    }
     if ((ae.value || '').startsWith('/') || window._agentLiveOn) {
       sections.push({ label: 'composer · slash command', keys: [
         ['enter', 'run in the live terminal'],
@@ -15189,7 +15931,10 @@ function helpNow() {
     if (pi) keys.push(['ctrl+shift+enter', 'open the terminal & send']);
     if ($('agentMic') && !$('agentMic').hidden) keys.push(['ctrl+m', 'start / stop dictation']);
     if (pi) keys.push(['alt+m', 'change the model'], ['alt+o', 'change the mode'], ['shift+tab', 'cycle reasoning']);
-    keys.push(['/', 'start a slash command'], ['@', 'add project or conversation context'], ['esc', 'leave the composer']);
+    keys.push(['/', 'start a slash command'], ['@', 'add project or conversation context']);
+    keys.push([snippetTrigger(), 'insert a snippet'], ['alt+;', 'snippet picker'], ['alt+shift+;', 'save the selection as a snippet']);
+    if (window._snipStops) keys.push(['tab', 'next blank in the inserted snippet']);
+    keys.push(['esc', 'leave the composer']);
     sections.push({ label: pi ? 'composer · pi' : 'composer · claude', keys });
     return sections;
   }
@@ -15461,6 +16206,14 @@ document.addEventListener('keydown', e => {
       control.click();
       return;
     }
+    // alt+; the snippet picker; alt+shift+; saves the selection as one.
+    // By key position, so shifted layouts (: on the same key) still work.
+    if (e.code === 'Semicolon' && $('agentText')) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.shiftKey) saveSelectionAsSnippet(); else openSnipPalette();
+      return;
+    }
   }
   if (inField) return;
   // Ctrl+Enter sends the drafted prompt without the composer focused — the
@@ -15681,7 +16434,10 @@ const live = new EventSource('/api/events');
 // connections may have ended runs without their final run-event.
 let liveConnectedOnce = false;
 live.onopen = () => {
-  if (liveConnectedOnce) loadJobs();
+  // Every update sent while the connection was down is gone. Reload the
+  // list (it carries each transcript's version) and let load() reconcile
+  // the open transcript against it.
+  if (liveConnectedOnce) { loadJobs(); load(); }
   liveConnectedOnce = true;
 };
 live.onmessage = ev => {
@@ -15717,7 +16473,8 @@ live.onmessage = ev => {
     // A fold re-attributes projects everywhere. Refetch quietly; never navigate.
     fetch('/api/project-folds').then(r => r.json()).then(f => {
       if (f && f.map) {
-        projectFolds = f;
+        applyProjectFolds(f);
+        refreshFilterOptions();
         if (viewKind === 'home' && tab === 'conv' && !searchMode) render();
       }
     }).catch(() => {});
@@ -15766,12 +16523,11 @@ live.onmessage = ev => {
       const doneL = runLedgers.get(d.jobId);
       if (doneL) { doneL.done = true; doneL.status = d.status; }
       activeRuns.delete(d.jobId);
-      // The run ended: perform the one full refresh now, after all live
-      // thinking and tool changes stayed inside the fixed pane.
-      if (d.key === activeRel && viewKind === 'conversation' && current) {
-        const v = $('view');
-        if (v.scrollHeight - v.scrollTop - v.clientHeight < 200) open(activeRel, 'bottom');
-      }
+      // The run ended: one settled refresh now, after all live thinking and
+      // tool changes stayed inside the fixed pane. The server indexed the
+      // file before it sent this event, so the session entry already carries
+      // the new version; if nothing new landed on disk, nothing reloads.
+      if (d.key === activeRel) reconcileTranscript(null, { force: true });
       // The settled reply carries fresh usage: the meter's ground truth.
       ctxMeterCache.delete(d.key);
       if (d.key === activeRel && current) refreshCtxMeter(current);
@@ -15805,7 +16561,11 @@ live.onmessage = ev => {
       if (Array.isArray(d.runs)) {
         let dropped = false;
         for (const id of [...activeRuns.keys()]) if (!d.runs.includes(id)) { activeRuns.delete(id); dropped = true; }
-        if (dropped && viewKind === 'conversation') renderRunCards();
+        if (dropped && viewKind === 'conversation') {
+          renderRunCards();
+          // A dropped run may have held the transcript refresh back.
+          reconcileTranscript(null, { force: true });
+        }
       }
       // A new boot id after a reconnect: the server was replaced. This tab
       // may run an old interface — offer a reload, never navigate by itself.
@@ -15880,25 +16640,10 @@ live.onmessage = ev => {
   setTicker(d.key, d.title, kind);
   updateLiveBadges();
   renderAgentsPopSoon();
-  // The open conversation grew. Rule: the app never navigates by itself —
-  // the live tail only refreshes the transcript view when the user is
-  // already reading that conversation (router-gated, not stale-state-gated).
-  if (d.key === activeRel && current && viewKind === 'conversation') {
-    const v = $('view');
-    const pinned = v.scrollHeight - v.scrollTop - v.clientHeight < 80;
-    if (pinned) {
-      // Run events patch the fixed live pane in place. Do not rebuild the
-      // scroll tree between thinking and tool calls. The final run event
-      // performs one settled transcript refresh.
-      if (!hasLiveRun(activeRel)) open(activeRel, 'bottom');
-    } else if ($('convHeadExtra') && !$('convReload')) {
-      const b = document.createElement('button');
-      b.id = 'convReload';
-      b.textContent = '↻ new messages';
-      b.onclick = () => open(activeRel, 'bottom');
-      $('convHeadExtra').appendChild(b);
-    }
-  }
+  // The open conversation may have grown. The app never navigates by itself:
+  // reconcileTranscript() only reloads the view the user is already reading,
+  // and only when the bytes on disk are newer than the ones on screen.
+  reconcileTranscript(d);
 };
 
 // Elapsed tick for run cards: 1 Hz text patches (no animation), and only a
@@ -15931,8 +16676,12 @@ fetch('/api/git/repos').then(r => r.json()).then(d => {
 load().then(() => {
   dispatchHash(decodeURIComponent(location.hash.slice(1)));
   if (!phoneLayout() && !location.hash && window.matchMedia('(pointer: fine)').matches) $('q').focus();
+  prefetchDocumentEditor();
 });
-setInterval(() => { if (!document.hidden) load(); }, 30000);
+// SSE `update` events patch the list live; this poll only reconciles what a
+// missed event could leave behind (fork families, folds). It used to run
+// every 30 s, which re-downloaded the full list whenever an agent wrote.
+setInterval(() => { if (!document.hidden) load(); }, 120000);
 setInterval(() => { if (!document.hidden) loadJobs(); }, 15000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 if (window.isSecureContext && navigator.serviceWorker) {
