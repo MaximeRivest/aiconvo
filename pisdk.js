@@ -19,8 +19,8 @@ const { pathToFileURL } = require('url');
 const { execFileSync } = require('child_process');
 
 const PI_TESTED_VERSION = '0.84.1';
+const { createStallWatch } = require('./stallwatch.js');
 const WARM_IDLE_MS = 5 * 60 * 1000;
-const RUN_STALL_MS = 15 * 60 * 1000;
 const DIALOG_MAX_MS = 30 * 60 * 1000;
 
 // ---- SDK loading ---------------------------------------------------------
@@ -347,6 +347,7 @@ async function bindS(S, loaded) {
   if (S.unsub) S.unsub();
   S.unsub = session.subscribe(ev => {
     S.lastEventAt = Date.now();
+    if (S.stall) S.stall.note(ev);
     S.emit(ev);
   });
 }
@@ -392,6 +393,7 @@ async function createS(target) {
     pendingUi: new Map(),
     customViews: new Map(),
     lastEventAt: Date.now(),
+    stall: null, // the active run's stall watch (see stallwatch.js)
     onEvent: null,
     editorText: '',
     unsub: null,
@@ -460,7 +462,11 @@ function piHeadlessRun(target, opts) {
       return true;
     };
     handle.abort = async () => { try { await S.session.abort(); } catch {} };
-    let stallTimer = null;
+    // Silence is the only failure sign, and a running tool or a pending
+    // dialog is legitimate silence — only a dead model stream is a stall.
+    const stall = createStallWatch({ stallMs: opts.stallMs, hasPendingUi: () => S.pendingUi.size > 0 });
+    S.stall = stall;
+    handle.runningTools = () => stall.runningTools;
     try {
       const want = opts.provider && opts.modelId ? opts.provider + '/' + opts.modelId : null;
       if (want && S.model !== want) {
@@ -485,16 +491,7 @@ function piHeadlessRun(target, opts) {
         if (!accepted) settle(); // rejected before acceptance: fail the run now
       });
       prompted.catch(() => {});
-      const stallMs = opts.stallMs || RUN_STALL_MS;
-      const stalled = new Promise((_, rej) => {
-        const check = () => {
-          if (!S.pendingUi.size && Date.now() - S.lastEventAt > stallMs) {
-            return rej(new Error('stalled — no pi events for ' + Math.round(stallMs / 60000) + ' minutes.'));
-          }
-          stallTimer = setTimeout(check, 30000);
-        };
-        stallTimer = setTimeout(check, 30000);
-      });
+      const stalled = stall.watch();
       stalled.catch(() => {});
       try {
         await Promise.race([settled, stalled]);
@@ -507,7 +504,9 @@ function piHeadlessRun(target, opts) {
       if (promptError && !accepted) throw promptError;
       return { uiAutoCancelled: handle.uiAutoCancelled, pid: process.pid, warm: true, engine: 'sdk' };
     } finally {
-      clearTimeout(stallTimer);
+      stall.stop();
+      if (S.stall === stall) S.stall = null;
+      handle.runningTools = null;
       for (const t of dialogTimers.values()) clearTimeout(t);
       // Unanswered dialogs must not block a (still live) extension forever.
       for (const p of [...S.pendingUi.values()]) { handle.uiAutoCancelled++; try { p.cancel(); } catch {} }

@@ -368,11 +368,13 @@ async function piQueuePrompt(target, message, behavior, images) {
   return true;
 }
 
-// A run is "stalled" only when pi emits nothing for this long. Wall-clock
-// timeouts killed legitimate long runs; the TUI has no timeout at all.
-// There is deliberately NO absolute cap: the agents view lists every
-// process and the user kills runs there. Silence is the only failure sign.
-const RUN_STALL_MS = 15 * 60 * 1000;
+// A run is "stalled" only when pi emits nothing while waiting for the model
+// (see stallwatch.js). Wall-clock timeouts killed legitimate long runs; the
+// TUI has no timeout at all, and a tool that is still executing (a quiet
+// build, a training job) is legitimate silence. There is deliberately NO
+// absolute cap: the agents view lists every process and the user kills
+// runs there.
+const { createStallWatch } = require('./stallwatch.js');
 // An extension dialog with no own timeout gets cancelled after this long.
 const DIALOG_MAX_MS = 30 * 60 * 1000;
 const DIALOG_METHODS = ['confirm', 'select', 'input', 'editor'];
@@ -396,8 +398,9 @@ function piHeadlessRun(target, opts) {
     if (!w.sess.alive) throw new Error('pi RPC process is gone.');
     clearTimeout(w.idleTimer);
     w.busy = true;
-    let lastEventAt = Date.now();
     const pendingUi = new Map(); // dialog id → { timer }
+    const stall = createStallWatch({ stallMs: opts.stallMs, hasPendingUi: () => pendingUi.size > 0 });
+    handle.runningTools = () => stall.runningTools;
     const dropDialog = id => {
       const p = pendingUi.get(id);
       if (!p) return;
@@ -417,7 +420,7 @@ function piHeadlessRun(target, opts) {
       return true;
     };
     const onEvent = event => {
-      lastEventAt = Date.now();
+      stall.note(event);
       if (event.type === 'extension_ui_request' && event.id && DIALOG_METHODS.includes(event.method)) {
         // Dialogs with their own timeout are auto-resolved by pi; just track
         // them until expiry so a late answer is ignored. Dialogs without one
@@ -431,7 +434,6 @@ function piHeadlessRun(target, opts) {
     };
     w.sess.setOnEvent(onEvent);
     handle.abort = async () => { try { await w.sess.request({ type: 'abort' }); } catch {} };
-    let stallTimer = null;
     try {
       const want = opts.provider && opts.modelId ? opts.provider + '/' + opts.modelId : null;
       if (want && w.model !== want) {
@@ -444,15 +446,7 @@ function piHeadlessRun(target, opts) {
       const promptCmd = { type: 'prompt', message: opts.message };
       if (Array.isArray(opts.images) && opts.images.length) promptCmd.images = opts.images;
       await w.sess.request(promptCmd);
-      const stallMs = opts.stallMs || RUN_STALL_MS;
-      const stalled = new Promise((_, rej) => {
-        const check = () => {
-          // A pending dialog is legitimate silence: someone must answer it.
-          if (!pendingUi.size && Date.now() - lastEventAt > stallMs) return rej(new Error('stalled — no pi events for ' + Math.round(stallMs / 60000) + ' minutes.' + piVersionHint()));
-          stallTimer = setTimeout(check, 30000);
-        };
-        stallTimer = setTimeout(check, 30000);
-      });
+      const stalled = stall.watch().catch(e => { throw new Error(e.message + piVersionHint()); });
       stalled.catch(() => {});
       try {
         await Promise.race([settled, stalled]);
@@ -468,7 +462,8 @@ function piHeadlessRun(target, opts) {
       }
       return { uiAutoCancelled: handle.uiAutoCancelled, pid: w.sess.pid, warm: true };
     } finally {
-      clearTimeout(stallTimer);
+      stall.stop();
+      handle.runningTools = null;
       // Unanswered dialogs must not block the (still warm) extension forever.
       for (const id of [...pendingUi.keys()]) cancelDialog(id);
       w.busy = false;
