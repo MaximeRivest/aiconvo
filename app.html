@@ -2617,20 +2617,108 @@ function updateKind(old, d, isNew) {
 $('ticker').onclick = () => { if (tickerKey) open(tickerKey); };
 setInterval(renderTicker, 30000);
 
-// Unread completion state is local to this browser. The first-use timestamp
-// prevents old sessions from all becoming unread when this feature appears.
-// Session mtimes also recover completions that happened while the page closed.
-const AGENT_READ_KEY = 'aiconvo.agentRead.v1';
+// Unread completion state is shared across devices: the server owns it
+// (/api/agent-read, logic in agentread.js) and pushes changes over SSE. This
+// browser keeps a copy for instant boot, applies its own reads at once, and
+// sends them in small batches; a read on the laptop clears the phone's dot.
+// The server clock wins for every timestamp, so the copy is replaced by what
+// the server echoes back rather than merged.
+const AGENT_READ_LEGACY_KEY = 'aiconvo.agentRead.v1'; // per-browser state, imported once
+const AGENT_READ_CACHE_KEY = 'aiconvo.agentRead.v2';  // last server state, boot copy
 let agentReadState = { since: Date.now(), read: {}, finished: {} };
+let agentReadLoaded = false;           // the server state has been fetched once
+const agentReadPending = new Map();    // key → local read time, not yet accepted by the server
+let agentReadPushTimer = null, agentReadPushing = false;
 try {
-  const saved = JSON.parse(localStorage.getItem(AGENT_READ_KEY) || 'null');
+  const saved = JSON.parse(localStorage.getItem(AGENT_READ_CACHE_KEY) || 'null');
   if (saved && Number(saved.since)) agentReadState = {
     since: Number(saved.since), read: saved.read || {}, finished: saved.finished || {},
   };
-  else localStorage.setItem(AGENT_READ_KEY, JSON.stringify(agentReadState));
 } catch {}
 function saveAgentReadState() {
-  try { localStorage.setItem(AGENT_READ_KEY, JSON.stringify(agentReadState)); } catch {}
+  try { localStorage.setItem(AGENT_READ_CACHE_KEY, JSON.stringify(agentReadState)); } catch {}
+}
+// Adopt a server state or delta. Keys with a read still in flight keep the
+// optimistic local value until the server answers that request.
+function applyAgentReadFromServer(d, { replace = false } = {}) {
+  if (!d || typeof d !== 'object') return;
+  if (replace) {
+    agentReadState = { since: Number(d.since) || agentReadState.since, read: { ...(d.read || {}) }, finished: { ...(d.finished || {}) } };
+    for (const [key, at] of agentReadPending) {
+      agentReadState.read[key] = Math.max(at, Number(agentReadState.read[key]) || 0);
+      delete agentReadState.finished[key];
+    }
+  } else {
+    if (Number(d.since)) agentReadState.since = Number(d.since);
+    for (const [key, at] of Object.entries(d.read || {})) {
+      if (agentReadPending.has(key)) continue;
+      agentReadState.read[key] = Number(at) || 0;
+      delete agentReadState.finished[key];
+    }
+    for (const [key, at] of Object.entries(d.finished || {})) {
+      if (agentReadPending.has(key)) continue;
+      agentReadState.finished[key] = Math.max(Number(agentReadState.finished[key]) || 0, Number(at) || 0);
+    }
+  }
+  saveAgentReadState();
+  updateActiveBtn();
+  renderAgentsPopSoon();
+}
+// Fetch the whole state: at boot, on every SSE (re)connect, and from the
+// periodic list poll, so a missed event can never leave a stale dot.
+async function fetchAgentReadState() {
+  try {
+    const r = await fetch('/api/agent-read');
+    if (!r.ok) return;
+    applyAgentReadFromServer(await r.json(), { replace: true });
+    agentReadLoaded = true;
+    importLegacyAgentRead();
+  } catch {}
+}
+// The old per-browser state seeds the shared one once, then goes away. Raw
+// merge on the server: old read times stay old, so unread replies stay unread.
+function importLegacyAgentRead() {
+  let legacy = null;
+  try { legacy = JSON.parse(localStorage.getItem(AGENT_READ_LEGACY_KEY) || 'null'); } catch {}
+  if (!legacy || !Number(legacy.since)) { try { localStorage.removeItem(AGENT_READ_LEGACY_KEY); } catch {} return; }
+  fetch('/api/agent-read', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ import: { since: legacy.since, read: legacy.read || {}, finished: legacy.finished || {} } }) })
+    .then(r => r.ok ? r.json() : null)
+    .then(state => {
+      if (!state) return;
+      applyAgentReadFromServer(state, { replace: true });
+      try { localStorage.removeItem(AGENT_READ_LEGACY_KEY); } catch {}
+    }).catch(() => {});
+}
+function queueAgentReadPush(key, at) {
+  agentReadPending.set(key, at);
+  clearTimeout(agentReadPushTimer);
+  // Coalesce: while a transcript streams on screen, each write marks it read
+  // again; one small POST per ~0.5 s carries the latest of them.
+  agentReadPushTimer = setTimeout(pushAgentReads, 500);
+}
+async function pushAgentReads() {
+  clearTimeout(agentReadPushTimer);
+  agentReadPushTimer = null;
+  if (agentReadPushing || !agentReadPending.size) return;
+  agentReadPushing = true;
+  const batch = new Map(agentReadPending);
+  try {
+    const r = await fetch('/api/agent-read', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ read: Object.fromEntries(batch) }) });
+    if (!r.ok) throw new Error('agent-read ' + r.status);
+    const state = await r.json();
+    // Accepted: drop what this batch carried unless a newer read queued since.
+    for (const [key, at] of batch) if (agentReadPending.get(key) === at) agentReadPending.delete(key);
+    applyAgentReadFromServer(state, { replace: true });
+  } catch {
+    // Offline or the server is restarting: keep the batch, retry later. The
+    // local dot is already cleared, so the person is never blocked.
+    agentReadPushTimer = setTimeout(pushAgentReads, 10000);
+  } finally {
+    agentReadPushing = false;
+    if (agentReadPending.size && !agentReadPushTimer) agentReadPushTimer = setTimeout(pushAgentReads, 500);
+  }
 }
 function agentActivityAt(s) {
   if (!s || !s.key) return 0;
@@ -2659,13 +2747,18 @@ function finishedUnreadSessions() {
 function markAgentRead(key, at = Date.now()) {
   if (!key) return;
   const s = sessions.find(item => item.key === key);
-  agentReadState.read[key] = Math.max(Number(at) || 0, Date.now(), Number(s && s.mtimeMs) || 0,
+  const readAt = Math.max(Number(at) || 0, Date.now(), Number(s && s.mtimeMs) || 0,
     Number(agentReadState.finished[key]) || 0);
+  agentReadState.read[key] = readAt;
   delete agentReadState.finished[key];
   saveAgentReadState();
   updateActiveBtn();
   renderAgentsPopSoon();
+  // Every read reaches the server; it owns the clock and the other devices.
+  queueAgentReadPush(key, readAt);
 }
+// A run ended (server time in `at`). The server already stamped the shared
+// state; this only keeps the local copy current until its SSE delta lands.
 function markAgentFinished(key, at = Date.now()) {
   if (!key) return;
   if (key === activeRel && viewKind === 'conversation' && !document.hidden) {
@@ -2930,6 +3023,9 @@ async function load() {
   let foldsDone = false, foldsResult = null;
   const foldsReq = fetch('/api/project-folds').then(r => r.json()).catch(() => null)
     .then(f => { foldsDone = true; foldsResult = f; return f; });
+  // The shared inbox state rides along with the list. The first boot waits
+  // for it so the unread badge paints right once, not wrong then right.
+  const readReq = fetchAgentReadState();
   let sessRes;
   try { sessRes = await fetch('/api/sessions', sessionsEtag ? { headers: { 'If-None-Match': sessionsEtag } } : {}); }
   catch { return; }
@@ -2938,6 +3034,7 @@ async function load() {
   const tag = sessRes.headers.get('ETag');
   if (tag) sessionsEtag = tag;
   if (!unchanged) sessions = await sessRes.json();
+  if (!agentReadLoaded) await readReq;
   // Folds: apply now if they already landed, else when they do.
   if (foldsDone) applyProjectFolds(foldsResult);
   else foldsReq.then(f => {
@@ -16437,7 +16534,7 @@ live.onopen = () => {
   // Every update sent while the connection was down is gone. Reload the
   // list (it carries each transcript's version) and let load() reconcile
   // the open transcript against it.
-  if (liveConnectedOnce) { loadJobs(); load(); }
+  if (liveConnectedOnce) { loadJobs(); load(); fetchAgentReadState().then(pushAgentReads); }
   liveConnectedOnce = true;
 };
 live.onmessage = ev => {
@@ -16508,6 +16605,11 @@ live.onmessage = ev => {
     } else clearLedgers();
     return;
   }
+  if (d.type === 'agent-read') {
+    // Another device (or this one, echoed) read a reply or a run ended.
+    applyAgentReadFromServer(d);
+    return;
+  }
   if (d.type === 'voice-state') { voiceMutedState = !!d.muted; if (settingsOpen) renderSettings(); return; }
   if (d.type === 'voice-playing') { renderVoiceUi(d.playing, d.paused); return; }
   if (d.type === 'voice-nav') {
@@ -16518,7 +16620,7 @@ live.onmessage = ev => {
   if (d.type === 'run-event') {
     if (d.final) {
       if (window._sendPendingKey === d.key || window._sendPendingKey === d.fanoutRootKey) window._sendPendingKey = null;
-      markAgentFinished(d.fanoutRootKey || d.key);
+      markAgentFinished(d.fanoutRootKey || d.key, d.finishedAt);
       ledgerAbsorb(d);
       const doneL = runLedgers.get(d.jobId);
       if (doneL) { doneL.done = true; doneL.status = d.status; }

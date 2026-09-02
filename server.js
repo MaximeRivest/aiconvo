@@ -27,6 +27,7 @@ const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
 const fanoutMerge = require('./fanoutmerge.js');
 const usageLib = require('./usageanalytics.js');
+const agentReadLib = require('./agentread.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
@@ -1827,6 +1828,17 @@ function endLiveRunTail(jobId) {
   liveRunTails.delete(jobId);
 }
 
+// The one place a web run's end reaches the browsers. It also stamps the
+// shared inbox, so a device that was closed still sees the reply as unread
+// when it comes back. Fan-out children report under their root conversation.
+function broadcastRunFinal(job, key) {
+  const finishedAt = job.finishedAt || Date.now();
+  agentReadFinished(job.fanoutRootKey || key, finishedAt);
+  broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
+    fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
+    fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true, finishedAt });
+}
+
 function toolResultTail(result) {
   if (result == null) return '';
   if (typeof result === 'string') return result.slice(-4000);
@@ -2076,9 +2088,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     if (status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
     endLiveRunTail(job.id);
     jobChanged(job);
-    broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
-      fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
-      fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
+    broadcastRunFinal(job, key);
     maybeSettleFanout(job);
     speakRunDone(job);
   };
@@ -2511,6 +2521,40 @@ function saveConversationModels(key, raw) {
   modelPrefs.conversations[key] = models;
   saveModelPrefs();
   return models;
+}
+// ---------- shared agent inbox (read / unread) ----------
+// Read receipts are user actions, so they live with the other per-person
+// preferences under the notes tree, not in the rebuildable cache. Logic and
+// clock rules: agentread.js.
+const AGENT_READ_FILE = path.join(NOTES_DIR, 'agent-read.json');
+let agentRead = agentReadLib.createState();
+try { agentRead = agentReadLib.normalize(JSON.parse(fs.readFileSync(AGENT_READ_FILE, 'utf8'))); } catch {}
+function saveAgentReadSoon() {
+  clearTimeout(saveAgentReadSoon.t);
+  saveAgentReadSoon.t = setTimeout(() => {
+    fs.mkdirSync(path.dirname(AGENT_READ_FILE), { recursive: true });
+    writeFileAtomic(AGENT_READ_FILE, JSON.stringify(agentRead) + '\n').catch(() => {});
+  }, 1000);
+}
+function agentReadApply(delta) {
+  if (!delta) return;
+  saveAgentReadSoon();
+  broadcast({ type: 'agent-read', ...delta });
+}
+function agentReadFinished(key, at) {
+  agentReadApply(agentReadLib.markFinished(agentRead, key, at));
+}
+// Keys arrive as a { key: clientAt } map; the client time is ignored on
+// purpose (server clock rule), it only says which keys were read.
+function agentReadMark(keys) {
+  const merged = { read: {} };
+  let any = false;
+  for (const key of keys) {
+    if (!key || !index[key]) continue;
+    const d = agentReadLib.markRead(agentRead, key, { mtimeMs: index[key].mtimeMs });
+    if (d) { Object.assign(merged.read, d.read); any = true; }
+  }
+  if (any) agentReadApply(merged);
 }
 const MEMORY_DOC_KINDS = ['overview', 'intent', 'environment', 'status'];
 function normalizeContextItems(raw) {
@@ -9190,18 +9234,14 @@ async function startProjectConversation(options) {
         if (job.status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
         endLiveRunTail(job.id);
         jobChanged(job);
-        broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
-          fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
-          fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
+        broadcastRunFinal(job, key);
         speakRunDone(job);
       }).catch(async e => {
         headlessRuns.delete(begun.file);
         job.status = 'error'; job.statusText = e.message; job.error = e.message; job.finishedAt = Date.now();
         endLiveRunTail(job.id);
         jobChanged(job);
-        broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
-          fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
-          fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true });
+        broadcastRunFinal(job, key);
       });
     }
     if (key && launchModels.length) saveConversationModels(key, launchModels);
@@ -10876,6 +10916,19 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}');
       try { json(res, 200, await actOnConversation(parsed.id, parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/agent-read' && req.method === 'GET') {
+      json(res, 200, agentRead);
+    } else if (u.pathname === '/api/agent-read' && req.method === 'POST') {
+      // { read: { key: at } } marks reads (server clock wins);
+      // { import: { since, read, finished } } merges a browser's old local state once.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        if (p.import && typeof p.import === 'object') agentReadApply(agentReadLib.importState(agentRead, p.import));
+        if (p.read && typeof p.read === 'object') agentReadMark(Object.keys(p.read));
+        json(res, 200, agentRead);
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/voice/state' && req.method === 'GET') {
       json(res, 200, { muted: voiceMuted(), mutedUntil: voice.mutedUntil || null, queued: voice.queue.length,
         playing: !!voice.current, paused: voice.paused });
