@@ -152,7 +152,9 @@ header { position: relative; }
 header .count { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 /* Conversation identity in the top bar: ⌂ · project path · title … ✎ ↻.
    The old in-view conversation header is gone. */
-#chProject, #chNew, #chTitle, #convHeadExtra { display: none; }
+#chProject, #chMove, #chNew, #chTitle, #convHeadExtra { display: none; }
+body.conv #chMove { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 3px; border: 0; background: transparent; color: var(--text-dim); font-size: 13px; line-height: 1; flex-shrink: 0; opacity: .7; }
+body.conv #chMove:hover { color: var(--accent); opacity: 1; background: transparent; }
 body.conv #chProject { display: inline-flex; align-items: center; background: transparent; border: 0; height: 26px; padding: 0 2px; color: var(--text-dim); font-size: var(--fs-meta); font-family: inherit; cursor: pointer; flex-shrink: 0; max-width: 22vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 body.conv #chProject:hover { color: var(--text); text-decoration: underline; background: transparent; }
 body.conv #chNew { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 4px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); font-size: 13px; line-height: 1; flex-shrink: 0; }
@@ -1588,7 +1590,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
      The cwd breadcrumb and the fold button cost too much width; scroll
      already hides the chrome, and home reaches the project overview. */
   body.conv header { flex-wrap: nowrap; }
-  body.conv #chProject, body.conv #barFold { display: none; }
+  body.conv #chProject, body.conv #chMove, body.conv #barFold { display: none; }
   body.conv #chNew { height: 44px; min-width: 44px; padding: 0 10px; font-size: 17px; }
   body.conv #chTitle { flex: 1 1 auto; min-width: 0; max-width: none; }
   body.conv #chTitle input { width: 100%; }
@@ -1820,6 +1822,7 @@ window.aiconvoSyncTheme();
   <button id="newLoose" title="New projectless conversation · working directory: your home (C)">+ conversation</button>
   <button id="brand" aria-label="Home">⌂</button>
   <button id="chProject" title="Open the project overview"></button>
+  <button id="chMove" title="Move this conversation to another project (P) — its memory follows; tools keep running in the original folder">⇢</button>
   <button id="chNew" title="New conversation in this project — same model and thinking level, the project map in the system prompt, an empty composer">+</button>
   <div id="chTitle"></div>
   <span id="convHeadExtra"></span>
@@ -8298,50 +8301,67 @@ function realProjectNames() {
   ])].filter(p => p && p !== '?' && p !== LOOSE_PROJECT).sort((a, b) => a.localeCompare(b));
 }
 
-function openLooseProjectPicker(key) {
-  const conversation = sessions.find(s => s.key === key);
+// One picker for both cases: a loose conversation joins a project, or a
+// conversation moves from one project to another. The move is a durable
+// assignment on the server (notes, not cache); the transcript file and its
+// tool cwd stay where they are, so the history stays true.
+function openProjectPicker(key) {
+  const conversation = sessions.find(s => s.key === key) || (current && current.key === key ? current : null);
   if (!conversation) return;
-  const projects = realProjectNames();
-  if (!projects.length) return errToast('create a project first');
+  const from = projectOf(conversation);
+  const loose = from === LOOSE_PROJECT;
+  const cwdProject = projectOf({ cwd: conversation.cwd });
+  const assignedAway = !loose && cwdProject !== LOOSE_PROJECT && from !== cwdProject;
+  const projects = realProjectNames().filter(p => p !== from);
+  if (!projects.length && !assignedAway) return errToast('create another project first');
   const ov = document.createElement('div');
   ov.className = 'ctx-confirm';
   ov.innerHTML = `<div class="cc-card">
-    <div class="cc-head"><b>assign to a project</b><button type="button" class="ghost" data-close>cancel</button></div>
-    <div class="cc-meta dim">${esc(conversation.title || '(untitled)')}</div>
+    <div class="cc-head"><b>${loose ? 'assign to a project' : 'move to another project'}</b><button type="button" class="ghost" data-close>cancel</button></div>
+    <div class="cc-meta dim">${esc(conversation.title || '(untitled)')}${loose ? '' : ' · now in <b>' + esc(from) + '</b>'}</div>
+    <div class="cc-meta dim">The conversation leaves ${loose ? 'the loose list' : 'that project’s memory'} and joins the one you pick. Tools keep running in ${esc(shortDir(conversation.cwd) || 'the original folder')}.</div>
     <input type="text" data-project-q placeholder="find a project" autocomplete="off">
     <div class="loose-pick-list" data-project-list></div>
+    ${assignedAway ? `<button type="button" class="ghost" data-target="" data-restore>↩ back to ${esc(cwdProject)} (where the folder is)</button>` : ''}
   </div>`;
   document.body.appendChild(ov);
   const q = ov.querySelector('[data-project-q]');
   const list = ov.querySelector('[data-project-list]');
   const close = () => ov.remove();
+  const move = async button => {
+    button.disabled = true;
+    const target = button.dataset.target;
+    const out = await postJsonMethod('/api/conversation/project', 'PUT', { id: key, project: target });
+    if (out.error) { button.disabled = false; return errToast(out.error); }
+    conversation.project = out.project;
+    const s = sessions.find(x => x.key === key);
+    if (s) s.project = out.project;
+    if (current && current.key === key) { current.project = out.project; convHead(current); }
+    close();
+    toast((loose ? 'assigned to ' : 'moved to ') + out.project + (out.reextract ? ' · memory re-read' : ''));
+    if (projectOverviewName === LOOSE_PROJECT && viewKind === 'project') showLooseConversations();
+    else if (viewKind === 'home' && tab === 'conv' && !searchMode) render();
+  };
   const paint = () => {
     const needle = q.value.trim().toLowerCase();
     const hits = projects.filter(p => p.toLowerCase().includes(needle)).slice(0, 30);
     list.innerHTML = hits.map(p => `<button type="button" data-target="${esc(p)}">${esc(p)}</button>`).join('')
       || '<div class="hint">no project matches.</div>';
-    list.querySelectorAll('[data-target]').forEach(button => button.onclick = async () => {
-      button.disabled = true;
-      const out = await (await fetch('/api/conversation/project', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: key, project: button.dataset.target }),
-      })).json();
-      if (out.error) { button.disabled = false; return errToast(out.error); }
-      conversation.project = out.project;
-      close();
-      toast('assigned to ' + out.project);
-      showLooseConversations();
-    });
+    list.querySelectorAll('[data-target]').forEach(button => button.onclick = () => move(button));
   };
+  const restore = ov.querySelector('[data-restore]');
+  if (restore) restore.onclick = () => move(restore);
   ov.querySelector('[data-close]').onclick = close;
   q.oninput = paint;
   q.onkeydown = e => {
+    e.stopPropagation(); // app shortcuts must never fire while typing here
     if (e.key === 'Escape') close();
     if (e.key === 'Enter') { const first = list.querySelector('[data-target]'); if (first) first.click(); }
   };
   paint();
   q.focus();
 }
+const openLooseProjectPicker = openProjectPicker;
 
 function showLooseConversations() {
   markSettingsClosed();
@@ -10002,6 +10022,8 @@ function wireHead() {
   refreshCtxMeter(current);
   const proj = $('chProject');
   if (proj) proj.onclick = () => current && showProjectOverview(projectOf(current));
+  const mv = $('chMove');
+  if (mv) mv.onclick = () => current && openProjectPicker(current.key);
   const nb = $('chNew');
   if (nb) nb.onclick = startSiblingConversation;
   wireTitleControls();
@@ -16114,7 +16136,7 @@ function helpNow() {
       ['shift+m', 'model picker (older shortcut)'],
       ['ctrl+enter', 'send the draft — focused or not; 2+ model chips fan out'],
       ['ctrl+shift+enter', 'send in the terminal — one model only, refuses with 2+ chips']);
-    keys.push(['z', 'zen — hide everything but the words'], ['c', 'copy as markdown'], ['e', 'export'], ['d', 'distill / open note'], ['p', 'project overview']);
+    keys.push(['z', 'zen — hide everything but the words'], ['c', 'copy as markdown'], ['e', 'export'], ['d', 'distill / open note'], ['p', 'project overview'], ['P', 'move to another project']);
     sections.push({ label: 'conversation', keys });
   }
   if (viewKind === 'tree') {
@@ -16443,6 +16465,7 @@ document.addEventListener('keydown', e => {
       break;
     case 'P':
       if (viewKind === 'home') { e.preventDefault(); openNewProjectForm(); }
+      else if (viewKind === 'conversation' && current) { e.preventDefault(); openProjectPicker(current.key); }
       break;
     case 'r': {
       const msg = lastReadableMsg();

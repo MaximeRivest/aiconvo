@@ -2459,10 +2459,21 @@ async function assignConversationProject(key, rawProject) {
   await writeFileAtomic(CONVERSATION_PROJECTS_FILE, JSON.stringify(conversationProjects, null, 2) + '\n');
   const project = projectNameOf(index[key].cwd, key);
   try { if (searchIdx) searchIdx.setProject('conv:' + key, project); } catch {}
+  // An existing leaf weighed this conversation's intent against the OLD
+  // project's primer. Re-extract it under the new project; that job
+  // regenerates the new project's documents (and any epics) when it lands.
+  // Without a leaf there is nothing to re-weigh: the backfill builds it later.
+  let reextract = false;
+  if (project !== oldProject && index[key].realUserCount && await readLeaf(key)) {
+    try {
+      startMemoryExtractJob([key], `${oneLine(index[key].title, '(untitled)').slice(0, 60)}: re-read for ${project}`);
+      reextract = true;
+    } catch {}
+  }
   if (oldProject !== LOOSE_PROJECT) scheduleDocsRegen(oldProject);
-  if (project !== LOOSE_PROJECT && project !== oldProject) scheduleDocsRegen(project);
+  if (project !== LOOSE_PROJECT && project !== oldProject && !reextract) scheduleDocsRegen(project);
   broadcast({ type: 'conversation-project', key, project });
-  return { ok: true, key, project };
+  return { ok: true, key, project, reextract };
 }
 
 // Model choices are user preferences, not derived cache. Keep one project
