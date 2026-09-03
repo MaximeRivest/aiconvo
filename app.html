@@ -740,7 +740,17 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .fi-head b { flex: 1; min-width: 220px; }
 .fi-head select { max-width: min(38vw, 520px); }
 .fi-truth { width: 100%; color: var(--text-dim); font-size: var(--fs-micro); }
-.fi-columns { overflow: auto; max-height: 72vh; font: 11px/1.45 var(--font); }
+.fi-columns { overflow: auto; max-height: 72vh; font: 11px/1.45 var(--font); position: relative; }
+/* Virtual window: only rows near the viewport (or the current page) exist.
+   The spacer carries the full computed height; the window is translated
+   to the first rendered row. Probe rows measure the real metrics once. */
+.fi-spacer { position: relative; min-height: 1px; }
+.fi-window { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+.fi-columns.paged .fi-spacer { height: auto !important; }
+.fi-columns.paged .fi-window { position: static; transform: none !important; }
+.fi-probe { position: absolute; left: 0; right: 0; top: 0; visibility: hidden; pointer-events: none; }
+.file-inspector .fi-columns.paged { height: 72vh; }
+body.file-full .file-inspector .fi-columns.paged { height: auto; }
 .fi-diff-row { display: flex; justify-content: center; }
 .fi-diff-row:not(.changed) .fi-cell { flex: 0 0 50%; width: 50%; max-width: 50%; }
 .fi-diff-row.changed { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -758,7 +768,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 :root[data-theme-mode="binary"] .fi-diff-row.changed .fi-cell + .fi-cell { border-left: 2px solid var(--text); }
 .fi-cell .ln { padding: 1px 6px; color: var(--text-faint); text-align: right; user-select: none; background: var(--surface-1); cursor: pointer; }
 .fi-cell .ln:hover { color: var(--text); font-weight: 700; }
-.fi-cell .code { display: block; min-width: 0; padding: 1px 7px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fi-cell .code { display: block; min-width: 0; padding: 1px 7px; white-space: pre-wrap; word-break: break-all; tab-size: 8; }
 .fi-cell .code .sx { font: inherit; }
 .sx-k { color: var(--accent); font-weight: 700; }
 .sx-s { color: var(--cyan); }
@@ -1949,6 +1959,7 @@ window.aiconvoSyncTheme();
   </div>
   <div id="readBody" tabindex="0"></div>
 </div>
+<script src="/linediff.js"></script>
 <script>
 let sessions = [];          // full index list
 const LOOSE_PROJECT = 'Loose conversations';
@@ -4371,12 +4382,9 @@ let focusedFileWindow = null;
 let fileCompareLines = localStorage.getItem('aiconvo.fileLines') === '1';
 let fileReadingMode = localStorage.getItem('aiconvo.fileRead') === '1';
 let fileComparePages = localStorage.getItem('aiconvo.filePages') !== '0';
-let focusedFileAbort = null;
 let focusedFileRequest = 0;
 let focusedCompareTimer = null;
-const focusedCompareCache = new Map();
 const focusedRowsCache = new Map();
-const focusedSnapshotCache = new Map();
 
 const fgAttr = value => esc(value).replace(/"/g, '&quot;');
 
@@ -4490,40 +4498,73 @@ function renderFileGanttChart() {
   }
 }
 
-function myersLineOps(a, b) {
-  const n = a.length, m = b.length, max = n + m;
-  if (max > 24000) return null;
-  let v = new Map([[1, 0]]);
-  const trace = [];
-  const limit = Math.min(max, 2400);
-  for (let d = 0; d <= limit; d++) {
-    trace.push(new Map(v));
-    for (let k = -d; k <= d; k += 2) {
-      const left = v.has(k - 1) ? v.get(k - 1) : -1;
-      const down = v.has(k + 1) ? v.get(k + 1) : -1;
-      let x = k === -d || (k !== d && left < down) ? Math.max(0, down) : left + 1;
-      let y = x - k;
-      while (x < n && y < m && a[x] === b[y]) { x++; y++; }
-      v.set(k, x);
-      if (x < n || y < m) continue;
-      const ops = [];
-      let bx = n, by = m;
-      for (let bd = trace.length - 1; bd >= 0; bd--) {
-        const bv = trace[bd], bk = bx - by;
-        const bleft = bv.has(bk - 1) ? bv.get(bk - 1) : -1;
-        const bdown = bv.has(bk + 1) ? bv.get(bk + 1) : -1;
-        const prevK = bk === -bd || (bk !== bd && bleft < bdown) ? bk + 1 : bk - 1;
-        const prevX = Math.max(0, bv.has(prevK) ? bv.get(prevK) : 0);
-        const prevY = prevX - prevK;
-        while (bx > prevX && by > prevY) { ops.push({ type: 'same', text: a[bx - 1] }); bx--; by--; }
-        if (bd === 0) break;
-        if (bx === prevX) { ops.push({ type: 'new', text: b[by - 1] }); by--; }
-        else { ops.push({ type: 'old', text: a[bx - 1] }); bx--; }
-      }
-      return ops.reverse();
+// ---- line diff ----
+// LineDiff (/linediff.js, shared with the server) is exact and has no size
+// cap: the old in-page Myers gave up above 24k lines or 2.4k edits and fell
+// back to comparing line i with line i, which painted every line of a big
+// file as changed. Whole-file diffs run in a worker so keyframe scrubbing
+// never blocks the page; small hunks diff inline.
+let diffWorker = null, diffWorkerSeq = 0;
+const diffWorkerPending = new Map();
+function ensureDiffWorker() {
+  if (diffWorker || typeof Worker === 'undefined') return diffWorker;
+  try {
+    const src = `importScripts(${JSON.stringify(location.origin + '/linediff.js')});
+      self.onmessage = e => { const { id, oldText, newText } = e.data;
+        const script = self.LineDiff.diffLines(oldText, newText);
+        self.postMessage({ id, script }, [script.buffer]); };`;
+    diffWorker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    diffWorker.onmessage = e => {
+      const pending = diffWorkerPending.get(e.data.id);
+      if (!pending) return;
+      diffWorkerPending.delete(e.data.id);
+      pending.resolve(e.data.script);
+    };
+    diffWorker.onerror = () => {
+      for (const pending of diffWorkerPending.values()) pending.resolve(null);
+      diffWorkerPending.clear();
+      try { diffWorker.terminate(); } catch {}
+      diffWorker = null;
+    };
+  } catch { diffWorker = null; }
+  return diffWorker;
+}
+function diffLinesAsync(oldText, newText) {
+  const worker = ensureDiffWorker();
+  if (!worker) return Promise.resolve(LineDiff.diffLines(oldText, newText));
+  return new Promise(resolve => {
+    const id = ++diffWorkerSeq;
+    diffWorkerPending.set(id, { resolve });
+    worker.postMessage({ id, oldText: String(oldText || ''), newText: String(newText || '') });
+  }).then(script => script || LineDiff.diffLines(oldText, newText));
+}
+
+// Rows for the two-column view from an edit script. Consecutive removed and
+// added lines pair up side by side; the rest is one full-width line.
+function rowsFromScript(script, oldLines, newLines) {
+  const rows = [];
+  let i = 0, j = 0, oldN = 0, newN = 0;
+  for (let k = 0; k < script.length;) {
+    if (script[k] === LineDiff.SAME) {
+      oldN++; newN++;
+      rows.push({ oldText: oldLines[i], newText: newLines[j], oldN, newN, changed: false });
+      i++; j++; k++;
+      continue;
+    }
+    const olds = [], news = [];
+    while (k < script.length && script[k] !== LineDiff.SAME) {
+      if (script[k] === LineDiff.OLD) olds.push(oldLines[i++]);
+      else news.push(newLines[j++]);
+      k++;
+    }
+    for (let m = 0; m < Math.max(olds.length, news.length); m++) {
+      const hasOld = m < olds.length, hasNew = m < news.length;
+      if (hasOld) oldN++;
+      if (hasNew) newN++;
+      rows.push({ oldText: hasOld ? olds[m] : null, newText: hasNew ? news[m] : null, oldN: hasOld ? oldN : null, newN: hasNew ? newN : null, changed: true });
     }
   }
-  return null;
+  return rows;
 }
 
 const SX_CACHE = new Map();
@@ -4683,24 +4724,38 @@ function highlightMdLine(line, state) {
   return highlightMdInline(line);
 }
 
-function highlightFileLines(text, lang) {
+// Incremental: the highlighter carries state from line to line (block
+// comments, template strings, fences), so lines are produced in order, but
+// only up to the last line anyone asked for. The whole-file view renders a
+// window of ~20–150 rows; highlighting all 17k lines up front cost
+// 150–270 ms per new snapshot for nothing. `eager` fills everything.
+function highlightFileLines(text, lang, { eager = false } = {}) {
   const key = lang + '\0' + text;
-  const cached = SX_CACHE.get(key);
-  if (cached) return cached;
-  const lines = String(text || '').split('\n');
-  const out = new Array(lines.length);
-  const state = { block: '', fence: undefined, code: { block: '' } };
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].length > 4000) out[i] = esc(lines[i]);
-    else out[i] = lang === 'md' ? highlightMdLine(lines[i], state) : highlightCodeLine(lines[i], lang, state);
+  let out = SX_CACHE.get(key);
+  if (!out) {
+    const lines = String(text || '').split('\n');
+    out = new Array(lines.length);
+    const state = { block: '', fence: undefined, code: { block: '' } };
+    let done = 0;
+    out.ensure = upTo => {
+      const stop = Math.min(lines.length, upTo);
+      for (; done < stop; done++) {
+        const line = lines[done];
+        out[done] = line.length > 4000 ? esc(line) : lang === 'md' ? highlightMdLine(line, state) : highlightCodeLine(line, lang, state);
+      }
+      return out;
+    };
+    SX_CACHE.set(key, out);
+    if (SX_CACHE.size > 16) SX_CACHE.delete(SX_CACHE.keys().next().value);
   }
-  SX_CACHE.set(key, out);
-  if (SX_CACHE.size > 16) SX_CACHE.delete(SX_CACHE.keys().next().value);
+  if (eager) out.ensure(Infinity);
   return out;
 }
 
 function fileLineHtml(highlighted, n) {
-  return n ? (highlighted[n - 1] || '') : '';
+  if (!n) return '';
+  if (highlighted.ensure) highlighted.ensure(n);
+  return highlighted[n - 1] || '';
 }
 
 // ---- highlighted code editor (overlay) ----
@@ -4781,17 +4836,16 @@ function fileCompareCell(kind, n, html) {
   return `<div class="fi-cell ${cls}"><span class="ln" title="Open the source of this change">${n || ''}</span><span class="code">${html || ''}</span></div>`;
 }
 
-function fileChangeStarts(root) {
-  const rows = [...root.querySelectorAll('.fi-diff-row.changed')];
+// First row index of every run of changed rows (computed from the row
+// model, so it does not depend on which rows are currently rendered).
+function fileChangeStarts(rows) {
   const starts = [];
-  for (const row of rows) {
-    const prev = starts.length ? starts[starts.length - 1].last : null;
-    let next = prev && prev.nextElementSibling;
-    while (next && next.classList.contains('fi-line-history')) next = next.nextElementSibling;
-    if (next === row) starts[starts.length - 1].last = row;
-    else starts.push({ first: row, last: row });
-  }
-  return starts.map(item => item.first);
+  for (let i = 0; i < rows.length; i++) if (rows[i].changed && (i === 0 || !rows[i - 1].changed)) starts.push(i);
+  return starts;
+}
+function compareListOf(root) {
+  if (!root) return null;
+  return root.__compareList || (root.closest && root.closest('.ff-compare, .file-inspector, .qf-body') || {}).__compareList || null;
 }
 
 function fileCompareDockHtml(identical) {
@@ -4833,7 +4887,8 @@ function exitFileDiffFull() {
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
   fileInk.teardown();
 }
-function wireFileCompareDock(root) {
+function wireFileCompareDock(root, list) {
+  if (list) root.__compareList = list;
   if ($('ffDockPrev')) $('ffDockPrev').onclick = () => jumpFileChange(root, -1);
   if ($('ffDockNext')) $('ffDockNext').onclick = () => jumpFileChange(root, 1);
   if ($('ffDockFull')) $('ffDockFull').onclick = enterFileDiffFull;
@@ -4842,7 +4897,7 @@ function wireFileCompareDock(root) {
     document.body.classList.toggle('file-full-tree');
     syncFileDiffFullUi();
   };
-  fileInk.bind(root);
+  fileInk.bind(root, list);
 }
 
 const fileInk = {
@@ -4855,9 +4910,10 @@ const fileInk = {
     const c = this.compare || {}, r = this.fileRow || {};
     return (r.id || c.path || '') + '\0' + (c.from || '') + '\0' + (c.to || '');
   },
-  bind(root) {
+  bind(root, list) {
     this.root = root;
-    const cols = root.querySelector('.fi-columns');
+    this.list = list || compareListOf(root);
+    const cols = this.list ? this.list.el : root.querySelector('.fi-columns');
     if (!cols) return;
     let sheet = root.querySelector('.ff-sheet');
     if (!sheet) {
@@ -4889,7 +4945,11 @@ const fileInk = {
       this.canvas.onpointermove = e => this.move(e);
       this.canvas.onpointerup = e => this.up(e);
       this.canvas.onpointercancel = e => this.up(e);
-      window.addEventListener('resize', () => { if (this.sheet && this.sheet.isConnected) this.paginate(); });
+      window.addEventListener('resize', () => {
+        if (!this.sheet || !this.sheet.isConnected) return;
+        if (this.list) this.list.refresh();
+        this.paginate();
+      });
     }
     if ($('ffInk')) $('ffInk').onclick = () => this.setMode(!this.on, false);
     if ($('ffErase')) $('ffErase').onclick = () => this.setMode(true, !this.erase);
@@ -4941,45 +5001,39 @@ const fileInk = {
     this.clearNativeAll();
     this.draft = null;
   },
+  // Pages and row boxes come from the virtual list: no per-row measuring.
   paginate() {
-    if (!this.sheet) return;
-    const cols = this.sheet.querySelector('.fi-columns');
-    if (!cols) return;
-    const all = [...cols.querySelectorAll('.fi-diff-row')];
-    all.forEach(row => { row.hidden = false; });
-    if (!fileComparePages) {
-      this.pages = [all];
-      this.page = 0;
-      this.resize();
-      this.cacheRows();
-      this.draw(true);
-      this.clearNativeAll();
-      return;
-    }
-    const limit = Math.max(220, (this.sheet.clientHeight || 600) - 4);
-    const pages = [];
-    let bucket = [], used = 0;
-    for (const row of all) {
-      const h = row.getBoundingClientRect().height || 18;
-      if (bucket.length && used + h > limit) { pages.push(bucket); bucket = []; used = 0; }
-      bucket.push(row); used += h;
-    }
-    if (bucket.length) pages.push(bucket);
-    this.pages = pages.length ? pages : [all];
-    this.showPage(Math.min(this.page, this.pages.length - 1));
-  },
-  showPage(n) {
-    if (!this.pages.length) return;
-    this.page = Math.max(0, Math.min(this.pages.length - 1, n));
-    const visible = new Set(this.pages[this.page]);
-    this.pages.flat().forEach(row => { row.hidden = !visible.has(row); });
-    if ($('ffPageInfo')) $('ffPageInfo').textContent = (this.page + 1) + '/' + this.pages.length;
-    if ($('ffPagePrev')) $('ffPagePrev').disabled = this.page <= 0;
-    if ($('ffPageNext')) $('ffPageNext').disabled = this.page >= this.pages.length - 1;
+    if (!this.sheet || !this.list) return;
+    this.list.setPagesMode(!!fileComparePages);
+    this.syncPageUi();
     this.resize();
     this.cacheRows();
     this.draw(true);
     this.clearNativeAll();
+  },
+  showPage(n) {
+    if (!this.list || !this.list.pagesMode) return;
+    this.list.setPage(n);
+    this.syncPageUi();
+    this.resize();
+    this.cacheRows();
+    this.draw(true);
+    this.clearNativeAll();
+  },
+  syncPageUi() {
+    if (!this.list) return;
+    this.page = this.list.page;
+    const count = this.list.pagesMode ? this.list.pageCount() : 1;
+    if ($('ffPageInfo')) $('ffPageInfo').textContent = (this.page + 1) + '/' + count;
+    if ($('ffPagePrev')) $('ffPagePrev').disabled = this.page <= 0;
+    if ($('ffPageNext')) $('ffPageNext').disabled = this.page >= count - 1;
+  },
+  // Called by the list after every window render: ink follows scrolling.
+  onListRender(list) {
+    if (!this.canvas || !this.sheet || !this.sheet.isConnected || list !== this.list) return;
+    this.syncPageUi();
+    this.cacheRows();
+    this.draw(true);
   },
   resize() {
     if (!this.canvas || !this.sheet) return;
@@ -4992,17 +5046,16 @@ const fileInk = {
     this.canvas.style.height = h + 'px';
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   },
+  renderedRows() {
+    return this.list ? this.list.rendered() : [];
+  },
   cacheRows() {
     if (!this.canvas) return;
     this.hostBox = this.canvas.getBoundingClientRect();
     const host = this.hostBox;
-    this.rowBox = (this.pages[this.page] || []).map(row => {
-      const box = row.getBoundingClientRect();
-      return {
-        i: Number(row.dataset.fiAny),
-        l: box.left - host.left, t: box.top - host.top,
-        w: Math.max(1, box.width), h: Math.max(1, box.height),
-      };
+    this.rowBox = this.renderedRows().map(({ i, el }) => {
+      const box = el.getBoundingClientRect();
+      return { i, l: box.left - host.left, t: box.top - host.top, w: Math.max(1, box.width), h: Math.max(1, box.height) };
     });
     this.rowByI = new Map(this.rowBox.map(r => [r.i, r]));
   },
@@ -5132,7 +5185,7 @@ const fileInk = {
     this.eraseAt(hit.x, hit.y);
   },
   clearPage() {
-    const visible = new Set((this.pages[this.page] || []).map(row => Number(row.dataset.fiAny)));
+    const visible = new Set(this.renderedRows().map(item => item.i));
     this.strokes = this.strokes.filter(stroke => !stroke.pts.some(pt => visible.has(pt.i)));
     this.store.set(this.key(), this.strokes);
     this.draw();
@@ -5166,8 +5219,8 @@ const fileInk = {
     for (const stroke of this.strokes) this.stroke(this.ctx, stroke.pts, stroke.erase, false, useHalo);
   },
   pageMeta() {
-    const els = this.pages[this.page] || [];
-    const lines = els.map(el => this.rows[Number(el.dataset.fiAny)]).filter(Boolean);
+    const lines = this.renderedRows().map(item => this.rows[item.i]).filter(Boolean);
+    const pageCount = this.list && this.list.pagesMode ? this.list.pageCount() : 1;
     const nums = lines.flatMap(line => [line.oldN, line.newN]).filter(Boolean);
     const key = (fileHistoryData && fileHistoryData.scope === 'conversation' && fileHistoryData.key)
       || (this.compare && this.compare.changes && this.compare.changes[0] && this.compare.changes[0].key)
@@ -5179,7 +5232,7 @@ const fileInk = {
       fromLine: nums.length ? Math.min(...nums) : 1,
       toLine: nums.length ? Math.max(...nums) : 1,
       page: this.page + 1,
-      pages: this.pages.length,
+      pages: pageCount,
       lines,
     };
   },
@@ -5196,10 +5249,11 @@ const fileInk = {
     const host = this.canvas.getBoundingClientRect();
     ctx.font = '11px ui-monospace, Menlo, monospace';
     ctx.textBaseline = 'top';
-    for (const el of (this.pages[this.page] || [])) {
-      const line = this.rows[Number(el.dataset.fiAny)];
+    for (const { i, el } of this.renderedRows()) {
+      const line = this.rows[i];
       if (!line) continue;
       const box = el.getBoundingClientRect();
+      if (box.bottom < host.top || box.top > host.bottom) continue;
       const x = box.left - host.left, y = box.top - host.top;
       const text = line.changed
         ? ((line.oldText !== null ? '- ' + line.oldText : '') + (line.oldText !== null && line.newText !== null ? '  |  ' : '') + (line.newText !== null ? '+ ' + line.newText : ''))
@@ -5263,21 +5317,10 @@ function intervalChangedRows() {
     return stats && stats.events > 0;
   }).sort((a, b) => a.relativePath.localeCompare(b.relativePath) || String(a.repoRoot || '').localeCompare(String(b.repoRoot || '')));
 }
-function revealDiffRow(row, dir = 1) {
-  if (!row) return;
-  if (row.hidden && fileInk.pages && fileComparePages) {
-    const at = fileInk.pages.findIndex(page => page.includes(row));
-    if (at >= 0) fileInk.showPage(at);
-  }
-  const scroller = row.closest('.fi-columns');
-  if (scroller) {
-    const box = scroller.getBoundingClientRect();
-    const rect = row.getBoundingClientRect();
-    const target = box.height * (dir > 0 ? 0.25 : 0.75);
-    scroller.scrollTop += (rect.top - box.top) - target;
-  } else row.scrollIntoView({ block: 'center' });
-  row.classList.add('jump');
-  setTimeout(() => row.classList.remove('jump'), 900);
+function revealDiffRow(list, index, dir = 1) {
+  if (!list || index < 0) return;
+  list.reveal(index, dir);
+  if (list.pagesMode) fileInk.syncPageUi();
 }
 async function jumpIntervalFile(dir) {
   const rows = intervalChangedRows();
@@ -5289,23 +5332,18 @@ async function jumpIntervalFile(dir) {
   const oldPoint = focusedFileCompare && focusedFileCompare.old.point;
   const newPoint = focusedFileCompare && focusedFileCompare.new.point;
   await loadFocusedFile(next, { fromAt: oldPoint && oldPoint.ms, toAt: newPoint && newPoint.ms });
-  const root = $('ffCompare') || $('diffCard');
-  const scroller = root && (root.classList.contains('fi-columns') ? root : root.querySelector('.fi-columns'));
-  const starts = scroller ? fileChangeStarts(scroller) : [];
-  if (starts.length) revealDiffRow(dir > 0 ? starts[0] : starts[starts.length - 1], dir);
+  const list = compareListOf($('ffCompare') || $('diffCard'));
+  const starts = list ? fileChangeStarts(list.rows) : [];
+  if (starts.length) revealDiffRow(list, dir > 0 ? starts[0] : starts[starts.length - 1], dir);
   return true;
 }
 function jumpFileChange(root, dir) {
-  const scroller = root && (root.classList.contains('fi-columns') ? root : root.querySelector('.fi-columns'));
-  const starts = scroller ? fileChangeStarts(scroller) : [];
-  if (starts.length && scroller) {
-    const box = scroller.getBoundingClientRect();
-    const mark = box.top + box.height * (dir > 0 ? 0.28 : 0.72);
-    let idx = dir > 0
-      ? starts.findIndex(row => row.getBoundingClientRect().top > mark + 8)
-      : [...starts].reverse().findIndex(row => row.getBoundingClientRect().top < mark - 8);
-    if (dir < 0) idx = idx < 0 ? -1 : starts.length - 1 - idx;
-    if (idx >= 0) return revealDiffRow(starts[idx], dir);
+  const list = compareListOf(root);
+  const starts = list ? fileChangeStarts(list.rows) : [];
+  if (starts.length) {
+    const mark = list.indexAtViewport(dir > 0 ? 0.28 : 0.72);
+    const idx = dir > 0 ? starts.find(i => i > mark) : [...starts].reverse().find(i => i < mark);
+    if (idx !== undefined) return revealDiffRow(list, idx, dir);
   }
   jumpIntervalFile(dir);
 }
@@ -5367,6 +5405,8 @@ function selectedCompareRange(container, rows) {
 
 function applyTrustMarks(container, rows, st) {
   if (!st || st.error) return;
+  const list = compareListOf(container);
+  if (list) return list.setTrust(st.lines || {});
   container.querySelectorAll('.fi-diff-row').forEach(el => {
     const line = rows[Number(el.dataset.fiAny)];
     el.classList.remove('t-v', 't-d');
@@ -5379,6 +5419,9 @@ async function wireCompareTrust(container, compare, rows) {
   const sumEl = container.querySelector('[data-trust-sum]');
   if (!sumEl || !compare.path || !compare.new) return;
   const content = String(compare.new.content || '');
+  // The current working file is what the server has on disk: ask by path
+  // only, instead of posting the whole file (900 KB for app.html) each time.
+  const onDisk = compare.new.point && compare.new.point.kind === 'current';
   const refresh = st => {
     if (!document.body.contains(sumEl) || !st || st.error) return;
     sumEl.textContent = trustStateText(st);
@@ -5391,25 +5434,286 @@ async function wireCompareTrust(container, compare, rows) {
     const out = await postVouch({ action, path: compare.path, range, text, note, source: 'file-view' });
     if (out.error) return errToast(out.error);
     toast((action === 'dispute' ? '✗ disputed' : '✓ vouched') + (range ? ` · lines ${range[0]}–${range[1]}` : ' · whole file'));
-    refresh(await fetchTrust(compare.path, content));
+    refresh(await fetchTrust(compare.path, onDisk ? undefined : content));
   };
   container.querySelectorAll('[data-vouch]').forEach(b => {
     b.onmousedown = e => e.preventDefault(); // keep the text selection alive through the click
     b.onclick = () => act(b.dataset.vouch === 'x' ? 'dispute' : 'vouch');
   });
-  refresh(await fetchTrust(compare.path, content));
+  refresh(await fetchTrust(compare.path, onDisk ? undefined : content));
 }
 
-function fileCompareRowHtml(line, i, oldHl, newHl) {
-  const lineCls = fileCompareLines ? ' lines' : '';
+function fileCompareRowHtml(line, i, oldHl, newHl, trust = null, selected = false) {
+  let cls = fileCompareLines ? ' lines' : '';
+  const mark = trust && line.newN && trust[line.newN];
+  if (mark) cls += mark === 'd' ? ' t-d' : ' t-v';
+  if (selected) cls += ' selected';
   if (!line.changed) {
     const n = line.newN || line.oldN;
     const html = line.newN ? fileLineHtml(newHl, line.newN) : fileLineHtml(oldHl, line.oldN);
-    return `<div class="fi-diff-row${lineCls}" data-fi-any="${i}">${fileCompareCell('same', n, html)}</div>`;
+    return `<div class="fi-diff-row${cls}" data-fi-any="${i}">${fileCompareCell('same', n, html)}</div>`;
   }
   const left = line.oldText !== null ? fileCompareCell('old', line.oldN, fileLineHtml(oldHl, line.oldN)) : fileCompareCell('empty');
   const right = line.newText !== null ? fileCompareCell('new', line.newN, fileLineHtml(newHl, line.newN)) : fileCompareCell('empty');
-  return `<div class="fi-diff-row changed${lineCls}" data-fi-any="${i}">${left}${right}</div>`;
+  return `<div class="fi-diff-row changed${cls}" data-fi-any="${i}">${left}${right}</div>`;
+}
+
+// ---- virtual compare list ----
+// Only the rows near the viewport (scroll mode) or on the current page
+// (e-ink pages mode) exist in the DOM. A 17k-line file used to cost 6–15 s
+// of layout per render; a window of ~150 rows costs a few milliseconds.
+// Row heights are monospace arithmetic (wrapped line count × line height,
+// metrics measured once from probe rows with the real CSS), then every
+// rendered row is measured and corrected, so what is on screen is exact.
+const WIDE_CHAR_RE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F000}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u;
+const ASCII_LINE_RE = /^[\x20-\x7e]*$/;
+function displayColumns(text) {
+  if (!text) return 0;
+  if (ASCII_LINE_RE.test(text)) return text.length;
+  let cols = 0;
+  for (const ch of text) {
+    if (ch === '\t') cols += 8 - (cols % 8);
+    else if (WIDE_CHAR_RE.test(ch)) cols += 2;
+    else if (ch.charCodeAt(0) < 32) continue;
+    else cols += 1;
+  }
+  return cols;
+}
+
+function createCompareList(host, opts) {
+  const rows = opts.rows || [];
+  const n = rows.length;
+  const el = document.createElement('div');
+  el.className = 'fi-columns' + (opts.reading ? ' reading' : '');
+  el.innerHTML = '<div class="fi-spacer"><div class="fi-window"></div></div>';
+  host.appendChild(el);
+  const spacer = el.firstElementChild, win = spacer.firstElementChild;
+  const geo = { lineH: 16, base: 2, minH: 18, colsSame: 80, colsChanged: 40, stacked: false, stackGap: 1, width: 0 };
+  const heights = new Float64Array(n), tops = new Float64Array(n + 1);
+  let rendered = new Map();
+  let start = 0, end = 0;
+  let pagesMode = false, page = 0, pageRanges = [[0, 0]];
+  let expanded = null, selected = -1, trust = null, raf = 0, destroyed = false;
+
+  function probe() {
+    const sample = [
+      { oldText: 'x', newText: 'x', oldN: 1, newN: 1, changed: false },
+      { oldText: 'x\ny', newText: 'x\ny', oldN: 1, newN: 1, changed: false },
+      { oldText: 'x', newText: 'x', oldN: 1, newN: 1, changed: true },
+    ];
+    const hl = ['x', 'x\ny'];
+    const box = document.createElement('div');
+    box.className = 'fi-probe';
+    box.innerHTML = sample.map((line, i) => fileCompareRowHtml(line, i, hl, hl)).join('') +
+      '<div class="fi-diff-row"><div class="fi-cell same"><span class="ln">1</span><span class="code"><span class="fi-ruler">' + 'M'.repeat(100) + '</span></span></div></div>';
+    // The second probe row must really wrap: give it a two-line code body.
+    box.children[1].querySelector('.code').textContent = 'x\ny';
+    el.appendChild(box);
+    const h1 = box.children[0].offsetHeight, h2 = box.children[1].offsetHeight;
+    const changedCells = box.children[2].querySelectorAll('.fi-cell');
+    const sameCode = box.children[0].querySelector('.code'), changedCode = changedCells[0].querySelector('.code');
+    const ruler = box.querySelector('.fi-ruler');
+    const charW = Math.max(1, ruler.getBoundingClientRect().width / 100);
+    const inner = node => { const cs = getComputedStyle(node); return node.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0); };
+    geo.lineH = Math.max(1, h2 - h1) || geo.lineH;
+    geo.base = Math.max(0, h1 - geo.lineH);
+    geo.minH = h1;
+    geo.colsSame = Math.max(1, Math.floor(inner(sameCode) / charW));
+    geo.colsChanged = Math.max(1, Math.floor(inner(changedCode) / charW));
+    const a = changedCells[0].getBoundingClientRect(), b = changedCells[1].getBoundingClientRect();
+    geo.stacked = b.top >= a.bottom - 1;
+    geo.stackGap = geo.stacked ? Math.max(0, box.children[2].offsetHeight - a.height - b.height) : 0;
+    geo.width = el.clientWidth;
+    box.remove();
+  }
+  const wrapLines = (text, cols) => { const c = displayColumns(text); return c <= cols ? 1 : Math.ceil(c / cols); };
+  function estimate(i) {
+    const r = rows[i];
+    if (!r.changed) return Math.max(geo.minH, geo.base + geo.lineH * wrapLines(r.newText !== null ? r.newText : r.oldText, geo.colsSame));
+    const hOld = r.oldText === null ? geo.minH : Math.max(geo.minH, geo.base + geo.lineH * wrapLines(r.oldText, geo.colsChanged));
+    const hNew = r.newText === null ? geo.minH : Math.max(geo.minH, geo.base + geo.lineH * wrapLines(r.newText, geo.colsChanged));
+    return geo.stacked ? hOld + hNew + geo.stackGap : Math.max(hOld, hNew);
+  }
+  function reflow(from) {
+    for (let i = from; i < n; i++) tops[i + 1] = tops[i] + heights[i];
+    if (!pagesMode) spacer.style.height = tops[n] + 'px';
+  }
+  function estimateAll() { for (let i = 0; i < n; i++) heights[i] = estimate(i); reflow(0); }
+  function indexAt(y) {
+    if (n === 0 || y <= 0) return 0;
+    if (y >= tops[n]) return n - 1;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (tops[mid + 1] > y) hi = mid; else lo = mid + 1; }
+    return lo;
+  }
+  const htmlFor = (s, e) => { let out = ''; for (let i = s; i < e; i++) out += fileCompareRowHtml(rows[i], i, opts.oldHl, opts.newHl, trust, i === selected); return out; };
+  function collectRendered() {
+    rendered = new Map();
+    for (const node of win.children) if (node.dataset && node.dataset.fiAny !== undefined) rendered.set(Number(node.dataset.fiAny), node);
+  }
+  function renderRange(s, e) {
+    s = Math.max(0, Math.min(n, s)); e = Math.max(s, Math.min(n, e));
+    if (start === end || s >= end || e <= start) win.innerHTML = htmlFor(s, e);
+    else {
+      for (let i = start; i < s; i++) { const node = rendered.get(i); if (node) node.remove(); }
+      for (let i = e; i < end; i++) { const node = rendered.get(i); if (node) node.remove(); }
+      if (s < start) win.insertAdjacentHTML('afterbegin', htmlFor(s, start));
+      if (e > end) win.insertAdjacentHTML('beforeend', htmlFor(end, e));
+    }
+    start = s; end = e;
+    collectRendered();
+    if (expanded) {
+      const row = rendered.get(expanded.index);
+      if (row) { if (row.nextElementSibling !== expanded.el) row.insertAdjacentElement('afterend', expanded.el); }
+      else if (expanded.el.isConnected) expanded.el.remove();
+    }
+    win.style.transform = pagesMode ? '' : `translateY(${tops[start]}px)`;
+    measure();
+    if (opts.onRender) opts.onRender(api);
+  }
+  function measure() {
+    let dirty = -1;
+    for (const [i, node] of rendered) {
+      let h = node.offsetHeight;
+      if (expanded && expanded.index === i && expanded.el.isConnected) h += expanded.el.offsetHeight;
+      if (h !== heights[i]) { heights[i] = h; if (dirty < 0 || i < dirty) dirty = i; }
+    }
+    if (dirty < 0) return;
+    const before = tops[start];
+    reflow(dirty);
+    if (!pagesMode) {
+      const shift = tops[start] - before;
+      if (shift) el.scrollTop += shift;
+      win.style.transform = `translateY(${tops[start]}px)`;
+    }
+  }
+  function update(force) {
+    if (destroyed || pagesMode) return;
+    const top = el.scrollTop, h = Math.max(el.clientHeight, 200);
+    const needS = indexAt(top - 300), needE = Math.min(n, indexAt(top + h + 300) + 1);
+    if (!force && needS >= start && needE <= end && start !== end) return;
+    renderRange(indexAt(top - 900), Math.min(n, indexAt(top + h + 900) + 1));
+  }
+  function computePages() {
+    pageRanges = [];
+    const limit = Math.max(120, el.clientHeight - 2);
+    let s = 0;
+    while (s < n) {
+      let e = s, used = 0;
+      while (e < n && (e === s || used + heights[e] <= limit)) { used += heights[e]; e++; }
+      pageRanges.push([s, e]); s = e;
+    }
+    if (!pageRanges.length) pageRanges.push([0, 0]);
+    return limit;
+  }
+  function setPage(p) {
+    if (!pagesMode) return;
+    page = Math.max(0, Math.min(pageRanges.length - 1, p));
+    let limit = Math.max(120, el.clientHeight - 2);
+    for (let guard = 0; guard < 3; guard++) {
+      const [s, e] = pageRanges[page];
+      renderRange(s, e);
+      if (tops[e] - tops[s] <= limit || e - s <= 1) break;
+      const firstRow = s;
+      limit = computePages();
+      page = pageOf(firstRow);
+    }
+  }
+  function pageOf(i) { for (let p = 0; p < pageRanges.length; p++) if (i < pageRanges[p][1]) return p; return pageRanges.length - 1; }
+  function setPagesMode(on) {
+    if (pagesMode === !!on) return;
+    pagesMode = !!on;
+    el.classList.toggle('paged', pagesMode);
+    if (pagesMode) {
+      const anchor = start < end ? Math.max(start, Math.min(end - 1, indexAt(el.scrollTop))) : 0;
+      spacer.style.height = '';
+      computePages();
+      setPage(pageOf(anchor));
+    } else {
+      const anchor = pageRanges[page] ? pageRanges[page][0] : 0;
+      spacer.style.height = tops[n] + 'px';
+      el.scrollTop = tops[anchor];
+      update(true);
+    }
+  }
+  el.addEventListener('scroll', () => {
+    if (pagesMode || raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; update(false); });
+  });
+  el.addEventListener('click', event => {
+    const ln = event.target.closest('.ln');
+    if (!ln) return;
+    const row = ln.closest('.fi-diff-row');
+    if (!row || !win.contains(row) || row.dataset.fiAny === undefined) return;
+    if (opts.onLineClick) opts.onLineClick(Number(row.dataset.fiAny), row);
+  });
+  const api = {
+    el, rows,
+    get page() { return page; },
+    get pagesMode() { return pagesMode; },
+    pageCount: () => pageRanges.length,
+    pageOf, setPage, setPagesMode,
+    rendered: () => { const out = []; for (let i = start; i < end; i++) { const node = rendered.get(i); if (node) out.push({ i, el: node }); } return out; },
+    elementAt: i => rendered.get(i) || null,
+    range: () => [start, end],
+    indexAtViewport(fraction) {
+      if (pagesMode) { const [s, e] = pageRanges[page]; return indexAt(tops[s] + (tops[e] - tops[s]) * fraction); }
+      return indexAt(el.scrollTop + el.clientHeight * fraction);
+    },
+    topOf: i => tops[Math.max(0, Math.min(n, i))],
+    reveal(i, dir = 1) {
+      if (i < 0 || i >= n) return;
+      if (pagesMode) setPage(pageOf(i));
+      else { el.scrollTop = Math.max(0, tops[i] - el.clientHeight * (dir > 0 ? 0.25 : 0.75)); update(true); }
+      const node = rendered.get(i);
+      if (node) { node.classList.add('jump'); setTimeout(() => node.classList.remove('jump'), 900); }
+    },
+    select(i) {
+      const old = rendered.get(selected);
+      if (old) old.classList.remove('selected');
+      selected = i;
+      const node = rendered.get(i);
+      if (node) node.classList.add('selected');
+    },
+    expand(i, panel) {
+      api.collapse();
+      expanded = { index: i, el: panel };
+      api.select(i);
+      const row = rendered.get(i);
+      if (row) row.insertAdjacentElement('afterend', panel);
+      measure();
+    },
+    collapse() {
+      if (!expanded) return;
+      if (expanded.el.isConnected) expanded.el.remove();
+      expanded = null;
+      api.select(-1);
+      measure();
+    },
+    expandedIndex: () => expanded ? expanded.index : -1,
+    setTrust(lines) {
+      trust = lines || null;
+      for (const [i, node] of rendered) {
+        const mark = trust && rows[i].newN && trust[rows[i].newN];
+        node.classList.toggle('t-v', mark === 'v');
+        node.classList.toggle('t-d', mark === 'd');
+      }
+    },
+    refresh() {
+      if (destroyed) return;
+      const anchor = pagesMode ? (pageRanges[page] ? pageRanges[page][0] : 0) : indexAt(el.scrollTop);
+      probe();
+      estimateAll();
+      if (pagesMode) { computePages(); setPage(pageOf(anchor)); }
+      else { el.scrollTop = tops[anchor]; start = end = 0; win.innerHTML = ''; rendered = new Map(); update(true); }
+    },
+    destroy() { destroyed = true; if (raf) cancelAnimationFrame(raf); },
+  };
+  probe();
+  estimateAll();
+  if (opts.pages) { pagesMode = true; el.classList.add('paged'); spacer.style.height = ''; computePages(); setPage(0); }
+  else update(true);
+  return api;
 }
 
 function fileReadingRows(content) {
@@ -5419,40 +5723,12 @@ function fileReadingRows(content) {
 function wholeFileDiffRows(oldText, newText) {
   const oldLines = String(oldText || '').split('\n');
   const newLines = String(newText || '').split('\n');
-  let ops = myersLineOps(oldLines, newLines);
-  if (!ops) {
-    ops = [];
-    for (let i = 0; i < Math.max(oldLines.length, newLines.length); i++) {
-      if (i < oldLines.length && i < newLines.length && oldLines[i] === newLines[i]) ops.push({ type: 'same', text: oldLines[i] });
-      else {
-        if (i < oldLines.length) ops.push({ type: 'old', text: oldLines[i] });
-        if (i < newLines.length) ops.push({ type: 'new', text: newLines[i] });
-      }
-    }
-  }
-  const rows = [];
-  let oldN = 0, newN = 0;
-  for (let i = 0; i < ops.length;) {
-    if (ops[i].type === 'same') {
-      oldN++; newN++;
-      rows.push({ oldText: ops[i].text, newText: ops[i].text, oldN, newN, changed: false });
-      i++;
-      continue;
-    }
-    const olds = [], news = [];
-    while (i < ops.length && ops[i].type !== 'same') {
-      if (ops[i].type === 'old') olds.push(ops[i].text);
-      else news.push(ops[i].text);
-      i++;
-    }
-    for (let j = 0; j < Math.max(olds.length, news.length); j++) {
-      const hasOld = j < olds.length, hasNew = j < news.length;
-      if (hasOld) oldN++;
-      if (hasNew) newN++;
-      rows.push({ oldText: hasOld ? olds[j] : null, newText: hasNew ? news[j] : null, oldN: hasOld ? oldN : null, newN: hasNew ? newN : null, changed: true });
-    }
-  }
-  return rows;
+  return rowsFromScript(LineDiff.diffLineArrays(oldLines, newLines), oldLines, newLines);
+}
+async function wholeFileDiffRowsAsync(oldText, newText) {
+  const oldLines = String(oldText || '').split('\n');
+  const newLines = String(newText || '').split('\n');
+  return rowsFromScript(await diffLinesAsync(oldText, newText), oldLines, newLines);
 }
 
 function lineToken(line) {
@@ -5498,16 +5774,78 @@ function historyExcerpt(text, tokens) {
   return (start ? '…\n' : '') + lines.slice(start, end).join('\n') + (end < lines.length ? '\n…' : '');
 }
 
-function renderFileInspector(compare, row) {
+// Change bodies for the line history are fetched on the first line click,
+// not with every compare (up to 1 MB per keyframe move on app.html).
+async function ensureCompareChanges(compare) {
+  if (Array.isArray(compare.changes)) return compare.changes;
+  if (compare.changesPending) return compare.changesPending;
+  const params = fileHistoryParams(compare);
+  params.set('from', compare.from); params.set('to', compare.to);
+  compare.changesPending = fetch('/api/file-history/changes?' + params).then(r => r.json())
+    .then(data => { compare.changes = data.error ? [] : (data.changes || []); return compare.changes; })
+    .catch(() => { compare.changes = []; return compare.changes; })
+    .finally(() => { compare.changesPending = null; });
+  return compare.changesPending;
+}
+
+function lineHistoryPanelHtml(history) {
+  return `<h4>line history · newest first <button class="ghost" data-fi-hist-close>close</button></h4>` + (history.entries.length ? history.entries.map((change, i) => {
+    const title = change.type === 'git' ? `${change.shortHash} · ${change.subject}` : `${change.conversationTitle} · ${change.agent} · ${change.kind}`;
+    return `<div class="fi-history-entry" data-fi-change="${i}" tabindex="0" role="button" title="${change.type === 'git' ? 'Open this commit' : 'Open the conversation at this edit'}"><div class="fi-history-meta"><b>${esc(fmtDate(change.ts))}</b><br>${esc(title)}</div><div class="fi-history-change"><pre>- ${esc(historyExcerpt(change.oldText, history.tokens))}</pre><pre>+ ${esc(historyExcerpt(change.newText, history.tokens))}</pre></div></div>`;
+  }).join('') : '<div class="dim">No recorded AI or Git change in this interval matches this line.</div>');
+}
+
+// Click a line number: open its history under the row (toggle on repeat).
+async function toggleLineHistory(list, compare, row, index) {
+  if (list.expandedIndex() === index) { list.collapse(); return; }
+  const line = list.rows[index];
+  const panel = document.createElement('div');
+  panel.className = 'fi-line-history';
+  panel.innerHTML = '<h4>line history · loading… <button class="ghost" data-fi-hist-close>close</button></h4>';
+  panel.querySelector('[data-fi-hist-close]').onclick = event => { event.stopPropagation(); list.collapse(); };
+  list.expand(index, panel);
+  const changes = await ensureCompareChanges(compare);
+  if (list.expandedIndex() !== index) return;
+  const history = fileLineHistory(changes, line);
+  panel.innerHTML = lineHistoryPanelHtml(history);
+  panel.querySelector('[data-fi-hist-close]').onclick = event => { event.stopPropagation(); list.collapse(); };
+  panel.querySelectorAll('[data-fi-change]').forEach(el => {
+    const change = history.entries[Number(el.dataset.fiChange)];
+    const activate = () => change.type === 'git' ? showGitCommit(row.repoId, change.hash) : openAtTs(change.key, change.ts);
+    el.onclick = activate;
+    el.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } };
+  });
+  list.expand(index, panel);
+}
+
+function snapshotMetaText(snapshot) {
+  return `${snapshot.exact ? 'exact' : 'reconstructed'} · ${snapshot.method}${snapshot.skipped ? ` · ${snapshot.skipped} skipped` : ''}`;
+}
+
+// Rows for a compare: the diff runs in the worker; results are cached per
+// (file, old sha, new sha, mode) so a keyframe scrub back and forth is free.
+async function compareRowsFor(compare, row) {
+  const key = `${row.id}\x00${compare.old.sha || compare.from}\x00${compare.new.sha || compare.to}\x00${fileReadingMode ? 'read' : 'diff'}`;
+  let rows = focusedRowsCache.get(key);
+  if (rows) return rows;
+  rows = fileReadingMode ? fileReadingRows(compare.new.content) : await wholeFileDiffRowsAsync(compare.old.content, compare.new.content);
+  focusedRowsCache.set(key, rows);
+  if (focusedRowsCache.size > 20) focusedRowsCache.delete(focusedRowsCache.keys().next().value);
+  return rows;
+}
+
+let inspectorRenderSeq = 0;
+async function renderFileInspector(compare, row) {
   const card = $('diffCard');
   if (!card) return;
-  const options = (compare.points || []).map(point => `<option value="${fgAttr(point.id)}">${esc(point.label)}</option>`).join('');
-  const rows = fileReadingMode ? fileReadingRows(compare.new.content) : wholeFileDiffRows(compare.old.content, compare.new.content);
+  const seq = ++inspectorRenderSeq;
+  const rows = await compareRowsFor(compare, row);
+  if (seq !== inspectorRenderSeq || $('diffCard') !== card) return;
+  const options = (compare.points || []).map(point => `<option value="${fgAttr(point.id)}">${esc(pointLabel(point))}</option>`).join('');
   const lang = fileHighlightLang(compare.relativePath || row.relativePath);
   const oldHl = highlightFileLines(compare.old.content, lang);
   const newHl = highlightFileLines(compare.new.content, lang);
   const identical = !rows.some(line => line.changed);
-  const snapshotMeta = snapshot => `${snapshot.exact ? 'exact' : 'reconstructed'} · ${snapshot.method}${snapshot.skipped ? ` · ${snapshot.skipped} skipped` : ''}`;
   card.className = 'file-inspector';
   card.hidden = false;
   card.innerHTML = `<div class="fi-head"><b>▤ ${esc(compare.relativePath)} · whole file</b>
@@ -5516,9 +5854,14 @@ function renderFileInspector(compare, row) {
     <button id="fiLines">${fileCompareLines ? 'hide lines' : 'show lines'}</button>
     ${trustButtonsHtml()}
     <button id="fiClose">close</button>
-    <div class="fi-truth">${fileReadingMode ? 'reading · new snapshot only' : identical ? 'one view · no line changes' : 'common is full width · changes split − / +'} · highlight ${esc(lang)} · left: ${esc(snapshotMeta(compare.old))} · right: ${esc(snapshotMeta(compare.new))}<br>${esc(compare.truth)}</div></div>
-    ${fileCompareDockHtml(identical)}
-    <div class="fi-columns${fileReadingMode ? ' reading' : ''}" id="fiColumns">${rows.map((line, i) => fileCompareRowHtml(line, i, oldHl, newHl)).join('')}</div>`;
+    <div class="fi-truth">${fileReadingMode ? 'reading · new snapshot only' : identical ? 'one view · no line changes' : 'common is full width · changes split − / +'} · highlight ${esc(lang)} · left: ${esc(snapshotMetaText(compare.old))} · right: ${esc(snapshotMetaText(compare.new))}<br>${esc(compare.truth)}</div></div>
+    ${fileCompareDockHtml(identical)}`;
+  const list = createCompareList(card, {
+    rows, oldHl, newHl, reading: fileReadingMode, pages: fileComparePages,
+    onRender: list => fileInk.onListRender(list),
+    onLineClick: index => toggleLineHistory(list, compare, row, index),
+  });
+  card.__compareList = list;
   $('fiOld').value = compare.from;
   $('fiNew').value = compare.to;
   const reload = () => showFileInspector(row, $('fiOld').value, $('fiNew').value, false);
@@ -5535,35 +5878,9 @@ function renderFileInspector(compare, row) {
     renderFileInspector(compare, row);
   };
   fileInk.attach(compare, row, rows);
-  wireFileCompareDock(card);
+  wireFileCompareDock(card, list);
   wireCompareTrust(card, compare, rows);
   $('fiClose').onclick = () => { card.hidden = true; fileInspectorRowId = null; if (document.body.classList.contains('file-full')) exitFileDiffFull(); renderFileGanttChart(); };
-  const openHistory = target => {
-    const already = target.classList.contains('selected') && target.nextElementSibling && target.nextElementSibling.classList.contains('fi-line-history');
-    card.querySelectorAll('.fi-diff-row.selected').forEach(el => el.classList.remove('selected'));
-    card.querySelectorAll('.fi-line-history').forEach(el => el.remove());
-    if (already) return;
-    const line = rows[Number(target.dataset.fiAny)];
-    target.classList.add('selected');
-    const history = fileLineHistory(compare.changes, line);
-    const panel = document.createElement('div');
-    panel.className = 'fi-line-history';
-    panel.innerHTML = `<h4>line history · newest first <button class="ghost" data-fi-hist-close>close</button></h4>` + (history.entries.length ? history.entries.map((change, i) => {
-      const title = change.type === 'git' ? `${change.shortHash} · ${change.subject}` : `${change.conversationTitle} · ${change.agent} · ${change.kind}`;
-      return `<div class="fi-history-entry" data-fi-change="${i}" tabindex="0" role="button" title="${change.type === 'git' ? 'Open this commit' : 'Open the conversation at this edit'}"><div class="fi-history-meta"><b>${esc(fmtDate(change.ts))}</b><br>${esc(title)}</div><div class="fi-history-change"><pre>- ${esc(historyExcerpt(change.oldText, history.tokens))}</pre><pre>+ ${esc(historyExcerpt(change.newText, history.tokens))}</pre></div></div>`;
-    }).join('') : '<div class="dim">No recorded AI or Git change in this interval matches this line.</div>');
-    target.insertAdjacentElement('afterend', panel);
-    panel.querySelector('[data-fi-hist-close]').onclick = event => { event.stopPropagation(); openHistory(target); };
-    panel.querySelectorAll('[data-fi-change]').forEach(el => {
-      const change = history.entries[Number(el.dataset.fiChange)];
-      const activate = () => change.type === 'git' ? showGitCommit(row.repoId, change.hash) : openAtTs(change.key, change.ts);
-      el.onclick = activate;
-      el.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } };
-    });
-  };
-  card.querySelectorAll('[data-fi-any]').forEach(line => {
-    line.onclick = event => { if (event.target.closest('.ln')) openHistory(line); };
-  });
 }
 
 async function showFileInspector(row, from = '', to = '', scroll = true) {
@@ -5576,11 +5893,18 @@ async function showFileInspector(row, from = '', to = '', scroll = true) {
   card.className = 'file-inspector';
   card.innerHTML = '<div class="fg-empty">loading the whole file and its time points…</div>';
   if (scroll) card.scrollIntoView({ block: 'start' });
-  const url = '/api/project/file-history/file?name=' + encodeURIComponent(fileHistoryData.project) +
-    '&repo=' + encodeURIComponent(row.repoRoot) + '&path=' + encodeURIComponent(row.relativePath) +
-    (from ? '&from=' + encodeURIComponent(from) : '') + (to ? '&to=' + encodeURIComponent(to) : '');
-  const compare = await (await fetch(url)).json();
-  if (compare.error) { card.innerHTML = `<div class="fg-empty">${esc(compare.error)}</div>`; return; }
+  let compare;
+  try {
+    const doc = await filePointsFor(row, !from && !to);
+    const picked = resolveFilePoints(doc.points, { from, to });
+    const [oldSnapshot, newSnapshot] = await Promise.all([fileSnapshotFor(row, doc, picked.from.id), fileSnapshotFor(row, doc, picked.to.id)]);
+    compare = {
+      scope: doc.scope, key: doc.key, project: doc.project, repoRoot: doc.repoRoot, path: doc.path, relativePath: doc.relativePath,
+      version: doc.version, points: doc.points, from: picked.from.id, to: picked.to.id,
+      old: { ...oldSnapshot, point: picked.from }, new: { ...newSnapshot, point: picked.to }, changes: null, truth: doc.truth,
+    };
+  } catch (error) { card.innerHTML = `<div class="fg-empty">${esc(error.message || 'could not load this file')}</div>`; return; }
+  if (fileInspectorRowId !== row.id) return;
   renderFileInspector(compare, row);
 }
 
@@ -5744,7 +6068,7 @@ function renderFocusedTimeline(compare, row) {
   const points = compare.points || [];
   const oldIndex = Math.max(0, points.findIndex(point => point.id === compare.from));
   const newIndex = Math.max(0, points.findIndex(point => point.id === compare.to));
-  const pointMarks = points.map((point, i) => `<button class="ff-point ${esc(point.kind)}" data-ff-point="${i}" style="left:${focusedPointLeft(points, point)}%" title="${fgAttr(point.label)}"></button>`).join('');
+  const pointMarks = points.map((point, i) => `<button class="ff-point ${esc(point.kind)}" data-ff-point="${i}" style="left:${focusedPointLeft(points, point)}%" title="${fgAttr(pointLabel(point))}"></button>`).join('');
   $('ffTimeline').innerHTML = `<div class="ff-track" id="ffTrack">${pointMarks}<span class="ff-key old" id="ffOldKey" tabindex="0" role="slider" aria-label="Old keyframe"></span><span class="ff-key new" id="ffNewKey" tabindex="0" role="slider" aria-label="New keyframe"></span></div>
     <div class="ff-ranges"><b>OLD</b><input id="ffOldRange" type="range" min="0" max="${Math.max(0, points.length - 1)}" step="1" value="${oldIndex}"><span class="ff-range-label" id="ffOldLabel"></span>
       <b>NEW</b><input id="ffNewRange" type="range" min="0" max="${Math.max(0, points.length - 1)}" step="1" value="${newIndex}"><span class="ff-range-label" id="ffNewLabel"></span></div>`;
@@ -5753,31 +6077,21 @@ function renderFocusedTimeline(compare, row) {
     const oldPoint = points[Number(oldRange.value)], newPoint = points[Number(newRange.value)];
     $('ffOldKey').style.left = focusedPointLeft(points, oldPoint) + '%';
     $('ffNewKey').style.left = focusedPointLeft(points, newPoint) + '%';
-    $('ffOldLabel').textContent = oldPoint.label;
-    $('ffNewLabel').textContent = newPoint.label;
-    $('ffOldKey').setAttribute('aria-valuetext', oldPoint.label);
-    $('ffNewKey').setAttribute('aria-valuetext', newPoint.label);
+    $('ffOldLabel').textContent = pointLabel(oldPoint);
+    $('ffNewLabel').textContent = pointLabel(newPoint);
+    $('ffOldKey').setAttribute('aria-valuetext', pointLabel(oldPoint));
+    $('ffNewKey').setAttribute('aria-valuetext', pointLabel(newPoint));
     focusedFileWindow = { fromMs: oldPoint.ms, toMs: newPoint.ms };
     updateFocusedTreeWindow();
   };
-  const applyLocal = (fromId, toId) => {
-    const local = compareFromCachedSnapshots(row, fromId, toId);
-    if (!local) return false;
-    focusedFileCompare = local;
-    renderFocusedComparison(local, row);
-    if (fileHistoryData.scope === 'git') refreshGitIntervalStats(local);
-    return true;
-  };
+  // Cached snapshots make a scrub free; a new point is one small request.
   const schedule = changed => {
     if (changed === 'old' && Number(oldRange.value) > Number(newRange.value)) newRange.value = oldRange.value;
     if (changed === 'new' && Number(newRange.value) < Number(oldRange.value)) oldRange.value = newRange.value;
     updateKeys();
     const fromId = points[Number(oldRange.value)].id, toId = points[Number(newRange.value)].id;
-    if (applyLocal(fromId, toId)) return;
     clearTimeout(focusedCompareTimer);
-    focusedCompareTimer = setTimeout(() => loadFocusedFile(row, {
-      from: fromId, to: toId,
-    }, { keepTree: true, keepTimeline: true, quiet: true, light: true }), 40);
+    focusedCompareTimer = setTimeout(() => loadFocusedFile(row, { from: fromId, to: toId }, { keepTree: true, keepTimeline: true, quiet: true }), 30);
   };
   const setKeyframe = (kind, at) => {
     at = Math.max(0, Math.min(points.length - 1, at));
@@ -5840,24 +6154,26 @@ function renderFocusedTimeline(compare, row) {
   updateKeys();
 }
 
-function renderFocusedComparison(compare, row) {
+let focusedRenderSeq = 0;
+async function renderFocusedComparison(compare, row) {
   const target = $('ffCompare');
   if (!target) return;
-  const rowCacheKey = `${row.id}\x00${compare.from}\x00${compare.to}\x00${fileReadingMode ? 'read' : 'diff'}`;
-  let rows = focusedRowsCache.get(rowCacheKey);
-  if (!rows) {
-    rows = fileReadingMode ? fileReadingRows(compare.new.content) : wholeFileDiffRows(compare.old.content, compare.new.content);
-    focusedRowsCache.set(rowCacheKey, rows);
-    if (focusedRowsCache.size > 20) focusedRowsCache.delete(focusedRowsCache.keys().next().value);
-  }
+  const seq = ++focusedRenderSeq;
+  const rows = await compareRowsFor(compare, row);
+  if (seq !== focusedRenderSeq || $('ffCompare') !== target) return;
   const lang = fileHighlightLang(compare.relativePath || row.relativePath);
   const oldHl = highlightFileLines(compare.old.content, lang);
   const newHl = highlightFileLines(compare.new.content, lang);
   const identical = !rows.some(line => line.changed);
-  const snapshotMeta = snapshot => `${snapshot.exact ? 'exact' : 'reconstructed'} · ${snapshot.method}${snapshot.skipped ? ` · ${snapshot.skipped} skipped` : ''}`;
-  target.innerHTML = `<div class="ff-status"><button id="ffRead" title="Toggle between the diff and a clean reading view of the new snapshot">${fileReadingMode ? 'diff' : 'read'}</button> <button id="ffLines">${fileCompareLines ? 'hide lines' : 'show lines'}</button> <button id="ffEdit" title="Edit the current on-disk file (not a snapshot)">edit file</button> ${trustButtonsHtml()} ${fileReadingMode ? 'reading · new snapshot only' : identical ? 'one view · no line changes' : 'common is full width · changes split − / +'} · highlight ${esc(lang)} · left: ${esc(snapshotMeta(compare.old))} · right: ${esc(snapshotMeta(compare.new))} · ${esc(compare.truth)}</div>
-    ${fileCompareDockHtml(identical)}
-    <div class="fi-columns${fileReadingMode ? ' reading' : ''}">${rows.map((line, i) => fileCompareRowHtml(line, i, oldHl, newHl)).join('')}</div>`;
+  if (target.__compareList) target.__compareList.destroy();
+  target.innerHTML = `<div class="ff-status"><button id="ffRead" title="Toggle between the diff and a clean reading view of the new snapshot">${fileReadingMode ? 'diff' : 'read'}</button> <button id="ffLines">${fileCompareLines ? 'hide lines' : 'show lines'}</button> <button id="ffEdit" title="Edit the current on-disk file (not a snapshot)">edit file</button> ${trustButtonsHtml()} ${fileReadingMode ? 'reading · new snapshot only' : identical ? 'one view · no line changes' : 'common is full width · changes split − / +'} · highlight ${esc(lang)} · left: ${esc(snapshotMetaText(compare.old))} · right: ${esc(snapshotMetaText(compare.new))} · ${esc(compare.truth)}</div>
+    ${fileCompareDockHtml(identical)}`;
+  const list = createCompareList(target, {
+    rows, oldHl, newHl, reading: fileReadingMode, pages: fileComparePages,
+    onRender: list => fileInk.onListRender(list),
+    onLineClick: index => toggleLineHistory(list, compare, row, index),
+  });
+  target.__compareList = list;
   $('ffLines').onclick = () => {
     fileCompareLines = !fileCompareLines;
     localStorage.setItem('aiconvo.fileLines', fileCompareLines ? '1' : '0');
@@ -5870,34 +6186,8 @@ function renderFocusedComparison(compare, row) {
   };
   $('ffEdit').onclick = () => openFocusedFileEditor(compare, row);
   fileInk.attach(compare, row, rows);
-  wireFileCompareDock(target);
+  wireFileCompareDock(target, list);
   wireCompareTrust(target, compare, rows);
-  const openHistory = lineElement => {
-    const already = lineElement.classList.contains('selected') && lineElement.nextElementSibling && lineElement.nextElementSibling.classList.contains('fi-line-history');
-    target.querySelectorAll('.fi-diff-row.selected').forEach(element => element.classList.remove('selected'));
-    target.querySelectorAll('.fi-line-history').forEach(element => element.remove());
-    if (already) return;
-    const line = rows[Number(lineElement.dataset.fiAny)];
-    lineElement.classList.add('selected');
-    const history = fileLineHistory(compare.changes, line);
-    const panel = document.createElement('div');
-    panel.className = 'fi-line-history';
-    panel.innerHTML = `<h4>line history · newest first <button class="ghost" data-fi-hist-close>close</button></h4>` + (history.entries.length ? history.entries.map((change, i) => {
-      const title = change.type === 'git' ? `${change.shortHash} · ${change.subject}` : `${change.conversationTitle} · ${change.agent} · ${change.kind}`;
-      return `<div class="fi-history-entry" data-ffi-change="${i}" tabindex="0" role="button" title="${change.type === 'git' ? 'Open this commit' : 'Open the conversation at this edit'}"><div class="fi-history-meta"><b>${esc(fmtDate(change.ts))}</b><br>${esc(title)}</div><div class="fi-history-change"><pre>- ${esc(historyExcerpt(change.oldText, history.tokens))}</pre><pre>+ ${esc(historyExcerpt(change.newText, history.tokens))}</pre></div></div>`;
-    }).join('') : '<div class="dim">No recorded AI or Git change in this interval matches this line.</div>');
-    lineElement.insertAdjacentElement('afterend', panel);
-    panel.querySelector('[data-fi-hist-close]').onclick = event => { event.stopPropagation(); openHistory(lineElement); };
-    panel.querySelectorAll('[data-ffi-change]').forEach(element => {
-      const change = history.entries[Number(element.dataset.ffiChange)];
-      const activate = () => change.type === 'git' ? showGitCommit(row.repoId, change.hash) : openAtTs(change.key, change.ts);
-      element.onclick = activate;
-      element.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } };
-    });
-  };
-  target.querySelectorAll('[data-fi-any]').forEach(element => {
-    element.onclick = event => { if (event.target.closest('.ln')) openHistory(element); };
-  });
 }
 
 // ---- direct file editing (whole-file view) ----
@@ -5944,106 +6234,164 @@ async function openFocusedFileEditor(compare, row) {
     } catch { out = { error: 'network failure' }; }
     if (out.error) { $('ffEditSave').disabled = false; return errToast('save failed: ' + out.error); }
     toast('saved · ' + compare.relativePath);
-    focusedCompareCache.clear();
-    focusedRowsCache.clear();
-    focusedSnapshotCache.delete(row.id);
+    invalidateFileCaches(row.id);
     loadFocusedFile(row);
   };
 }
 
-function compareFromCachedSnapshots(row, fromId, toId) {
-  const pack = focusedSnapshotCache.get(row.id);
-  if (!pack) return null;
-  const oldSnap = pack.snaps.get(fromId), newSnap = pack.snaps.get(toId);
-  if (!oldSnap || !newSnap) return null;
-  return {
-    scope: fileHistoryData.scope || 'git',
-    project: fileHistoryData.project, repoRoot: row.repoRoot, path: row.path, relativePath: row.relativePath,
-    points: pack.points, from: fromId, to: toId, old: oldSnap, new: newSnap, changes: [],
-    truth: 'Git and current-file points are exact. This view has no AI reconstructions.',
+// ---- file history: points once, snapshots by id, cached by content ----
+// A keyframe move used to fetch a 3–4 MB compare (both files, every point
+// label, every change body). Now: the point list once per file, one small
+// snapshot request per point (the browser revalidates by ETag = sha), the
+// diff in a worker, and the change bodies only on a line click. Moving
+// between already-seen points costs no request at all.
+const filePointsCache = new Map();      // row.id -> points document
+const fileSnapshotCache = new Map();    // row.id \0 version \0 point id -> snapshot
+let fileSnapshotBytes = 0;
+const FILE_SNAPSHOT_BUDGET = 96 * 1024 * 1024;
+let filePrefetchSeq = 0;
+
+function invalidateFileCaches(rowId) {
+  focusedRowsCache.clear();
+  if (rowId === undefined) { filePointsCache.clear(); fileSnapshotCache.clear(); fileSnapshotBytes = 0; return; }
+  filePointsCache.delete(rowId);
+  for (const key of [...fileSnapshotCache.keys()]) if (key.startsWith(rowId + '\x00')) { fileSnapshotBytes -= fileSnapshotCache.get(key).content.length; fileSnapshotCache.delete(key); }
+}
+
+function fileHistoryParams(compare) {
+  const scope = compare.scope || 'project';
+  const params = new URLSearchParams({ scope, repo: compare.repoRoot, path: compare.relativePath });
+  if (scope === 'conversation') params.set('id', compare.key);
+  else if (scope !== 'git') params.set('name', compare.project);
+  return params;
+}
+
+function fileScopeFor(row) {
+  const scope = fileHistoryData.scope === 'conversation' ? 'conversation' : fileHistoryData.scope === 'git' ? 'git' : 'project';
+  return { scope, key: fileHistoryData.key, project: fileHistoryData.project, repoRoot: row.repoRoot, relativePath: row.relativePath };
+}
+
+function pointLabel(point) {
+  if (!point) return '';
+  if (point.label) return point.label;
+  const when = point.ms ? new Date(point.ms).toLocaleString() : '';
+  if (point.kind === 'git') return `${point.shortHash || String(point.hash || '').slice(0, 10)} · ${point.subject || ''} · ${when}`;
+  if (point.kind === 'ai') return `${point.eventKind || 'edit'} · ${point.title || ''} · ${when}`;
+  if (point.kind === 'current') return 'current working file';
+  return when;
+}
+
+async function filePointsFor(row, fresh = false) {
+  const cached = filePointsCache.get(row.id);
+  if (cached && !fresh) return cached;
+  const data = await (await fetch('/api/file-history/points?' + fileHistoryParams(fileScopeFor(row)))).json();
+  if (data.error) throw new Error(data.error);
+  if (cached && cached.version !== data.version) invalidateFileCaches(row.id);
+  filePointsCache.set(row.id, data);
+  if (filePointsCache.size > 40) filePointsCache.delete(filePointsCache.keys().next().value);
+  return data;
+}
+
+async function fileSnapshotFor(row, doc, pointId) {
+  const key = `${row.id}\x00${doc.version}\x00${pointId}`;
+  const hit = fileSnapshotCache.get(key);
+  if (hit) return hit.pending || hit;
+  const params = fileHistoryParams(doc);
+  params.set('point', pointId);
+  const pending = fetch('/api/file-history/snapshot?' + params).then(r => r.json()).then(snap => {
+    if (snap.error) throw new Error(snap.error);
+    fileSnapshotCache.set(key, snap);
+    fileSnapshotBytes += snap.content.length;
+    while (fileSnapshotBytes > FILE_SNAPSHOT_BUDGET && fileSnapshotCache.size > 2) {
+      const oldest = fileSnapshotCache.keys().next().value;
+      if (oldest === key) break;
+      const gone = fileSnapshotCache.get(oldest);
+      if (gone && !gone.pending) fileSnapshotBytes -= gone.content.length;
+      fileSnapshotCache.delete(oldest);
+    }
+    return snap;
+  }).catch(error => { fileSnapshotCache.delete(key); throw error; });
+  fileSnapshotCache.set(key, { pending, content: '' });
+  return pending;
+}
+
+// Warm the points a scrub is likely to reach: the two AI neighbours of each
+// keyframe, then every Git commit (exact, served from git objects). One
+// request at a time, and never while the user's own load is in flight: an
+// AI snapshot is a server-side replay, and a queue of them would sit in
+// front of the click the user just made.
+let foregroundFileLoads = 0;
+function prefetchFileSnapshots(row, doc, fromId, toId) {
+  const seq = ++filePrefetchSeq;
+  const points = doc.points || [];
+  const byId = new Map(points.map((point, i) => [point.id, i]));
+  const wanted = [];
+  const push = point => { if (point && !wanted.includes(point.id)) wanted.push(point.id); };
+  for (const id of [fromId, toId]) {
+    const at = byId.get(id);
+    if (at === undefined) continue;
+    push(points[at - 1]); push(points[at + 1]);
+  }
+  for (const point of points) if (point.kind === 'git' || point.kind === 'boundary') push(point);
+  const queue = wanted.slice(0, 140);
+  let active = false;
+  const next = () => {
+    if (seq !== filePrefetchSeq || active || !queue.length) return;
+    if (foregroundFileLoads > 0) { setTimeout(next, 250); return; }
+    const id = queue.shift();
+    active = true;
+    fileSnapshotFor(row, doc, id).catch(() => {}).finally(() => { active = false; setTimeout(next, 40); });
   };
+  if ('requestIdleCallback' in window) requestIdleCallback(next, { timeout: 1500 }); else setTimeout(next, 300);
 }
-async function prefetchFileSnapshots(row) {
-  if (!fileHistoryData || fileHistoryData.scope !== 'git' || !row) return;
-  if (focusedSnapshotCache.has(row.id)) return;
-  try {
-    const data = await (await fetch('/api/git/file-history/snapshots?repo=' + encodeURIComponent(row.repoRoot) +
-      '&path=' + encodeURIComponent(row.relativePath))).json();
-    if (data.error || !data.snapshots) return;
-    focusedSnapshotCache.set(row.id, {
-      points: data.points || [],
-      snaps: new Map(data.snapshots.map(snap => [snap.point.id, snap])),
-    });
-    if (focusedSnapshotCache.size > 8) focusedSnapshotCache.delete(focusedSnapshotCache.keys().next().value);
-  } catch {}
+
+function resolveFilePoints(points, selection) {
+  const byId = id => points.find(point => point.id === id);
+  const nearest = value => {
+    const ms = Number(value);
+    if (value === undefined || value === null || value === '' || !Number.isFinite(ms)) return null;
+    return points.reduce((best, point) => !best || Math.abs(point.ms - ms) < Math.abs(best.ms - ms) ? point : best, null);
+  };
+  const last = points[points.length - 1];
+  let to = byId(selection.to) || nearest(selection.toAt) || last;
+  const before = points.filter(point => point.order < to.order);
+  const boundary = points[0] && points[0].kind === 'boundary' ? points[0] : null;
+  const defaultFrom = boundary || [...before].reverse().find(point => point.kind === 'git') || before[before.length - 1] || to;
+  let from = byId(selection.from) || nearest(selection.fromAt) || defaultFrom;
+  if (from.order > to.order) [from, to] = [to, from];
+  return { from, to };
 }
+
 async function loadFocusedFile(row, selection = {}, options = {}) {
   if (!fileHistoryData || !row || !$('ffMain')) return;
-  if (fileHistoryData.scope === 'git' && selection.from && selection.to) {
-    const local = compareFromCachedSnapshots(row, selection.from, selection.to);
-    if (local) {
-      focusedFileRow = row;
-      focusedFileCompare = local;
-      if (!options.keepTimeline) renderFocusedTimeline(local, row);
-      renderFocusedComparison(local, row);
-      refreshGitIntervalStats(local);
-      return;
-    }
-  }
   focusedFileRow = row;
-  renderFocusedFileTree($('ffTreeSearch') ? $('ffTreeSearch').value : '');
+  if (!options.keepTree) renderFocusedFileTree($('ffTreeSearch') ? $('ffTreeSearch').value : '');
   $('ffTitle').textContent = row.relativePath;
   if (!options.quiet) $('ffCompare').innerHTML = '<div class="ff-loading">loading this file and its keyframes…</div>';
-  else if ($('ffStatusLive')) $('ffStatusLive').textContent = 'updating…';
-  const conversationScope = fileHistoryData.scope === 'conversation';
-  const gitScope = fileHistoryData.scope === 'git';
-  const query = new URLSearchParams(conversationScope
-    ? { id: fileHistoryData.key, repo: row.repoRoot, path: row.relativePath }
-    : gitScope
-      ? { repo: row.repoRoot, path: row.relativePath }
-      : { name: fileHistoryData.project, repo: row.repoRoot, path: row.relativePath });
-  if (selection.from) query.set('from', selection.from);
-  if (selection.to) query.set('to', selection.to);
-  if (selection.fromAt) query.set('fromAt', selection.fromAt);
-  if (selection.toAt) query.set('toAt', selection.toAt);
-  const cacheKey = `${fileHistoryData.scope || 'project'}\x00${fileHistoryData.key || fileHistoryData.project}\x00${row.id}\x00${selection.from || selection.fromAt || ''}\x00${selection.to || selection.toAt || ''}`;
-  let compare = focusedCompareCache.get(cacheKey);
   const request = ++focusedFileRequest;
-  if (!compare) {
-    if (focusedFileAbort) focusedFileAbort.abort();
-    focusedFileAbort = new AbortController();
-    try {
-      if (gitScope && options.light) query.set('light', '1');
-      const fileUrl = conversationScope ? '/api/conversation/file-history/file?' : gitScope ? '/api/git/file-history/file?' : '/api/project/file-history/file?';
-      compare = await (await fetch(fileUrl + query, { signal: focusedFileAbort.signal })).json();
-    } catch (error) {
-      if (error.name === 'AbortError') return;
-      compare = { error: error.message };
-    }
+  let compare;
+  foregroundFileLoads++;
+  try {
+    const doc = await filePointsFor(row, !options.quiet);
     if (request !== focusedFileRequest) return;
-    if (!compare.error) {
-      focusedCompareCache.set(cacheKey, compare);
-      if (focusedCompareCache.size > 30) focusedCompareCache.delete(focusedCompareCache.keys().next().value);
-    }
-  }
-  if (compare.error) { $('ffCompare').innerHTML = `<div class="ff-loading">${esc(compare.error)}</div>`; return; }
+    const { from, to } = resolveFilePoints(doc.points, selection);
+    const [oldSnapshot, newSnapshot] = await Promise.all([fileSnapshotFor(row, doc, from.id), fileSnapshotFor(row, doc, to.id)]);
+    if (request !== focusedFileRequest) return;
+    compare = {
+      scope: doc.scope, key: doc.key, project: doc.project, repoRoot: doc.repoRoot, path: doc.path, relativePath: doc.relativePath,
+      version: doc.version, points: doc.points, from: from.id, to: to.id,
+      old: { ...oldSnapshot, point: from }, new: { ...newSnapshot, point: to }, changes: null, truth: doc.truth,
+    };
+    prefetchFileSnapshots(row, doc, from.id, to.id);
+  } catch (error) {
+    if (request !== focusedFileRequest) return;
+    $('ffCompare').innerHTML = `<div class="ff-loading">${esc(error.message || 'could not load this file')}</div>`;
+    return;
+  } finally { foregroundFileLoads--; }
   focusedFileCompare = compare;
   if (!options.keepTimeline) renderFocusedTimeline(compare, row);
-  renderFocusedComparison(compare, row);
-  if (gitScope) {
-    refreshGitIntervalStats(compare);
-    prefetchFileSnapshots(row);
-    const pack = focusedSnapshotCache.get(row.id);
-    if (pack) {
-      if (compare.old && compare.old.point) pack.snaps.set(compare.old.point.id, compare.old);
-      if (compare.new && compare.new.point) pack.snaps.set(compare.new.point.id, compare.new);
-    } else if (compare.old && compare.new) {
-      focusedSnapshotCache.set(row.id, {
-        points: compare.points || [],
-        snaps: new Map([[compare.old.point.id, compare.old], [compare.new.point.id, compare.new]]),
-      });
-    }
-  }
+  await renderFocusedComparison(compare, row);
+  if (fileHistoryData.scope === 'git') refreshGitIntervalStats(compare);
 }
 
 function jumpToLatestConversationChanges() {
@@ -6167,8 +6515,8 @@ function quickHunkContext(e, diskText, lang) {
     rows.push({ oldText: t, newText: t, oldN: n - delta, newN: n, changed: false });
   });
   // Sparse highlight arrays aligned to real file line numbers.
-  const newSliceHl = highlightFileLines([...ctxBefore, ...newText.split('\n'), ...ctxAfter].join('\n'), lang);
-  const oldSliceHl = highlightFileLines([...ctxBefore, ...(e.oldText || '').split('\n'), ...ctxAfter].join('\n'), lang);
+  const newSliceHl = highlightFileLines([...ctxBefore, ...newText.split('\n'), ...ctxAfter].join('\n'), lang, { eager: true });
+  const oldSliceHl = highlightFileLines([...ctxBefore, ...(e.oldText || '').split('\n'), ...ctxAfter].join('\n'), lang, { eager: true });
   const newHl = [], oldHl = [];
   newSliceHl.forEach((h, i) => { newHl[from - 1 + i] = h; });
   oldSliceHl.forEach((h, i) => { oldHl[from - 1 + i] = h; });
@@ -6414,7 +6762,7 @@ async function openConversationFileDiff(key, pathValue, ts, anchorTs) {
   setRoute('file', 'diffs=' + encodeURIComponent(key), []);
   fileHistoryData = data;
   focusedFileWindow = null;
-  if (!reuse) { focusedCompareCache.clear(); focusedRowsCache.clear(); }
+  if (!reuse) invalidateFileCaches();
   diffScope = { scope: 'conversation', key };
   data.returnTs = anchorTs || ts || null;
   data.returnPath = pathValue || null;
@@ -6465,12 +6813,11 @@ async function showProjectFileHistory(name, reuse = false) {
   focusedFileWindow = null;
   setRoute('project-files', 'project=' + encodeURIComponent(name) + '&files',
     [crumbHome(), crumbProject(name), { label: 'file gantt', title: 'AI edits and Git history over time' }]);
-  let data = reuse && fileHistoryData && fileHistoryData.project === name ? fileHistoryData : null;
+  let data = reuse && fileHistoryData && fileHistoryData.project === name && !fileHistoryData.light ? fileHistoryData : null;
   if (!data) {
     $('view').innerHTML = `<div class="file-gantt-view"><div class="phead"><h2>file history · ${esc(name)}</h2><div class="pmeta">mining AI edits and Git history…</div></div></div>`;
     data = await (await fetch('/api/project/file-history?name=' + encodeURIComponent(name))).json();
-    focusedCompareCache.clear();
-    focusedRowsCache.clear();
+    invalidateFileCaches();
   }
   if (data.error) { $('view').innerHTML = `<div class="empty">could not build file history.<div class="hint">${esc(data.error)}</div></div>`; return; }
   data.projectCode = false;
@@ -6542,8 +6889,7 @@ async function showGitRepoHistory(root, reuse = false) {
   if (!data) {
     $('view').innerHTML = `<div class="file-gantt-view"><div class="phead"><h2>Git history · ${esc(root)}</h2><div class="pmeta">reading commits and worktrees…</div></div></div>`;
     data = await (await fetch('/api/git/file-history?repo=' + encodeURIComponent(root))).json();
-    focusedCompareCache.clear();
-    focusedRowsCache.clear();
+    invalidateFileCaches();
   }
   if (data.error) { $('view').innerHTML = `<div class="empty">could not build Git history.<div class="hint">${esc(data.error)}</div></div>`; return; }
   fileHistoryData = data;
@@ -6753,8 +7099,7 @@ async function showConversationDiffs(key) {
   }
   fileHistoryData = data;
   focusedFileWindow = null;
-  focusedCompareCache.clear();
-  focusedRowsCache.clear();
+  invalidateFileCaches();
   diffScope = { scope: 'conversation', key };
   enterFocusedFile(data.rows[0]);
 }
@@ -7615,9 +7960,9 @@ async function showProjectTree(name) {
   wireProjectSwitch(name);
   let data = fileHistoryData && fileHistoryData.project === name && fileHistoryData.projectCode ? fileHistoryData : null;
   if (!data) {
-    data = await (await fetch('/api/project/file-history?name=' + encodeURIComponent(name))).json();
-    focusedCompareCache.clear();
-    focusedRowsCache.clear();
+    // light=1: the tree needs paths and 24 h activity, not every event (40 KB, not 3.7 MB).
+    data = await (await fetch('/api/project/file-history?name=' + encodeURIComponent(name) + '&light=1')).json();
+    invalidateFileCaches();
   }
   if (data.error) { $('view').innerHTML = `<div class="empty">could not read project code.<div class="hint">${esc(data.error)}</div></div>`; return; }
   data.projectCode = true;
@@ -7743,8 +8088,7 @@ async function openRepoFile(root, rel, backProject = null) {
     toast('loading the repository history…');
     data = await (await fetch('/api/git/file-history?repo=' + encodeURIComponent(root))).json();
     if (data.error) return errToast(data.error);
-    focusedCompareCache.clear();
-    focusedRowsCache.clear();
+    invalidateFileCaches();
   }
   fileHistoryData = data;
   data.backProject = backProject;
@@ -8847,7 +9191,7 @@ function openTextFilePreview(data) {
   const lang = fileHighlightLang(data.path);
   const body = lang === 'md'
     ? `<div class="md">${mdRender(data.text)}</div>`
-    : `<pre class="md-code"><code class="lang-${esc(lang)}">${highlightFileLines(data.text, lang).join('\n')}</code></pre>`;
+    : `<pre class="md-code"><code class="lang-${esc(lang)}">${highlightFileLines(data.text, lang, { eager: true }).join('\n')}</code></pre>`;
   box.innerHTML = `<div class="file-preview-head"><span>${esc(data.path)}</span><button type="button">close</button></div><div class="file-preview-body">${body}</div>`;
   const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
   const onKey = e => { if (e.key === 'Escape') close(); };

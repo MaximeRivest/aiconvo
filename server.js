@@ -22,6 +22,7 @@ const { openSearchIndex, SearchIndex } = require('./searchindex.js');
 const foldsLib = require('./projectfolds.js');
 const areasLib = require('./areas.js');
 const gitmeta = require('./gitmeta.js');
+const lineDiff = require('./linediff.js');
 const { agentPath } = require('./agentpath.js');
 const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
@@ -5898,28 +5899,66 @@ async function sendFileFeedback(body) {
 // ---------- agent file diffs ----------
 // Extract intended file changes from edit/write tool calls. These are agent
 // file touches, not Git diffs: a tool call can fail and files can change later.
+// One cache file per conversation under ~/.cache/aiconvo/diff-cache/. The
+// previous single diff-cache.json grew to ~80 MB and was re-serialized on
+// the main thread after every transcript parse (~1 s of blocked event loop
+// per save, and a 1.8 s parse at boot). Entries now load lazily on first
+// use and only the parsed conversation is written, atomically.
 const DIFF_CACHE_FILE = path.join(CACHE_DIR, 'diff-cache.json');
-let diffCache = {};
-try { diffCache = JSON.parse(fs.readFileSync(DIFF_CACHE_FILE, 'utf8')); } catch {}
+const DIFF_CACHE_DIR = path.join(CACHE_DIR, 'diff-cache');
 const DIFF_CACHE_VERSION = 'v6:';
+let diffCache = {};
+const diffCacheDiskChecked = new Set();
 
+function diffCachePathFor(key) {
+  return path.join(DIFF_CACHE_DIR, crypto.createHash('sha256').update(key).digest('hex').slice(0, 32) + '.json');
+}
 
-function pruneDiffCache() {
-  for (const key of Object.keys(diffCache)) {
-    const row = diffCache[key];
-    const stale = !row || typeof row.cacheKey !== 'string' || !row.cacheKey.startsWith(DIFF_CACHE_VERSION) || !index[key];
-    if (stale) delete diffCache[key];
+function validDiffCacheRow(row, key) {
+  return !!(row && typeof row.cacheKey === 'string' && row.cacheKey.startsWith(DIFF_CACHE_VERSION) && Array.isArray(row.events) && index[key]);
+}
+
+async function loadDiffCacheRow(key) {
+  if (diffCache[key]) return diffCache[key];
+  if (diffCacheDiskChecked.has(key)) return null;
+  diffCacheDiskChecked.add(key);
+  try {
+    const row = JSON.parse(await fsp.readFile(diffCachePathFor(key), 'utf8'));
+    if (validDiffCacheRow(row, key)) { diffCache[key] = row; return row; }
+  } catch {}
+  return null;
+}
+
+function saveDiffCacheRow(key, row) {
+  fsp.mkdir(DIFF_CACHE_DIR, { recursive: true })
+    .then(() => writeFileAtomic(diffCachePathFor(key), JSON.stringify(row)))
+    .catch(error => console.error('diff cache write failed:', key, error.message));
+}
+
+// One-time move from the old single file to per-conversation files. Runs
+// after boot so the 80 MB parse never delays the first request; the old
+// file is renamed once every entry is on disk.
+async function migrateDiffCacheFile() {
+  let raw;
+  try { raw = await fsp.readFile(DIFF_CACHE_FILE, 'utf8'); } catch { return; }
+  let old;
+  try { old = JSON.parse(raw); } catch { old = null; }
+  raw = null;
+  if (old && typeof old === 'object') {
+    await fsp.mkdir(DIFF_CACHE_DIR, { recursive: true });
+    const keys = Object.keys(old);
+    let moved = 0;
+    await mapLimit(keys, 4, async key => {
+      const row = old[key];
+      if (!validDiffCacheRow(row, key)) return;
+      try { await fsp.access(diffCachePathFor(key)); return; } catch {}
+      try { await writeFileAtomic(diffCachePathFor(key), JSON.stringify(row)); moved++; } catch {}
+    });
+    console.log(`diff cache: moved ${moved} of ${keys.length} conversations to per-file entries`);
   }
+  await fsp.rename(DIFF_CACHE_FILE, DIFF_CACHE_FILE + '.migrated').catch(() => {});
 }
-pruneDiffCache();
-
-function saveDiffCacheSoon() {
-  clearTimeout(saveDiffCacheSoon.t);
-  saveDiffCacheSoon.t = setTimeout(() => {
-    pruneDiffCache();
-    fs.writeFile(DIFF_CACHE_FILE, JSON.stringify(diffCache), () => {});
-  }, 500);
-}
+setTimeout(() => { migrateDiffCacheFile().catch(error => console.error('diff cache migration failed:', error.message)); }, 8000);
 
 function diffEventHash(parts) {
   return crypto.createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 24);
@@ -6078,7 +6117,7 @@ async function conversationDiffs(key) {
     mtimeMs = st.mtimeMs; size = st.size;
   } catch {}
   const cacheKey = DIFF_CACHE_VERSION + String(mtimeMs) + ':' + String(size);
-  const cached = diffCache[key];
+  const cached = await loadDiffCacheRow(key);
   if (cached && cached.cacheKey === cacheKey) return cached.events;
   const raw = await fsp.readFile(absPathForKey(key), 'utf8');
   const records = [];
@@ -6123,7 +6162,7 @@ async function conversationDiffs(key) {
   }
   events.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.path.localeCompare(b.path) || a.editIndex - b.editIndex);
   diffCache[key] = { cacheKey, events, createdAt: Date.now() };
-  saveDiffCacheSoon();
+  saveDiffCacheRow(key, diffCache[key]);
   return events;
 }
 
@@ -7043,14 +7082,11 @@ function recentProjectFileActivity(file) {
   };
 }
 
+// A real line diff (shared with the browser) so the +/- counts in the code
+// tree match what the whole-file view shows, instead of prefix/suffix guesses.
 function watchedLineDelta(oldText, newText) {
-  const before = String(oldText || '').split('\n');
-  const after = String(newText || '').split('\n');
-  let start = 0;
-  while (start < before.length && start < after.length && before[start] === after[start]) start++;
-  let oldEnd = before.length - 1, newEnd = after.length - 1;
-  while (oldEnd >= start && newEnd >= start && before[oldEnd] === after[newEnd]) { oldEnd--; newEnd--; }
-  return { removed: Math.max(0, oldEnd - start + 1), added: Math.max(0, newEnd - start + 1) };
+  const stats = lineDiff.scriptStats(lineDiff.diffLines(oldText, newText));
+  return { removed: stats.removed, added: stats.added };
 }
 
 async function readProjectFileSnapshot(file) {
@@ -7292,6 +7328,34 @@ async function projectCommitResponse(project, root, hash) {
 const projectFileContextCache = new Map();
 const projectFileSnapshotCache = new Map();
 
+// All recorded AI file events of a project, grouped by absolute path. The
+// signature is the set of per-conversation diff-cache keys (mtime:size of
+// each transcript), so the index rebuilds only when a transcript changed.
+// conversationDiffs() is a stat per conversation when its cache is warm.
+const projectPathEventsCache = new Map(); // project -> { sig, byPath }
+async function projectEventsByPath(meta) {
+  const conversations = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
+  const perConv = await mapLimit(conversations, 6, async ({ key }) => {
+    try { return await conversationDiffs(key); } catch { return []; }
+  });
+  const sig = diffEventHash(conversations.map(({ key }) => key + ':' + ((diffCache[key] && diffCache[key].cacheKey) || '')));
+  const cached = projectPathEventsCache.get(meta.project);
+  if (cached && cached.sig === sig) return cached;
+  const byPath = new Map();
+  perConv.forEach(events => {
+    for (const event of events) {
+      const full = path.resolve(event.path);
+      let list = byPath.get(full);
+      if (!list) { list = []; byPath.set(full, list); }
+      list.push(event);
+    }
+  });
+  for (const list of byPath.values()) list.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.editIndex - b.editIndex || a.id.localeCompare(b.id));
+  const value = { sig, byPath, conversations: conversations.length };
+  projectPathEventsCache.set(meta.project, value);
+  return value;
+}
+
 function normalizedRepoFile(root, file) {
   const resolved = path.resolve(root, String(file || ''));
   if (resolved !== root && !resolved.startsWith(root + path.sep)) throw new Error('file is outside the repository');
@@ -7308,31 +7372,25 @@ async function projectFileContext(project, rootValue, fileValue) {
   const { fullPath, relativePath } = normalizedRepoFile(root, fileValue);
   const cacheKey = `${project}\x00${root}\x00${relativePath}`;
   const cached = projectFileContextCache.get(cacheKey);
-  let diskMtime = 0;
-  try { diskMtime = (await fsp.stat(fullPath)).mtimeMs; } catch {}
-  if (cached && Date.now() - cached.at < 15000 && cached.diskMtime === diskMtime) return cached.context;
+  let diskMtime = 0, diskSize = 0;
+  try { const stat = await fsp.stat(fullPath); diskMtime = stat.mtimeMs; diskSize = stat.size; } catch {}
   const repo = gitRoots.includes(root) ? await loadGitRepository(root) : {
     id: crypto.createHash('sha256').update('workspace:' + root).digest('hex').slice(0, 12),
     root, commits: [], workingTree: [], isGit: false,
   };
-  const events = [];
-  const conversations = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
-  for (const { key } of conversations) {
-    try {
-      for (const event of await conversationDiffs(key)) {
-        if (path.resolve(event.path) !== fullPath) continue;
-        events.push(event);
-      }
-    } catch {}
-  }
-  events.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.editIndex - b.editIndex || a.id.localeCompare(b.id));
+  const pathEvents = await projectEventsByPath(meta);
+  // Valid while the transcripts, the repository head, and the disk file are
+  // all unchanged — real inputs, not a timer.
+  const inputs = `${pathEvents.sig}\x00${repo.head || ''}\x00${repo.commits.length}\x00${diskMtime}\x00${diskSize}`;
+  if (cached && cached.inputs === inputs) return cached.context;
+  const events = pathEvents.byPath.get(fullPath) || [];
   const commits = repo.commits.filter(commit => commit.files.some(file => file.path === relativePath))
     .sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')) || a.hash.localeCompare(b.hash));
   let current = null;
   try { current = await fsp.readFile(fullPath, 'utf8'); } catch {}
   const version = diffEventHash([diskMtime, repo.head || '', events.map(event => `${event.id}:${event.outcome}`), commits.map(commit => commit.hash)]);
   const context = { project, root, relativePath, fullPath, repo, events, commits, current, version };
-  projectFileContextCache.set(cacheKey, { at: Date.now(), diskMtime, context });
+  projectFileContextCache.set(cacheKey, { inputs, context });
   if (projectFileContextCache.size > 200) projectFileContextCache.delete(projectFileContextCache.keys().next().value);
   return context;
 }
@@ -7359,7 +7417,7 @@ function fileHistoryPoints(ctx) {
     points.push({
       id: `ai:${event.id}`, kind: 'ai', ts: event.ts, ms, eventId: event.id,
       label: `${event.kind} · ${event.conversationTitle} · ${new Date(ms).toLocaleString()}`,
-      key: event.key, outcome: event.outcome,
+      key: event.key, outcome: event.outcome, eventKind: event.kind, title: event.conversationTitle,
     });
   }
   for (const commit of ctx.commits) {
@@ -7368,6 +7426,7 @@ function fileHistoryPoints(ctx) {
     points.push({
       id: `git:${commit.hash}`, kind: 'git', ts: commit.ts, ms, hash: commit.hash,
       label: `${commit.shortHash} · ${commit.subject} · ${new Date(ms).toLocaleString()}`,
+      shortHash: commit.shortHash, subject: commit.subject,
     });
   }
   points.sort((a, b) => a.ms - b.ms || (a.kind === b.kind ? a.id.localeCompare(b.id) : a.kind === 'ai' ? -1 : 1));
@@ -7411,7 +7470,11 @@ async function snapshotAtFilePoint(ctx, point) {
     }
     candidates.push({ content, method: `replayed after Git ${baseline.shortHash}`, applied, skipped, preference: 0 });
   }
-  if (ctx.current !== null) {
+  // The reverse replay walks every later event over the current file (a
+  // second per far-back point on a 900 KB file). A forward replay from an
+  // exact Git blob that skipped nothing is already the best answer.
+  const forwardExact = candidates.length && candidates[0].skipped === 0;
+  if (ctx.current !== null && !forwardExact) {
     let content = ctx.current, applied = 0, skipped = 0;
     for (const event of [...ctx.events].reverse()) {
       const eventMs = Date.parse(event.ts || '');
@@ -7566,6 +7629,26 @@ async function conversationFileContext(key, root, file) {
 
 async function conversationFileCompareResponse(key, root, file, fromId = '', toId = '', fromAt = '', toAt = '') {
   const ctx = await conversationFileContext(key, root, file);
+  const { points, scopedEvents, snapshotAt } = conversationScopedPoints(ctx, key);
+  let to = points.find(point => point.id === toId) || nearestFilePoint(points, toAt) || points[points.length - 1];
+  let from = points.find(point => point.id === fromId) || nearestFilePoint(points, fromAt) || points[0];
+  if (from.order > to.order) [from, to] = [to, from];
+  const [oldSnapshot, newSnapshot] = await Promise.all([snapshotAt(from), snapshotAt(to)]);
+  const changes = aiChangesBetween(scopedEvents, points, from, to)
+    .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
+  return {
+    scope: 'conversation', key, project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
+    points, from: from.id, to: to.id, old: oldSnapshot, new: newSnapshot, changes,
+    truth: 'This view includes only file changes recorded in this conversation. Complete AI snapshots are reconstructed and can skip divergent edits.',
+  };
+}
+
+// ---- file history document: points once, snapshots by id, changes on demand ----
+// The whole-file view used to fetch one 3–4 MB compare per keyframe move (both
+// files + every point label + every change body). It now asks for the point
+// list once per file, one snapshot per point (cached by content sha on both
+// sides), and the change bodies only when a line is opened.
+function conversationScopedPoints(ctx, key) {
   const allPoints = fileHistoryPoints(ctx);
   const scopedEvents = ctx.events.filter(event => event.key === key);
   const eventPoints = scopedEvents.map(event => allPoints.find(point => point.eventId === event.id)).filter(Boolean);
@@ -7586,10 +7669,7 @@ async function conversationFileCompareResponse(key, root, file, fromId = '', toI
     label: 'conversation end · after this file changed', sourcePoint: lastGlobal,
   };
   const points = [startBoundary, ...eventPoints.map((point, i) => ({ ...point, order: i + 1 })), endBoundary];
-  let to = points.find(point => point.id === toId) || nearestFilePoint(points, toAt) || points[points.length - 1];
-  let from = points.find(point => point.id === fromId) || nearestFilePoint(points, fromAt) || points[0];
-  if (from.order > to.order) [from, to] = [to, from];
-  const scopedSnapshot = async point => {
+  const snapshotAt = async point => {
     if (point.kind !== 'boundary') return snapshotAtFilePoint(ctx, point);
     if (point.sourcePoint) {
       const source = await snapshotAtFilePoint(ctx, point.sourcePoint);
@@ -7601,21 +7681,111 @@ async function conversationFileCompareResponse(key, root, file, fromId = '', toI
     const reversed = applyEventText(after.content, firstEvent, true);
     return { point, content: reversed.text, exact: false, method: 'reversed from the first conversation edit', applied: reversed.applied ? 1 : 0, skipped: reversed.applied ? 0 : 1 };
   };
-  const [oldSnapshot, newSnapshot] = await Promise.all([scopedSnapshot(from), scopedSnapshot(to)]);
-  const changes = scopedEvents.map(event => {
-    const point = points.find(item => item.eventId === event.id);
-    if (!point || point.order <= from.order || point.order > to.order) return null;
+  return { points, scopedEvents, snapshotAt };
+}
+
+function aiChangesBetween(events, points, from, to) {
+  const orderByEvent = new Map(points.filter(point => point.eventId).map(point => [point.eventId, point.order]));
+  return events.map(event => {
+    const order = orderByEvent.get(event.id);
+    if (order === undefined || order <= from.order || order > to.order) return null;
     return {
       type: 'ai', id: event.id, key: event.key, ts: event.ts, kind: event.kind,
       agent: event.agent, conversationTitle: event.conversationTitle, outcome: event.outcome,
       oldText: event.oldText || '', newText: event.newText || '',
     };
-  }).filter(Boolean).sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
+  }).filter(Boolean);
+}
+
+async function gitChangesBetween(ctx, points, from, to) {
+  const orderByHash = new Map(points.filter(point => point.hash).map(point => [point.hash, point.order]));
+  const changes = [];
+  for (const commit of ctx.commits) {
+    const order = orderByHash.get(commit.hash);
+    if (order === undefined || order <= from.order || order > to.order) continue;
+    const patch = await commitPatch(ctx.root, commit.hash, ctx.relativePath);
+    changes.push({
+      type: 'git', id: commit.hash, hash: commit.hash, shortHash: commit.shortHash,
+      ts: commit.ts, kind: 'commit', subject: commit.subject, ...patchChangeText(patch),
+    });
+  }
+  return changes;
+}
+
+async function fileHistoryDocument(params) {
+  const scope = params.scope === 'git' ? 'git' : params.scope === 'conversation' ? 'conversation' : 'project';
+  const repo = params.repo || '', file = params.path || '';
+  if (scope === 'git') {
+    const ctx = await gitFileContext(repo, file);
+    const points = fileHistoryPoints(ctx);
+    return {
+      scope, ctx, points, key: null,
+      snapshotAt: point => snapshotAtFilePoint(ctx, point),
+      changesBetween: (from, to) => gitChangesBetween(ctx, points, from, to),
+      truth: 'Git and current-file points are exact. This view has no AI reconstructions.',
+    };
+  }
+  if (scope === 'conversation') {
+    const key = params.id || '';
+    const ctx = await conversationFileContext(key, repo, file);
+    const scoped = conversationScopedPoints(ctx, key);
+    return {
+      scope, ctx, points: scoped.points, key,
+      snapshotAt: scoped.snapshotAt,
+      changesBetween: (from, to) => aiChangesBetween(scoped.scopedEvents, scoped.points, from, to),
+      truth: 'This view includes only file changes recorded in this conversation. Complete AI snapshots are reconstructed and can skip divergent edits.',
+    };
+  }
+  const ctx = await projectFileContext(params.name || '', repo, file);
+  const points = fileHistoryPoints(ctx);
   return {
-    scope: 'conversation', key, project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
-    points, from: from.id, to: to.id, old: oldSnapshot, new: newSnapshot, changes,
-    truth: 'This view includes only file changes recorded in this conversation. Complete AI snapshots are reconstructed and can skip divergent edits.',
+    scope, ctx, points, key: null,
+    snapshotAt: point => snapshotAtFilePoint(ctx, point),
+    changesBetween: async (from, to) => [...aiChangesBetween(ctx.events, points, from, to), ...await gitChangesBetween(ctx, points, from, to)],
+    truth: 'Git and current-file points are exact. AI points replay recorded tool calls and can skip divergent edits.',
   };
+}
+
+function publicFilePoint(point) {
+  const out = {
+    id: point.id, kind: point.kind, ts: point.ts, ms: point.ms, order: point.order,
+  };
+  if (point.hash) { out.hash = point.hash; out.shortHash = point.shortHash; out.subject = point.subject; }
+  if (point.eventId) { out.eventId = point.eventId; out.key = point.key; out.eventKind = point.eventKind; out.title = point.title; out.outcome = point.outcome; }
+  if (point.kind === 'boundary') out.label = point.label;
+  return out;
+}
+
+async function fileHistoryPointsResponse(params) {
+  const doc = await fileHistoryDocument(params);
+  if (!doc.points.length) throw new Error('this file has no selectable history points');
+  const ctx = doc.ctx;
+  return {
+    scope: doc.scope, key: doc.key, project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
+    version: ctx.version, truth: doc.truth, points: doc.points.map(publicFilePoint),
+  };
+}
+
+async function fileHistorySnapshotResponse(params) {
+  const doc = await fileHistoryDocument(params);
+  const point = doc.points.find(item => item.id === params.point);
+  if (!point) throw new Error('unknown history point');
+  const snapshot = await doc.snapshotAt(point);
+  if (!snapshot.sha) snapshot.sha = sha256Hex(String(snapshot.content || ''));
+  return {
+    scope: doc.scope, version: doc.ctx.version, point: publicFilePoint(point), sha: snapshot.sha, content: snapshot.content,
+    exact: !!snapshot.exact, method: snapshot.method, applied: snapshot.applied || 0, skipped: snapshot.skipped || 0,
+  };
+}
+
+async function fileHistoryChangesResponse(params) {
+  const doc = await fileHistoryDocument(params);
+  let from = doc.points.find(item => item.id === params.from), to = doc.points.find(item => item.id === params.to);
+  if (!from || !to) throw new Error('unknown history point');
+  if (from.order > to.order) [from, to] = [to, from];
+  const changes = await doc.changesBetween(from, to);
+  changes.sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
+  return { scope: doc.scope, version: doc.ctx.version, from: from.id, to: to.id, changes };
 }
 
 // Replay recorded edit/write events to attribute each current line to the
@@ -9978,6 +10148,7 @@ const server = http.createServer(async (req, res) => {
     // Images and the APK are not text: no gzip.
     const staticFile = {
       '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
@@ -10199,7 +10370,16 @@ const server = http.createServer(async (req, res) => {
       catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/project/file-history') {
       const project = u.searchParams.get('name') || '';
-      try { json(res, 200, await projectFileHistoryResponse(project)); }
+      try {
+        const data = await projectFileHistoryResponse(project);
+        // The code tree only needs paths and the 24 h activity: strip the
+        // per-file event lists (3.5 of 3.7 MB on this project).
+        if (u.searchParams.get('light') === '1') {
+          data.light = true;
+          data.rows = data.rows.map(row => ({ ...row, aiEvents: undefined, commitEvents: undefined, aiEventCount: row.aiEvents.length, commitCount: row.commitEvents.length }));
+        }
+        json(res, 200, data);
+      }
       catch (e) { json(res, e.message === 'project not found' ? 404 : 500, { error: e.message }); }
     } else if (u.pathname === '/api/project/tree') {
       try { json(res, 200, await projectTreeResponse(u.searchParams.get('name') || '')); }
@@ -10214,6 +10394,22 @@ const server = http.createServer(async (req, res) => {
         u.searchParams.get('from') || '', u.searchParams.get('to') || '',
         u.searchParams.get('fromAt') || '', u.searchParams.get('toAt') || ''));
       } catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/file-history/points') {
+      try { json(res, 200, await fileHistoryPointsResponse(Object.fromEntries(u.searchParams))); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/file-history/snapshot') {
+      try {
+        const snap = await fileHistorySnapshotResponse(Object.fromEntries(u.searchParams));
+        const etag = '"' + snap.sha + '"';
+        if (req.headers['if-none-match'] === etag) {
+          res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' });
+          return res.end();
+        }
+        sendBody(req, res, 200, { 'Content-Type': 'application/json; charset=utf-8', ETag: etag, 'Cache-Control': 'no-cache' }, JSON.stringify(snap));
+      } catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/file-history/changes') {
+      try { json(res, 200, await fileHistoryChangesResponse(Object.fromEntries(u.searchParams))); }
+      catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/git/repos') {
       try { json(res, 200, { repos: await discoverGitRepos(u.searchParams.get('refresh') === '1') }); }
       catch (e) { json(res, 500, { error: e.message }); }
