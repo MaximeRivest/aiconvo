@@ -17049,15 +17049,16 @@ live.onmessage = ev => {
   if (d.type === 'job') {
     const old = jobs.get(d.job.id);
     updateJob(d.job);
-    if (d.job.status === 'done' && (!old || old.status === 'running') && !d.job.parentId) {
+    if (d.job.status === 'done' && (!old || old.status === 'running' || (d.job.type === 'memory-health' && old.status === 'error')) && !d.job.parentId) {
       if (d.job.type === 'epic') relatedCache.clear();
       else if (d.job.key) relatedCache.delete(d.job.key);
       const label = d.job.type === 'epic' ? 'epic saved' :
         d.job.type === 'evidence' ? 'evidence ready' :
         d.job.type === 'project-distill' ? 'all project notes ready' :
-        d.job.type === 'memory-extract' ? 'memory leaves saved' :
+        d.job.type === 'memory-extract' ? (d.job.result?.paused ? 'memory extraction paused' : 'memory leaves saved') :
         d.job.type === 'memory-docs' ? 'memory documents regenerated' :
         d.job.type === 'memory-backfill' ? (d.job.result?.paused ? 'leaf backfill paused' : 'leaf backfill finished') :
+        d.job.type === 'memory-health' ? 'memory model recovered' :
         d.job.type === 'agent-run' ? 'model run finished' : 'note saved';
       toast('✓ ' + label + ': ' + d.job.title, () => {
         if (d.job.type === 'epic') showEpic(d.job.epicId);
@@ -17076,7 +17077,7 @@ live.onmessage = ev => {
       }
     }
     if (d.job.status === 'error' && (!old || old.status === 'running') && !d.job.parentId) {
-      errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'memory-extract' ? 'leaf extraction failed: ' : d.job.type === 'memory-docs' ? 'document regeneration failed: ' : d.job.type === 'memory-backfill' ? 'leaf backfill failed: ' : d.job.type === 'agent-run' ? 'model run failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
+      errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'memory-extract' ? 'leaf extraction failed: ' : d.job.type === 'memory-docs' ? 'document regeneration failed: ' : d.job.type === 'memory-backfill' ? 'leaf backfill failed: ' : d.job.type === 'memory-health' ? 'memory model paused: ' : d.job.type === 'agent-run' ? 'model run failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
       if ((d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && projectOverviewName === d.job.project && viewKind === 'project' && $('pDocsRegen')) {
         $('pDocsRegen').disabled = false;
         $('pDocsRegen').textContent = 'retry doc regeneration';

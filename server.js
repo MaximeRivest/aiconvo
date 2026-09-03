@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const readline = require('readline');
 const net = require('net');
 const { pathToFileURL } = require('url');
+const { AsyncLocalStorage } = require('async_hooks');
 const { execFile, execFileSync, spawn } = require('child_process');
 const zlib = require('zlib');
 const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
@@ -29,6 +30,8 @@ const fanoutLib = require('./fanout.js');
 const fanoutMerge = require('./fanoutmerge.js');
 const usageLib = require('./usageanalytics.js');
 const agentReadLib = require('./agentread.js');
+const { createModelHealth } = require('./modelhealth.js');
+const { execFileWithActivityTimeout } = require('./modelprocess.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
@@ -42,6 +45,8 @@ const SESS_DIR = path.join(CACHE_DIR, 'sessions');
 const INDEX_FILE = path.join(CACHE_DIR, 'index.json');
 const USAGE_DB_FILE = path.join(CACHE_DIR, 'usage.db');
 const INTERNAL_USAGE_FILE = path.join(CACHE_DIR, 'internal-usage.jsonl');
+const MODEL_HEALTH_FILE = path.join(CACHE_DIR, 'memory-model-health.json');
+const MODEL_ACTIVITY_TIMEOUT_MS = Math.max(30000, Number(process.env.AICONVO_MODEL_ACTIVITY_TIMEOUT_MS) || 2 * 60 * 1000);
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7433;
 const HOST = process.env.AICONVO_HOST || (process.env.AICONVO_LAN === '1' ? '0.0.0.0' : '127.0.0.1');
 const TLS_PORT = process.env.AICONVO_TLS_PORT ? Number(process.env.AICONVO_TLS_PORT) : 7443;
@@ -180,6 +185,39 @@ function saveIndexSoon() {
     writeFileAtomic(INDEX_FILE, JSON.stringify(index)).catch(() => {});
   }, 500);
 }
+
+// All calls made through the Settings "memory model" share one health gate.
+// Its cache survives restarts, so restarting aiconvo cannot create a new retry
+// storm while a provider is down. Explicit user work gets one probe during a
+// pause; automatic work waits for the half-open probe after the pause.
+let savedModelHealth = null;
+try { savedModelHealth = JSON.parse(fs.readFileSync(MODEL_HEALTH_FILE, 'utf8')); } catch {}
+let pendingModelHealthSave = null;
+let modelHealthSaveRunning = false;
+async function persistModelHealth(state) {
+  pendingModelHealthSave = state;
+  if (modelHealthSaveRunning) return;
+  modelHealthSaveRunning = true;
+  try {
+    while (pendingModelHealthSave) {
+      const next = pendingModelHealthSave;
+      pendingModelHealthSave = null;
+      await writeFileAtomic(MODEL_HEALTH_FILE, JSON.stringify(next));
+    }
+  } catch {} finally {
+    modelHealthSaveRunning = false;
+    if (pendingModelHealthSave) persistModelHealth(pendingModelHealthSave);
+  }
+}
+const modelCallContext = new AsyncLocalStorage();
+const memoryModelHealth = createModelHealth({
+  initialState: savedModelHealth,
+  onChange: state => {
+    persistModelHealth(state);
+    const job = memoryModelHealthJobView(state);
+    if (job) broadcast({ type: 'job', job });
+  },
+});
 
 function cachePathFor(key) {
   return path.join(SESS_DIR, key.replace(/[:\/\\]/g, '__') + '.json');
@@ -2467,7 +2505,7 @@ async function assignConversationProject(key, rawProject) {
   let reextract = false;
   if (project !== oldProject && index[key].realUserCount && await readLeaf(key)) {
     try {
-      startMemoryExtractJob([key], `${oneLine(index[key].title, '(untitled)').slice(0, 60)}: re-read for ${project}`);
+      startMemoryExtractJob([key], `${oneLine(index[key].title, '(untitled)').slice(0, 60)}: re-read for ${project}`, { automatic: true });
       reextract = true;
     } catch {}
   }
@@ -3031,6 +3069,7 @@ const CLAUDE_CODE_CRED_FILE = path.join(os.homedir(), '.claude', '.credentials.j
 const CLAUDE_CODE_EXT = path.join(os.homedir(), '.pi', 'agent', 'extensions', 'claude-code-fable-5', 'index.ts');
 let appSettings = settingsLib.normalizeSettings(settingsLib.DEFAULT_SETTINGS);
 try { appSettings = settingsLib.normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch {}
+memoryModelHealth.setIdentity(currentModelLabel());
 function saveAppSettings() {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(appSettings, null, 2) + '\n', { mode: 0o600 });
@@ -3222,48 +3261,71 @@ function splitTextToTokenBudget(text, tokenBudget) {
   return parts;
 }
 
-function runPi(fileContent, prompt, onChunk) {
-  return new Promise((resolve, reject) => {
-    const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
-    fs.writeFileSync(tmp, fileContent);
+async function runPi(fileContent, prompt, onChunk, options = {}) {
+  const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
+  fs.writeFileSync(tmp, fileContent);
+  const inherited = modelCallContext.getStore();
+  const automatic = options.automatic == null ? !!(inherited && inherited.automatic) : !!options.automatic;
+  let permit = null;
+  let carry = '';
+  try {
+    memoryModelHealth.setIdentity(currentModelLabel());
+    permit = memoryModelHealth.begin({ automatic });
+    const result = await execFileWithActivityTimeout(
+      execFile,
+      'pi',
+      [...piArgs(), '--mode', 'json', '@' + tmp, prompt],
+      { maxBuffer: 64 * 1024 * 1024, timeout: 1800000 },
+      {
+        activityTimeoutMs: MODEL_ACTIVITY_TIMEOUT_MS,
+        onChild: child => child.stdin.end(), // pi -p waits for stdin EOF otherwise
+        onStdout: data => {
+          if (!onChunk) return;
+          carry += String(data);
+          const lines = carry.split('\n');
+          carry = lines.pop() || '';
+          for (const line of lines) {
+            let event; try { event = JSON.parse(line); } catch { continue; }
+            const update = event.type === 'message_update' && event.assistantMessageEvent;
+            if (update && update.type === 'text_delta') onChunk(String(update.delta || ''));
+          }
+        },
+      },
+    );
+    memoryModelHealth.success(permit);
+
     // JSON mode gives the final provider usage. These no-session calls were
     // previously invisible to every cost report.
-    const child = execFile('pi', [...piArgs(), '--mode', 'json', '@' + tmp, prompt], { maxBuffer: 64 * 1024 * 1024, timeout: 1800000 },
-      (err, stdout, stderr) => {
-        fs.unlink(tmp, () => {});
-        let finalMessage = null;
-        for (const line of String(stdout).split('\n')) {
-          let event; try { event = JSON.parse(line); } catch { continue; }
-          if (event.type === 'message_end' && event.message && event.message.role === 'assistant') finalMessage = event.message;
-        }
-        if (finalMessage && finalMessage.usage) {
-          const record = {
-            type: 'message', id: crypto.randomUUID(), parentId: null,
-            timestamp: new Date(finalMessage.timestamp || Date.now()).toISOString(),
-            aiconvoCategory: 'internal',
-            message: { ...finalMessage, content: [] },
-          };
-          try { fs.appendFileSync(INTERNAL_USAGE_FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); } catch {}
-        }
-        if (err) return reject(new Error(stderr.trim() || err.message));
-        if (!finalMessage) return resolve(String(stdout).trim());
-        resolve(textOf(finalMessage.content).trim());
-      });
-    child.stdin.end(); // pi -p waits for stdin EOF otherwise
-    if (onChunk) {
-      let carry = '';
-      child.stdout.on('data', data => {
-        carry += String(data);
-        const lines = carry.split('\n');
-        carry = lines.pop() || '';
-        for (const line of lines) {
-          let event; try { event = JSON.parse(line); } catch { continue; }
-          const update = event.type === 'message_update' && event.assistantMessageEvent;
-          if (update && update.type === 'text_delta') onChunk(String(update.delta || ''));
-        }
-      });
+    let finalMessage = null;
+    for (const line of result.stdout.split('\n')) {
+      let event; try { event = JSON.parse(line); } catch { continue; }
+      if (event.type === 'message_end' && event.message && event.message.role === 'assistant') finalMessage = event.message;
     }
-  });
+    if (finalMessage && finalMessage.usage) {
+      const record = {
+        type: 'message', id: crypto.randomUUID(), parentId: null,
+        timestamp: new Date(finalMessage.timestamp || Date.now()).toISOString(),
+        aiconvoCategory: 'internal',
+        message: { ...finalMessage, content: [] },
+      };
+      try { fs.appendFileSync(INTERNAL_USAGE_FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); } catch {}
+    }
+    if (!finalMessage) return result.stdout.trim();
+    return textOf(finalMessage.content).trim();
+  } catch (error) {
+    if (permit) {
+      error.modelCallFailure = true;
+      memoryModelHealth.failure(permit, error);
+    }
+    if (error.code === 'MODEL_CALLS_PAUSED' || error.code === 'MODEL_ACTIVITY_TIMEOUT') throw error;
+    const message = String(error.stderr || '').trim() || error.message;
+    const wrapped = new Error(message);
+    wrapped.code = error.code;
+    wrapped.modelCallFailure = true;
+    throw wrapped;
+  } finally {
+    fsp.unlink(tmp).catch(() => {});
+  }
 }
 
 const TIMELINE_TITLE_PROMPT =
@@ -3274,9 +3336,9 @@ const TIMELINE_TITLE_PROMPT =
 
 let timelineTitleRunning = false;
 let timelineTitleAgain = false;
-function scheduleTimelineTitles() {
+function scheduleTimelineTitles(delayMs = 5000) {
   clearTimeout(scheduleTimelineTitles.t);
-  scheduleTimelineTitles.t = setTimeout(refreshTimelineTitles, 5000);
+  scheduleTimelineTitles.t = setTimeout(refreshTimelineTitles, Math.max(1000, delayMs));
 }
 
 function mapTimelineLimit(items, limit, fn) {
@@ -3306,7 +3368,7 @@ async function refreshTimelineTitles() {
     await mapTimelineLimit(batches, 3, async batch => {
       const input = batch.map(([, e], id) => ({ id, request: e.title }));
       try {
-        const raw = await runPi(JSON.stringify(input), TIMELINE_TITLE_PROMPT);
+        const raw = await runPi(JSON.stringify(input), TIMELINE_TITLE_PROMPT, null, { automatic: true });
         const result = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
         if (!Array.isArray(result)) return;
         const updates = [];
@@ -3332,6 +3394,10 @@ async function refreshTimelineTitles() {
         saveIndexSoon();
       } catch (e) {
         console.error('timeline title batch failed:', e.message);
+        const retryDelay = e.code === 'MODEL_CALLS_PAUSED'
+          ? Math.max(1000, e.retryAt - Date.now() + 1000)
+          : e.modelCallFailure ? 10 * 60 * 1000 : 0;
+        if (retryDelay) scheduleTimelineTitles(retryDelay);
       }
     });
   } finally {
@@ -3379,6 +3445,27 @@ const RETITLE_PROMPT =
 // Auto retitle: fire once, when a conversation crosses from fewer than two real
 // user messages to two or more. A manual/override title always blocks this.
 const autoRetitleInFlight = new Set();
+function scheduleAutoRetitle(key, delayMs = 2000) {
+  if (autoRetitleInFlight.has(key)) return;
+  autoRetitleInFlight.add(key);
+  const timer = setTimeout(async () => {
+    let retryDelay = 0;
+    try {
+      const saved = timelineTitles[key];
+      if (!index[key] || (saved && saved.manual)) return;
+      await retitleConversation(key, { automatic: true });
+    } catch (e) {
+      console.error('auto retitle failed:', key, e.message);
+      retryDelay = e.code === 'MODEL_CALLS_PAUSED'
+        ? Math.max(1000, e.retryAt - Date.now() + 1000)
+        : e.modelCallFailure ? 10 * 60 * 1000 : 0;
+    } finally {
+      autoRetitleInFlight.delete(key);
+      if (retryDelay) scheduleAutoRetitle(key, retryDelay);
+    }
+  }, delayMs);
+  timer.unref();
+}
 function maybeAutoRetitle(key, prev, entry) {
   const saved = timelineTitles[key];
   if (saved && saved.manual) return; // a person (or an earlier retitle) owns this title
@@ -3386,25 +3473,18 @@ function maybeAutoRetitle(key, prev, entry) {
   const crossed = prev
     ? Number(prev.realUserCount ?? NaN) < 2
     : !!entry.firstTs && Date.now() - entry.firstTs < 10 * 60 * 1000; // brand-new file, still fresh
-  if (!crossed) return;
-  if (autoRetitleInFlight.has(key)) return;
-  autoRetitleInFlight.add(key);
-  setTimeout(() => {
-    retitleConversation(key)
-      .catch(e => console.error('auto retitle failed:', key, e.message))
-      .finally(() => autoRetitleInFlight.delete(key));
-  }, 2000);
+  if (crossed) scheduleAutoRetitle(key);
 }
 
 // Retitle one conversation on demand, from its first real (non-bootstrap) user messages.
-async function retitleConversation(key) {
+async function retitleConversation(key, options = {}) {
   if (!index[key]) throw new Error('unknown conversation');
   const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
   const users = data.messages.filter(m => m.role === 'user' && String(m.text || '').trim());
   const real = users.filter(m => !isBootstrapMessage(m.text));
   const chosen = (real.length ? real : users).slice(0, 4).map(m => String(m.text).slice(0, 2000));
   if (!chosen.length) throw new Error('no user messages to title from');
-  const raw = await runPi(JSON.stringify(chosen), RETITLE_PROMPT);
+  const raw = await runPi(JSON.stringify(chosen), RETITLE_PROMPT, null, options);
   const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
   const fullTitle = String(parsed.title || '').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!fullTitle) throw new Error('the model returned no title');
@@ -4758,6 +4838,7 @@ const epicJobs = new Map();    // epic id -> job
 const memoryExtractJobs = new Map(); // batch id -> leaf extraction job
 const memoryDocsJobs = new Map();    // project -> document regeneration job
 const memoryBackfillJobs = new Map(); // project -> backfill job
+const activeMemoryLeafKeys = new Set(); // one extraction owner per conversation
 
 function jobView(job) {
   return {
@@ -4783,11 +4864,39 @@ function jobChanged(job) {
   broadcast({ type: 'job', job: jobView(job) });
 }
 
+function memoryModelHealthJobView(state = memoryModelHealth.snapshot()) {
+  const now = Date.now();
+  if (state.mode === 'closed') {
+    if (!state.recoveredAt || state.recoveredAt <= now - JOB_KEEP_MS) return null;
+    return {
+      id: 'memory-model-health', type: 'memory-health', title: 'Memory model recovered',
+      status: 'done', statusText: 'The model responded. Automatic memory calls resumed.',
+      done: 1, total: 1, startedAt: state.recoveredAt, finishedAt: state.recoveredAt,
+      model: currentModelLabel(), result: { recovered: true },
+    };
+  }
+  const waiting = state.mode === 'open';
+  const remainingMinutes = Math.max(1, Math.ceil((state.openUntil - now) / 60000));
+  const text = waiting
+    ? `Automatic memory calls paused for about ${remainingMinutes} minutes after ${state.consecutiveFailures} failed calls. A manual action can test the model once.`
+    : state.probeInFlight
+      ? 'Testing the memory model once. Other automatic calls remain paused.'
+      : 'The pause ended. The next automatic call will test the memory model once.';
+  return {
+    id: 'memory-model-health', type: 'memory-health', title: 'Memory model paused',
+    status: waiting ? 'error' : 'running', statusText: text, error: waiting ? text : null,
+    done: 0, total: 1, startedAt: state.openedAt || now, finishedAt: null,
+    model: currentModelLabel(), result: { retryAt: state.openUntil, failures: state.consecutiveFailures },
+  };
+}
+
 function allJobs() {
   const cutoff = Date.now() - JOB_KEEP_MS;
+  const healthJob = memoryModelHealthJobView();
   return [...distillJobs.values(), ...projectDistillJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...memoryExtractJobs.values(), ...memoryDocsJobs.values(), ...memoryBackfillJobs.values(), ...agentRunJobs.values()]
     .map(jobView)
     .concat([...restoredRunJobs.values()].filter(j => (j.finishedAt || 0) > cutoff))
+    .concat(healthJob ? [healthJob] : [])
     .sort((a, b) => b.startedAt - a.startedAt);
 }
 
@@ -4906,11 +5015,13 @@ function startProjectDistillJob(project) {
 
 // ---- memory pyramid jobs ----
 
-// A batch of leaf extractions. Each leaf fails alone; the batch reports the
-// count. Concurrency 2 keeps the trickle polite to rate limits.
-function startMemoryExtractJob(ids, label = null) {
-  const keys = [...new Set(ids)].filter(k => index[k]);
-  if (!keys.length) throw new Error('no conversations to extract');
+// A batch of leaf extractions. Each leaf fails alone and enters a durable
+// 10/20/30-minute retry queue. One owner per key prevents a sweep, a backfill,
+// and a manual action from writing the same leaf at the same time.
+function startMemoryExtractJob(ids, label = null, options = {}) {
+  const automatic = !!options.automatic;
+  const keys = [...new Set(ids)].filter(k => index[k] && !activeMemoryLeafKeys.has(k) && memoryModelHealth.canRunLeaf(k, { automatic }));
+  if (!keys.length) throw new Error('no memory leaves are ready to extract');
   const id = crypto.randomUUID();
   const job = {
     id: 'memory-extract:' + id, type: 'memory-extract',
@@ -4920,55 +5031,73 @@ function startMemoryExtractJob(ids, label = null) {
     startedAt: Date.now(), finished: false, model: currentModelLabel(),
   };
   memoryExtractJobs.set(job.id, job);
+  for (const key of keys) activeMemoryLeafKeys.add(key);
   jobChanged(job);
   job.completion = (async () => {
     const failures = [];
+    const deferred = [];
     const projects = new Set();
+    const savedKeys = [];
     await mapLimit(keys, 2, async key => {
       try {
-        await extractLeaf(key);
+        await modelCallContext.run({ automatic }, () => extractLeaf(key));
+        memoryModelHealth.leafSuccess(key);
+        savedKeys.push(key);
         const entry = index[key];
         if (entry) projects.add(projectNameOf(entry.cwd, key));
-      } catch (e) { failures.push(e.message); }
-      job.done++;
-      job.statusText = `Extracted ${job.done}/${job.total} leaves…`;
-      jobChanged(job);
+      } catch (e) {
+        if (e.code === 'MODEL_CALLS_PAUSED') {
+          deferred.push(key);
+          memoryModelHealth.deferLeaf(key, e.retryAt, e);
+        } else {
+          failures.push({ key, error: e.message });
+          memoryModelHealth.leafFailure(key, e);
+        }
+      } finally {
+        activeMemoryLeafKeys.delete(key);
+        job.done++;
+        job.statusText = `Extracted ${job.done}/${job.total} leaves…`;
+        jobChanged(job);
+      }
     });
-    if (failures.length === keys.length) {
-      job.status = 'error'; job.error = failures[0]; job.statusText = failures[0];
+    job.result = { extracted: savedKeys.length, failed: failures.length, deferred: deferred.length, paused: !!deferred.length };
+    if (!savedKeys.length && failures.length) {
+      job.status = 'error'; job.error = failures[0].error; job.statusText = failures[0].error;
     } else {
       job.status = 'done';
-      job.statusText = failures.length ? `${keys.length - failures.length} leaves saved · ${failures.length} failed` : 'Memory leaves saved.';
-      job.result = { extracted: keys.length - failures.length, failed: failures.length };
+      const parts = [`${savedKeys.length} ${savedKeys.length === 1 ? 'leaf' : 'leaves'} saved`];
+      if (failures.length) parts.push(`${failures.length} waiting to retry`);
+      if (deferred.length) parts.push(`${deferred.length} paused`);
+      job.statusText = parts.join(' · ') + '.';
     }
     job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
     for (const project of projects) scheduleDocsRegen(project);
-    scheduleEpicRegenForKeys(keys);
+    if (savedKeys.length) scheduleEpicRegenForKeys(savedKeys);
     setTimeout(() => { if (memoryExtractJobs.get(job.id) === job) memoryExtractJobs.delete(job.id); }, 60 * 60 * 1000);
   })();
   return job;
 }
 
-function startMemoryDocsJob(project) {
+function startMemoryDocsJob(project, options = {}) {
   if (!projectMetaFor(project)) throw new Error('project not found');
   return startDocsJobCore(project, project + ': regenerate memory documents', project, null,
-    emit => regenerateProjectDocs(project, emit));
+    emit => regenerateProjectDocs(project, emit), options);
 }
 
-function startAreaDocsJob(project, rel) {
+function startAreaDocsJob(project, rel, options = {}) {
   if (!areaMetaFor(project, rel)) throw new Error('area not found');
   return startDocsJobCore('area:' + project + '\0' + rel, `${project}/${rel}: regenerate area memory`, project, null,
-    emit => regenerateAreaDocs(project, rel, emit));
+    emit => regenerateAreaDocs(project, rel, emit), options);
 }
 
-function startEpicDocsJob(epicId) {
+function startEpicDocsJob(epicId, options = {}) {
   const epic = epics[epicId];
   if (!epic) throw new Error('epic not found');
   return startDocsJobCore('epic:' + epicId, (epic.title || epicId) + ': regenerate epic memory', null, epicId,
-    emit => regenerateEpicDocs(epicId, emit));
+    emit => regenerateEpicDocs(epicId, emit), options);
 }
 
-function startDocsJobCore(mapKey, title, project, epicId, run) {
+function startDocsJobCore(mapKey, title, project, epicId, run, options = {}) {
   const running = memoryDocsJobs.get(mapKey);
   if (running && !running.finished) return running;
   const job = {
@@ -4978,7 +5107,7 @@ function startDocsJobCore(mapKey, title, project, epicId, run) {
   };
   memoryDocsJobs.set(mapKey, job);
   jobChanged(job);
-  job.completion = (async () => {
+  job.completion = modelCallContext.run({ automatic: !!options.automatic }, async () => {
     try {
       const manifest = await run((text, done, total) => {
         job.statusText = text; job.done = done; job.total = total; jobChanged(job);
@@ -4987,11 +5116,17 @@ function startDocsJobCore(mapKey, title, project, epicId, run) {
       job.result = { project, epicId, paths: manifest.paths, candidates: (manifest.candidates || []).length };
     } catch (e) {
       job.status = 'error'; job.statusText = e.message; job.error = e.message;
+      if (options.automatic && typeof options.retry === 'function') {
+        const retryDelay = (e.code === 'MODEL_CALLS_PAUSED' || memoryModelHealth.isAutomaticPaused())
+          ? modelAutomaticRetryDelay()
+          : e.code === 'MODEL_ACTIVITY_TIMEOUT' ? 10 * 60 * 1000 : 0;
+        if (retryDelay) try { options.retry(retryDelay); } catch {}
+      }
     } finally {
       job.finished = true; job.finishedAt = Date.now(); jobChanged(job);
       setTimeout(() => { if (memoryDocsJobs.get(mapKey) === job) memoryDocsJobs.delete(mapKey); }, 60 * 60 * 1000);
     }
-  })();
+  });
   return job;
 }
 
@@ -5015,31 +5150,53 @@ function startMemoryBackfillJob(project) {
       const sorted = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
       const todo = [];
       for (const { key, entry } of sorted) {
-        if (!entry.realUserCount) continue;
+        if (!entry.realUserCount || activeMemoryLeafKeys.has(key)) continue;
         if (leafStateFor(entry, await readLeaf(key)) !== 'fresh') todo.push(key);
       }
       job.total = todo.length;
       if (!todo.length) { job.status = 'done'; job.statusText = 'All leaves are current.'; return; }
+      for (const key of todo) activeMemoryLeafKeys.add(key);
       jobChanged(job);
       let failed = 0;
+      let modelPaused = false;
+      const savedKeys = [];
       await mapLimit(todo, 2, async key => {
-        if (job.cancelRequested) return;
-        try { await extractLeaf(key); } catch { failed++; }
-        job.done++;
-        job.statusText = `Backfill ${job.done}/${job.total} leaves…${failed ? ` (${failed} failed)` : ''}`;
-        jobChanged(job);
+        if (job.cancelRequested || modelPaused) { activeMemoryLeafKeys.delete(key); return; }
+        try {
+          await modelCallContext.run({ automatic: false }, () => extractLeaf(key));
+          memoryModelHealth.leafSuccess(key);
+          savedKeys.push(key);
+        } catch (e) {
+          if (e.code === 'MODEL_CALLS_PAUSED') {
+            modelPaused = true;
+            memoryModelHealth.deferLeaf(key, e.retryAt, e);
+          } else {
+            failed++;
+            memoryModelHealth.leafFailure(key, e);
+            if (memoryModelHealth.isAutomaticPaused()) modelPaused = true;
+          }
+        } finally {
+          activeMemoryLeafKeys.delete(key);
+          job.done++;
+          job.statusText = `Backfill ${job.done}/${job.total} leaves…${failed ? ` (${failed} failed)` : ''}`;
+          jobChanged(job);
+        }
       });
-      if (job.cancelRequested) {
-        job.status = 'done'; job.statusText = `Paused at ${job.done}/${job.total}. Start again to resume.`;
-        job.result = { paused: true, done: job.done, total: job.total };
+      // Workers stop taking new leaves as soon as the user pauses or the model
+      // circuit opens. Release all reservations that they did not process.
+      for (const key of todo) activeMemoryLeafKeys.delete(key);
+      if (job.cancelRequested || modelPaused) {
+        const reason = modelPaused ? 'The memory model is not responding.' : 'Paused by the user.';
+        job.status = 'done'; job.statusText = `${reason} Saved ${savedKeys.length}; stopped at ${job.done}/${job.total}. Start again to resume.`;
+        job.result = { paused: true, modelPaused, done: job.done, total: job.total, saved: savedKeys.length, failed };
         return;
       }
       job.status = failed === todo.length ? 'error' : 'done';
-      job.statusText = failed ? `Backfill finished · ${failed} leaves failed.` : 'Backfill finished.';
-      job.result = { done: job.done, failed };
-      if (failed < todo.length) {
+      job.statusText = failed ? `Backfill finished · ${failed} leaves waiting to retry.` : 'Backfill finished.';
+      job.result = { done: job.done, failed, saved: savedKeys.length };
+      if (savedKeys.length) {
         try { startMemoryDocsJob(project); } catch {}
-        scheduleEpicRegenForKeys(todo, 60 * 1000); // backfill already batched: refresh epic docs soon after
+        scheduleEpicRegenForKeys(savedKeys, 60 * 1000); // backfill already batched: refresh epic docs soon after
       }
     } catch (e) {
       job.status = 'error'; job.statusText = e.message; job.error = e.message;
@@ -5067,22 +5224,34 @@ function markLeafDirty(key, prevEntry, entry, mtimeMs) {
 }
 
 async function sweepSettledLeaves() {
+  // Keep dirty work queued while the circuit is open. After the cooldown, one
+  // call becomes the half-open probe; the health gate blocks all other calls.
+  if (memoryModelHealth.isAutomaticPaused()) return;
   const now = Date.now();
-  const ready = [];
+  const ready = new Set(memoryModelHealth.dueLeafKeys());
   for (const [key, at] of leafDirty) {
     const entry = index[key];
-    if (!entry) { leafDirty.delete(key); continue; }
+    if (!entry) { leafDirty.delete(key); memoryModelHealth.leafSuccess(key); continue; }
     if (now - Math.max(at, entry.mtimeMs || 0) < LEAF_SETTLE_MS) continue;
-    leafDirty.delete(key);
-    ready.push(key);
+    ready.add(key);
   }
-  if (!ready.length) return;
+  if (!ready.size) return;
   const stale = [];
   for (const key of ready) {
-    if (leafStateFor(index[key], await readLeaf(key)) !== 'fresh') stale.push(key);
+    const entry = index[key];
+    if (!entry) { leafDirty.delete(key); memoryModelHealth.leafSuccess(key); continue; }
+    if (activeMemoryLeafKeys.has(key) || !memoryModelHealth.canRunLeaf(key, { automatic: true })) continue;
+    if (leafStateFor(entry, await readLeaf(key)) === 'fresh') {
+      leafDirty.delete(key);
+      memoryModelHealth.leafSuccess(key);
+    } else {
+      stale.push(key);
+      leafDirty.delete(key);
+    }
   }
   if (stale.length) {
-    try { startMemoryExtractJob(stale, `${stale.length} settled conversation${stale.length === 1 ? '' : 's'}`); } catch {}
+    try { startMemoryExtractJob(stale, `${stale.length} settled conversation${stale.length === 1 ? '' : 's'}`, { automatic: true }); }
+    catch { for (const key of stale) leafDirty.set(key, now - LEAF_SETTLE_MS); }
   }
 }
 
@@ -5090,13 +5259,24 @@ async function sweepSettledLeaves() {
 // already opted into memory (a manifest exists) regenerate automatically.
 const DOCS_REGEN_DEBOUNCE_MS = 30 * 60 * 1000;
 const docsRegenTimers = new Map(); // project or 'epic:<id>' -> timer
+function modelAutomaticRetryDelay() {
+  return Math.max(LEAF_SWEEP_MS, memoryModelHealth.automaticWaitMs() + 1000);
+}
 function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
   if (!project || project === '?') return;
   clearTimeout(docsRegenTimers.get(project));
   docsRegenTimers.set(project, setTimeout(() => {
     docsRegenTimers.delete(project);
+    if (memoryModelHealth.isAutomaticPaused()) return scheduleDocsRegen(project, modelAutomaticRetryDelay());
     fsp.access(projectMemoryPaths(project).manifest).then(
-      () => { try { startMemoryDocsJob(project); } catch {} },
+      () => {
+        try {
+          startMemoryDocsJob(project, {
+            automatic: true,
+            retry: delay => scheduleDocsRegen(project, delay || modelAutomaticRetryDelay()),
+          });
+        } catch {}
+      },
       () => {});
   }, delayMs));
   // Declared areas with built memory refresh on the same debounce. Area docs
@@ -5106,8 +5286,16 @@ function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
     clearTimeout(docsRegenTimers.get(mapKey));
     docsRegenTimers.set(mapKey, setTimeout(() => {
       docsRegenTimers.delete(mapKey);
+      if (memoryModelHealth.isAutomaticPaused()) return scheduleDocsRegen(project, modelAutomaticRetryDelay());
       fsp.access(areaMemoryPaths(project, rel).manifest).then(
-        () => { try { startAreaDocsJob(project, rel); } catch {} },
+        () => {
+          try {
+            startAreaDocsJob(project, rel, {
+              automatic: true,
+              retry: delay => scheduleDocsRegen(project, delay || modelAutomaticRetryDelay()),
+            });
+          } catch {}
+        },
         () => {});
     }, delayMs));
   }
@@ -5125,8 +5313,16 @@ function scheduleEpicRegenForKeys(keys, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
     clearTimeout(docsRegenTimers.get(mapKey));
     docsRegenTimers.set(mapKey, setTimeout(() => {
       docsRegenTimers.delete(mapKey);
+      if (memoryModelHealth.isAutomaticPaused()) return scheduleEpicRegenForKeys(epic.sessionIds || [], modelAutomaticRetryDelay());
       fsp.access(epicMemoryPaths(epic.id).manifest).then(
-        () => { try { startEpicDocsJob(epic.id); } catch {} },
+        () => {
+          try {
+            startEpicDocsJob(epic.id, {
+              automatic: true,
+              retry: delay => scheduleEpicRegenForKeys(epic.sessionIds || [], delay || modelAutomaticRetryDelay()),
+            });
+          } catch {}
+        },
         () => {});
     }, delayMs));
   }
@@ -10972,6 +11168,7 @@ const server = http.createServer(async (req, res) => {
       const prevSemTarget = (appSettings.semanticUrl || '') + '|' + semNs();
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
       saveAppSettings();
+      memoryModelHealth.setIdentity(currentModelLabel());
       // A new URL or namespace means a different remote index: re-push all.
       if (searchIdx && (appSettings.semanticUrl || '') + '|' + semNs() !== prevSemTarget) {
         searchIdx.semanticResetSync();
