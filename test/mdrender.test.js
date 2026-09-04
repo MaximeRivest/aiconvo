@@ -83,3 +83,25 @@ test('fenced code is untouched by list logic', () => {
 test('search marks apply inside list items', () => {
   assert.match(mdRender('- find me', 'find'), /<mark>find<\/mark>/);
 });
+
+test('a bare URL inside bold or code becomes a link', () => {
+  const h = mdRender('Open **https://portal.azure.com/#view/Billing/Sub** now');
+  assert.strictEqual(squash(h),
+    '<p>Open <b><a href="https://portal.azure.com/#view/Billing/Sub" target="_blank" rel="noopener">https://portal.azure.com/#view/Billing/Sub</a></b> now</p>');
+  assert.match(mdRender('run `https://localhost:7433/x`'), /<code><a href="https:\/\/localhost:7433\/x"/);
+});
+
+test('trailing punctuation and quotes stay outside the link', () => {
+  assert.match(mdRender('see https://a.io/b.'), /<a href="https:\/\/a\.io\/b"[^>]*>https:\/\/a\.io\/b<\/a>\./);
+  // The test stub escapes quotes; the app's esc does not. Both must link.
+  assert.match(mdRender('go to "https://a.io/b", then'), /("|&quot;)<a href="https:\/\/a\.io\/b"[^>]*>https:\/\/a\.io\/b<\/a>("|&quot;), then/);
+  assert.match(mdRender('(https://a.io/b)'), /\(<a href="https:\/\/a\.io\/b"[^>]*>https:\/\/a\.io\/b<\/a>\)/);
+  assert.match(mdRender('https://en.wikipedia.org/wiki/Foo_(bar) ok'), /<a href="https:\/\/en\.wikipedia\.org\/wiki\/Foo_\(bar\)"/);
+});
+
+test('query strings keep their ampersands and a markdown link is not re-linked', () => {
+  assert.match(mdRender('https://a.io/?x=1&y=2'), /<a href="https:\/\/a\.io\/\?x=1&amp;y=2"[^>]*>https:\/\/a\.io\/\?x=1&amp;y=2<\/a>/);
+  const h = mdRender('[https://a.io](https://a.io)');
+  assert.strictEqual((h.match(/<a /g) || []).length, 1);
+  assert.match(h, /<a href="https:\/\/a\.io"[^>]*>https:\/\/a\.io<\/a>/);
+});
