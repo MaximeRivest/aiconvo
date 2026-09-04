@@ -596,22 +596,47 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pmemline button { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); }
 .pnewrow { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-4) 0; }
 .pfoldbtn { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); margin-left: 6px; }
-.settings-view { max-width: var(--read-max); margin: 0 auto; }
-.settings-view .hint, .set-body .hint { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
-/* Settings form vocabulary. Every control follows one of three shapes:
-   .set-field  — a caption above one control (text, select)
-   .set-check  — one checkbox with its text on the same line
-   .set-options — an exclusive list: radio, name, one-line description.
-   Captions are dim and small; the control is the loud thing in the row. */
+/* ---- settings page ----
+   A section list on the left, one pane on the right. The pane is a short
+   column: a title, one lead sentence, then controls. Three control shapes:
+   .set-field   — a caption above one control (text, select, picker)
+   .set-check   — one checkbox with its text on the same line
+   .set-options — an exclusive list: radio, name, one-line description,
+                  and optional child controls under the chosen row.
+   Captions and help are dim and small; the control is the loud thing. */
+.settings-page { max-width: 880px; margin: 0 auto; display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: var(--sp-6); align-items: start; }
+.settings-nav { position: sticky; top: 0; display: flex; flex-direction: column; gap: 1px; padding-top: 6px; }
+.settings-nav button { text-align: left; border: 0; border-radius: var(--r); background: transparent; color: var(--text-dim); padding: 6px 10px; min-height: 30px; font-size: var(--fs-body); }
+.settings-nav button:hover { background: var(--surface-2); color: var(--text); }
+.settings-nav button.on { background: var(--surface-2); color: var(--text); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+.settings-nav .sep { border-top: 1px solid var(--border); margin: 8px 6px; }
+.settings-pane { max-width: 620px; min-width: 0; }
+.settings-pane h2 { margin: 0 0 4px; font-size: var(--fs-title); }
+.settings-pane .lead { color: var(--text-dim); margin: 0 0 var(--sp-4); }
+.settings-pane .hint { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
+.set-help { color: var(--text-dim); font-size: var(--fs-meta); margin: 6px 0 var(--sp-3); line-height: 1.45; }
+.set-help code { font-size: inherit; }
+.set-status { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
 .set-field { margin: 0 0 var(--sp-3); }
 .set-field > label { display: block; font-size: var(--fs-label); color: var(--text-dim); margin: 0 0 4px; }
-#settingsDlg .set-field > input[type=text] { display: block; width: 100%; max-width: 440px; margin: 0; }
-#settingsDlg .set-field > select { display: block; width: auto; min-width: 16ch; max-width: 100%; margin: 0; }
-#settingsDlg .set-field > input.narrow { width: 8ch; }
+.set-field > input[type=text], .set-field .set-row > input[type=text] { display: block; width: 100%; max-width: 440px; margin: 0; }
+.set-field .set-row > input[type=text] { flex: 1; width: auto; }
+.set-field > select { display: block; width: auto; min-width: 16ch; max-width: 100%; margin: 0; }
+.set-field > input.narrow { width: 8ch; }
+.set-field > input.medium { width: 28ch; }
+.set-field > .set-help { margin-bottom: 0; }
 .set-check { display: flex; gap: 8px; align-items: center; margin: 0 0 var(--sp-3); cursor: pointer; }
 .set-check input[type=checkbox] { margin-top: 1px; }
-.set-status { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
 .set-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: 0 0 var(--sp-3); }
+.set-muted { color: var(--text); }
+.set-group { margin: var(--sp-4) 0 0; }
+.set-group > h3, .set-group-head > h3 { font-size: var(--fs-label); color: var(--text-faint); border-bottom: 1px solid var(--border); padding-bottom: 4px; margin: 0 0 8px; }
+.set-group-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); border-bottom: 1px solid var(--border); margin: 0 0 8px; }
+.set-group-head > h3 { border: 0; margin: 0; padding: 0; }
+.set-group-head > button { min-height: 26px; padding: 2px 10px; margin-bottom: 4px; }
+.set-more { margin: 0 0 var(--sp-3); font-size: var(--fs-meta); color: var(--text-dim); }
+.set-more summary { cursor: pointer; color: var(--text-dim); }
+.set-more p { margin: 6px 0 0; max-width: 60ch; }
 .set-options { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border-strong); margin: 0 0 var(--sp-2); }
 .set-option { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 10px; row-gap: 2px; align-items: start; padding: 8px 12px; background: var(--surface-1); cursor: pointer; }
 .set-option:hover { background: var(--surface-2); }
@@ -621,7 +646,19 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .set-option input[type=radio]:checked::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent-strong); }
 .set-option .name { font-weight: 700; line-height: 1.5; }
 .set-option .desc { grid-column: 2; color: var(--text-dim); font-size: var(--fs-meta); line-height: 1.45; }
-.set-usage-open { width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-4); border: 2px solid var(--accent); font-weight: 700; }
+.set-option .child { grid-column: 2; margin-top: 6px; }
+.set-picker { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); width: 100%; max-width: 440px; text-align: left; padding: 6px 12px; }
+.set-picker-main { display: flex; flex-direction: column; min-width: 0; }
+.set-picker-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-picker-main .meta { color: var(--text-dim); font-size: var(--fs-micro); }
+.set-picker-act { color: var(--text-dim); font-size: var(--fs-meta); white-space: nowrap; }
+@media (max-width: 760px) {
+  .settings-page { grid-template-columns: 1fr; gap: var(--sp-3); }
+  .settings-nav { position: static; flex-direction: row; overflow-x: auto; gap: 4px; padding: 0 0 6px; border-bottom: 1px solid var(--border); scrollbar-width: none; }
+  .settings-nav button { white-space: nowrap; flex: 0 0 auto; }
+  .settings-nav button.on { box-shadow: inset 0 -3px 0 var(--accent); }
+  .settings-nav .sep { border-top: 0; border-left: 1px solid var(--border); margin: 4px 4px; }
+}
 
 /* Usage dashboard. Cost always means a catalog estimate, not an invoice. */
 .usage-view { max-width: 1240px; margin: 0 auto; }
@@ -673,22 +710,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
   .usage-rule { grid-template-columns: 1fr 120px; }
   .usage-rule .usage-fee { grid-column: 1 / -1; }
 }
-.settings-tools { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: 0 0 var(--sp-2); }
-.settings-tools input[type=search] { flex: 1; min-width: 220px; }
-.settings-tools label { color: var(--text); font-size: var(--fs-meta); white-space: nowrap; }
-.model-list { border: 1px solid var(--border-strong); background: var(--surface-1); max-height: 58vh; overflow: auto; }
-.model-prov { border-bottom: 1px solid var(--border); }
-.model-prov > summary { cursor: pointer; padding: 7px 10px; display: flex; gap: 8px; align-items: baseline; list-style: none; }
-.model-prov > summary::-webkit-details-marker { display: none; }
-.model-prov > summary::before { content: "▸ "; color: var(--text-faint); }
-.model-prov[open] > summary::before { content: "▾ "; }
-.model-prov .ptitle { font-weight: 700; }
-.model-prov .pkind { color: var(--text-dim); font-size: var(--fs-micro); }
-.model-row { display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; padding: 6px 10px 6px 22px; height: auto; }
-.model-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.model-row .meta { color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; }
-.model-row.on { background: var(--accent-strong); color: var(--accent-ink); }
-.model-row.on .meta { color: var(--accent-ink); opacity: .8; }
 .diff-view { max-width: var(--read-max); margin: 0 auto; }
 .diff-toolbar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3); }
 .diff-toolbar input[type=search] { flex: 1; min-width: 220px; }
@@ -1542,11 +1563,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 #helpOverlay h4 { margin: 12px 0 4px; font-size: var(--fs-label); color: var(--text-dim); font-weight: 600; }
 #helpOverlay .dialog { max-height: 84vh; overflow: auto; }
 /* Settings modal: fixed head with the close ✗, only the body scrolls. */
-#settingsOverlay { padding-top: 6vh; }
-#settingsDlg { width: 720px; max-width: 96vw; max-height: 88vh; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
-#settingsDlg .set-head { display: flex; align-items: center; justify-content: space-between; padding: 10px var(--sp-4); border-bottom: 1px solid var(--border-strong); flex-shrink: 0; }
-#settingsDlg .set-head h3 { margin: 0; }
-#settingsDlg .set-body { overflow-y: auto; padding: var(--sp-4); min-height: 0; }
 /* One corner stack: the help hint on top, the navigator below it. */
 #cornerStack { position: fixed; right: 10px; bottom: 10px; z-index: 75; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
 /* E-ink gesture feedback: a static label, no motion, black on white. */
@@ -1717,7 +1733,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .agent-mic { width: 46px; min-width: 46px; }
   #agentSend, #agentRun { margin-left: auto; position: sticky; right: 0; z-index: 1; box-shadow: -6px 0 6px -2px var(--surface-1); }
 
-  .project-overview, .settings-view, .diff-view { width: 100%; }
+  .project-overview, .settings-page, .diff-view { width: 100%; }
   /* Phone: the project head scrolls away like the conversation head does.
      Sticky here buried the content under title + buttons + fold chips. */
   .phead { position: static; top: auto; margin: -1px -2px 10px; }
@@ -1753,8 +1769,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .nbody { flex-direction: column; }
   .ntree { position: static; width: 100%; max-height: 38dvh; }
   .npane { width: 100%; padding: 10px 12px; }
-  .settings-tools input[type=search] { min-width: 0; width: 100%; flex-basis: 100%; }
-  .model-list { max-height: none; }
 
   .ptree-toolbar input[type=search] { min-width: 0; flex-basis: 100%; }
   .ptree ul { padding-left: 12px; }
@@ -1963,31 +1977,6 @@ window.aiconvoSyncTheme();
 <div class="overlay" id="helpOverlay" hidden>
   <div class="dialog" id="helpDialog"><!-- rendered by renderHelpOverlay() --></div>
 </div>
-<div class="overlay" id="settingsOverlay" hidden>
-  <div class="dialog" id="settingsDlg" role="dialog" aria-modal="true" aria-labelledby="setTitle">
-    <div class="set-head">
-      <h3 id="setTitle">settings</h3>
-      <button id="setClose" class="ghost" title="Close (esc)">✗</button>
-    </div>
-    <div class="set-body">
-    <div id="settingsRoot"></div>
-    <section class="psection">
-      <h3>theme</h3>
-      <div class="set-field">
-      <label for="themeSel">color scheme</label>
-      <select id="themeSel">
-        <option value="">auto (system)</option>
-        <option value="dark">dark</option>
-        <option value="light">light</option>
-        <option value="gray">grayscale</option>
-        <option value="eink">e-ink (black/white)</option>
-        <optgroup id="customThemeOptions" label="custom themes" hidden></optgroup>
-      </select>
-      </div>
-    </section>
-    </div>
-  </div>
-</div>
 <div id="readOverlay" hidden>
   <div id="readBar">
     <span class="rb-title" id="readTitle"></span>
@@ -2102,7 +2091,7 @@ function goHome() {
 // The route dispatcher: one hash grammar for every view.
 function dispatchHash(h) {
   if (!h) return goHome();
-  if (h === 'settings') { goHome(); return showSettings(); }
+  if (h === 'settings' || h.startsWith('settings=')) return showSettings(settingsPaneOf(h));
   if (h === 'usage') return showUsageDashboard();
   if (h.startsWith('q=')) {
     // A search is a home state: restore the query and rerun it.
@@ -2358,6 +2347,7 @@ async function voiceSetMuted(muted, minutes = 30) {
       body: JSON.stringify({ muted, minutes }),
     })).json();
     voiceMutedState = !!d.muted;
+    voiceMutedUntil = Number(d.mutedUntil) || 0;
   } catch {}
   if (settingsOpen) renderSettings();
 }
@@ -2365,6 +2355,7 @@ async function voiceSetMuted(muted, minutes = 30) {
   try {
     const d = await (await fetch('/api/voice/state')).json();
     voiceMutedState = !!d.muted;
+    voiceMutedUntil = Number(d.mutedUntil) || 0;
     renderVoiceUi(d.playing, d.paused);
   } catch {}
 })();
@@ -2581,6 +2572,20 @@ new MutationObserver(() => {
   clearTimeout(mermaidT);
   mermaidT = setTimeout(() => renderMermaids(document), 120);
 }).observe(document.body, { childList: true, subtree: true });
+// Custom themes: the runtime stylesheet is always loaded; the <select> is
+// painted only while the appearance pane is on screen.
+let customThemeCatalog = { themes: [], invalid: [] };
+const BUILTIN_THEME_OPTIONS = [['', 'auto (system)'], ['dark', 'dark'], ['light', 'light'], ['gray', 'grayscale'], ['eink', 'e-ink (black/white)']];
+function paintThemeSelect() {
+  const sel = $('themeSel');
+  if (!sel) return;
+  const saved = localStorage.getItem('aiconvo.theme') || '';
+  const custom = customThemeCatalog.themes || [];
+  const missing = saved && !BUILTIN_THEMES.has(saved) && !custom.some(t => t.id === saved);
+  sel.innerHTML = BUILTIN_THEME_OPTIONS.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')
+    + (custom.length || missing ? `<optgroup label="custom themes">${custom.map(t => `<option value="${esc(t.id)}" title="${esc(t.scheme + ' · ' + t.mode + ' · motion ' + t.motion)}">${esc(t.name)}</option>`).join('')}${missing ? `<option value="${esc(saved)}" disabled>${esc(saved)} (missing or invalid)</option>` : ''}</optgroup>` : '');
+  sel.value = saved;
+}
 async function loadCustomThemes() {
   try {
     const [catalog, css] = await Promise.all([
@@ -2589,35 +2594,14 @@ async function loadCustomThemes() {
     ]);
     $('customThemeRuntime').textContent = css;
     $('customThemeSheet').disabled = true; // runtime copy can now refresh or remove themes
-    const group = $('customThemeOptions');
-    group.textContent = '';
-    for (const theme of (catalog.themes || [])) {
-      const option = document.createElement('option');
-      option.value = theme.id;
-      option.textContent = theme.name;
-      option.title = `${theme.scheme} · ${theme.mode} · motion ${theme.motion}`;
-      group.appendChild(option);
-    }
-    group.hidden = !group.children.length;
-    const saved = localStorage.getItem('aiconvo.theme') || '';
-    if (saved && !BUILTIN_THEMES.has(saved) && !(catalog.themes || []).some(t => t.id === saved)) {
-      const option = document.createElement('option');
-      option.value = saved;
-      option.textContent = `${saved} (missing or invalid)`;
-      option.disabled = true;
-      group.hidden = false;
-      group.appendChild(option);
-    }
-    $('themeSel').value = saved;
+    customThemeCatalog = catalog || { themes: [] };
+    paintThemeSelect();
     syncActiveTheme();
     if ((catalog.invalid || []).length) console.warn('Invalid custom themes:', catalog.invalid);
   } catch (error) {
     console.warn('Could not load custom themes:', error);
   }
 }
-$('themeSel').value = localStorage.getItem('aiconvo.theme') || '';
-$('themeSel').onchange = () => selectTheme($('themeSel').value);
-$('themeSel').onfocus = () => loadCustomThemes();
 loadCustomThemes();
 try {
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
@@ -11849,8 +11833,8 @@ async function renderSettingsSnippets() {
       `<span class="snip-desc">${esc(s.description || '')}</span>` +
       `<span class="snip-tag">${esc([s.kind === 'template' ? 'template' : '', s.scope === 'project' ? 'project' : '', s.uses ? s.uses + '×' : ''].filter(Boolean).join(' · '))}</span>` +
     `</div>`).join('') +
-    `<div class="hint" style="margin-top:var(--sp-2)">global folder: ${esc(data.globalDir || '')}${data.projectDir ? ' · project folder: ' + esc(data.projectDir) : ''}</div>`;
-  host.querySelectorAll('.snip-open').forEach(b => b.onclick = () => { closeSettings(); openDocument(b.dataset.path); });
+    `<div class="hint" style="margin-top:var(--sp-2)">global folder: ${esc(data.globalDir || '')}${data.projectDir ? ' · project folder: ' + esc(data.projectDir) : ''} — pi’s prompt folders, so the pi terminal sees them as /name too.</div>`;
+  host.querySelectorAll('.snip-open').forEach(b => b.onclick = () => openDocument(b.dataset.path));
 }
 
 function fileToImage(file) {
@@ -15840,30 +15824,27 @@ async function showUsageDashboard() {
   await loadUsageDashboard();
 }
 
-// ---- settings: memory model ----
+// ---- settings page ----
+// Settings is a full view (#settings=PANE) with one pane at a time: model,
+// sound, search, snippets, appearance, advanced. Every change applies at
+// once; there is no save button. Closing returns to the previous view
+// through history, so the browser back button and esc do the same thing.
 let settingsState = null;
 let modelsState = null;
 let settingsOpen = false;
-let settingsQuery = '';
-let settingsReadyOnly = true;
+let settingsPane = 'model';
+let settingsPushed = false; // this visit pushed a history entry; esc = back
+let voiceMutedUntil = 0;
+let voiceMuteTimer = null;
 
-function settingsThinkingOptions(current, supportsThinking) {
-  const levels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-  return levels.map(level => {
-    const disabled = !supportsThinking && level !== 'off';
-    return `<option value="${level}"${level === current ? ' selected' : ''}${disabled ? ' disabled' : ''}>${level}</option>`;
-  }).join('');
-}
-
-function currentSettingsModel() {
-  const resolved = settingsState && settingsState.resolved || {};
-  return { provider: resolved.provider || '', model: resolved.model || '', usePiDefault: !!(settingsState && settingsState.settings && settingsState.settings.usePiDefault) };
-}
-
-function modelSupportsThinking(provider, model) {
-  const hit = modelsState && modelsState.models && modelsState.models.find(item => item.provider === provider && item.model === model);
-  return !hit || hit.thinking;
-}
+const SETTINGS_PANES = [
+  ['model', 'model', 'Which model writes notes, titles, epics, and memory.'],
+  ['sound', 'sound', 'What the speakers do when a run finishes.'],
+  ['search', 'search', 'Meaning-based search on the GPU server.'],
+  ['snippets', 'snippets', 'Sentences you type often.'],
+  ['appearance', 'appearance', 'Colors for the app and for pi views.'],
+  ['advanced', 'advanced', 'Engine, settings file, overrides.'],
+];
 
 // Mirrors DONE_SOUND_MODES in settings.js, quietest first: [value, name, description].
 const DONE_SOUND_OPTIONS = [
@@ -15874,158 +15855,273 @@ const DONE_SOUND_OPTIONS = [
   ['voice', 'voice', 'The summary, then the microphone opens for a spoken reply or a command: mute, skip, status, read, go to.'],
 ];
 
-function renderSettings() {
-  if (!settingsOpen || !$('settingsRoot')) return;
+const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+const settingsOf = () => (settingsState && settingsState.settings) || {};
+
+function settingsThinkingOptions(current, supportsThinking) {
+  return THINKING_LEVELS.map(level => {
+    const disabled = !supportsThinking && level !== 'off';
+    return `<option value="${level}"${level === current ? ' selected' : ''}${disabled ? ' disabled' : ''}>${level}</option>`;
+  }).join('');
+}
+
+function currentSettingsModel() {
+  const resolved = settingsState && settingsState.resolved || {};
+  return { provider: resolved.provider || '', model: resolved.model || '', usePiDefault: !!settingsOf().usePiDefault };
+}
+
+function modelSupportsThinking(provider, model) {
+  const hit = modelsState && modelsState.models && modelsState.models.find(item => item.provider === provider && item.model === model);
+  return !hit || hit.thinking;
+}
+
+// One exclusive list: radio, name, one-line description, optional child
+// controls under the chosen row. `name` is the radio group.
+function setOptionsHtml(name, options, current) {
+  return `<div class="set-options" role="radiogroup">${options.map(o => `<label class="set-option${current === o.value ? ' on' : ''}">
+    <input type="radio" name="${name}" value="${esc(o.value)}"${current === o.value ? ' checked' : ''}${o.disabled ? ' disabled' : ''}>
+    <span class="name">${esc(o.name)}</span>
+    <span class="desc">${o.descHtml || esc(o.desc || '')}</span>
+    ${o.child && current === o.value ? `<div class="child">${o.child}</div>` : ''}
+  </label>`).join('')}</div>`;
+}
+
+function bindOptions(root, name, onPick) {
+  root.querySelectorAll(`input[name=${name}]`).forEach(r => r.onchange = () => { if (r.checked) onPick(r.value); });
+}
+
+function modelLabelOf(provider, model) {
+  return provider && model ? provider + ' / ' + model : 'not set';
+}
+
+function paneModel() {
+  const s = settingsOf();
   const resolved = (settingsState && settingsState.resolved) || {};
-  const doneSoundMode = (settingsState && settingsState.settings && settingsState.settings.doneSound) || 'voice';
   const piDefault = (settingsState && settingsState.piDefault) || (modelsState && modelsState.piDefault) || {};
-  const ready = new Set((modelsState && modelsState.readyProviders) || (settingsState && settingsState.readyProviders) || []);
   const current = currentSettingsModel();
-  const q = settingsQuery.trim().toLowerCase();
-  const models = (modelsState && modelsState.models) || [];
-  const filtered = models.filter(item => {
-    if (settingsReadyOnly && !ready.has(item.provider) && !(item.provider === current.provider && item.model === current.model)) return false;
-    if (!q) return true;
-    return (item.provider + '/' + item.model).toLowerCase().includes(q);
+  const hit = modelsState && modelsState.models && modelsState.models.find(m => m.provider === current.provider && m.model === current.model);
+  const meta = [fmtTokens(resolved.contextTokens), hit && hit.thinking ? 'thinking' : ''].filter(Boolean).join(' · ');
+  const picker = `<button type="button" class="set-picker" id="setModelPick" title="Choose a model from pi's catalog">
+      <span class="set-picker-main"><b>${esc(modelLabelOf(s.provider, s.model))}</b><span class="meta">${esc(current.usePiDefault ? '' : meta)}</span></span>
+      <span class="set-picker-act">change ▾</span>
+    </button>`;
+  const defaultLabel = modelLabelOf(piDefault.provider, piDefault.model);
+  return `<h2>model</h2>
+    <p class="lead">This model writes notes, evidence, epics, titles, and project memory. Conversations pick their own model in the composer. A change applies to the next call.</p>
+    ${setOptionsHtml('setModelSource', [
+      { value: 'pi', name: 'pi’s default', desc: 'Follow pi’s own settings. Now: ' + defaultLabel + '.' },
+      { value: 'fixed', name: 'a fixed model', desc: 'Always this one, whatever pi’s default is.', child: picker },
+    ], current.usePiDefault ? 'pi' : 'fixed')}
+    <div class="set-field">
+      <label for="setThinking">thinking</label>
+      <select id="setThinking">${settingsThinkingOptions(resolved.thinking || 'off', modelSupportsThinking(current.provider, current.model))}</select>
+      <div class="set-help">${modelSupportsThinking(current.provider, current.model) ? 'How much the model reasons before it answers. Higher is slower and costs more.' : 'This model does not support thinking.'}</div>
+    </div>`;
+}
+
+function bindPaneModel(root) {
+  bindOptions(root, 'setModelSource', v => {
+    if (v === 'pi') return saveSettings({ usePiDefault: true, provider: '', model: '' }, 'model: pi’s default');
+    const cur = currentSettingsModel();
+    // "fixed" with no model yet: keep what pi resolved to, so nothing changes
+    // until the user picks.
+    saveSettings({ usePiDefault: false, provider: cur.provider, model: cur.model }, 'model: fixed to ' + modelLabelOf(cur.provider, cur.model));
   });
-  const groups = new Map();
-  for (const item of filtered) {
-    if (!groups.has(item.provider)) groups.set(item.provider, []);
-    groups.get(item.provider).push(item);
-  }
-  const defaultLabel = [piDefault.provider, piDefault.model].filter(Boolean).join('/') || 'pi settings';
-  const catalog = !modelsState
-    ? '<div class="empty" style="margin:10px 0;text-align:left">loading pi catalog…</div>'
-    : modelsState.error && !models.length
-      ? `<div class="empty" style="margin:10px 0;text-align:left">could not list pi models.<div class="hint">${esc(modelsState.error)}</div></div>`
-      : !filtered.length
-        ? '<div class="empty" style="margin:10px 0;text-align:left">no models match.<div class="hint">clear the search or show all providers.</div></div>'
-        : `<div class="model-list">${[...groups.entries()].map(([provider, items]) => {
-            const open = provider === current.provider || (q && items.length);
-            return `<details class="model-prov" ${open ? 'open' : ''}>
-              <summary><span class="ptitle">${esc(provider)}</span><span class="pkind">${items.length} model${items.length === 1 ? '' : 's'}${ready.has(provider) ? (provider === 'claude-code' ? ' · Claude Code login' : ' · signed in') : ''}</span></summary>
-              ${items.map(item => {
-                const on = !current.usePiDefault && item.provider === current.provider && item.model === current.model;
-                return `<button class="model-row${on ? ' on' : ''}" data-set-provider="${esc(item.provider)}" data-set-model="${esc(item.model)}" data-set-context="${item.context}" data-set-thinking="${item.thinking ? '1' : '0'}">
-                  <span class="name">${esc(item.model)}</span>
-                  <span class="meta">${esc(item.contextLabel || '')}${item.thinking ? ' · think' : ''}${on ? ' · current' : ''}</span>
-                </button>`;
-              }).join('')}
-            </details>`;
-          }).join('')}</div>`;
-  $('settingsRoot').innerHTML = `<div class="settings-view">
-    <button type="button" id="setUsage" class="set-usage-open"><span>usage and cost dashboard</span><span>open →</span></button>
-    <section class="psection">
-      <h3>memory model</h3>
-      <div class="pmeta" style="margin-bottom:var(--sp-2)">${esc(resolved.label || 'not set')} · ${esc(fmtTokens(resolved.contextTokens))} · thinking ${esc(resolved.thinking || 'off')}</div>
-      <p class="hint">Notes, evidence, epics, titles, and project memory use this Pi model. The change applies to the next model call.</p>
-      <div class="set-field">
-        <label for="setThinking">thinking</label>
-        <select id="setThinking">${settingsThinkingOptions(resolved.thinking || 'off', modelSupportsThinking(current.provider, current.model))}</select>
-      </div>
-      <div class="pactions">
-        <button id="setPiDefault"${current.usePiDefault ? ' class="primary"' : ''}>use pi default (${esc(defaultLabel)})</button>
-      </div>
-    </section>
-    <section class="psection">
-      <h3>sound when a run finishes</h3>
-      <p class="hint">What the speakers do when an agent reply is ready. If speech cannot be made, the chime plays.</p>
-      <div class="set-options" role="radiogroup" aria-label="sound when a run finishes">${DONE_SOUND_OPTIONS.map(([v, name, desc]) => `<label class="set-option${doneSoundMode === v ? ' on' : ''}">
-        <input type="radio" name="setDoneSound" value="${v}"${doneSoundMode === v ? ' checked' : ''}>
-        <span class="name">${esc(name)}</span>
-        <span class="desc">${esc(desc)}</span>
-      </label>`).join('')}</div>
-      <div class="set-row">
-        <button id="setDonePreview"${doneSoundMode === 'off' ? ' disabled' : ''}>▶ play a sample</button>
-        <label class="set-check" style="margin:0"><input id="setVoiceMute" type="checkbox"${voiceMutedState ? ' checked' : ''}> mute all sound for 30 minutes</label>
-      </div>
-    </section>
-    <section class="psection">
-      <h3>semantic search</h3>
-      <p class="hint">A late-interaction (ColBERT) stage on the GPU server adds meaning-based matches to search — it forgives reworded speech-to-text queries. The laptop stays authoritative: lexical search keeps working when the server is off.</p>
-      <label class="set-check"><input id="setSemantic" type="checkbox"${(settingsState && settingsState.settings && settingsState.settings.semanticSearch) ? ' checked' : ''}> enable semantic search</label>
-      <div class="set-field">
-        <label for="setSemanticUrl">server URL</label>
-        <input id="setSemanticUrl" type="text" value="${esc((settingsState && settingsState.settings && settingsState.settings.semanticUrl) || '')}" spellcheck="false">
-      </div>
-      <div class="set-field">
-        <label for="setSemanticNs">namespace — one per user on a shared server</label>
-        <input id="setSemanticNs" type="text" value="${esc((settingsState && settingsState.settings && settingsState.settings.semanticNs) || '')}" spellcheck="false">
-      </div>
-      <div class="set-status" id="semStatus"></div>
-    </section>
-    <section class="psection">
-      <h3>snippets</h3>
-      <p class="hint">Sentences you type often. Type the trigger in the composer to insert one at the cursor; alt+; opens the picker; alt+shift+; saves the selected text as a new one. Files live in pi's prompt folders, so the pi terminal sees them as /name too.</p>
-      <div class="set-field">
-        <label for="setSnipTrigger">trigger typed in the composer</label>
-        <input id="setSnipTrigger" class="narrow" type="text" value="${esc(snippetTrigger())}" spellcheck="false" maxlength="4">
-      </div>
-      <div class="pactions"><button id="setSnipNew">new snippet</button></div>
-      <div id="setSnipList" class="snip-list" style="margin-top:var(--sp-2)"><span class="hint">loading…</span></div>
-    </section>
-    <section class="psection">
-      <h3>pi catalog</h3>
-      <div class="settings-tools">
-        <input id="setModelQ" type="search" placeholder="search provider or model" value="${esc(settingsQuery)}">
-        <label><input id="setReadyOnly" type="checkbox"${settingsReadyOnly ? ' checked' : ''}> signed-in providers only</label>
-        <button id="setRefresh">reload catalog</button>
-      </div>
-      <div id="setModels">${catalog}</div>
-    </section>
-  </div>`;
-  $('setUsage').onclick = () => { closeSettings(); showUsageDashboard(); };
-  $('settingsRoot').querySelectorAll('input[name=setDoneSound]').forEach(r => r.onchange = () => {
-    if (r.checked) saveSettings({ doneSound: r.value }, 'sound when a run finishes: ' + r.value);
+  const pick = $('setModelPick');
+  if (pick) pick.onclick = () => openModelPicker(pick, { selected: [settingsOf().provider + '/' + settingsOf().model] }, ([m]) => {
+    const item = modelsState && modelsState.models && modelsState.models.find(x => x.provider === m.provider && x.model === m.modelId);
+    saveSettings({
+      usePiDefault: false, provider: m.provider, model: m.modelId,
+      contextTokens: item && item.context || undefined,
+      thinking: item && !item.thinking ? 'off' : (settingsOf().thinking || 'off'),
+    }, 'model: ' + modelLabelOf(m.provider, m.modelId));
   });
-  $('setDonePreview').onclick = async () => {
+  $('setThinking').onchange = () => saveSettings({ thinking: $('setThinking').value }, 'thinking: ' + $('setThinking').value);
+}
+
+function muteRowHtml() {
+  const muted = voiceMutedState && voiceMutedUntil > Date.now();
+  if (!muted) return `<button type="button" id="setVoiceMute">mute for 30 minutes</button><span class="set-help" style="margin:0">Silences every mode until the timer ends. Runs keep working.</span>`;
+  const until = new Date(voiceMutedUntil);
+  const hh = String(until.getHours()).padStart(2, '0'), mm = String(until.getMinutes()).padStart(2, '0');
+  const left = Math.max(1, Math.round((voiceMutedUntil - Date.now()) / 60000));
+  return `<span class="set-muted"><b>muted</b> until ${hh}:${mm} · ${left} min left</span><button type="button" id="setVoiceUnmute">unmute</button>`;
+}
+
+function paneSound() {
+  const mode = settingsOf().doneSound || 'voice';
+  return `<h2>sound</h2>
+    <p class="lead">What the speakers do when an agent reply is ready. Pick a mode to hear it.</p>
+    ${setOptionsHtml('setDoneSound', DONE_SOUND_OPTIONS.map(([value, name, desc]) => ({ value, name, desc })), mode)}
+    <div class="set-help">If speech cannot be made (voice server down), the chime plays instead.</div>
+    <div class="set-row" id="setMuteRow">${muteRowHtml()}</div>`;
+}
+
+function bindPaneSound(root) {
+  bindOptions(root, 'setDoneSound', async v => {
+    await saveSettings({ doneSound: v }, 'sound: ' + v);
+    if (v === 'off') return;
     try {
       const d = await (await fetch('/api/voice/preview', { method: 'POST' })).json();
-      if (d.ok) toast(d.reason ? d.reason : 'playing a sample on the speakers');
-      else toast(d.reason === 'muted' ? 'voice is muted for now' : 'sound is off');
-    } catch { errToast('could not play a sample'); }
-  };
-  $('setVoiceMute').onchange = () => voiceSetMuted($('setVoiceMute').checked);
-  $('setSemantic').onchange = () => saveSettings({ semanticSearch: $('setSemantic').checked }, 'semantic search ' + ($('setSemantic').checked ? 'on — backfill starts now' : 'off'));
-  $('setSemanticUrl').onchange = () => saveSettings({ semanticUrl: $('setSemanticUrl').value.trim() }, 'semantic server saved');
-  $('setSemanticNs').onchange = () => saveSettings({ semanticNs: $('setSemanticNs').value.trim() }, 'semantic namespace saved — full re-push starts');
+      if (!d.ok && d.reason === 'muted') toast('sound is muted right now — unmute to hear it');
+      else if (d.reason) toast(d.reason);
+    } catch {}
+  });
+  bindMuteRow();
+}
+
+function bindMuteRow() {
+  const m = $('setVoiceMute'), u = $('setVoiceUnmute');
+  if (m) m.onclick = () => voiceSetMuted(true);
+  if (u) u.onclick = () => voiceSetMuted(false);
+  clearTimeout(voiceMuteTimer);
+  if (voiceMutedState && voiceMutedUntil > Date.now()) voiceMuteTimer = setTimeout(() => { if ($('setMuteRow')) { $('setMuteRow').innerHTML = muteRowHtml(); bindMuteRow(); } }, 30000);
+}
+
+function paneSearch() {
+  const s = settingsOf();
+  const on = !!s.semanticSearch;
+  return `<h2>search</h2>
+    <p class="lead">Search always matches words on this computer. The GPU server can add matches by meaning, which forgives reworded speech-to-text queries.</p>
+    <label class="set-check"><input id="setSemantic" type="checkbox"${on ? ' checked' : ''}> add meaning-based matches from the GPU server</label>
+    ${on ? `<div class="set-field">
+      <label for="setSemanticUrl">server URL</label>
+      <input id="setSemanticUrl" type="text" value="${esc(s.semanticUrl || '')}" spellcheck="false">
+    </div>
+    <div class="set-field">
+      <label for="setSemanticNs">namespace</label>
+      <input id="setSemanticNs" type="text" value="${esc(s.semanticNs || '')}" spellcheck="false">
+      <div class="set-help">One per user on a shared server. A new namespace re-pushes everything.</div>
+    </div>` : ''}
+    <div class="set-status" id="semStatus"></div>
+    <details class="set-more"><summary>how it works</summary><p>A late-interaction (ColBERT) stage on the GPU server indexes every conversation and returns matches by meaning. This computer stays authoritative: word search keeps working when the server is off, and the index is pushed again on demand.</p></details>`;
+}
+
+function bindPaneSearch(root) {
+  $('setSemantic').onchange = () => saveSettings({ semanticSearch: $('setSemantic').checked }, 'meaning-based search ' + ($('setSemantic').checked ? 'on — backfill starts now' : 'off'));
+  if ($('setSemanticUrl')) $('setSemanticUrl').onchange = () => saveSettings({ semanticUrl: $('setSemanticUrl').value.trim() }, 'server saved');
+  if ($('setSemanticNs')) $('setSemanticNs').onchange = () => saveSettings({ semanticNs: $('setSemanticNs').value.trim() }, 'namespace saved — full re-push starts');
   refreshSemanticStatus();
-  $('setThinking').onchange = () => saveSettings({ thinking: $('setThinking').value });
+}
+
+function paneSnippets() {
+  return `<h2>snippets</h2>
+    <p class="lead">Sentences you type often. Type the trigger in the composer to insert one at the cursor. alt+; opens the picker; alt+shift+; saves the selected text as a new one.</p>
+    <div class="set-field">
+      <label for="setSnipTrigger">trigger typed in the composer</label>
+      <input id="setSnipTrigger" class="narrow" type="text" value="${esc(snippetTrigger())}" spellcheck="false" maxlength="4">
+      <div class="set-help">1–4 characters. Not / or @, which open other palettes.</div>
+    </div>
+    <div class="set-group">
+      <div class="set-group-head"><h3>your snippets</h3><button type="button" id="setSnipNew">new snippet</button></div>
+      <div id="setSnipList" class="snip-list"><span class="hint">loading…</span></div>
+    </div>`;
+}
+
+function bindPaneSnippets(root) {
   $('setSnipTrigger').onchange = () => saveSettings({ snippetTrigger: $('setSnipTrigger').value.trim() }, 'snippet trigger: ' + ($('setSnipTrigger').value.trim() || ';;'));
   $('setSnipNew').onclick = () => openSnippetForm({ body: '' });
   renderSettingsSnippets();
-  $('setPiDefault').onclick = () => saveSettings({ usePiDefault: true, provider: '', model: '' });
-  $('setModelQ').oninput = () => { settingsQuery = $('setModelQ').value; renderSettings(); $('setModelQ').focus(); const el = $('setModelQ'); el.setSelectionRange(el.value.length, el.value.length); };
-  $('setReadyOnly').onchange = () => { settingsReadyOnly = $('setReadyOnly').checked; renderSettings(); };
-  $('setRefresh').onclick = () => loadModels(true);
-  $('settingsRoot').querySelectorAll('[data-set-model]').forEach(btn => btn.onclick = () => saveSettings({
-    usePiDefault: false,
-    provider: btn.dataset.setProvider,
-    model: btn.dataset.setModel,
-    contextTokens: Number(btn.dataset.setContext) || undefined,
-    thinking: btn.dataset.setThinking === '1' ? (settingsState && settingsState.settings && settingsState.settings.thinking) || 'off' : 'off',
-  }));
+}
+
+function paneAppearance() {
+  const piTheme = settingsOf().piTheme || 'light';
+  return `<h2>appearance</h2>
+    <p class="lead">Colors for this app, and for the pi views it hosts.</p>
+    <div class="set-field">
+      <label for="themeSel">app theme</label>
+      <select id="themeSel"></select>
+      <div class="set-help">Custom themes come from the themes folder. Auto follows the system.</div>
+    </div>
+    <div class="set-field">
+      <label for="setPiTheme">pi theme for hosted extension views</label>
+      <input id="setPiTheme" class="medium" type="text" value="${esc(piTheme)}" spellcheck="false" list="setPiThemeList">
+      <datalist id="setPiThemeList"><option value="light"><option value="dark"></datalist>
+      <div class="set-help">A pi theme name (light, dark, or one from ~/.pi/agent/themes). Applies after the server restarts.</div>
+    </div>`;
+}
+
+function bindPaneAppearance(root) {
+  paintThemeSelect();
+  $('themeSel').onchange = () => selectTheme($('themeSel').value);
+  $('themeSel').onfocus = () => loadCustomThemes();
+  $('setPiTheme').onchange = () => saveSettings({ piTheme: $('setPiTheme').value.trim() || 'light' }, 'pi theme saved — applies after a server restart');
+}
+
+function paneAdvanced() {
+  const s = settingsOf();
+  const file = (settingsState && settingsState.path) || '';
+  return `<h2>advanced</h2>
+    <p class="lead">Things you set once. Most people never need this pane.</p>
+    <div class="set-field" style="margin:0"><label>pi engine</label></div>
+    ${setOptionsHtml('setPiEngine', [
+      { value: 'sdk', name: 'sdk', desc: 'pi runs inside this server. Fast forks, full extension UI. The default.' },
+      { value: 'rpc', name: 'rpc', desc: 'pi runs as child processes. Slower, but one bad session cannot take the server down.' },
+    ], s.piEngine === 'rpc' ? 'rpc' : 'sdk')}
+    <div class="set-help">Applies to sessions started after the change.</div>
+    <div class="set-field">
+      <label for="setFile">settings file</label>
+      <div class="set-row" style="margin:0"><input id="setFile" type="text" value="${esc(file)}" readonly><button type="button" id="setFileCopy">copy path</button></div>
+      <div class="set-help">Every setting on these panes lives in this JSON file. Edit it by hand when the server is stopped.</div>
+    </div>
+    <div class="set-group">
+      <h3>environment overrides</h3>
+      <div class="set-help">These cap the sound setting for a whole deployment: <code>AICONVO_SPEAK_DONE=0</code> forces off; <code>AICONVO_VOICE_REPLY=0</code> keeps the microphone closed. <code>AICONVO_VOICE_SPEED</code> sets the speech rate.</div>
+    </div>`;
+}
+
+function bindPaneAdvanced(root) {
+  bindOptions(root, 'setPiEngine', v => saveSettings({ piEngine: v }, 'engine: ' + v + ' — for new sessions'));
+  $('setFileCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText($('setFile').value); toast('path copied'); }
+    catch { $('setFile').select(); }
+  };
+}
+
+const SETTINGS_PANE_RENDER = {
+  model: [paneModel, bindPaneModel],
+  sound: [paneSound, bindPaneSound],
+  search: [paneSearch, bindPaneSearch],
+  snippets: [paneSnippets, bindPaneSnippets],
+  appearance: [paneAppearance, bindPaneAppearance],
+  advanced: [paneAdvanced, bindPaneAdvanced],
+};
+
+function renderSettings() {
+  if (!settingsOpen || !$('settingsRoot')) return;
+  const [paint, bind] = SETTINGS_PANE_RENDER[settingsPane] || SETTINGS_PANE_RENDER.model;
+  $('settingsRoot').innerHTML = `<div class="settings-page">
+    <nav class="settings-nav" aria-label="settings sections">
+      ${SETTINGS_PANES.map(([id, label, hint]) => `<button type="button" class="${id === settingsPane ? 'on' : ''}" data-pane="${id}" title="${esc(hint)}">${esc(label)}</button>`).join('')}
+      <div class="sep"></div>
+      <button type="button" data-go="usage" title="Tokens, cost estimates, and subscription value">usage and cost →</button>
+    </nav>
+    <section class="settings-pane">${settingsState ? paint() : '<div class="empty">loading settings…</div>'}</section>
+  </div>`;
+  const root = $('settingsRoot');
+  root.querySelectorAll('.settings-nav [data-pane]').forEach(b => b.onclick = () => showSettingsPane(b.dataset.pane));
+  root.querySelector('[data-go=usage]').onclick = () => showUsageDashboard();
+  if (settingsState) bind(root);
 }
 
 async function loadSettings() {
   const res = await fetch('/api/settings');
   settingsState = await res.json();
   if (settingsState && settingsState.resolved) {
-    $('settingsBtn').title = 'Memory model: ' + settingsState.resolved.label + ' (,)';
+    $('settingsBtn').title = 'Settings · memory model: ' + settingsState.resolved.label + ' (,)';
   }
   if (settingsOpen) renderSettings();
 }
 
 async function loadModels(refresh = false) {
   if (refresh) modelsState = null;
-  if (settingsOpen) renderSettings();
   try { modelsState = await modelCatalog(refresh); }
   catch { modelsState = { models: [], error: 'could not load pi models' }; }
   if (settingsOpen) renderSettings();
 }
 
 async function saveSettings(patch, message) {
-  const current = (settingsState && settingsState.settings) || {};
+  const current = settingsOf();
   const res = await fetch('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -16034,7 +16130,7 @@ async function saveSettings(patch, message) {
   const data = await res.json();
   if (data.error) return errToast(data.error);
   settingsState = data;
-  $('settingsBtn').title = 'Memory model: ' + data.resolved.label + ' (,)';
+  $('settingsBtn').title = 'Settings · memory model: ' + data.resolved.label + ' (,)';
   toast(message || ('memory model: ' + data.resolved.label));
   renderSettings();
 }
@@ -16046,38 +16142,56 @@ async function refreshSemanticStatus() {
   el.textContent = '…';
   try {
     const s = await (await fetch('/api/search/semantic-status')).json();
-    if (!s.enabled) { el.textContent = 'off — lexical search only.'; return; }
-    if (s.error) { el.textContent = 'enabled, but unreachable: ' + s.error; return; }
+    if (!s.enabled) { el.textContent = 'off — word search only.'; return; }
+    if (s.error) { el.textContent = '● on, but the server is unreachable: ' + s.error; return; }
     const sync = s.sync ? ` · pushed ${s.sync.synced}/${s.sync.total} sources` : '';
     const units = (s.health.spaces && s.ns in s.health.spaces) ? s.health.spaces[s.ns] : s.health.units;
     el.textContent = `● reachable · ${s.health.model.split('/').pop()} on ${s.health.device} · ${units} units in “${s.ns}”${sync}`;
   } catch { el.textContent = 'status check failed.'; }
 }
 
-// Settings is a modal: it floats over the current view, so closing it
-// returns you exactly where you were (mid-conversation included).
-async function showSettings() {
+const settingsPaneOf = h => { const p = String(h || '').split('=')[1] || 'model'; return SETTINGS_PANE_RENDER[p] ? p : 'model'; };
+
+async function showSettings(pane) {
+  if (window.fileInk && fileInk.teardown) fileInk.teardown();
+  if (progressStream) { progressStream.close(); progressStream = null; }
+  const wasOpen = settingsOpen;
+  settingsPane = pane || settingsPane || 'model';
+  const before = location.hash.replace(/^#/, '');
   settingsOpen = true;
   $('settingsBtn').classList.add('on');
-  $('settingsOverlay').hidden = false;
+  setRoute('settings', 'settings=' + settingsPane, [crumbHome(), { label: 'settings', title: 'Settings', go: () => showSettings() }]);
+  if (!wasOpen) settingsPushed = before !== 'settings=' + settingsPane && before !== 'settings';
+  $('view').innerHTML = '<div id="settingsRoot"></div>';
   renderSettings();
   if (!settingsState) await loadSettings();
-  else renderSettings();
   if (!modelsState) loadModels();
+}
+
+// Pane switches replace the history entry: back leaves settings as one step.
+function showSettingsPane(pane) {
+  if (!settingsOpen) return showSettings(pane);
+  settingsPane = settingsPaneOf('settings=' + pane);
+  currentHash = 'settings=' + settingsPane;
+  try { history.replaceState(null, '', location.pathname + location.search + '#' + currentHash); } catch {}
+  routeSegs = [crumbHome(), { label: 'settings', title: 'Settings', go: () => showSettings() }];
+  renderSettings();
+  const pane_ = $('settingsRoot') && $('settingsRoot').querySelector('.settings-pane');
+  if (pane_) pane_.scrollIntoView({ block: 'start' });
 }
 
 function markSettingsClosed() {
   settingsOpen = false;
-  if ($('settingsOverlay')) $('settingsOverlay').hidden = true;
+  clearTimeout(voiceMuteTimer);
   if ($('settingsBtn')) $('settingsBtn').classList.remove('on');
 }
 function closeSettings() {
   if (!settingsOpen) return;
-  markSettingsClosed();
+  if (settingsPushed) { settingsPushed = false; history.back(); }
+  else goHome();
 }
 
 $('settingsBtn').onclick = () => settingsOpen ? closeSettings() : showSettings();
-$('setClose').onclick = () => closeSettings();
 
 // ---- collapsible top bar: ` toggles; the thin rail is the handle ----
 const barFolded = () => document.body.classList.contains('bar-fold');
@@ -16693,7 +16807,7 @@ function helpNow() {
   }
 
   // Open panels sit on top of the view.
-  if (settingsOpen) sections.push({ label: 'settings', keys: [['esc / ,', 'close settings']] });
+  if (settingsOpen) sections.push({ label: 'settings', keys: [['esc / ,', 'back to where you were']] });
   if (!$('filtersPop').hidden) sections.push({ label: 'filters', keys: [['esc / f', 'close the filters']] });
   if (!$('agentsPop').hidden) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['j', 'toggle notifications'], ['esc / a', 'close the agents panel']] });
 
@@ -17239,7 +17353,7 @@ live.onmessage = ev => {
     applyAgentReadFromServer(d);
     return;
   }
-  if (d.type === 'voice-state') { voiceMutedState = !!d.muted; if (settingsOpen) renderSettings(); return; }
+  if (d.type === 'voice-state') { voiceMutedState = !!d.muted; voiceMutedUntil = Number(d.mutedUntil) || 0; if (settingsOpen) renderSettings(); return; }
   if (d.type === 'voice-playing') { renderVoiceUi(d.playing, d.paused); return; }
   if (d.type === 'voice-nav') {
     // A spoken "go to X": follow it on this screen.
