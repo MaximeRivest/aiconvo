@@ -67,11 +67,15 @@ When the user starts a distillation and stays to watch:
 
 ## Screen E — Settings
 
-Triggered from the header `settings` button, key `,`, or `#settings`.
+Triggered from the header gear, key `,`, or `#settings=PANE`. See
+`20-settings.md`.
 
-- Header card shows the current memory model, context size, and thinking level.
-- Body: thinking select, **use pi default**, then a searchable Pi catalog.
-- Signed-in providers are grouped and can be expanded. Click a model row to save.
+- A full view, not a modal: a section list on the left, one pane on the
+  right. Panes: model, sound, search, snippets, appearance, advanced, and a
+  link to usage and cost.
+- Every change applies at once; there is no save button.
+- Esc and browser back leave settings in one step, back to the view that
+  opened it. Pane switches replace the history entry.
 - This view does not change live Pi or Claude agent sessions.
 
 ## Modal cases (keep minimal)
