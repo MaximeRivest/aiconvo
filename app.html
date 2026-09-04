@@ -15797,9 +15797,26 @@ function modelSupportsThinking(provider, model) {
   return !hit || hit.thinking;
 }
 
+// Mirrors DONE_SOUND_MODES in settings.js, quietest first.
+const DONE_SOUND_OPTIONS = [
+  ['off', 'off — silent'],
+  ['chime', 'chime — one short sound'],
+  ['title', 'title — say which conversation returned'],
+  ['summary', 'summary — say which conversation returned, then a short digest of the reply'],
+  ['voice', 'voice — the digest, then the microphone listens for a reply or command'],
+];
+const DONE_SOUND_HINTS = {
+  off: 'Nothing plays. Unread replies still show in the agent panel.',
+  chime: 'Three short notes. No speech, no network: it works when the GPU server is off.',
+  title: 'One sentence: “Your conversation about … has just returned.” No reading of the reply, no microphone.',
+  summary: 'The sentence above plus two to four spoken sentences about the reply. No microphone.',
+  voice: 'The digest, then a beep and the microphone opens. Say a reply ending with “send”, or a command such as mute, skip, status, read, or go to.',
+};
+
 function renderSettings() {
   if (!settingsOpen || !$('settingsRoot')) return;
   const resolved = (settingsState && settingsState.resolved) || {};
+  const doneSoundMode = (settingsState && settingsState.settings && settingsState.settings.doneSound) || 'voice';
   const piDefault = (settingsState && settingsState.piDefault) || (modelsState && modelsState.piDefault) || {};
   const ready = new Set((modelsState && modelsState.readyProviders) || (settingsState && settingsState.readyProviders) || []);
   const current = currentSettingsModel();
@@ -15848,9 +15865,13 @@ function renderSettings() {
       </div>
     </section>
     <section class="psection">
-      <h3>voice</h3>
-      <p class="hint">Finished agent runs are announced on the speakers, then the microphone listens for a spoken reply or command. Mute silences announcements and keeps runs working.</p>
-      <label style="display:flex;gap:6px;align-items:center"><input id="setVoiceMute" type="checkbox"${voiceMutedState ? ' checked' : ''}> mute voice for 30 minutes</label>
+      <h3>sound when a run finishes</h3>
+      <p class="hint">What the speakers do when an agent reply is ready. Quietest first. When speech cannot be made, the chime plays instead.</p>
+      <label for="setDoneSound">mode</label>
+      <select id="setDoneSound">${DONE_SOUND_OPTIONS.map(([v, label]) => `<option value="${v}"${doneSoundMode === v ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>
+      <div class="pmeta" style="margin-top:var(--sp-1)">${esc(DONE_SOUND_HINTS[doneSoundMode] || '')}</div>
+      <div class="pactions" style="margin-top:var(--sp-2)"><button id="setDonePreview" class="ghost"${doneSoundMode === 'off' ? ' disabled' : ''}>play a sample</button></div>
+      <label style="display:flex;gap:6px;align-items:center;margin-top:var(--sp-2)"><input id="setVoiceMute" type="checkbox"${voiceMutedState ? ' checked' : ''}> mute all sound for 30 minutes</label>
     </section>
     <section class="psection">
       <h3>semantic search</h3>
@@ -15881,6 +15902,14 @@ function renderSettings() {
     </section>
   </div>`;
   $('setUsage').onclick = () => { closeSettings(); showUsageDashboard(); };
+  $('setDoneSound').onchange = () => saveSettings({ doneSound: $('setDoneSound').value }, 'finished-run sound: ' + $('setDoneSound').value);
+  $('setDonePreview').onclick = async () => {
+    try {
+      const d = await (await fetch('/api/voice/preview', { method: 'POST' })).json();
+      if (d.ok) toast(d.reason ? d.reason : 'playing a sample on the speakers');
+      else toast(d.reason === 'muted' ? 'voice is muted for now' : 'sound is off');
+    } catch { errToast('could not play a sample'); }
+  };
   $('setVoiceMute').onchange = () => voiceSetMuted($('setVoiceMute').checked);
   $('setSemantic').onchange = () => saveSettings({ semanticSearch: $('setSemantic').checked }, 'semantic search ' + ($('setSemantic').checked ? 'on — backfill starts now' : 'off'));
   $('setSemanticUrl').onchange = () => saveSettings({ semanticUrl: $('setSemanticUrl').value.trim() }, 'semantic server saved');

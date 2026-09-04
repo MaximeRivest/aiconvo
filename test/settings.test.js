@@ -126,3 +126,15 @@ test('resolveContextTokens uses the catalog when present', () => {
   assert.strictEqual(modelLabel({ provider: 'xai', model: 'grok-4.6' }), 'xai/grok-4.6');
   assert.strictEqual(modelLabel({ usePiDefault: true }, { provider: 'xai', model: 'grok-4.6' }), 'pi default (xai/grok-4.6)');
 });
+
+test('normalizeSettings keeps a valid doneSound and falls back to voice', () => {
+  const { DONE_SOUND_MODES } = require('../settings.js');
+  assert.deepStrictEqual(DONE_SOUND_MODES, ['off', 'chime', 'title', 'summary', 'voice']);
+  for (const mode of DONE_SOUND_MODES) {
+    assert.strictEqual(normalizeSettings({ doneSound: mode }).doneSound, mode);
+    assert.strictEqual(normalizeSettings({ usePiDefault: true, doneSound: mode }).doneSound, mode);
+  }
+  assert.strictEqual(normalizeSettings({}).doneSound, 'voice');
+  assert.strictEqual(normalizeSettings({ doneSound: 'loud' }).doneSound, 'voice');
+  assert.strictEqual(normalizeSettings({ doneSound: 3 }).doneSound, 'voice');
+});

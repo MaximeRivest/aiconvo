@@ -10,6 +10,14 @@ function defaultSemanticNs() {
   catch { return 'default'; }
 }
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+// What the speakers do when a web run finishes with a reply. One ordered
+// ladder, quietest first:
+//   off     — nothing
+//   chime   — one short sound, no speech, no network
+//   title   — one spoken line naming the conversation that returned
+//   summary — that line plus a short spoken digest of the reply
+//   voice   — the digest, then the microphone opens for a reply or command
+const DONE_SOUND_MODES = ['off', 'chime', 'title', 'summary', 'voice'];
 const DEFAULT_SETTINGS = {
   usePiDefault: false,
   provider: 'openai-codex',
@@ -29,6 +37,7 @@ const DEFAULT_SETTINGS = {
   // Typed in the composer, this opens the snippet picker inline. Two
   // semicolons: almost never in prose or code, and one key on most layouts.
   snippetTrigger: ';;',
+  doneSound: 'voice',
   // Cost analytics keeps billing classification separate from Pi's retail
   // cost estimate. Rules are provider-scoped and never contain credentials.
   usageBilling: { providerModes: {}, monthlyFees: {} },
@@ -150,8 +159,9 @@ function normalizeSettings(input) {
   const piTheme = typeof src.piTheme === 'string' && src.piTheme.trim() ? src.piTheme.trim() : DEFAULT_SETTINGS.piTheme;
   const usageBilling = normalizeUsageBilling(src.usageBilling);
   const snippetTrigger = normalizeSnippetTrigger(src.snippetTrigger);
+  const doneSound = DONE_SOUND_MODES.includes(src.doneSound) ? src.doneSound : DEFAULT_SETTINGS.doneSound;
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound };
   }
   return {
     usePiDefault: false,
@@ -166,6 +176,7 @@ function normalizeSettings(input) {
     piTheme,
     usageBilling,
     snippetTrigger,
+    doneSound,
   };
 }
 
@@ -232,6 +243,7 @@ module.exports = {
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_SETTINGS,
   THINKING_LEVELS,
+  DONE_SOUND_MODES,
   hasClaudeCodeCredential,
   parseTokenCount,
   formatTokenCount,

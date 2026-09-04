@@ -9815,13 +9815,25 @@ async function synthesizeSpeech(text, rewrite, speed = 1) {
 }
 
 // ---------- spoken completion ----------
-// When a web run settles, tell the user in one spoken sentence what was just
-// finished: last assistant message → Qwen (one-sentence summary) → Kokoro →
-// local speakers through pipewire. Fire and forget; every failure is silent.
+// When a web run settles, tell the user on the speakers that a reply is
+// ready. How much is said is the doneSound setting (settings.js): a chime,
+// the conversation name, a Qwen digest of the reply, or the digest plus an
+// open microphone. Fire and forget. When speech cannot be made (Kokoro or
+// Qwen down) the chime plays instead, so a finished run is never silent
+// unless the mode is off or voice is muted.
 const SPEAK_SUMMARY_PROMPT = 'You are a voice announcer for a person who runs several coding-agent conversations. One conversation just returned a new reply. You get an OPENING line, the conversation title, and the full reply. Speak a short digest: start with the OPENING exactly as given, then say in two to four short sentences what there is to read in the reply — what it did, what it found, and what it asks or recommends, if anything. Talk about the reply in the third person ("it says", "it recommends"). Plain spoken words only: no code, no file paths, no markdown, no lists. Keep the whole thing under sixty words.';
 
 // Spoken playback speed for announcements and confirmations.
 const VOICE_SPEED = Number(process.env.AICONVO_VOICE_SPEED) || 1.5;
+
+// The effective finished-run sound mode. The two env vars predate the
+// setting and still act as hard caps for deployments that set them.
+function doneSoundMode() {
+  if (process.env.AICONVO_SPEAK_DONE === '0') return 'off';
+  const mode = settingsLib.DONE_SOUND_MODES.includes(appSettings.doneSound) ? appSettings.doneSound : 'voice';
+  if (mode === 'voice' && process.env.AICONVO_VOICE_REPLY === '0') return 'summary';
+  return mode;
+}
 
 // Name the conversation only when it changes: back-to-back replies from the
 // same conversation open with a short line instead of the full title.
@@ -9843,31 +9855,64 @@ function fallbackSpokenLine(text, opening) {
 
 async function speakRunDone(job) {
   try {
-    if (process.env.AICONVO_SPEAK_DONE === '0') return;
+    const mode = doneSoundMode();
+    if (mode === 'off') return;
     if (job.fanoutId) return; // parallel runs would talk over each other
     const text = String(job.doneSpeechSource || '').trim();
     if (!text) return;
+    if (mode === 'chime') { enqueueAnnouncement({ job, tone: 'done' }); return; }
     const entry = job.key && index[job.key];
     const title = (entry && (entry.title || entry.timelineTitle) || '').trim() || 'an untitled task';
     const opening = voiceOpeningFor(job.key, title);
     let sentence = '';
+    if (mode === 'title') sentence = opening;
+    else {
+      try {
+        const res = await httpJson(REWRITE_URL, {
+          model: REWRITE_MODEL,
+          messages: [
+            { role: 'system', content: SPEAK_SUMMARY_PROMPT },
+            { role: 'user', content: 'OPENING: ' + opening + '\nTITLE: ' + title + '\n\nFull reply:\n' + text.slice(0, 16000) },
+          ],
+          max_tokens: 400,
+          chat_template_kwargs: { enable_thinking: false },
+        }, 45000);
+        sentence = String(res.json && res.json.choices && res.json.choices[0]
+          && res.json.choices[0].message && res.json.choices[0].message.content || '').trim();
+      } catch (e) { console.log('speak-done summarizer unreachable, using fallback: ' + e.message); }
+      if (!sentence) sentence = fallbackSpokenLine(text, opening);
+    }
+    let wavPath;
     try {
-      const res = await httpJson(REWRITE_URL, {
-        model: REWRITE_MODEL,
-        messages: [
-          { role: 'system', content: SPEAK_SUMMARY_PROMPT },
-          { role: 'user', content: 'OPENING: ' + opening + '\nTITLE: ' + title + '\n\nFull reply:\n' + text.slice(0, 16000) },
-        ],
-        max_tokens: 400,
-        chat_template_kwargs: { enable_thinking: false },
-      }, 45000);
-      sentence = String(res.json && res.json.choices && res.json.choices[0]
-        && res.json.choices[0].message && res.json.choices[0].message.content || '').trim();
-    } catch (e) { console.log('speak-done summarizer unreachable, using fallback: ' + e.message); }
-    if (!sentence) sentence = fallbackSpokenLine(text, opening);
-    const clip = await synthesizeSpeech(sentence, false, VOICE_SPEED);
-    enqueueAnnouncement({ job, title, wavPath: path.join(TTS_DIR, clip.id + '.wav') });
+      const clip = await synthesizeSpeech(sentence, false, VOICE_SPEED);
+      wavPath = path.join(TTS_DIR, clip.id + '.wav');
+    } catch (e) {
+      console.log('speak-done tts failed, chime instead: ' + e.message);
+      enqueueAnnouncement({ job, tone: 'done' });
+      return;
+    }
+    enqueueAnnouncement({ job, title, wavPath, listen: mode === 'voice' });
   } catch (e) { console.log('speak-done failed: ' + e.message); }
+}
+
+// A sample of the current mode, for the settings page. Never opens the
+// microphone and never changes the "same conversation" memory.
+async function previewDoneSound() {
+  const mode = doneSoundMode();
+  if (mode === 'off') return { ok: false, mode, reason: 'off' };
+  if (voiceMuted()) return { ok: false, mode, reason: 'muted' };
+  if (mode === 'chime') { enqueueAnnouncement({ tone: 'done' }); return { ok: true, mode }; }
+  const opening = 'Your conversation about sound settings has just returned.';
+  const sentence = mode === 'title' ? opening
+    : opening + ' It says the sound mode is saved. It recommends the mode that fits the room you are in.';
+  try {
+    const clip = await synthesizeSpeech(sentence, false, VOICE_SPEED);
+    enqueueAnnouncement({ wavPath: path.join(TTS_DIR, clip.id + '.wav'), listen: false });
+    return { ok: true, mode };
+  } catch (e) {
+    enqueueAnnouncement({ tone: 'done' });
+    return { ok: true, mode, reason: 'tts failed: ' + e.message + ' (chime played instead)' };
+  }
 }
 
 // ---------- voice loop ----------
@@ -9882,11 +9927,13 @@ const voiceMuted = () => voice.mutedUntil && Date.now() < voice.mutedUntil;
 const VOICE_GATE_PROMPT = 'You are a voice gate for a coding-agent app. The user just heard a spoken summary of an agent reply and the microphone opened. You get the full transcript captured so far; the user paused, and you must decide what to do. The user often thinks in silence between phrases, so an unfinished thought is normal. Answer STRICT JSON only, no prose, no code fence: {"action":"send|wait|command|ignore","command":"mute|skip|status|read|goto|none","target":"...","text":"..."}. Use "send" ONLY when the user clearly ended the message with a send word such as: send, done, go, submit, enter, control enter, ship it, that is all. Put the cleaned message in "text" with the trailing send word removed. Use "wait" when the user dictated something addressed to the agent but no send word ended it yet — they are still thinking; keep the microphone open. Use "command" for short standalone app commands: "mute" (also: stop, be quiet, shut up, pause notifications), "skip" (also: next, dismiss), "status" (also: what is running, what is done), "read" (read a reply aloud — matches: read it, read the reply, read me the last reply, what did it say; put any named conversation or project in "target", empty means the one that just spoke), "goto" (open something on screen — matches: go to, open, show me; put the named conversation or project in "target"). Use "ignore" ONLY when the transcript is clearly not addressed to the app: background noise, other people talking to each other, phone calls, or the user talking to someone else in the room. The topic does not matter — the user may ask the agent anything, including casual requests. The strongest signal that speech is addressed to the app is a trailing send word. A message that ends with a send word is a send even when the topic is casual. Transcription is imperfect: stray trailing words after the send word (like "complete" or "thank you") still count as a send. Examples: "can you tell me a joke? send" is send with text "can you tell me a joke?". "I will pick it up on the way home no worries" is ignore (talking to someone else, no send word). "refactor the queue and add tests, send" is send. "maybe we should split that function" is wait.';
 
 // Small state tones. Each is a distinct earcon:
+//   done  — three rising notes (C E G): a run finished, a reply is ready
 //   open  — rising two notes: the microphone is now listening
 //   ack   — one short high tick: speech was captured, the gate is deciding
 //   wait  — two quick high ticks: kept open, keep thinking or talking
 //   close — falling two notes: the microphone closed, nothing was sent
 const VOICE_TONES = {
+  done: [[523, 80], [659, 80], [784, 180]],
   open: [[660, 90], [880, 120]],
   ack: [[988, 70]],
   wait: [[880, 60], [0, 50], [880, 60]],
@@ -9968,15 +10015,20 @@ function enqueueAnnouncement(item) {
   voicePump();
 }
 
+// Queue items are either { tone } (a short earcon) or { wavPath, listen }
+// (a speech clip, optionally followed by a microphone window). The mode is
+// re-read at play time so that switching to off, or away from voice, takes
+// effect on items that were queued under the old mode.
 async function voicePump() {
   if (voice.playing) return;
   voice.playing = true;
   try {
     while (voice.queue.length) {
       const item = voice.queue.shift();
-      if (voiceMuted()) continue;
+      if (voiceMuted() || doneSoundMode() === 'off') continue;
+      if (item.tone) { await playTone(item.tone); continue; }
       await playWav(item.wavPath, true);
-      if (voiceMuted()) continue; // muted mid-announcement: no mic window
+      if (!item.listen || voiceMuted() || doneSoundMode() !== 'voice') continue;
       await voiceListen(item).catch(e => console.log('voice listen failed: ' + e.message));
     }
   } finally { voice.playing = false; }
@@ -11371,6 +11423,8 @@ const server = http.createServer(async (req, res) => {
         playing: !!voice.current, paused: voice.paused });
     } else if (u.pathname === '/api/voice/pause' && req.method === 'POST') {
       json(res, 200, { ok: voicePauseToggle(), paused: voice.paused });
+    } else if (u.pathname === '/api/voice/preview' && req.method === 'POST') {
+      json(res, 200, await previewDoneSound());
     } else if (u.pathname === '/api/voice/mute' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
