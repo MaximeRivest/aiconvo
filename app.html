@@ -73,7 +73,7 @@ button.ghost:hover { color: var(--text); background: transparent; }
 button.danger { border-color: var(--danger); color: var(--danger); background: transparent; }
 button:disabled { opacity: .4; cursor: default; background: var(--surface-1); filter: none; }
 :is(button, input, select, [tabindex]):focus-visible { outline: none; border-color: var(--accent); }
-input[type=text], select { background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--r); height: 30px; padding: 0 10px; color: var(--text); font: var(--fs-body) var(--font); }
+input[type=text], input[type=search], select { background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--r); height: 30px; padding: 0 10px; color: var(--text); font: var(--fs-body) var(--font); }
 input::placeholder { color: var(--text-faint); }
 input[type=checkbox] { appearance: none; width: 14px; height: 14px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface-1); margin: 0; cursor: pointer; position: relative; flex-shrink: 0; }
 input[type=checkbox]:checked { background: var(--accent-strong); border-color: var(--accent-strong); }
@@ -597,7 +597,30 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pnewrow { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-4) 0; }
 .pfoldbtn { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); margin-left: 6px; }
 .settings-view { max-width: var(--read-max); margin: 0 auto; }
-.settings-view .hint { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
+.settings-view .hint, .set-body .hint { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
+/* Settings form vocabulary. Every control follows one of three shapes:
+   .set-field  — a caption above one control (text, select)
+   .set-check  — one checkbox with its text on the same line
+   .set-options — an exclusive list: radio, name, one-line description.
+   Captions are dim and small; the control is the loud thing in the row. */
+.set-field { margin: 0 0 var(--sp-3); }
+.set-field > label { display: block; font-size: var(--fs-label); color: var(--text-dim); margin: 0 0 4px; }
+#settingsDlg .set-field > input[type=text] { display: block; width: 100%; max-width: 440px; margin: 0; }
+#settingsDlg .set-field > select { display: block; width: auto; min-width: 16ch; max-width: 100%; margin: 0; }
+#settingsDlg .set-field > input.narrow { width: 8ch; }
+.set-check { display: flex; gap: 8px; align-items: center; margin: 0 0 var(--sp-3); cursor: pointer; }
+.set-check input[type=checkbox] { margin-top: 1px; }
+.set-status { color: var(--text-dim); font-size: var(--fs-meta); margin: 0 0 var(--sp-3); }
+.set-row { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: 0 0 var(--sp-3); }
+.set-options { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border-strong); margin: 0 0 var(--sp-2); }
+.set-option { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 10px; row-gap: 2px; align-items: start; padding: 8px 12px; background: var(--surface-1); cursor: pointer; }
+.set-option:hover { background: var(--surface-2); }
+.set-option.on { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+.set-option input[type=radio] { appearance: none; width: 14px; height: 14px; margin: 4px 0 0; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface-1); position: relative; cursor: pointer; }
+.set-option input[type=radio]:checked { border-color: var(--accent-strong); }
+.set-option input[type=radio]:checked::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent-strong); }
+.set-option .name { font-weight: 700; line-height: 1.5; }
+.set-option .desc { grid-column: 2; color: var(--text-dim); font-size: var(--fs-meta); line-height: 1.45; }
 .set-usage-open { width: 100%; min-height: 46px; display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--sp-4); border: 2px solid var(--accent); font-weight: 700; }
 
 /* Usage dashboard. Cost always means a catalog estimate, not an invoice. */
@@ -1950,6 +1973,8 @@ window.aiconvoSyncTheme();
     <div id="settingsRoot"></div>
     <section class="psection">
       <h3>theme</h3>
+      <div class="set-field">
+      <label for="themeSel">color scheme</label>
       <select id="themeSel">
         <option value="">auto (system)</option>
         <option value="dark">dark</option>
@@ -1958,6 +1983,7 @@ window.aiconvoSyncTheme();
         <option value="eink">e-ink (black/white)</option>
         <optgroup id="customThemeOptions" label="custom themes" hidden></optgroup>
       </select>
+      </div>
     </section>
     </div>
   </div>
@@ -15839,21 +15865,14 @@ function modelSupportsThinking(provider, model) {
   return !hit || hit.thinking;
 }
 
-// Mirrors DONE_SOUND_MODES in settings.js, quietest first.
+// Mirrors DONE_SOUND_MODES in settings.js, quietest first: [value, name, description].
 const DONE_SOUND_OPTIONS = [
-  ['off', 'off — silent'],
-  ['chime', 'chime — one short sound'],
-  ['title', 'title — say which conversation returned'],
-  ['summary', 'summary — say which conversation returned, then a short digest of the reply'],
-  ['voice', 'voice — the digest, then the microphone listens for a reply or command'],
+  ['off', 'off', 'Nothing plays. New replies still show in the agent panel.'],
+  ['chime', 'chime', 'Three short notes. No speech, no network.'],
+  ['title', 'title', '“Your conversation about … has just returned.” Nothing more, no microphone.'],
+  ['summary', 'summary', 'The title line, then two to four sentences about the reply. No microphone.'],
+  ['voice', 'voice', 'The summary, then the microphone opens for a spoken reply or a command: mute, skip, status, read, go to.'],
 ];
-const DONE_SOUND_HINTS = {
-  off: 'Nothing plays. Unread replies still show in the agent panel.',
-  chime: 'Three short notes. No speech, no network: it works when the GPU server is off.',
-  title: 'One sentence: “Your conversation about … has just returned.” No reading of the reply, no microphone.',
-  summary: 'The sentence above plus two to four spoken sentences about the reply. No microphone.',
-  voice: 'The digest, then a beep and the microphone opens. Say a reply ending with “send”, or a command such as mute, skip, status, read, or go to.',
-};
 
 function renderSettings() {
   if (!settingsOpen || !$('settingsRoot')) return;
@@ -15900,37 +15919,49 @@ function renderSettings() {
       <h3>memory model</h3>
       <div class="pmeta" style="margin-bottom:var(--sp-2)">${esc(resolved.label || 'not set')} · ${esc(fmtTokens(resolved.contextTokens))} · thinking ${esc(resolved.thinking || 'off')}</div>
       <p class="hint">Notes, evidence, epics, titles, and project memory use this Pi model. The change applies to the next model call.</p>
-      <label for="setThinking">thinking</label>
-      <select id="setThinking">${settingsThinkingOptions(resolved.thinking || 'off', modelSupportsThinking(current.provider, current.model))}</select>
-      <div class="pactions" style="margin-top:var(--sp-2)">
+      <div class="set-field">
+        <label for="setThinking">thinking</label>
+        <select id="setThinking">${settingsThinkingOptions(resolved.thinking || 'off', modelSupportsThinking(current.provider, current.model))}</select>
+      </div>
+      <div class="pactions">
         <button id="setPiDefault"${current.usePiDefault ? ' class="primary"' : ''}>use pi default (${esc(defaultLabel)})</button>
       </div>
     </section>
     <section class="psection">
       <h3>sound when a run finishes</h3>
-      <p class="hint">What the speakers do when an agent reply is ready. Quietest first. When speech cannot be made, the chime plays instead.</p>
-      <label for="setDoneSound">mode</label>
-      <select id="setDoneSound">${DONE_SOUND_OPTIONS.map(([v, label]) => `<option value="${v}"${doneSoundMode === v ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>
-      <div class="pmeta" style="margin-top:var(--sp-1)">${esc(DONE_SOUND_HINTS[doneSoundMode] || '')}</div>
-      <div class="pactions" style="margin-top:var(--sp-2)"><button id="setDonePreview" class="ghost"${doneSoundMode === 'off' ? ' disabled' : ''}>play a sample</button></div>
-      <label style="display:flex;gap:6px;align-items:center;margin-top:var(--sp-2)"><input id="setVoiceMute" type="checkbox"${voiceMutedState ? ' checked' : ''}> mute all sound for 30 minutes</label>
+      <p class="hint">What the speakers do when an agent reply is ready. If speech cannot be made, the chime plays.</p>
+      <div class="set-options" role="radiogroup" aria-label="sound when a run finishes">${DONE_SOUND_OPTIONS.map(([v, name, desc]) => `<label class="set-option${doneSoundMode === v ? ' on' : ''}">
+        <input type="radio" name="setDoneSound" value="${v}"${doneSoundMode === v ? ' checked' : ''}>
+        <span class="name">${esc(name)}</span>
+        <span class="desc">${esc(desc)}</span>
+      </label>`).join('')}</div>
+      <div class="set-row">
+        <button id="setDonePreview"${doneSoundMode === 'off' ? ' disabled' : ''}>▶ play a sample</button>
+        <label class="set-check" style="margin:0"><input id="setVoiceMute" type="checkbox"${voiceMutedState ? ' checked' : ''}> mute all sound for 30 minutes</label>
+      </div>
     </section>
     <section class="psection">
       <h3>semantic search</h3>
       <p class="hint">A late-interaction (ColBERT) stage on the GPU server adds meaning-based matches to search — it forgives reworded speech-to-text queries. The laptop stays authoritative: lexical search keeps working when the server is off.</p>
-      <label style="display:flex;gap:6px;align-items:center"><input id="setSemantic" type="checkbox"${(settingsState && settingsState.settings && settingsState.settings.semanticSearch) ? ' checked' : ''}> enable semantic search</label>
-      <label for="setSemanticUrl" style="margin-top:var(--sp-2)">server URL</label>
-      <input id="setSemanticUrl" type="text" value="${esc((settingsState && settingsState.settings && settingsState.settings.semanticUrl) || '')}" spellcheck="false">
-      <label for="setSemanticNs" style="margin-top:var(--sp-2)">namespace — one per user on a shared server</label>
-      <input id="setSemanticNs" type="text" value="${esc((settingsState && settingsState.settings && settingsState.settings.semanticNs) || '')}" spellcheck="false">
-      <div class="pmeta" id="semStatus" style="margin-top:var(--sp-2)"></div>
+      <label class="set-check"><input id="setSemantic" type="checkbox"${(settingsState && settingsState.settings && settingsState.settings.semanticSearch) ? ' checked' : ''}> enable semantic search</label>
+      <div class="set-field">
+        <label for="setSemanticUrl">server URL</label>
+        <input id="setSemanticUrl" type="text" value="${esc((settingsState && settingsState.settings && settingsState.settings.semanticUrl) || '')}" spellcheck="false">
+      </div>
+      <div class="set-field">
+        <label for="setSemanticNs">namespace — one per user on a shared server</label>
+        <input id="setSemanticNs" type="text" value="${esc((settingsState && settingsState.settings && settingsState.settings.semanticNs) || '')}" spellcheck="false">
+      </div>
+      <div class="set-status" id="semStatus"></div>
     </section>
     <section class="psection">
       <h3>snippets</h3>
       <p class="hint">Sentences you type often. Type the trigger in the composer to insert one at the cursor; alt+; opens the picker; alt+shift+; saves the selected text as a new one. Files live in pi's prompt folders, so the pi terminal sees them as /name too.</p>
-      <label for="setSnipTrigger">trigger typed in the composer</label>
-      <input id="setSnipTrigger" type="text" value="${esc(snippetTrigger())}" spellcheck="false" maxlength="4" style="width:6ch">
-      <div class="pactions" style="margin-top:var(--sp-2)"><button id="setSnipNew" class="ghost">new snippet</button></div>
+      <div class="set-field">
+        <label for="setSnipTrigger">trigger typed in the composer</label>
+        <input id="setSnipTrigger" class="narrow" type="text" value="${esc(snippetTrigger())}" spellcheck="false" maxlength="4">
+      </div>
+      <div class="pactions"><button id="setSnipNew">new snippet</button></div>
       <div id="setSnipList" class="snip-list" style="margin-top:var(--sp-2)"><span class="hint">loading…</span></div>
     </section>
     <section class="psection">
@@ -15938,13 +15969,15 @@ function renderSettings() {
       <div class="settings-tools">
         <input id="setModelQ" type="search" placeholder="search provider or model" value="${esc(settingsQuery)}">
         <label><input id="setReadyOnly" type="checkbox"${settingsReadyOnly ? ' checked' : ''}> signed-in providers only</label>
-        <button id="setRefresh" class="ghost">reload catalog</button>
+        <button id="setRefresh">reload catalog</button>
       </div>
       <div id="setModels">${catalog}</div>
     </section>
   </div>`;
   $('setUsage').onclick = () => { closeSettings(); showUsageDashboard(); };
-  $('setDoneSound').onchange = () => saveSettings({ doneSound: $('setDoneSound').value }, 'finished-run sound: ' + $('setDoneSound').value);
+  $('settingsRoot').querySelectorAll('input[name=setDoneSound]').forEach(r => r.onchange = () => {
+    if (r.checked) saveSettings({ doneSound: r.value }, 'sound when a run finishes: ' + r.value);
+  });
   $('setDonePreview').onclick = async () => {
     try {
       const d = await (await fetch('/api/voice/preview', { method: 'POST' })).json();
