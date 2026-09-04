@@ -68,4 +68,41 @@ function areaSlug(rel) {
     .replace(/^-+|-+$/g, '').slice(0, 60) || 'area';
 }
 
-module.exports = { normalizeAreaRel, projectRootOfCwd, relOfCwd, deepestAreaOf, relInArea, areaSlug };
+// Candidate-folder rows for the area picker. Pure join of three inputs:
+//   found:    Map rel -> { exists, git }   (the on-disk walk)
+//   own:      Map rel -> { n, lastMs }     (conversations by the folder they ran in)
+//   declared: { rel: { title? } }          (the registry)
+// Folders that only conversations or declarations know about are added,
+// with their ancestors, so the tree stays connected. Counts are inclusive
+// (a folder counts the conversations of its descendants), because that is
+// what joins the area when it is declared.
+function folderRows({ found, own, declared, exists = () => false }) {
+  const rows = new Map(found);
+  const declaredRels = Object.keys(declared || {});
+  for (const rel of [...own.keys(), ...declaredRels]) {
+    const parts = rel.split('/');
+    for (let i = 1; i <= parts.length; i++) {
+      const r = parts.slice(0, i).join('/');
+      if (!rows.has(r)) rows.set(r, { exists: !!exists(r), git: false });
+    }
+  }
+  const out = [];
+  for (const [rel, info] of rows) {
+    let n = 0, lastMs = 0;
+    for (const [r, rec] of own) {
+      if (!relInArea(r, rel)) continue;
+      n += rec.n; lastMs = Math.max(lastMs, rec.lastMs || 0);
+    }
+    const here = own.get(rel);
+    out.push({
+      rel, depth: rel.split('/').length, exists: !!info.exists, git: !!info.git,
+      conversations: n, own: here ? here.n : 0, lastTs: lastMs ? new Date(lastMs).toISOString() : null,
+      declared: rel in (declared || {}), title: (declared && declared[rel] && declared[rel].title) || null,
+      inside: deepestAreaOf(rel, declaredRels.filter(a => a !== rel)),
+    });
+  }
+  out.sort((a, b) => a.rel.localeCompare(b.rel));
+  return out;
+}
+
+module.exports = { normalizeAreaRel, projectRootOfCwd, relOfCwd, deepestAreaOf, relInArea, areaSlug, folderRows };

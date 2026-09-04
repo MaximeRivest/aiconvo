@@ -1117,6 +1117,35 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .np-details summary:hover { color: var(--text); }
 .np-details-body { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
 .np-git-row { flex-direction: row !important; align-items: center; gap: 6px; }
+/* project folder picker (new area, subfolder start): one combobox — type a
+   relative path or pick a real folder. Rows show the fact that matters:
+   how many conversations ran there. */
+.fp-card { width: min(560px, 94vw); }
+.fp { display: flex; flex-direction: column; gap: 4px; }
+.fp-input { width: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); padding: 6px 8px; }
+.fp-input:focus { outline: 0; border-color: var(--accent); }
+.fp-status { font-size: 11px; color: var(--text-dim); min-height: 15px; overflow-wrap: anywhere; }
+.fp-status.warn { color: var(--warn); }
+.fp-status .fp-path { color: var(--text-faint); }
+.fp-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 11px; color: var(--text-faint); }
+.fp-chip, .pareahint .fp-chip { border: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 11px; padding: 1px 7px; height: auto; min-height: 0; cursor: pointer; }
+.fp-chip:hover, .fp-chip:focus-visible { border-color: var(--accent); outline: 0; }
+.fp-chip .n { color: var(--text-faint); margin-left: 4px; }
+.fp-list { border: 1px solid var(--border-strong); background: var(--bg); height: min(200px, 32vh); overflow: auto; } /* fixed: filtering must not move the card */
+.fp-row { display: flex; align-items: center; gap: 8px; padding: 3px 8px; cursor: pointer; min-height: 22px; }
+.fp-row:hover, .fp-row.hi { background: var(--surface-2); }
+.fp-row.hi { box-shadow: inset 2px 0 0 var(--accent); }
+.fp-row.off { cursor: default; color: var(--text-faint); }
+.fp-row.off:hover { background: transparent; }
+.fp-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-name b { font-weight: 600; }
+.fp-meta, .fp-tag { flex: 0 0 auto; font-size: 10px; color: var(--text-faint); white-space: nowrap; }
+.fp-meta.has { color: var(--text-dim); }
+.fp-tag.area { color: var(--accent); }
+.fp-empty, .fp-more { padding: 6px 8px; font-size: 11px; color: var(--text-faint); }
+.fp-more { border-top: 1px solid var(--border); }
+.pareahint { font-size: var(--fs-meta); margin-top: var(--sp-2); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+@media (pointer: coarse) { .fp-row { min-height: 32px; } .fp-chip { min-height: 28px; } }
 .mf-pair { display: flex; gap: 8px; }
 .mf-pair > * { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
 .mf-body textarea, .mf-body input, .cc-text { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); padding: 6px 8px; }
@@ -8591,10 +8620,15 @@ async function startReviewedConversation(project, opts = {}) {
   const areaSel = ov.querySelector('.cc-area');
   if (areaSel) areaSel.onchange = async () => {
     if (areaSel.value === '__sub') {
-      const rel = (window.prompt('Subfolder, relative to the project root (scope only — no area memory):', subRel) || '').trim().replace(/^\/+|\/+$/g, '');
-      if (!rel) { areaSel.value = where; return; }
-      subRel = rel; where = '';
-      areaSel.options[areaSel.options.length - 1].textContent = 'subfolder · ' + subRel;
+      const picked = await pickProjectFolder(project, { value: subRel, title: 'start in a subfolder', hint: 'scope only — no area memory, unless you pick a declared area' });
+      if (!picked) { areaSel.value = subRel ? '__sub' : where; return; }
+      if (picked.declared) { // a declared area is an identity, not just a folder
+        where = picked.rel; subRel = '';
+        areaSel.value = where;
+      } else {
+        subRel = picked.rel; where = '';
+        areaSel.options[areaSel.options.length - 1].textContent = 'subfolder · ' + subRel;
+      }
     } else {
       where = areaSel.value; subRel = '';
     }
@@ -8631,6 +8665,19 @@ function renderProjectPanel(d) {
   const heroRows = sessions.filter(s => projectOf(s) === d.project)
     .map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
   const displayTitle = d.title || d.project;
+  // Subfolders where conversations ran that no declared area covers. Two or
+  // more conversations in one folder is the signal that a workstream lives
+  // there; a single stray cd is not. Shown as chips that prefill the form.
+  const areaCandidates = (() => {
+    const counts = new Map();
+    for (const s of sessions) {
+      if (projectOf(s) !== d.project || areaOfSession(s)) continue;
+      const rel = projectRelOf(s.cwd);
+      if (!rel) continue;
+      counts.set(rel, (counts.get(rel) || 0) + 1);
+    }
+    return [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([rel, n]) => ({ rel, n }));
+  })();
   $('view').innerHTML = `<div class="project-overview">
     ${miniGanttHtml(heroRows)}
     <div class="ptitle"><h1 id="pTitleBig" title="${esc(pTitleHint(displayTitle))}">${esc(displayTitle)}</h1><button id="pNew" class="primary pnewbtn" title="Start a new conversation in ${esc(d.project)} — you review the context before it goes">+ new in ${esc(d.project)}</button></div>
@@ -8640,12 +8687,12 @@ function renderProjectPanel(d) {
         : '<p class="psummary dim">No project vision yet. Build the memory leaves once — after that, the documents stay current automatically.</p>'}
       ${d.epics.length ? `<div class="pepicstrip"><span class="pes-label">epics</span>${d.epics.map(e => `<a href="#" data-p-epic-open="${esc(e.id)}" title="Open the epic · ${e.sessionIds.length} conversations · updated ${fmtDate(e.updatedAt)}">▸ ${esc(e.title)}<span class="pes-n">${e.sessionIds.length}</span></a>`).join('')}</div>` : ''}
     </section>
-    ${(d.areas || []).length ? `<section class="psection pareas"><h3>areas <span class="dim">declared inner scopes — own memory, own briefing</span></h3><div class="pareacards">${d.areas.map(a => `
+    ${(d.areas || []).length || areaCandidates.length ? `<section class="psection pareas"><h3>areas <span class="dim">declared inner scopes — own memory, own briefing</span></h3>${(d.areas || []).length ? `<div class="pareacards">${d.areas.map(a => `
       <div class="pareacard" data-area-open="${esc(a.rel)}" tabindex="0" title="Open the area · ${a.conversations} conversations">
         <div class="pa-name">▸ ${esc(a.title || a.rel)}</div>
         <div class="pa-meta dim">${esc(a.rel)} · ${a.conversations} conversation${a.conversations === 1 ? '' : 's'}${a.lastTs ? ' · ' + fmtDate(a.lastTs) : ''}${a.memory ? (a.memory.stale ? ' · memory ⚠' : ' · memory ✓') : ''}</div>
         <button type="button" class="ghost pa-start" data-area-start="${esc(a.rel)}" title="Start a conversation in this area — area memory briefs first">+ start here</button>
-      </div>`).join('')}</div></section>` : ''}
+      </div>`).join('')}</div>` : ''}${areaCandidates.length ? `<div class="pareahint dim"><span>conversations also ran in</span>${areaCandidates.map(c => `<button type="button" class="fp-chip" data-area-suggest="${esc(c.rel)}" title="${c.n} conversations ran in ${esc(c.rel)} — declare it as an area?">${esc(c.rel)}<span class="n">${c.n}</span></button>`).join('')}<span>— declare one as an area?</span></div>` : ''}</section>` : ''}
     <div class="ptoolbar">
       ${projectSwitchHtml('overview')}
       <div class="pmemline dim">
@@ -8716,6 +8763,7 @@ function renderProjectPanel(d) {
   };
   $('pNew').onclick = () => startReviewedConversation(d.project);
   $('pAreaNew').onclick = () => openNewAreaForm(d.project);
+  $('view').querySelectorAll('[data-area-suggest]').forEach(b => b.onclick = () => openNewAreaForm(d.project, { rel: b.dataset.areaSuggest }));
   $('view').querySelectorAll('[data-area-open]').forEach(c => {
     c.onclick = e => { if (!e.target.closest('[data-area-start]')) showAreaView(d.project, c.dataset.areaOpen); };
     c.onkeydown = e => { if (e.key === 'Enter') showAreaView(d.project, c.dataset.areaOpen); };
@@ -8946,16 +8994,205 @@ async function renderAreaDocs(d) {
   renderDocChapters('area:' + d.project + '/' + d.rel, chapters);
 }
 
+// ---- project folder picker (new area · subfolder start) ----
+// One combobox over the project's real folders, joined with every folder a
+// conversation ran in (GET /api/area/folders). Typing filters the list and
+// also names a folder that does not exist yet. The status line answers the
+// three questions a person has before declaring: does it exist, how much
+// past work joins it, and is it nested inside another area.
+// Mirror of areas.normalizeAreaRel on the server: '' means invalid.
+function normalizeAreaRel(rel) {
+  const parts = String(rel || '').replace(/\\/g, '/').split('/').map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return '';
+  for (const p of parts) {
+    if (p === '.' || p === '..' || !/^[A-Za-z0-9][A-Za-z0-9._ -]{0,80}$/.test(p)) return '';
+  }
+  return parts.join('/');
+}
+function buildFolderPicker(project, opts = {}) {
+  const el = document.createElement('div');
+  el.className = 'fp';
+  el.innerHTML = `<input class="fp-input" type="text" placeholder="type a folder path, or pick one below" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" role="combobox" aria-expanded="true" aria-autocomplete="list">
+    <div class="fp-status" aria-live="polite"></div>
+    <div class="fp-suggest" hidden></div>
+    <div class="fp-list" role="listbox"><div class="fp-empty">reading folders…</div></div>`;
+  const input = el.querySelector('.fp-input');
+  const status = el.querySelector('.fp-status');
+  const suggest = el.querySelector('.fp-suggest');
+  const list = el.querySelector('.fp-list');
+  let data = null, byRel = new Map(), rows = [], hi = -1, hidden = 0;
+  const declaredOf = (rel, excludeSelf) => {
+    let best = null;
+    for (const f of data ? data.folders : []) {
+      if (!f.declared || (excludeSelf && f.rel === rel)) continue;
+      if (rel !== f.rel && !rel.startsWith(f.rel + '/')) continue;
+      if (!best || f.rel.length > best.length) best = f.rel;
+    }
+    return best;
+  };
+  // Everything the caller needs to decide: valid? exists? declared? nested?
+  function info() {
+    const raw = input.value.trim();
+    const rel = normalizeAreaRel(raw);
+    const f = rel ? byRel.get(rel) : null;
+    return {
+      raw, rel, valid: !!rel, empty: !raw,
+      exists: !!(f && f.exists), declared: !!(f && f.declared),
+      inside: rel ? declaredOf(rel, true) : null,
+      conversations: f ? f.conversations : 0, lastTs: f ? f.lastTs : null,
+      path: data ? data.display + '/' + (rel || raw) : '',
+    };
+  }
+  function paintStatus() {
+    const i = info();
+    status.classList.toggle('warn', false);
+    if (!data) { status.textContent = ''; return; }
+    if (i.empty) { status.innerHTML = `<span class="fp-path">${esc(data.display)}/</span> — type a folder, or pick one below`; return; }
+    if (!i.valid) { status.classList.add('warn'); status.textContent = 'use letters, digits, ". _ -", spaces and "/" only — no ".."'; return; }
+    const parts = [];
+    if (i.declared && !opts.allowDeclared) { status.classList.add('warn'); parts.push('already an area'); }
+    else if (i.declared) parts.push('declared area — its memory briefs first');
+    else if (i.exists) parts.push(i.conversations ? `existing folder · ${i.conversations} past conversation${i.conversations === 1 ? '' : 's'} join` : 'existing folder · no conversations yet');
+    else parts.push('new folder — created now' + (rows.length && rows.some(f => f.rel !== i.rel) ? ' · ↓ picks a listed folder' : ''));
+    if (i.inside) parts.push(`nested inside area <b>${esc(i.inside)}</b>`);
+    status.innerHTML = `<span class="fp-path">${esc(data.display)}/${esc(i.rel)}</span> · ${parts.join(' · ')}`;
+  }
+  // The list: with no filter, the top level plus every deeper folder where
+  // work happened (ancestors kept, so the tree reads). With a filter, every
+  // folder whose path contains the text. Never a 400-row wall.
+  function paintList() {
+    if (!data) return;
+    const q = input.value.trim().toLowerCase().replace(/\\/g, '/').replace(/^\/+/, '');
+    let vis;
+    if (q) vis = data.folders.filter(f => f.rel.toLowerCase().includes(q));
+    else {
+      const keep = new Set();
+      for (const f of data.folders) {
+        if (f.depth === 1 || f.conversations || f.declared) {
+          const parts = f.rel.split('/');
+          for (let i = 1; i <= parts.length; i++) keep.add(parts.slice(0, i).join('/'));
+        }
+      }
+      vis = data.folders.filter(f => keep.has(f.rel));
+    }
+    hidden = data.folders.length - vis.length;
+    rows = vis;
+    hi = -1;
+    if (!vis.length) {
+      list.innerHTML = `<div class="fp-empty">${q ? 'no folder matches — enter creates it' : 'no subfolders yet — type a name to create one'}</div>`;
+      return;
+    }
+    const now = Date.now();
+    list.innerHTML = vis.map((f, idx) => {
+      const name = f.rel.split('/').pop();
+      const parent = f.rel.slice(0, -name.length);
+      const off = f.declared && !opts.allowDeclared;
+      const meta = f.conversations
+        ? `${f.conversations}${f.lastTs ? ' · ' + ago(now - Date.parse(f.lastTs)) : ''}`
+        : '';
+      const tag = f.declared ? '<span class="fp-tag area">area ✓</span>'
+        : f.inside ? `<span class="fp-tag">in ${esc(f.inside)}</span>`
+        : !f.exists ? '<span class="fp-tag">not on disk</span>' : '';
+      const label = q ? `<span class="dim">${esc(parent)}</span><b>${esc(name)}</b>` : `<b>${esc(name)}</b>`;
+      return `<div class="fp-row${off ? ' off' : ''}" role="option" data-i="${idx}" style="padding-left:${8 + (q ? 0 : (f.depth - 1) * 14)}px" title="${esc(f.rel)}${f.conversations ? ' · ' + f.conversations + ' conversations ran here' : ''}${off ? ' · already an area' : ''}">
+        <span class="fp-name">${label}</span><span class="fp-meta${f.conversations ? ' has' : ''}" title="conversations · last activity">${meta}</span>${tag}</div>`;
+    }).join('') + (hidden > 0 && !q ? `<div class="fp-more">${hidden} more folder${hidden === 1 ? '' : 's'} — type to find them</div>` : '');
+    list.querySelectorAll('.fp-row').forEach(r => {
+      r.onmousedown = e => e.preventDefault(); // keep focus in the input
+      r.onclick = () => { const f = rows[Number(r.dataset.i)]; if (f && !(f.declared && !opts.allowDeclared)) pick(f.rel); };
+    });
+  }
+  function paintSuggest() {
+    if (!data) return;
+    const top = data.folders.filter(f => !f.declared && !f.inside && f.conversations > 0)
+      .sort((a, b) => b.conversations - a.conversations || String(b.lastTs || '').localeCompare(String(a.lastTs || ''))).slice(0, 4);
+    suggest.hidden = !top.length;
+    if (!top.length) return;
+    suggest.innerHTML = 'where work already ran ' + top.map(f => `<button type="button" class="fp-chip" data-rel="${esc(f.rel)}" title="${esc(f.rel)} · ${f.conversations} conversations">${esc(f.rel)}<span class="n">${f.conversations}</span></button>`).join('');
+    suggest.querySelectorAll('.fp-chip').forEach(b => b.onclick = () => pick(b.dataset.rel));
+  }
+  function pick(rel) {
+    input.value = rel;
+    paintList(); paintStatus();
+    input.focus();
+    if (opts.onChange) opts.onChange(info());
+  }
+  function setHi(n) {
+    const pickable = rows.map((f, i) => (f.declared && !opts.allowDeclared) ? -1 : i).filter(i => i >= 0);
+    if (!pickable.length) return;
+    const at = pickable.indexOf(hi);
+    hi = n > 0 ? pickable[Math.min(at + 1, pickable.length - 1)] : pickable[Math.max(at - 1, 0)];
+    list.querySelectorAll('.fp-row').forEach(r => r.classList.toggle('hi', Number(r.dataset.i) === hi));
+    const row = list.querySelector('.fp-row.hi');
+    if (row) row.scrollIntoView({ block: 'nearest' });
+  }
+  input.addEventListener('input', () => { paintList(); paintStatus(); if (opts.onChange) opts.onChange(info()); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHi(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(-1); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (hi >= 0 && rows[hi]) pick(rows[hi].rel);
+      else if (opts.onEnter) opts.onEnter(info());
+    } else if (e.key === 'Escape' && hi >= 0) { e.stopPropagation(); hi = -1; list.querySelectorAll('.fp-row.hi').forEach(r => r.classList.remove('hi')); }
+  });
+  (async () => {
+    let out = null;
+    try { out = await (await fetch('/api/area/folders?project=' + encodeURIComponent(project))).json(); }
+    catch (e) { out = { error: e.message }; }
+    if (!out || out.error) {
+      data = { display: '', folders: [], cwd: '' };
+      list.innerHTML = `<div class="fp-empty">${esc((out && out.error) || 'network error')}</div>`;
+      status.textContent = '';
+      return;
+    }
+    data = out;
+    byRel = new Map(out.folders.map(f => [f.rel, f]));
+    paintSuggest(); paintList(); paintStatus();
+    if (opts.onChange) opts.onChange(info());
+  })();
+  if (opts.value) input.value = opts.value;
+  return { el, input, info, setValue: pick, focus: () => input.focus() };
+}
+
+// A small overlay around the picker: resolves to { rel, declared } or null.
+// Used where a start needs a plain subfolder (scope only, no area memory).
+function pickProjectFolder(project, opts = {}) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.className = 'ctx-confirm';
+    ov.innerHTML = `<div class="cc-card np-card fp-card">
+      <div class="cc-head"><b>${esc(opts.title || 'working folder')}</b><span class="dim">${esc(opts.hint || 'relative to the project root')}</span></div>
+      <div class="mf-body np-body"></div>
+      <div class="cc-foot"><button type="button" class="ghost fp-cancel">cancel</button><button type="button" class="primary fp-use" disabled>use folder</button></div>
+    </div>`;
+    const done = v => { ov.remove(); resolve(v); };
+    const use = i => { if (i.valid) done({ rel: i.rel, declared: i.declared }); };
+    const picker = buildFolderPicker(project, {
+      value: opts.value || '', allowDeclared: true,
+      onChange: i => { ov.querySelector('.fp-use').disabled = !i.valid; },
+      onEnter: use,
+    });
+    ov.querySelector('.np-body').appendChild(picker.el);
+    ov.querySelector('.fp-cancel').onclick = () => done(null);
+    ov.querySelector('.fp-use').onclick = () => use(picker.info());
+    ov.addEventListener('click', e => { if (e.target === ov) done(null); });
+    ov.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } };
+    document.body.appendChild(ov);
+    picker.focus();
+  });
+}
+
 // ---- new area (the project birth ritual, one level down) ----
-function openNewAreaForm(project) {
+// opts.rel prefills the folder (from a "conversations also ran in" chip).
+function openNewAreaForm(project, opts = {}) {
   document.querySelectorAll('.ctx-confirm').forEach(el => el.remove());
   const ov = document.createElement('div');
   ov.className = 'ctx-confirm';
-  ov.innerHTML = `<div class="cc-card np-card">
-    <div class="cc-head"><b>new area in ${esc(project)}</b><span class="dim">a subfolder becomes an inner scope</span></div>
+  ov.innerHTML = `<div class="cc-card np-card fp-card">
+    <div class="cc-head"><b>new area in ${esc(project)}</b><span class="dim">a subfolder becomes an inner scope — own memory, own briefing</span></div>
     <div class="mf-body np-body">
-      <label><span class="np-cap">folder — relative to the project root; created if missing, adopted if it exists</span>
-        <input class="na-rel" type="text" placeholder="experiments/vector-search" autocomplete="off"></label>
+      <div><div class="np-cap" style="margin-bottom:4px">folder — past and future conversations in it belong to the area</div><div class="na-picker"></div></div>
       <label><span class="np-cap">title — optional display name</span>
         <input class="na-title" type="text" autocomplete="off"></label>
       <label><span class="np-cap">intent — why does this area exist? (becomes the vouched area intent.md)</span>
@@ -8966,21 +9203,40 @@ function openNewAreaForm(project) {
     <div class="cc-foot">
       <span class="mf-err na-err"></span>
       <button type="button" class="ghost na-cancel">cancel</button>
-      <button type="button" class="primary na-go">declare area</button>
+      <button type="button" class="primary na-go" disabled>declare area</button>
     </div>
   </div>`;
   document.body.appendChild(ov);
   const q = sel => ov.querySelector(sel);
-  q('.na-first').oninput = () => { q('.na-go').textContent = q('.na-first').value.trim() ? 'declare + start' : 'declare area'; };
+  let cur = null;
+  // The verb says what will happen: adopt what exists, or create then declare.
+  const paintGo = () => {
+    const go = q('.na-go');
+    const ok = !!(cur && cur.valid && !cur.declared);
+    go.disabled = !ok;
+    const base = cur && cur.valid && !cur.exists ? 'create + declare' : 'declare area';
+    go.textContent = q('.na-first').value.trim() ? base + ' + start' : base;
+    q('.na-title').placeholder = cur && cur.rel ? cur.rel.split('/').pop() : '';
+    q('.na-err').textContent = '';
+  };
+  const picker = buildFolderPicker(project, {
+    value: opts.rel || '',
+    onChange: i => { cur = i; paintGo(); },
+    onEnter: () => { if (cur && cur.valid && !cur.declared) q('.na-intent').focus(); },
+  });
+  q('.na-picker').appendChild(picker.el);
+  q('.na-first').oninput = paintGo;
   q('.na-cancel').onclick = () => ov.remove();
   ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  ov.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); ov.remove(); } };
   q('.na-go').onclick = async () => {
-    const rel = q('.na-rel').value.trim();
-    if (!rel) { q('.na-err').textContent = 'give the area a folder path.'; return; }
+    const i = picker.info();
+    if (!i.valid) { q('.na-err').textContent = 'give the area a folder path.'; return; }
+    if (i.declared) { q('.na-err').textContent = 'that folder is already an area.'; return; }
     q('.na-go').disabled = true;
     q('.na-err').textContent = 'declaring…';
     const out = await postJson('/api/area/create', {
-      project, rel, title: q('.na-title').value.trim(),
+      project, rel: i.rel, title: q('.na-title').value.trim(),
       intent: q('.na-intent').value.trim(), firstPrompt: q('.na-first').value.trim(),
     }).catch(e => ({ error: e.message }));
     if (!out || out.error) {
@@ -8989,12 +9245,12 @@ function openNewAreaForm(project) {
       return;
     }
     ov.remove();
-    toast('✓ area declared · ' + out.project + '/' + out.rel + (out.adopted ? ' (existing folder adopted)' : '') + (out.started ? ' · first conversation started' : ''));
+    toast('✓ area declared · ' + out.project + '/' + out.rel + (out.adopted ? ' (existing folder adopted)' : ' (folder created)') + (out.started ? ' · first conversation started' : ''));
     await load();
     if (out.started && out.started.key) await open(out.started.key, 'bottom');
     else showAreaView(out.project, out.rel);
   };
-  q('.na-rel').focus();
+  picker.focus();
 }
 
 // ---- the shared document body (project page and epic page) ----

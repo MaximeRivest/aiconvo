@@ -9033,6 +9033,61 @@ async function areaResponse(rawProject, rawRel) {
   };
 }
 
+// Candidate folders for a new area. Two sources joined into one list:
+//   1. the project's on-disk subfolders (a bounded walk — depth, count,
+//      and the usual build/dependency noise skipped);
+//   2. every folder a conversation of this project actually ran in, whether
+//      or not the walk reached it (or it still exists on disk).
+// Each row carries the inclusive conversation count, so the picker can show
+// the one fact that matters when declaring an area: how much past work
+// would join it. Cheap: readdir over a few hundred folders, no git.
+const AREA_WALK_SKIP = new Set(['node_modules', '.git', '.venv', 'venv', '__pycache__', 'dist', 'build', 'target',
+  '.next', '.cache', 'coverage', '.folded', '.tox', '.mypy_cache', '.pytest_cache', 'site-packages', '.gradle', '.idea', '.vscode']);
+const AREA_WALK_DEPTH = 3;
+const AREA_WALK_LIMIT = 400;
+async function areaFoldersResponse(rawProject) {
+  const project = canonicalProjectName(String(rawProject || '').trim());
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const root = meta.cwd;
+  if (!root || !fs.existsSync(root)) throw new Error('the project folder is missing: ' + (root || '(unknown)'));
+  const declared = declaredAreasFor(project);
+  // Conversations by the folder they ran in (direct hits, rel to the root).
+  const own = new Map(); // rel -> { n, lastMs }
+  for (const { entry } of meta.entries) {
+    if (!entry.cwd) continue;
+    const rel = areasLib.relOfCwd(entry.cwd);
+    if (!rel) continue;
+    const rec = own.get(rel) || { n: 0, lastMs: 0 };
+    rec.n += 1;
+    rec.lastMs = Math.max(rec.lastMs, Date.parse(entry.lastTs || '') || 0);
+    own.set(rel, rec);
+  }
+  const found = new Map(); // rel -> { exists, git }
+  const walk = async (dir, rel, depth) => {
+    if (depth > AREA_WALK_DEPTH || found.size >= AREA_WALK_LIMIT) return;
+    let ents = [];
+    try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    ents.sort((a, b) => a.name.localeCompare(b.name));
+    for (const ent of ents) {
+      if (found.size >= AREA_WALK_LIMIT) return;
+      if (!ent.isDirectory() || ent.name.startsWith('.') || AREA_WALK_SKIP.has(ent.name)) continue;
+      const childRel = rel ? rel + '/' + ent.name : ent.name;
+      const full = path.join(dir, ent.name);
+      found.set(childRel, { exists: true, git: fs.existsSync(path.join(full, '.git')) });
+      await walk(full, childRel, depth + 1);
+    }
+  };
+  await walk(root, '', 1);
+  const folders = areasLib.folderRows({ found, own, declared, exists: rel => fs.existsSync(path.join(root, rel)) });
+  const home = os.homedir();
+  return {
+    project, cwd: root,
+    display: root === home || root.startsWith(home + path.sep) ? '~' + root.slice(home.length) : root,
+    truncated: found.size >= AREA_WALK_LIMIT, folders,
+  };
+}
+
 // The "memory to include" selection becomes a briefing FILE, not an inline
 // prompt: aiconvo's provenance pattern. The briefing maps the project's work
 // memory (notes, epics, evidence) to real file paths; the agent reads what it
@@ -10911,6 +10966,9 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/area' && req.method === 'GET') {
       try { json(res, 200, await areaResponse(u.searchParams.get('project') || '', u.searchParams.get('rel') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/area/folders' && req.method === 'GET') {
+      try { json(res, 200, await areaFoldersResponse(u.searchParams.get('project') || '')); }
+      catch (e) { json(res, e.message === 'project not found' ? 404 : 400, { error: e.message }); }
     } else if (u.pathname === '/api/area/create' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
