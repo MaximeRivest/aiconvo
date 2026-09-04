@@ -1275,7 +1275,15 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 /* An OPEN steps fold is its own room: a dashed frame walls the tool
    boxes off from the user/assistant prose around them. */
 .toolgroup[open] { border: 1px dashed var(--border-strong); margin: 6px 0; padding-bottom: 6px; background: var(--bg); }
-.toolgroup[open] > summary { border-bottom: 1px dashed var(--border); margin-bottom: 4px; }
+/* An open fold can run for screens. Its line rides at the top of the
+   scroller while the reader is inside it, so the fold control and the
+   "where am I" label are one tap away at any depth. Same top offset as
+   .phead: flush with the scroller's edge. A stuck line gets a hairline
+   shadow so the layering reads as intended. */
+.toolgroup[open] > summary { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 2; background: var(--bg); border-bottom: 1px dashed var(--border); margin-bottom: 4px; padding: 7px 14px; }
+.toolgroup[open] > summary.stuck { box-shadow: 0 1px 0 var(--border-strong), 0 4px 10px -6px rgba(0,0,0,.35); }
+:root[data-theme-mode="binary"] .toolgroup[open] > summary.stuck { box-shadow: 0 1px 0 var(--text); }
+.toolgroup[open] > summary::after { content: " ▴"; color: var(--text-faint); }
 .toolgroup > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 14px; font-size: 11px; color: var(--text-faint); text-align: center; }
 .toolgroup > summary::-webkit-details-marker { display: none; }
 .toolgroup > summary:hover { color: var(--text-dim); }
@@ -13021,8 +13029,7 @@ async function renderConv(scroll) {
   });
   $('view').querySelectorAll('[data-transcript-path]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
   wireTranscriptPathCandidates($('view'), activeRel);
-  $('view').querySelectorAll('.toolgroup').forEach(g =>
-    g.addEventListener('toggle', () => toolGroupOpen.set(activeRel + '|' + g.dataset.gkey, g.open)));
+  wireToolGroups($('view'));
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.
@@ -13376,6 +13383,41 @@ async function mergeCompareGroup(row, btn) {
 // and only follows the bottom when the user is already pinned there.
 const activeRuns = new Map();   // jobId → latest run-event (with tail blocks)
 const toolGroupOpen = new Map(); // conversation + group key → fold choice survives re-renders
+
+// Steps folds. The open line is sticky (CSS), so folding can happen from
+// any depth. Two details make that feel right:
+// 1. Folding from a stuck line must not throw the reader: the fold removes
+//    the height above the viewport, so the page is scrolled by the same
+//    amount and the line stays where the finger was. Done synchronously in
+//    the click, before any paint, instead of in the async toggle event.
+// 2. A stuck line is marked (.stuck) so it can carry a shadow.
+let toolGroupStick = null;
+function wireToolGroups(view) {
+  if (!toolGroupStick && view) {
+    toolGroupStick = new IntersectionObserver(entries => {
+      for (const en of entries) {
+        const stuck = en.intersectionRatio < 1 && en.rootBounds && en.boundingClientRect.top <= en.rootBounds.top + 1;
+        en.target.classList.toggle('stuck', stuck);
+      }
+    }, { root: view, threshold: [1], rootMargin: '-1px 0px 0px 0px' });
+  }
+  toolGroupStick.disconnect(); // the previous render's lines are gone
+  for (const g of view.querySelectorAll('.toolgroup')) {
+    const summary = g.querySelector(':scope > summary');
+    g.addEventListener('toggle', () => toolGroupOpen.set(activeRel + '|' + g.dataset.gkey, g.open));
+    if (!summary) continue;
+    summary.title = 'Fold or show these steps · the line stays at the top while you read them';
+    summary.addEventListener('click', e => {
+      if (e.target.closest('button')) return; // a file link on the line, not the fold
+      e.preventDefault();
+      const before = summary.getBoundingClientRect().top;
+      g.open = !g.open;
+      const delta = summary.getBoundingClientRect().top - before;
+      if (Math.abs(delta) > 1) view.scrollTop += delta;
+    });
+    toolGroupStick.observe(summary);
+  }
+}
 
 // Client-side run ledgers: the server prunes finished blocks from its tail
 // once the session file re-indexes, so the browser keeps its own append-only
