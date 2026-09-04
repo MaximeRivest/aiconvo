@@ -8926,6 +8926,14 @@ function renderAreaPanel(d) {
   const memory = d.memory;
   const o = (memory && memory.overview) || {};
   const vision = memory && (memory.coreIntent || o.vision || o.summary);
+  // A newborn area has no generated memory, but may already hold the vouched
+  // intent written at creation. Say what is true: what exists, what builds
+  // from what, and what the next step is.
+  const hasIntent = !!(d.docs && d.docs.intent);
+  const anyDoc = !!(d.docs && Object.values(d.docs).some(Boolean));
+  const emptyText = d.conversations
+    ? 'No area memory yet. Build it once from the conversations below; after that it stays current with the project.'
+    : `New area — no conversations yet. Start the first one here; area memory builds from what happens in this folder.${hasIntent ? ' The intent written at creation is below and briefs every start.' : ''}`;
   $('view').innerHTML = `<div class="project-overview">
     ${miniGanttHtml(heroRows)}
     <div class="ptitle"><h1><a href="#" id="aUp" title="Back to the project">${esc(d.project)}</a> / ${esc(d.title || d.rel)}</h1><button id="aNew" class="primary pnewbtn" title="Start a conversation in ${esc(d.rel)} — area memory briefs first, then project memory">+ new in ${esc(d.rel)}</button></div>
@@ -8933,7 +8941,7 @@ function renderAreaPanel(d) {
       <div class="pmeta dim">${esc(d.cwd || '')} · ${d.conversations} conversation${d.conversations === 1 ? '' : 's'}${d.latestTs ? ' · last ' + fmtDate(d.latestTs) : ''} · area of ${esc(d.project)}</div>
       ${memory
         ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(vision || '(no area vision yet)')}</p>`
-        : '<p class="psummary dim">No area memory yet. Area documents regenerate from the same conversation leaves as the project — scoped to this folder.</p>'}
+        : `<p class="psummary dim">${emptyText}</p>`}
     </section>
     <section class="psection">
       <h3>conversations</h3>
@@ -8945,8 +8953,8 @@ function renderAreaPanel(d) {
     <div class="pdoclayout"><nav id="pToc" class="ptoc" hidden></nav><div class="pdocmain">
     <div id="pDocBody">${memory ? '<div class="dim">reading the area documents…</div>' : ''}</div>
     <footer class="pfoot"><div class="pmemline dim">
-      ${memory ? `memory ${fmtDate(memory.builtAt)} · ${memory.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}
-      ${d.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : `<button id="aDocsRegen" class="ghost">${memory ? 'regenerate' : 'build'} area docs</button>`}
+      ${memory ? `memory ${fmtDate(memory.builtAt)} · ${memory.stale ? '⚠ stale' : '✓ current'}` : d.conversations ? 'memory: none yet' : 'memory builds from conversations — none yet'}
+      ${d.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : d.conversations ? `<button id="aDocsRegen" class="ghost">${memory ? 'regenerate' : 'build'} area docs</button>` : ''}
       <button id="aRemove" class="ghost pfoldbtn" title="Remove the area declaration. The folder and its conversations stay; they fall back to the project.">un-declare</button>
     </div></footer>
     </div></div>
@@ -8974,7 +8982,7 @@ function renderAreaPanel(d) {
     await load();
     showProjectOverview(d.project);
   };
-  if (memory) renderAreaDocs(d);
+  if (memory || anyDoc) renderAreaDocs(d);
 }
 
 async function renderAreaDocs(d) {

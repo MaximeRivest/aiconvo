@@ -8966,13 +8966,18 @@ async function createArea(body) {
   let started = null;
   const firstPrompt = String(body.firstPrompt || '').trim();
   if (firstPrompt) {
+    // Narrow before wide, from turn one: the vouched intent just written
+    // rides first, then the parent project's memory — the same bundle a
+    // reviewed "+ new in <area>" start would inject. Unlike a newborn
+    // project, an area is born inside memory that already exists.
+    let context = '';
+    try { context = (await buildProjectContextBundle(project, { map: true, area: rel }, '')).text; } catch { context = ''; }
+    context += `\n\n## This area was born today\n\n- Project: ${project} \u2014 area: ${rel}\n- Area folder: ${cwd}\n- ${adopted ? 'An existing folder, adopted as a declared inner scope.' : 'A new folder, created now.'} No area memory exists yet; it builds from the conversations that happen here.\n`;
     started = await startProjectConversation({
       project, area: rel, agent: body.agent === 'claude' ? 'claude' : 'pi',
       mode: body.mode || null, models: Array.isArray(body.models) ? body.models : [],
       surface: body.surface || 'rpc',
-      include: { map: false }, // no area memory exists yet; nothing to brief
-      context: `# Project: ${project} \u2014 area: ${rel}\n\n- Area folder: ${cwd}\n- Born today \u2014 a declared inner scope of the project.` +
-        (intent ? `\n\n## Area intent (human-written at creation, vouched)\n\n${intent}` : ''),
+      include: { map: true }, context,
       kickoffText: firstPrompt, name: '',
     });
   }
