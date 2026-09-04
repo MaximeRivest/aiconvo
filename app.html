@@ -2085,8 +2085,11 @@ function dispatchHash(h) {
   }
   if (h.startsWith('note=')) return openNoteFile(h.slice(5));
   if (h.startsWith('doc=')) {
-    const [docPath, project] = h.slice(4).split('&').map(s => { try { return decodeURIComponent(s); } catch { return s; } });
-    return openDocument(docPath, project || null);
+    // doc=PATH[&PROJECT][&conv=KEY]. conv= names the conversation the
+    // document was opened from, so a reload or a switched window keeps
+    // "← conversation" pointing at the right place.
+    const [docPath, project, origin] = h.slice(4).split('&').map(s => { try { return decodeURIComponent(s); } catch { return s; } });
+    return openDocument(docPath, project || null, origin && origin.startsWith('conv=') ? origin.slice(5) : null);
   }
   if (h.startsWith('tree=')) return showTree(h.slice(5));
   if (h === 'git') { goHome(); return setTab('repos'); }
@@ -2114,7 +2117,9 @@ function dispatchHash(h) {
     return openToolCallFile(key, pathValue, ts, anchor, call);
   }
   if (h.startsWith('blame=')) return showFileBlame(h.slice(6));
-  if (viewKind === 'file' && conversationFileReturn && conversationFileReturn.key === h)
+  // Browser Back from a file change or a document opened out of the
+  // conversation lands on the control that opened it, not at the bottom.
+  if ((viewKind === 'file' || viewKind === 'doc') && conversationFileReturn && conversationFileReturn.key === h)
     return returnToConversationFile(h, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call);
   return open(h);
 }
@@ -6613,11 +6618,16 @@ function rememberConversationFileReturn(button) {
   if (!button || !view || viewKind !== 'conversation') return;
   const viewRect = view.getBoundingClientRect();
   const group = button.closest('.toolgroup');
+  // A path link in prose has no tool timestamp: its message row is the anchor.
+  const row = button.closest('.msg[data-ts]');
   conversationFileReturn = {
     key: activeRel,
-    path: button.dataset.fileDiff || '',
+    // A change link carries the file of a tool call; a path link carries a
+    // file the prose mentioned. The return looks for the same kind.
+    path: button.dataset.fileDiff || button.dataset.transcriptPath || '',
+    change: !!button.dataset.fileDiff,
     call: button.dataset.fileCall || '',
-    ts: button.dataset.fileAnchor || button.dataset.fileTs || '',
+    ts: button.dataset.fileAnchor || button.dataset.fileTs || (row ? row.dataset.ts : '') || '',
     className: button.className || '',
     groupKey: group ? group.dataset.gkey || '' : '',
     offset: button.getBoundingClientRect().top - viewRect.top,
@@ -6633,13 +6643,15 @@ async function returnToConversationFile(key, pathValue, ts, callId) {
   requestAnimationFrame(() => {
     const view = $('view');
     if (!view) return;
-    let buttons = [...view.querySelectorAll('[data-file-diff]')].filter(button =>
-      (!pathValue || button.dataset.fileDiff === pathValue) &&
+    const attr = saved && !saved.change ? 'transcriptPath' : 'fileDiff';
+    const selector = attr === 'fileDiff' ? '[data-file-diff]' : '[data-transcript-path]';
+    let buttons = [...view.querySelectorAll(selector)].filter(button =>
+      (!pathValue || button.dataset[attr] === pathValue) &&
       (!callId || button.dataset.fileCall === callId));
     let fallbackMessage = null;
     if (!buttons.length && ts) {
       fallbackMessage = view.querySelector(`[data-ts="${CSS.escape(ts)}"]`);
-      if (fallbackMessage) buttons = [...fallbackMessage.querySelectorAll('[data-file-diff]')];
+      if (fallbackMessage) buttons = [...fallbackMessage.querySelectorAll(selector)];
     }
     let target = buttons[0] || fallbackMessage;
     if (saved && buttons.length > 1) {
@@ -7728,28 +7740,49 @@ function unwrapHardLines(text) {
 // The standalone document view (a markdown link from a conversation, or a
 // #doc= hash). Project documents normally open inside the project's
 // documents page instead, where the complete list sits beside the editor.
-async function openDocument(docPath, project = null) {
+// fromConversation: the key of the conversation whose path link opened this
+// document. Then the back control returns to that conversation at the link
+// (rememberConversationFileReturn), and the route keeps the origin so a
+// reload or a window switch does not lose it. Without it, the document
+// belongs to the project's documents page.
+async function openDocument(docPath, project = null, fromConversation = null) {
   if (!docPath) return;
   markSettingsClosed();
   flushAndCloseDocument();
   if (project) projectOverviewName = project;
   const name = String(docPath).split('/').pop();
-  setRoute('doc', 'doc=' + encodeURIComponent(docPath) + (project ? '&' + encodeURIComponent(project) : ''),
-    project ? [crumbHome(), crumbProject(project), { label: '☰ ' + name, title: docPath }]
-      : [crumbHome(), { label: '☰ ' + name, title: docPath }]);
-  $('view').innerHTML = `<div class="doc-view">${documentHeadHtml(docPath, project ? '← documents' : null)}
+  const doc = { label: '☰ ' + name, title: docPath };
+  // The project segment stays optional (old links keep working); it is
+  // only written empty when a conv= segment must follow it.
+  const hash = 'doc=' + encodeURIComponent(docPath) +
+    (project ? '&' + encodeURIComponent(project) : fromConversation ? '&' : '') +
+    (fromConversation ? '&conv=' + encodeURIComponent(fromConversation) : '');
+  setRoute('doc', hash,
+    fromConversation ? convCrumbs(fromConversation, doc)
+      : project ? [crumbHome(), crumbProject(project), doc] : [crumbHome(), doc]);
+  const back = fromConversation ? ['← conversation', 'Back to the conversation, at the link that opened this document']
+    : project ? ['← documents', 'Every markdown document in ' + project] : null;
+  $('view').innerHTML = `<div class="doc-view">${documentHeadHtml(docPath, back)}
     <div class="doc-editor-host"><div id="docEditor"></div></div>
   </div>`;
-  if ($('docBack')) $('docBack').onclick = () => showProjectDocuments(project, docPath);
+  if ($('docBack')) $('docBack').onclick = () => {
+    if (!fromConversation) return showProjectDocuments(project, docPath);
+    // After a reload the return point is gone: open the conversation plainly
+    // rather than guess at a control.
+    const saved = conversationFileReturn && conversationFileReturn.key === fromConversation ? conversationFileReturn : null;
+    if (saved) returnToConversationFile(fromConversation, saved.path, saved.ts, saved.call);
+    else open(fromConversation);
+  };
   await mountDocumentEditor(docPath, project);
 }
 
 // The editor head bar. Ids are shared with the project documents page, so
 // docStatusLine / commitDocument / reloadDocumentFromDisk work in both.
+// back: null, or [label, title] for the leading back control.
 function documentHeadHtml(docPath, back) {
   const name = String(docPath).split('/').pop();
   return `<div class="doc-head">
-      ${back ? `<button id="docBack">${esc(back)}</button>` : ''}
+      ${back ? `<button id="docBack" title="${esc(back[1])}">${esc(back[0])}</button>` : ''}
       <b class="doc-title" title="${esc(docPath)}">${esc(name)}</b>
       <span class="dim" id="docStatus">loading…</span>
       <button id="docReload" hidden title="The disk file changed — reload it (your unsaved edits are lost)">reload from disk</button>
@@ -9303,7 +9336,11 @@ async function openMarkdownInEditor(ctx, quiet = false) {
     return false;
   }
   const s = sessions.find(x => x.key === ctx.key);
-  openDocument(probe.path, s ? projectOf(s) : null);
+  // Only a link inside the open conversation carries a return point.
+  // ctx.key is the last active conversation even on project pages.
+  const fromConversation = viewKind === 'conversation' && ctx.key === activeRel ? ctx.key : null;
+  if (fromConversation) rememberConversationFileReturn(ctx.button);
+  openDocument(probe.path, s ? projectOf(s) : null, fromConversation);
   return true;
 }
 
