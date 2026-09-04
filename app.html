@@ -865,7 +865,7 @@ body.file-full .file-inspector .fi-columns.paged { height: auto; }
 .qf-cmd { margin: 0; padding: 8px 12px; white-space: pre-wrap; font: 11px/1.45 var(--font); }
 .quick-file-view .fi-columns { max-height: none; overflow: visible; }
 [data-file-diff].kbd-pick { outline: 2px solid var(--accent); outline-offset: 1px; }
-[data-file-diff].file-return-jump { outline: 2px solid var(--accent); outline-offset: 2px; }
+[data-file-diff].file-return-jump, [data-transcript-path].file-return-jump { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ff-sheet { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .ff-sheet .fi-columns { height: 100%; overflow: hidden; }
 .ff-sheet.scroll .fi-columns { overflow: auto; }
@@ -6666,13 +6666,35 @@ async function returnToConversationFile(key, pathValue, ts, callId) {
       if (saved) view.scrollTop = saved.scrollTop;
       return;
     }
-    if (!saved) {
-      for (let node = target.parentElement; node && node !== view; node = node.parentElement)
-        if (node.tagName === 'DETAILS') node.open = true;
-      target.scrollIntoView({ block: 'center' });
-    } else {
+    // Reveal first, then position. A fresh render folds every long message
+    // back to one screen and closes branches; the control the reader
+    // clicked was visible, so it must be visible again before any offset
+    // is measured. The <details> property write fires the toggle listeners,
+    // so remembered fold state stays honest.
+    for (let node = target.parentElement; node && node !== view; node = node.parentElement) {
+      if (node.tagName === 'DETAILS') node.open = true;
+      if (node.classList.contains('folded')) { const b = node.querySelector(':scope > .unfold'); if (b) b.click(); }
+    }
+    const land = () => {
+      if (!saved) return target.scrollIntoView({ block: 'center' });
       const viewRect = view.getBoundingClientRect();
       view.scrollTop += target.getBoundingClientRect().top - viewRect.top - saved.offset;
+      return view.scrollTop;
+    };
+    let lastSet = land();
+    // Screenshots above the target load after layout and push it down.
+    // Re-land for a short window, but never over a scroll the reader
+    // started (same rule as the reply landing in renderConv).
+    if (saved) {
+      const until = Date.now() + 2500;
+      for (const im of view.querySelectorAll('img')) {
+        if (im.complete) continue;
+        im.addEventListener('load', () => {
+          if (Date.now() > until || !target.isConnected) return;
+          if (Math.abs(view.scrollTop - lastSet) > 4) return;
+          lastSet = land();
+        }, { once: true });
+      }
     }
     target.classList.add('file-return-jump');
     setTimeout(() => target.classList.remove('file-return-jump'), 1800);
