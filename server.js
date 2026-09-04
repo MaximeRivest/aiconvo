@@ -8070,12 +8070,26 @@ async function transcriptPathInfo(key, pathValue, { local = false, maxBytes = In
   const expanded = expandHomePath(clean);
   const cwd = key && index[key] ? index[key].cwd || '' : '';
   if (!path.isAbsolute(expanded) && !cwd) throw new Error('relative path without a conversation');
-  const wanted = path.resolve(path.isAbsolute(expanded) ? expanded : path.join(cwd, expanded));
+  // A relative path resolves against the conversation's cwd first. When the
+  // agent ran in a subfolder, models still quote paths from the repository
+  // root, so that root is the second try.
+  const bases = path.isAbsolute(expanded) ? [''] : [cwd];
+  if (!path.isAbsolute(expanded)) {
+    const root = (gitRepoIndexCache.repos || [])
+      .filter(repo => pathInside(cwd, repo.root) && path.resolve(repo.root) !== path.resolve(cwd))
+      .sort((a, b) => b.root.length - a.root.length)[0];
+    if (root) bases.push(root.root);
+  }
   let abs, stat;
-  try {
-    abs = await fsp.realpath(wanted);
-    stat = await fsp.stat(abs);
-  } catch { throw new Error('file not found on disk'); }
+  for (const base of bases) {
+    const wanted = path.resolve(base ? path.join(base, expanded) : expanded);
+    try {
+      abs = await fsp.realpath(wanted);
+      stat = await fsp.stat(abs);
+      break;
+    } catch { abs = stat = null; }
+  }
+  if (!stat) throw new Error('file not found on disk');
   if (!stat.isFile() && !stat.isDirectory()) throw new Error('not a regular file or directory');
   if (stat.isFile() && stat.size > maxBytes) throw new Error('file is too large to open here');
 
@@ -10432,6 +10446,25 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/path/read' && req.method === 'GET') {
       try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/path/exists' && req.method === 'POST') {
+      // Batch probe for file names quoted in chat prose. The client only
+      // turns a mention into a link when the path really exists, so the
+      // transcript never shows dead links. Limits keep one render cheap.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const input = JSON.parse(body || '{}');
+        const paths = [...new Set((Array.isArray(input.paths) ? input.paths : []).map(String))].slice(0, 300);
+        const local = isLocalRequest(req);
+        const found = {};
+        await Promise.all(paths.map(async p => {
+          try {
+            const info = await transcriptPathInfo(input.id, p, { local });
+            found[p] = { path: info.abs, kind: info.stat.isDirectory() ? 'directory' : 'file' };
+          } catch { found[p] = null; }
+        }));
+        json(res, 200, { found });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/path/action' && req.method === 'POST') {
       if (!isLocalRequest(req)) return json(res, 403, { error: 'system file actions are available only on the laptop' });
       let body = '';

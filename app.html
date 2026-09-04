@@ -1241,6 +1241,9 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .msg-media img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .msg-path { border: 0; border-bottom: 1px dotted var(--border-strong); background: transparent; color: var(--cyan); padding: 0; height: auto; font: inherit; text-align: left; }
 .msg-path:hover { background: transparent; color: var(--text); }
+/* A confirmed file mention inside inline code: same dotted cue as a path button. */
+.md code[data-transcript-path] { cursor: pointer; color: var(--cyan); border-bottom: 1px dotted var(--border-strong); }
+.md code[data-transcript-path]:hover { color: var(--text); }
 .media-lightbox { position: fixed; inset: 0; z-index: 10020; display: grid; grid-template-rows: auto minmax(0, 1fr); background: color-mix(in srgb, var(--bg) 94%, transparent); }
 .media-lightbox-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
 .media-lightbox-head button { margin-left: auto; }
@@ -9130,6 +9133,42 @@ function messageMediaHtml(images) {
     return `<button type="button" data-media-src="${esc(src)}" title="Open image ${i + 1} of ${images.length}"><img src="${esc(src)}" loading="lazy" decoding="async" alt="Attached image ${i + 1}"></button>`;
   }).join('')}</div>`;
 }
+// File names quoted in chat prose (`README.md`, `plans/`) become links only
+// after the server confirms they exist next to the conversation's cwd.
+// Results are cached per conversation, so a re-render (streaming, fold,
+// search) links known files at once and asks only about new names.
+const pathCandidateCache = new Map();
+function linkPathCandidate(el, hit) {
+  el.removeAttribute('data-path-candidate');
+  if (!hit) return;
+  el.dataset.transcriptPath = hit.path;
+  el.setAttribute('role', 'button');
+  el.tabIndex = 0;
+  el.onclick = e => handleFileControlClick(e, el);
+}
+async function wireTranscriptPathCandidates(root, key) {
+  if (!root || !key) return;
+  const pending = new Map();
+  for (const el of root.querySelectorAll('code[data-path-candidate]')) {
+    const cand = el.dataset.pathCandidate;
+    const cacheKey = key + '|' + cand;
+    if (pathCandidateCache.has(cacheKey)) { linkPathCandidate(el, pathCandidateCache.get(cacheKey)); continue; }
+    if (!pending.has(cand)) pending.set(cand, []);
+    pending.get(cand).push(el);
+  }
+  if (!pending.size) return;
+  let out;
+  try { out = await postJson('/api/path/exists', { id: key, paths: [...pending.keys()] }); }
+  catch { out = {}; }
+  const found = out && out.found ? out.found : {};
+  for (const [cand, els] of pending) {
+    const hit = found[cand] || null;
+    if (cand in found) pathCandidateCache.set(key + '|' + cand, hit);
+    if (activeRel !== key) continue;
+    for (const el of els) if (el.isConnected) linkPathCandidate(el, hit);
+  }
+}
+
 function transcriptPathButton(pathValue, label = '') {
   return `<button type="button" class="msg-path" data-transcript-path="${esc(pathValue)}" title="Open ${esc(pathValue)}">${esc(label || pathValue)}</button>`;
 }
@@ -12910,6 +12949,7 @@ async function renderConv(scroll) {
     openMediaLightbox(b.dataset.mediaSrc, b.title || 'image');
   });
   $('view').querySelectorAll('[data-transcript-path]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
+  wireTranscriptPathCandidates($('view'), activeRel);
   $('view').querySelectorAll('.toolgroup').forEach(g =>
     g.addEventListener('toggle', () => toolGroupOpen.set(activeRel + '|' + g.dataset.gkey, g.open)));
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
@@ -14001,6 +14041,28 @@ function parseNote(text) {
   return note;
 }
 
+// relPathCandidate: the text of a code span, already HTML-escaped, when it
+// reads like a file path relative to the conversation's folder. Absolute and
+// home paths are handled earlier (pathify). Anything with call syntax,
+// spaces, entities, or nested markup is not a path. Dotted identifiers like
+// `lmcc.load` still pass: the disk check on the server sorts those out.
+function relPathCandidate(text) {
+  let s = String(text).trim();
+  if (!s || s.length > 200 || /[\s<>&"'`(){}\[\]=*$,;|\\]/.test(s)) return '';
+  if (s.startsWith('/') || s.startsWith('~')) return '';
+  s = s.replace(/^\.\//, '');
+  const clean = s.replace(/:\d+(?::\d+)?$/, '');
+  if (!/^(?:[\w.@+-]+\/)*[\w.@+-]+\/?$/.test(clean)) return '';
+  if (/(^|\/)\.\.?(\/|$)/.test(clean)) return '';
+  const leaf = clean.replace(/\/$/, '').split('/').pop();
+  const hasDir = clean.includes('/');
+  const hasExt = /^[\w@+-]+\.[A-Za-z0-9]{1,10}$/.test(leaf) || /^\.[\w-]+$/.test(leaf);
+  const known = /^(README|LICENSE|CHANGELOG|CONTRIBUTING|Makefile|Dockerfile|Justfile|AGENTS|CLAUDE|TODO)$/i.test(leaf);
+  if (!hasDir && !hasExt && !known) return '';
+  if (/^\d+(\.\d+)+$/.test(leaf)) return '';
+  return s;
+}
+
 // Small markdown renderer for transcripts and notes. Headings, bold/italic/strike,
 // inline + fenced code, bullet and numbered lists, blockquotes, tables, rules, links.
 // q (optional) wraps search matches in <mark>.
@@ -14039,8 +14101,16 @@ function mdRender(src, q = '') {
       }
       return `${pre}<a href="${url}" target="_blank" rel="noopener">${url}</a>${tail}`;
     });
+  // A code span that reads like a relative file (`README.md`, `src/a.py:12`,
+  // `plans/`) is only a candidate here. The conversation view asks the
+  // server which candidates exist next to the session's cwd and links those
+  // (wireTranscriptPathCandidates). Notes and docs keep them as plain code.
+  const codeSpan = c => {
+    const cand = relPathCandidate(c);
+    return cand ? `<code data-path-candidate="${cand}">${c}</code>` : `<code>${c}</code>`;
+  };
   const inline = s => linkify(pathify(mark(esc(s)))
-    .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/`([^`]+)`/g, (_, c) => codeSpan(c))
     .replace(/\*\*((?:[^*]|\*(?!\*))+?)\*\*/g, '<b>$1</b>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>')
     .replace(/~~([^~]+)~~/g, '<s>$1</s>'));

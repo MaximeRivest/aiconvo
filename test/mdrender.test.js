@@ -105,3 +105,24 @@ test('query strings keep their ampersands and a markdown link is not re-linked',
   assert.strictEqual((h.match(/<a /g) || []).length, 1);
   assert.match(h, /<a href="https:\/\/a\.io"[^>]*>https:\/\/a\.io<\/a>/);
 });
+
+// relPathCandidate lives next to mdRender: same extraction trick.
+const rpStart = html.indexOf('function relPathCandidate');
+const rpEnd = html.indexOf('// Small markdown renderer');
+// eslint-disable-next-line no-eval
+const relPathCandidate = eval('(' + html.slice(rpStart, rpEnd).replace(/^function relPathCandidate/, 'function') + ')');
+
+test('relative file mentions in code spans are candidates', () => {
+  for (const ok of ['README.md', 'GUIDE.md', 'contract/spec/errors.md', 'plans/', 'src/a.py:12', 'src/a.py:12:3', './lib/x.js', 'Makefile', '.gitignore', 'src/lib'])
+    assert.ok(relPathCandidate(ok), 'expected candidate: ' + ok);
+  for (const no of ['plan.describe()', 'lmcc_std.install(registry=None)', 'json_object', '/abs/path.md', '~/x.md', 'a b.md', '../x.md', 'x=1', '1.2.3', 'a&amp;b.md', '<b>x</b>.md', 'Streaming'])
+    assert.strictEqual(relPathCandidate(no), '', 'unexpected candidate: ' + no);
+  assert.strictEqual(relPathCandidate('./lib/x.js'), 'lib/x.js');
+});
+
+test('mdRender marks path-like code spans as candidates only', () => {
+  const h = mdRender('read `README.md` and `plan.describe()`');
+  assert.match(h, /<code data-path-candidate="README\.md">README\.md<\/code>/);
+  assert.match(h, /<code>plan\.describe\(\)<\/code>/);
+  assert.ok(!h.includes('data-transcript-path'));
+});
