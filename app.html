@@ -6620,13 +6620,20 @@ function rememberConversationFileReturn(button) {
   const group = button.closest('.toolgroup');
   // A path link in prose has no tool timestamp: its message row is the anchor.
   const row = button.closest('.msg[data-ts]');
+  // The same file name can appear many times in one conversation. A path
+  // link has no call id, so its identity is: the message row, then its
+  // rank among links to the same file inside that row.
+  const pathValue = button.dataset.fileDiff || button.dataset.transcriptPath || '';
+  const scope = row || view;
+  const siblings = button.dataset.fileDiff ? [] : [...scope.querySelectorAll('[data-transcript-path]')].filter(b => b.dataset.transcriptPath === pathValue);
   conversationFileReturn = {
     key: activeRel,
     // A change link carries the file of a tool call; a path link carries a
     // file the prose mentioned. The return looks for the same kind.
-    path: button.dataset.fileDiff || button.dataset.transcriptPath || '',
+    path: pathValue,
     change: !!button.dataset.fileDiff,
     call: button.dataset.fileCall || '',
+    ordinal: Math.max(0, siblings.indexOf(button)),
     ts: button.dataset.fileAnchor || button.dataset.fileTs || (row ? row.dataset.ts : '') || '',
     className: button.className || '',
     groupKey: group ? group.dataset.gkey || '' : '',
@@ -6654,7 +6661,12 @@ async function returnToConversationFile(key, pathValue, ts, callId) {
       if (fallbackMessage) buttons = [...fallbackMessage.querySelectorAll(selector)];
     }
     let target = buttons[0] || fallbackMessage;
-    if (saved && buttons.length > 1) {
+    if (saved && !saved.change && buttons.length > 1) {
+      // Prose links: the remembered row first, then the remembered rank.
+      const inRow = ts ? buttons.filter(b => { const r = b.closest('.msg[data-ts]'); return r && r.dataset.ts === ts; }) : [];
+      const pool = inRow.length ? inRow : buttons;
+      target = pool[Math.min(saved.ordinal || 0, pool.length - 1)];
+    } else if (saved && buttons.length > 1) {
       target = buttons.sort((a, b) => {
         const score = button =>
           (button.className === saved.className ? 4 : 0) +
