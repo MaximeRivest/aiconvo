@@ -9644,8 +9644,11 @@ async function copyFullFilePath(ctx) {
 // read-only preview instead.
 async function openMarkdownInEditor(ctx, quiet = false) {
   const clean = ctx.path.replace(/:(\d+)(?::(\d+))?$/, '');
+  // The conversation id lets the server resolve a relative link the same
+  // way the preview and diff views do: against the conversation cwd.
+  const query = new URLSearchParams({ id: ctx.key || '', path: clean });
   let probe;
-  try { probe = await (await fetch('/api/file/read?path=' + encodeURIComponent(clean))).json(); }
+  try { probe = await (await fetch('/api/file/read?' + query)).json(); }
   catch { probe = { error: 'network failure' }; }
   if (probe.error) {
     if (!quiet) errToast(probe.error);

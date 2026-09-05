@@ -8026,10 +8026,31 @@ function expandHomePath(p) {
 
 const sha256Hex = text => crypto.createHash('sha256').update(text).digest('hex');
 
-async function editableFilePath(pathValue) {
-  const abs = path.resolve(expandHomePath(pathValue));
-  let st;
-  try { st = await fsp.stat(abs); } catch { throw new Error('file not found on disk'); }
+// One resolver for every path a transcript quotes. Absolute and ~ paths
+// stand alone. A relative path resolves against the conversation's cwd
+// first; when the agent ran in a subfolder, models still quote paths from
+// the repository root, so that root is the second try. Never the server's
+// own process cwd — that is meaningless to the user.
+function transcriptPathCandidates(key, pathValue) {
+  const expanded = expandHomePath(pathWithoutLocation(pathValue));
+  if (!expanded) throw new Error('missing path');
+  if (path.isAbsolute(expanded)) return [path.resolve(expanded)];
+  const cwd = key && index[key] ? index[key].cwd || '' : '';
+  if (!cwd) throw new Error('relative path without a conversation');
+  const bases = [cwd];
+  const root = (gitRepoIndexCache.repos || [])
+    .filter(repo => pathInside(cwd, repo.root) && path.resolve(repo.root) !== path.resolve(cwd))
+    .sort((a, b) => b.root.length - a.root.length)[0];
+  if (root) bases.push(root.root);
+  return bases.map(base => path.resolve(path.join(base, expanded)));
+}
+
+async function editableFilePath(pathValue, key = '') {
+  let abs = null, st = null;
+  for (const candidate of transcriptPathCandidates(key, pathValue)) {
+    try { st = await fsp.stat(candidate); abs = candidate; break; } catch { abs = st = null; }
+  }
+  if (!st) throw new Error('file not found on disk');
   if (!st.isFile()) throw new Error('not a regular file');
   if (st.size > FILE_EDIT_MAX) throw new Error('file too large to edit here');
   const inside = root => root && (abs === root || abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep));
@@ -8066,23 +8087,8 @@ function pathInside(abs, root) {
 // app windows can preview paths under home and tmp. Authenticated LAN readers
 // keep the narrower project/repository policy and can never launch host apps.
 async function transcriptPathInfo(key, pathValue, { local = false, maxBytes = Infinity } = {}) {
-  const clean = pathWithoutLocation(pathValue);
-  const expanded = expandHomePath(clean);
-  const cwd = key && index[key] ? index[key].cwd || '' : '';
-  if (!path.isAbsolute(expanded) && !cwd) throw new Error('relative path without a conversation');
-  // A relative path resolves against the conversation's cwd first. When the
-  // agent ran in a subfolder, models still quote paths from the repository
-  // root, so that root is the second try.
-  const bases = path.isAbsolute(expanded) ? [''] : [cwd];
-  if (!path.isAbsolute(expanded)) {
-    const root = (gitRepoIndexCache.repos || [])
-      .filter(repo => pathInside(cwd, repo.root) && path.resolve(repo.root) !== path.resolve(cwd))
-      .sort((a, b) => b.root.length - a.root.length)[0];
-    if (root) bases.push(root.root);
-  }
   let abs, stat;
-  for (const base of bases) {
-    const wanted = path.resolve(base ? path.join(base, expanded) : expanded);
+  for (const wanted of transcriptPathCandidates(key, pathValue)) {
     try {
       abs = await fsp.realpath(wanted);
       stat = await fsp.stat(abs);
@@ -8229,8 +8235,8 @@ async function nativePathAction(key, pathValue, action) {
   return { ok: true, action, path: abs };
 }
 
-async function fileReadResponse(pathValue) {
-  const abs = await editableFilePath(pathValue);
+async function fileReadResponse(pathValue, key = '') {
+  const abs = await editableFilePath(pathValue, key);
   const text = await fsp.readFile(abs, 'utf8');
   return { path: abs, text, sha: sha256Hex(text) };
 }
@@ -10791,7 +10797,7 @@ const server = http.createServer(async (req, res) => {
       try { json(res, 200, await fileBlameResponse(pathValue, u.searchParams.get('project') || '', u.searchParams.get('key') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/file/read' && req.method === 'GET') {
-      try { json(res, 200, await fileReadResponse(u.searchParams.get('path') || '')); }
+      try { json(res, 200, await fileReadResponse(u.searchParams.get('path') || '', u.searchParams.get('id') || '')); }
       catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/file/save' && req.method === 'POST') {
       let body = '';
