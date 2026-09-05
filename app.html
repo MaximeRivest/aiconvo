@@ -8662,6 +8662,9 @@ function renderProjectPanel(d) {
   const pyramid = d.pyramid || {};
   const leaves = pyramid.leaves || {};
   const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
+  // Leaves already on disk: enough for a first document build even when a few
+  // conversations still lack one (the build reads whatever leaves exist).
+  const haveLeaves = (leaves.fresh || 0) + (leaves.stale || 0) + (leaves.seeded || 0);
   const heroRows = sessions.filter(s => projectOf(s) === d.project)
     .map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
   const displayTitle = d.title || d.project;
@@ -8684,7 +8687,7 @@ function renderProjectPanel(d) {
     <section class="psection pdesc">
       ${memory
         ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(vision || '(no project vision yet)')}</p>`
-        : '<p class="psummary dim">No project vision yet. Build the memory leaves once — after that, the documents stay current automatically.</p>'}
+        : `<p class="psummary dim">No project vision yet. ${haveLeaves ? 'The memory leaves exist — build the memory documents once; after that they stay current automatically.' : 'Build the memory leaves once — after that, the documents stay current automatically.'}</p>`}
       ${d.epics.length ? `<div class="pepicstrip"><span class="pes-label">epics</span>${d.epics.map(e => `<a href="#" data-p-epic-open="${esc(e.id)}" title="Open the epic · ${e.sessionIds.length} conversations · updated ${fmtDate(e.updatedAt)}">▸ ${esc(e.title)}<span class="pes-n">${e.sessionIds.length}</span></a>`).join('')}</div>` : ''}
     </section>
     ${(d.areas || []).length || areaCandidates.length ? `<section class="psection pareas"><h3>areas <span class="dim">declared inner scopes — own memory, own briefing</span></h3>${(d.areas || []).length ? `<div class="pareacards">${d.areas.map(a => `
@@ -8698,7 +8701,7 @@ function renderProjectPanel(d) {
       <div class="pmemline dim">
         <span title="${memory ? 'The generated project memory: overview, intent, environment, status' : 'No generated memory yet'}">${memory ? `memory ${fmtDate(memory.builtAt)} · ${pyramid.docs && pyramid.docs.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}</span>
         ${pyramid.backfillRunning ? '<span><span class="spin">░</span> extracting leaves…</span>' : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : ''}
-        ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : ''}
+        ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : haveLeaves ? `<button id="pDocsRegen" class="ghost" title="First build: overview, intent, environment, status from ${haveLeaves} memory ${haveLeaves === 1 ? 'leaf' : 'leaves'}">build memory docs</button>` : ''}
         <span class="psep"></span>
         <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
       </div>
@@ -8756,10 +8759,10 @@ function renderProjectPanel(d) {
   const pDocsRegen = $('pDocsRegen');
   if (pDocsRegen) pDocsRegen.onclick = async () => {
     const out = await postJson('/api/project/memory/regenerate', { project: d.project });
-    if (out.error) return errToast('regeneration failed to start: ' + out.error);
+    if (out.error) return errToast((memory ? 'regeneration' : 'memory build') + ' failed to start: ' + out.error);
     updateJob(out);
     toggleJobs(true);
-    pDocsRegen.outerHTML = '<span><span class="spin">░</span> regenerating docs…</span>';
+    pDocsRegen.outerHTML = `<span><span class="spin">░</span> ${memory ? 'regenerating' : 'building'} docs…</span>`;
   };
   $('pNew').onclick = () => startReviewedConversation(d.project);
   $('pAreaNew').onclick = () => openNewAreaForm(d.project);
