@@ -7287,46 +7287,6 @@ async function gitIntervalNumstat(root, fromId, toId) {
   return files;
 }
 
-async function gitFileCompareResponse(root, file, fromId = '', toId = '', fromAt = '', toAt = '', light = false) {
-  const ctx = await gitFileContext(root, file);
-  const points = fileHistoryPoints(ctx);
-  if (!points.length) throw new Error('this file has no Git or working-tree points');
-  let to = points.find(point => point.id === toId) || nearestFilePoint(points, toAt) || points[points.length - 1];
-  const beforeTo = points.filter(point => point.order < to.order);
-  const defaultFrom = [...beforeTo].reverse().find(point => point.kind === 'git') || beforeTo[beforeTo.length - 1] || to;
-  let from = points.find(point => point.id === fromId) || nearestFilePoint(points, fromAt) || defaultFrom;
-  if (from.order > to.order) [from, to] = [to, from];
-  const [oldSnapshot, newSnapshot] = await Promise.all([snapshotAtFilePoint(ctx, from), snapshotAtFilePoint(ctx, to)]);
-  const changes = [];
-  if (!light) {
-    for (const commit of ctx.commits) {
-      const point = points.find(item => item.hash === commit.hash);
-      if (!point || point.order <= from.order || point.order > to.order) continue;
-      const patch = await commitPatch(ctx.root, commit.hash, ctx.relativePath);
-      changes.push({
-        type: 'git', id: commit.hash, hash: commit.hash, shortHash: commit.shortHash,
-        ts: commit.ts, kind: 'commit', subject: commit.subject, ...patchChangeText(patch),
-      });
-    }
-    changes.sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
-  }
-  return {
-    scope: 'git', project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
-    points, from: from.id, to: to.id, old: oldSnapshot, new: newSnapshot, changes,
-    truth: 'Git and current-file points are exact. This view has no AI reconstructions.',
-  };
-}
-
-async function gitFileSnapshotsResponse(root, file) {
-  const ctx = await gitFileContext(root, file);
-  const points = fileHistoryPoints(ctx);
-  const snapshots = await mapLimit(points, 6, async point => snapshotAtFilePoint(ctx, point));
-  return {
-    scope: 'git', project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
-    points, snapshots,
-  };
-}
-
 async function gitCommitResponse(root, hash) {
   const listed = await discoverGitRepos();
   const resolved = path.resolve(root || '');
@@ -8038,50 +7998,6 @@ function patchChangeText(patch) {
   return { oldText: oldLines.join('\n'), newText: newLines.join('\n') };
 }
 
-function nearestFilePoint(points, value) {
-  if (value === '' || value === null || value === undefined) return null;
-  const ms = Number(value);
-  if (!Number.isFinite(ms)) return null;
-  return points.reduce((best, point) => !best || Math.abs(point.ms - ms) < Math.abs(best.ms - ms) ? point : best, null);
-}
-
-async function projectFileCompareResponse(project, root, file, fromId = '', toId = '', fromAt = '', toAt = '') {
-  const ctx = await projectFileContext(project, root, file);
-  const points = fileHistoryPoints(ctx);
-  if (!points.length) throw new Error('this file has no selectable history points');
-  let to = points.find(point => point.id === toId) || nearestFilePoint(points, toAt) || points[points.length - 1];
-  const beforeTo = points.filter(point => point.order < to.order);
-  const defaultFrom = [...beforeTo].reverse().find(point => point.kind === 'git') || beforeTo[beforeTo.length - 1] || to;
-  let from = points.find(point => point.id === fromId) || nearestFilePoint(points, fromAt) || defaultFrom;
-  if (from.order > to.order) [from, to] = [to, from];
-  const [oldSnapshot, newSnapshot] = await Promise.all([snapshotAtFilePoint(ctx, from), snapshotAtFilePoint(ctx, to)]);
-  const changes = [];
-  for (const event of ctx.events) {
-    const point = points.find(item => item.eventId === event.id);
-    if (!point || point.order <= from.order || point.order > to.order) continue;
-    changes.push({
-      type: 'ai', id: event.id, key: event.key, ts: event.ts, kind: event.kind,
-      agent: event.agent, conversationTitle: event.conversationTitle, outcome: event.outcome,
-      oldText: event.oldText || '', newText: event.newText || '',
-    });
-  }
-  for (const commit of ctx.commits) {
-    const point = points.find(item => item.hash === commit.hash);
-    if (!point || point.order <= from.order || point.order > to.order) continue;
-    const patch = await commitPatch(ctx.root, commit.hash, ctx.relativePath);
-    changes.push({
-      type: 'git', id: commit.hash, hash: commit.hash, shortHash: commit.shortHash,
-      ts: commit.ts, kind: 'commit', subject: commit.subject, ...patchChangeText(patch),
-    });
-  }
-  changes.sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
-  return {
-    project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
-    points, from: from.id, to: to.id, old: oldSnapshot, new: newSnapshot, changes,
-    truth: 'Git and current-file points are exact. AI points replay recorded tool calls and can skip divergent edits.',
-  };
-}
-
 async function conversationFileHistoryResponse(key) {
   const entry = index[key];
   if (!entry) throw new Error('conversation not found');
@@ -8148,22 +8064,6 @@ async function conversationFileContext(key, root, file) {
     const version = diffEventHash([diskMtime, repo.head || '', events.map(event => `${event.id}:${event.outcome}`), commits.map(commit => commit.hash)]);
     return { project, root: resolvedRoot, relativePath, fullPath, repo, events, commits, current, version };
   }
-}
-
-async function conversationFileCompareResponse(key, root, file, fromId = '', toId = '', fromAt = '', toAt = '') {
-  const ctx = await conversationFileContext(key, root, file);
-  const { points, scopedEvents, snapshotAt } = conversationScopedPoints(ctx, key);
-  let to = points.find(point => point.id === toId) || nearestFilePoint(points, toAt) || points[points.length - 1];
-  let from = points.find(point => point.id === fromId) || nearestFilePoint(points, fromAt) || points[0];
-  if (from.order > to.order) [from, to] = [to, from];
-  const [oldSnapshot, newSnapshot] = await Promise.all([snapshotAt(from), snapshotAt(to)]);
-  const changes = aiChangesBetween(scopedEvents, points, from, to)
-    .sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')) || a.id.localeCompare(b.id));
-  return {
-    scope: 'conversation', key, project: ctx.project, repoRoot: ctx.root, path: ctx.fullPath, relativePath: ctx.relativePath,
-    points, from: from.id, to: to.id, old: oldSnapshot, new: newSnapshot, changes,
-    truth: 'This view includes only file changes recorded in this conversation. Complete AI snapshots are reconstructed and can skip divergent edits.',
-  };
 }
 
 // ---- file history document: points once, snapshots by id, changes on demand ----
@@ -11116,12 +11016,6 @@ const server = http.createServer(async (req, res) => {
         u.searchParams.get('id') || '', u.searchParams.get('call') || '',
         u.searchParams.get('ts') || '', u.searchParams.get('path') || ''));
       } catch (e) { json(res, 404, { error: e.message }); }
-    } else if (u.pathname === '/api/conversation/file-history/file') {
-      try { json(res, 200, await conversationFileCompareResponse(
-        u.searchParams.get('id') || '', u.searchParams.get('repo') || '', u.searchParams.get('path') || '',
-        u.searchParams.get('from') || '', u.searchParams.get('to') || '',
-        u.searchParams.get('fromAt') || '', u.searchParams.get('toAt') || ''));
-      } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/project/diffs') {
       const project = u.searchParams.get('name') || '';
       try { json(res, 200, await projectDiffResponse(project, u.searchParams.get('include') === 'full')); }
@@ -11145,12 +11039,6 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/project/file-history/commit') {
       try { json(res, 200, await projectCommitResponse(
         u.searchParams.get('name') || '', u.searchParams.get('repo') || '', u.searchParams.get('hash') || ''));
-      } catch (e) { json(res, 404, { error: e.message }); }
-    } else if (u.pathname === '/api/project/file-history/file') {
-      try { json(res, 200, await projectFileCompareResponse(
-        u.searchParams.get('name') || '', u.searchParams.get('repo') || '', u.searchParams.get('path') || '',
-        u.searchParams.get('from') || '', u.searchParams.get('to') || '',
-        u.searchParams.get('fromAt') || '', u.searchParams.get('toAt') || ''));
       } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/file-history/points') {
       try { json(res, 200, await fileHistoryPointsResponse(Object.fromEntries(u.searchParams))); }
@@ -11176,16 +11064,6 @@ const server = http.createServer(async (req, res) => {
       catch (e) { json(res, e.message === 'repository not found' ? 404 : 500, { error: e.message }); }
     } else if (u.pathname === '/api/git/file-history/commit') {
       try { json(res, 200, await gitCommitResponse(u.searchParams.get('repo') || '', u.searchParams.get('hash') || '')); }
-      catch (e) { json(res, 404, { error: e.message }); }
-    } else if (u.pathname === '/api/git/file-history/file') {
-      try { json(res, 200, await gitFileCompareResponse(
-        u.searchParams.get('repo') || '', u.searchParams.get('path') || '',
-        u.searchParams.get('from') || '', u.searchParams.get('to') || '',
-        u.searchParams.get('fromAt') || '', u.searchParams.get('toAt') || '',
-        u.searchParams.get('light') === '1'));
-      } catch (e) { json(res, 404, { error: e.message }); }
-    } else if (u.pathname === '/api/git/file-history/snapshots') {
-      try { json(res, 200, await gitFileSnapshotsResponse(u.searchParams.get('repo') || '', u.searchParams.get('path') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/git/file-history/interval') {
       try {
