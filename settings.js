@@ -41,7 +41,30 @@ const DEFAULT_SETTINGS = {
   // Cost analytics keeps billing classification separate from Pi's retail
   // cost estimate. Rules are provider-scoped and never contain credentials.
   usageBilling: { providerModes: {}, monthlyFees: {} },
+  // Other aiconvo installs reachable from the header machine switcher.
+  // Each entry: { name, url, token }. The token is that machine's LAN token.
+  machines: [],
 };
+
+// Keep only well-formed machine entries: a name, an http(s) URL without a
+// trailing slash, and a token string (may be empty for a local-only URL).
+function normalizeMachines(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const m of raw) {
+    if (!m || typeof m !== 'object') continue;
+    const url = String(m.url || '').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\/[^\s/]+/i.test(url)) continue;
+    const name = String(m.name || '').trim().slice(0, 40) || url.replace(/^https?:\/\//i, '');
+    const token = String(m.token || '').trim();
+    const id = url.toLowerCase();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ name, url, token });
+  }
+  return out;
+}
 
 function parseTokenCount(raw) {
   const s = String(raw || '').trim().toUpperCase();
@@ -160,8 +183,9 @@ function normalizeSettings(input) {
   const usageBilling = normalizeUsageBilling(src.usageBilling);
   const snippetTrigger = normalizeSnippetTrigger(src.snippetTrigger);
   const doneSound = DONE_SOUND_MODES.includes(src.doneSound) ? src.doneSound : DEFAULT_SETTINGS.doneSound;
+  const machines = normalizeMachines(src.machines);
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound, machines };
   }
   return {
     usePiDefault: false,
@@ -177,6 +201,7 @@ function normalizeSettings(input) {
     usageBilling,
     snippetTrigger,
     doneSound,
+    machines,
   };
 }
 
@@ -251,6 +276,7 @@ module.exports = {
   parseListModels,
   findModel,
   normalizeUsageBilling,
+  normalizeMachines,
   normalizeSettings,
   buildPiArgs,
   modelLabel,

@@ -160,6 +160,21 @@ body.conv #convHeadExtra { display: inline-flex; flex-shrink: 0; }
 #settingsBtn { height: 26px; padding: 0 7px; border-color: transparent; background: transparent; color: var(--text-dim); font-size: 14px; }
 #settingsBtn:hover { background: var(--surface-2); color: var(--text); }
 #settingsBtn.on { color: var(--accent); }
+/* Machine switcher: which aiconvo install this page talks to, and the others. */
+#machineBtn { height: 26px; padding: 0 7px; border-color: transparent; background: transparent; color: var(--magenta); font-size: var(--fs-micro); white-space: nowrap; }
+#machineBtn:hover { background: var(--surface-2); }
+#machineBtn[hidden] { display: none; }
+#machinePop { position: absolute; top: calc(var(--header-h) - 4px); right: var(--sp-3); z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); min-width: 220px; max-width: calc(100vw - 24px); padding: var(--sp-1) 0; }
+#machinePop[hidden] { display: none; }
+#machinePop .mach-head { padding: 4px 10px; font-size: var(--fs-label); color: var(--text-faint); border-bottom: 1px solid var(--border); }
+#machinePop button { display: flex; width: 100%; justify-content: space-between; gap: var(--sp-3); padding: 6px 10px; border: 0; background: transparent; color: var(--text); text-align: left; }
+#machinePop button:hover { background: var(--surface-2); }
+#machinePop button .mach-url { color: var(--text-dim); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mach-item { display: grid; grid-template-columns: 1fr 2fr 2fr auto; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.mach-item input { min-width: 0; }
+.mach-item .row, .set-field .row { display: flex; gap: var(--sp-2); align-items: center; }
+.set-field .row input { flex: 1 1 auto; min-width: 0; }
+.mach-link { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Away from home the header quiets down: reading and talking need no
    list count. */
 body:not(.home) .count { display: none !important; }
@@ -1863,12 +1878,14 @@ window.aiconvoSyncTheme();
   <button id="ticker" hidden title="Open the latest active conversation"></button>
   <span class="count" id="count"></span>
   <button id="activeBtn" hidden title="Agents, replies, and notifications (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
+  <button id="machineBtn" hidden title="Switch to another aiconvo machine"></button>
   <button id="settingsBtn" title="Settings (,)">⚙</button>
   <button id="barFold" title="Fold the top bar — click the rail to bring it back (`)">▴</button>
 </header>
 <button id="zenExit" title="Leave zen mode (z)">zen ✕</button>
 <button id="gRecenter" title="Jump to now" aria-label="Jump to now">⌖</button>
 <div id="agentsPop" hidden><div id="agentsUnread"></div><div id="agentsLegacy"></div></div>
+<div id="machinePop" hidden></div>
 <div id="searchOverlay" class="overlay" hidden>
   <div class="dialog search-dialog" role="dialog" aria-modal="true" aria-labelledby="searchModalInput">
     <div class="search-modal-head">
@@ -2533,7 +2550,36 @@ try {
 document.addEventListener('click', e => {
   if (!$('filtersPop').hidden && !e.target.closest('#filtersPop')) $('filtersPop').hidden = true;
   if (!$('agentsPop').hidden && !e.target.closest('#agentsPop')) toggleAgents(false);
+  if (!$('machinePop').hidden && !e.target.closest('#machinePop')) $('machinePop').hidden = true;
 });
+
+// ---- machine switcher ----
+// Each install keeps its own list of the others (settings → machines). The
+// button shows this machine's name only when there is somewhere to go.
+// Switching is a plain navigation: the target's ?token= login sets its
+// cookie once, then the page stays signed in there.
+function machineUrl(m) {
+  return m.url + '/' + (m.token ? '?token=' + encodeURIComponent(m.token) : '');
+}
+function renderMachineBtn() {
+  const btn = $('machineBtn');
+  const list = settingsOf().machines || [];
+  const host = (settingsState && settingsState.hostname) || '';
+  btn.hidden = !list.length;
+  btn.textContent = '@' + (host || 'this machine');
+  btn.title = 'This is ' + (host || 'this machine') + ' — switch to another aiconvo machine';
+}
+function toggleMachinePop(show) {
+  const pop = $('machinePop');
+  pop.hidden = show !== undefined ? !show : !pop.hidden;
+  if (pop.hidden) return;
+  const host = (settingsState && settingsState.hostname) || 'this machine';
+  const list = settingsOf().machines || [];
+  pop.innerHTML = `<div class="mach-head">you are on ${esc(host)} · go to</div>` +
+    list.map((m, i) => `<button type="button" data-i="${i}"><span>${esc(m.name)}</span><span class="mach-url">${esc(m.url.replace(/^https?:\/\//i, ''))}</span></button>`).join('');
+  pop.querySelectorAll('button[data-i]').forEach(b => b.onclick = () => { location.href = machineUrl(list[Number(b.dataset.i)]); });
+}
+$('machineBtn').onclick = e => { e.stopPropagation(); toggleMachinePop(); };
 
 // ---- activity ticker + agents popover (design/10-activity-and-agents.md) ----
 function ago(ms) {
@@ -15515,6 +15561,7 @@ const SETTINGS_PANES = [
   ['sound', 'sound', 'What the speakers do when a run finishes.'],
   ['search', 'search', 'Meaning-based search on the GPU server.'],
   ['snippets', 'snippets', 'Sentences you type often.'],
+  ['machines', 'machines', 'Other aiconvo installs to switch to.'],
   ['appearance', 'appearance', 'Colors for the app and for pi views.'],
   ['advanced', 'advanced', 'Engine, settings file, overrides.'],
 ];
@@ -15724,6 +15771,93 @@ function bindPaneSnippets(root) {
   renderSettingsSnippets();
 }
 
+function paneMachines() {
+  const list = settingsOf().machines || [];
+  const host = (settingsState && settingsState.hostname) || 'this machine';
+  const row = (m, i) => `<div class="mach-item" data-i="${i}">
+      <input type="text" data-f="name" value="${esc(m.name)}" placeholder="name" spellcheck="false">
+      <input type="text" data-f="url" value="${esc(m.url)}" placeholder="http://host:7433" spellcheck="false">
+      <input type="password" data-f="token" value="${esc(m.token)}" placeholder="LAN token" spellcheck="false" autocomplete="off">
+      <button type="button" class="ghost" data-del title="Remove">✕</button>
+    </div>`;
+  const links = (settingsState && settingsState.connectLinks) || [];
+  return `<h2>machines</h2>
+    <p class="lead">This page is talking to <b>${esc(host)}</b>. Connected machines appear in the header switcher; each one keeps its own conversations, agents, and notes.</p>
+    <div class="set-group">
+      <h3>connect to another machine</h3>
+      <div class="set-field">
+        <label for="setMachLink">paste its connect link</label>
+        <div class="row"><input id="setMachLink" type="text" placeholder="http://192.168.2.24:7433/?token=…" spellcheck="false" autocomplete="off"><button type="button" id="setMachConnect">connect</button></div>
+        <div class="set-help">Found on that machine under settings → machines, or in its <code>journalctl --user -u aiconvo</code> log. One paste links both ways: it is added here, and this machine is registered there.</div>
+      </div>
+      <div class="set-status" id="setMachStatus"></div>
+    </div>
+    <div class="set-group">
+      <h3>this machine's connect link</h3>
+      ${links.length
+        ? links.map(l => `<div class="row"><code class="mach-link">${esc(l)}</code><button type="button" class="ghost" data-copy="${esc(l)}">copy</button></div>`).join('')
+        : '<span class="hint">not reachable from other machines — this server listens on localhost only. Start it with AICONVO_LAN=1 to get a link.</span>'}
+      <div class="set-help">Anyone with this link can open this aiconvo. Share it only with your own machines.</div>
+    </div>
+    <div class="set-group">
+      <div class="set-group-head"><h3>connected machines</h3><button type="button" id="setMachNew">add by hand</button></div>
+      <div id="setMachList">${list.length ? list.map(row).join('') : '<span class="hint">none yet — the header button stays hidden</span>'}</div>
+      <div class="set-help">URL as the browser reaches it (LAN or Tailscale address, port 7433) and that machine's LAN token. Stored in this machine's settings file.</div>
+    </div>`;
+}
+
+function bindPaneMachines(root) {
+  const link = $('setMachLink');
+  const connect = async () => {
+    const v = link.value.trim();
+    if (!v) return link.focus();
+    const st = $('setMachStatus');
+    st.textContent = 'connecting…';
+    $('setMachConnect').disabled = true;
+    try {
+      const r = await fetch('/api/machines/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ link: v }) });
+      const d = await r.json();
+      if (d.error) { st.textContent = d.error; return errToast(d.error); }
+      settingsState = d;
+      renderMachineBtn();
+      toast('connected to ' + d.name + (d.registeredBack ? ' — both ways' : ''));
+      renderSettings();
+      if (!d.registeredBack) $('setMachStatus').textContent = d.name + ' is added here, but could not register this machine back: ' + d.why + '. Paste this machine\'s link there to finish.';
+    } finally { if ($('setMachConnect')) $('setMachConnect').disabled = false; }
+  };
+  $('setMachConnect').onclick = connect;
+  link.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); connect(); } };
+  root.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); flashCopied(b); });
+  const read = () => [...root.querySelectorAll('.mach-item')].map(el => ({
+    name: el.querySelector('[data-f=name]').value,
+    url: el.querySelector('[data-f=url]').value,
+    token: el.querySelector('[data-f=token]').value,
+  }));
+  root.querySelectorAll('.mach-item input').forEach(inp => inp.onchange = () => {
+    const list = read();
+    const bad = list.find(m => m.url.trim() && !/^https?:\/\/[^\s/]+/i.test(m.url.trim()));
+    if (bad) return errToast('URL must start with http:// or https://');
+    saveSettings({ machines: list }, 'machines saved');
+  });
+  root.querySelectorAll('.mach-item [data-del]').forEach(b => b.onclick = () => {
+    const i = Number(b.closest('.mach-item').dataset.i);
+    saveSettings({ machines: read().filter((_, j) => j !== i) }, 'machine removed');
+  });
+  $('setMachNew').onclick = () => {
+    const list = read();
+    const wrap = $('setMachList');
+    if (!list.length) wrap.innerHTML = '';
+    wrap.insertAdjacentHTML('beforeend', `<div class="mach-item" data-i="${list.length}">
+      <input type="text" data-f="name" value="" placeholder="name" spellcheck="false">
+      <input type="text" data-f="url" value="" placeholder="http://host:7433" spellcheck="false">
+      <input type="password" data-f="token" value="" placeholder="LAN token" spellcheck="false" autocomplete="off">
+      <button type="button" class="ghost" data-del title="Remove">✕</button>
+    </div>`);
+    bindPaneMachines(root);
+    wrap.lastElementChild.querySelector('[data-f=name]').focus();
+  };
+}
+
 function paneAppearance() {
   const piTheme = settingsOf().piTheme || 'light';
   return `<h2>appearance</h2>
@@ -15783,6 +15917,7 @@ const SETTINGS_PANE_RENDER = {
   sound: [paneSound, bindPaneSound],
   search: [paneSearch, bindPaneSearch],
   snippets: [paneSnippets, bindPaneSnippets],
+  machines: [paneMachines, bindPaneMachines],
   appearance: [paneAppearance, bindPaneAppearance],
   advanced: [paneAdvanced, bindPaneAdvanced],
 };
@@ -15810,6 +15945,7 @@ async function loadSettings() {
   if (settingsState && settingsState.resolved) {
     $('settingsBtn').title = 'Settings · memory model: ' + settingsState.resolved.label + ' (,)';
   }
+  renderMachineBtn();
   if (settingsOpen) renderSettings();
 }
 
@@ -15832,6 +15968,7 @@ async function saveSettings(patch, message) {
   settingsState = data;
   $('settingsBtn').title = 'Settings · memory model: ' + data.resolved.label + ' (,)';
   toast(message || ('memory model: ' + data.resolved.label));
+  renderMachineBtn();
   renderSettings();
 }
 

@@ -3458,6 +3458,81 @@ function piContextTokens() {
 }
 function piTargetTokens() { return Math.floor(piContextTokens() * 0.80); }
 function currentModelLabel() { return settingsLib.modelLabel(appSettings, readPiDefault()); }
+// ---- machines: pairing between aiconvo installs ----
+// A connect link is this install's URL plus its LAN token. Pasting one into
+// another install adds this machine there, and that install registers itself
+// back here, so one paste links both ways.
+function connectLinks() {
+  if (!LAN_TOKEN || HOST === '127.0.0.1') return [];
+  return lanAddresses().map(ip => `http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
+}
+
+function parseConnectLink(raw) {
+  const s = String(raw || '').trim();
+  let u;
+  try { u = new URL(/^https?:\/\//i.test(s) ? s : 'http://' + s); } catch { return null; }
+  const token = u.searchParams.get('token') || '';
+  const url = `${u.protocol}//${u.host}`;
+  return { url, token };
+}
+
+// The address the other machine should use to reach us: same network family
+// as theirs (Tailscale 100.x when they are on Tailscale), else the first LAN one.
+function ownUrlFor(remoteUrl) {
+  const addrs = lanAddresses();
+  if (!addrs.length) return '';
+  let host = '';
+  try { host = new URL(remoteUrl).hostname; } catch {}
+  const tail = a => a.startsWith('100.');
+  const pick = (tail(host) ? addrs.find(tail) : addrs.find(a => !tail(a))) || addrs[0];
+  return `http://${pick}:${PORT}`;
+}
+
+function upsertMachine(entry) {
+  const list = (appSettings.machines || []).filter(m => m.url.toLowerCase() !== String(entry.url).toLowerCase());
+  list.push(entry);
+  appSettings.machines = settingsLib.normalizeMachines(list);
+  saveAppSettings();
+}
+
+async function remoteJson(base, route, token, opts = {}) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const r = await fetch(base + route, {
+      ...opts,
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(opts.headers || {}) },
+    });
+    if (r.status === 401) throw new Error('that token is wrong for ' + base);
+    if (!r.ok) throw new Error(base + route + ' answered ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+// One paste: verify the other machine, remember it, and ask it to remember us.
+async function connectMachine(link) {
+  const parsed = parseConnectLink(link);
+  if (!parsed) throw new Error('paste the connect link from the other machine (http://host:7433/?token=…)');
+  const remote = await remoteJson(parsed.url, '/api/settings', parsed.token);
+  const name = String(remote.hostname || '').trim() || parsed.url.replace(/^https?:\/\//, '');
+  if (name === os.hostname() && parsed.url.includes('127.0.0.1')) throw new Error('that link points at this machine');
+  upsertMachine({ name, url: parsed.url, token: parsed.token });
+  let registeredBack = false, why = '';
+  const myUrl = ownUrlFor(parsed.url);
+  if (!LAN_TOKEN || HOST === '127.0.0.1') why = 'this machine is not on the LAN (AICONVO_LAN=1), so it cannot be reached back';
+  else if (!myUrl) why = 'no LAN address found for this machine';
+  else {
+    try {
+      await remoteJson(parsed.url, '/api/machines/register', parsed.token, {
+        method: 'POST', body: JSON.stringify({ name: os.hostname(), url: myUrl, token: LAN_TOKEN }),
+      });
+      registeredBack = true;
+    } catch (e) { why = e.message; }
+  }
+  return { name, url: parsed.url, registeredBack, why, myUrl };
+}
+
 function settingsResponse() {
   const piDefault = readPiDefault();
   return {
@@ -3472,6 +3547,9 @@ function settingsResponse() {
     piDefault,
     readyProviders: readyProviders(),
     path: SETTINGS_FILE,
+    // Which install the page is talking to; the header machine switcher shows it.
+    hostname: os.hostname(),
+    connectLinks: connectLinks(),
   };
 }
 
@@ -11547,6 +11625,21 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { usageBilling: appSettings.usageBilling });
     } else if (u.pathname === '/api/settings' && req.method === 'GET') {
       json(res, 200, settingsResponse());
+    } else if (u.pathname === '/api/machines/connect' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const { link } = JSON.parse(body || '{}');
+      try { json(res, 200, { ...(await connectMachine(link)), ...settingsResponse() }); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/machines/register' && req.method === 'POST') {
+      // Called by another install during its connect step. Reaching this
+      // route already required our LAN token, so the caller is trusted.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const entry = settingsLib.normalizeMachines([JSON.parse(body || '{}')])[0];
+      if (!entry) return json(res, 400, { error: 'name, url and token are required' });
+      upsertMachine(entry);
+      json(res, 200, { ok: true, name: os.hostname() });
     } else if (u.pathname === '/api/settings' && (req.method === 'PUT' || req.method === 'POST')) {
       let body = '';
       for await (const chunk of req) body += chunk;
