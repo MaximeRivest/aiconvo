@@ -5119,7 +5119,6 @@ async function epicEvidenceResponse(epic) {
 
 // Background jobs survive browser navigation. Finished jobs stay visible for one hour.
 const distillJobs = new Map(); // key -> job
-const projectDistillJobs = new Map(); // project -> batch job
 const evidenceJobs = new Map(); // batch id -> job
 const epicJobs = new Map();    // epic id -> job
 const memoryExtractJobs = new Map(); // batch id -> leaf extraction job
@@ -5180,7 +5179,7 @@ function memoryModelHealthJobView(state = memoryModelHealth.snapshot()) {
 function allJobs() {
   const cutoff = Date.now() - JOB_KEEP_MS;
   const healthJob = memoryModelHealthJobView();
-  return [...distillJobs.values(), ...projectDistillJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...memoryExtractJobs.values(), ...memoryDocsJobs.values(), ...memoryBackfillJobs.values(), ...agentRunJobs.values()]
+  return [...distillJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...memoryExtractJobs.values(), ...memoryDocsJobs.values(), ...memoryBackfillJobs.values(), ...agentRunJobs.values()]
     .map(jobView)
     .concat([...restoredRunJobs.values()].filter(j => (j.finishedAt || 0) > cutoff))
     .concat(healthJob ? [healthJob] : [])
@@ -5241,61 +5240,6 @@ function startDistillJob(key, data, options = {}) {
       jobChanged(job);
       setTimeout(() => { if (distillJobs.get(key) === job) distillJobs.delete(key); }, 60 * 60 * 1000);
     }
-  })();
-  return job;
-}
-
-function startProjectDistillJob(project) {
-  const running = projectDistillJobs.get(project);
-  if (running && !running.finished) return running;
-  const meta = projectMetaFor(project);
-  if (!meta) throw new Error('project not found');
-  const targets = meta.entries.filter(({ entry }) => noteStateForEntry(entry) !== 'fresh');
-  const job = {
-    id: 'project-distill:' + project, type: 'project-distill', project,
-    title: `${project}: update all notes`, status: 'running',
-    statusText: targets.length ? 'Preparing project notes…' : 'All project notes are current.',
-    done: 0, total: targets.length, startedAt: Date.now(), finished: false,
-    model: currentModelLabel(),
-  };
-  projectDistillJobs.set(project, job);
-  jobChanged(job);
-  job.completion = (async () => {
-    let updated = 0;
-    const failures = [];
-    await mapLimit(targets, 2, async ({ key }) => {
-      try {
-        let child = distillJobs.get(key);
-        if (!child || child.finished) {
-          const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
-          child = startDistillJob(key, data, { project, parentId: job.id });
-        }
-        await child.completion;
-        if (child.status !== 'done') throw new Error(child.error || child.statusText || 'distillation failed');
-        updated++;
-      } catch (e) {
-        failures.push(`${key}: ${e.message}`);
-      } finally {
-        job.done++;
-        job.statusText = `Updating project notes ${job.done}/${job.total}…`;
-        jobChanged(job);
-      }
-    });
-    job.result = { project, updated, failed: failures.length };
-    if (failures.length) {
-      job.status = 'error';
-      job.error = `${failures.length} of ${targets.length} notes failed.`;
-      job.statusText = job.error;
-    } else {
-      job.status = 'done';
-      job.statusText = targets.length ? `All project notes are current: ${updated} updated.` : 'All project notes are current.';
-    }
-    job.finished = true;
-    job.finishedAt = Date.now();
-    jobChanged(job);
-    setTimeout(() => {
-      if (projectDistillJobs.get(project) === job) projectDistillJobs.delete(project);
-    }, 60 * 60 * 1000);
   })();
   return job;
 }
@@ -11166,12 +11110,6 @@ const server = http.createServer(async (req, res) => {
         }
         json(res, 202, jobView(startMemoryBackfillJob(parsed.project || '')));
       } catch (e) { json(res, 400, { error: e.message }); }
-    } else if (u.pathname === '/api/project/distill' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const parsed = JSON.parse(body || '{}');
-      try { json(res, 202, jobView(startProjectDistillJob(parsed.project || ''))); }
-      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/start' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -12096,12 +12034,6 @@ const server = http.createServer(async (req, res) => {
         'Content-Disposition': 'attachment; filename="conversations.md"',
       });
       res.end(toMarkdown(sessions, mode));
-    } else if (u.pathname === '/api/distill' && req.method === 'POST') {
-      const key = u.searchParams.get('id');
-      if (!key || !index[key]) return json(res, 404, { error: 'not found' });
-      const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
-      const result = await distill(data);
-      json(res, 200, result);
     } else if (u.pathname === '/api/distill/start' && req.method === 'POST') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
@@ -12135,8 +12067,6 @@ const server = http.createServer(async (req, res) => {
         job.listeners.add(send);
         req.on('close', () => job.listeners.delete(send));
       }
-    } else if (u.pathname === '/api/distill-running') {
-      json(res, 200, [...distillJobs.entries()].filter(([, j]) => !j.finished).map(([k]) => k));
     } else if (u.pathname === '/api/events') {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
