@@ -55,7 +55,7 @@ Execution and parent review are separate. A returned result still needs checks. 
 
 Records live in `~/.local/share/aiconvo/delegations`, not the cache. Web SDK sessions run in separate processes. On systemd, delegated supervisors use independent user scopes. Existing unmanaged processes remain untracked; the app does not guess their parents.
 
-The delegation tools are opt-in. A mode gets them only when its `tools` list names them; `pi-orchestrator` does. Every other mode runs without the delegation tools, so no subagent text enters its system prompt.
+The delegation tools and the browser tools (`agent_browser`, `agent_browser_session`) are opt-in. A mode gets them only when its `tools` list names them: `pi-orchestrator` lists the delegation tools, `browser` lists the browser tools. Every other mode runs without them, so their guidance text stays out of its system prompt.
 
 Aiconvo loads `extensions/delegation.ts` automatically. For the Pi terminal, load it explicitly with `pi -e /path/to/aiconvo/extensions/delegation.ts`. Terminal roots receive next-turn reminders; web roots receive tracked callbacks. Setup and update install the default mode only when missing, preserving personal mode files.
 

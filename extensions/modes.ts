@@ -9,8 +9,9 @@ const CUSTOM_TYPE = "mode-switch";
 // Opt-in tools. A mode without an explicit `tools` list never gets them.
 // Each active tool puts its description and guidance into the system prompt.
 // The delegation tools carry orchestration text that only orchestrator modes
-// should see; every other mode stays free of subagent context.
-const OPT_IN_TOOLS = new Set(["web_search", "delegate", "delegation_status", "delegation_control", "delegation_resume", "delegation_review"]);
+// should see; the browser tools carry approval rules that only browser modes
+// need. Every other mode stays free of that context.
+const OPT_IN_TOOLS = new Set(["web_search", "delegate", "delegation_status", "delegation_control", "delegation_resume", "delegation_review", "agent_browser", "agent_browser_session"]);
 const SYSTEM_PROMPT_SECTIONS = new Set(["available_tools", "custom_tools_note", "guidelines", "pi_docs", "append_prompt", "project_context", "skills", "date", "cwd"]);
 const SECTION_HEADINGS: Record<string, string[]> = {
   available_tools: ["Tools", "Available tools"],
