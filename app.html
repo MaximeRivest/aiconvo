@@ -324,28 +324,6 @@ body.home #left { flex: 1 1 auto; width: 100% !important; height: auto !importan
 body.home #ganttResize { display: none; }
 body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; }
 
-/* ---- project tree mode ---- */
-.ptree-toolbar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3); }
-.ptree-toolbar input[type=search] { flex: 1; min-width: 200px; }
-.ptree-repo { margin-bottom: var(--sp-4); }
-.ptree-repo > .rhead { display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border); margin-bottom: var(--sp-2); }
-.ptree-repo > .rhead b { font-size: var(--fs-body); }
-.ptree ul { list-style: none; margin: 0; padding-left: 18px; }
-.ptree > ul { padding-left: 0; }
-.ptree li { line-height: 1.65; }
-.ptree summary { list-style: none; }
-.ptree summary::-webkit-details-marker { display: none; }
-.ptree details[open] > summary .twist { transform: rotate(90deg); }
-.ptree .twist { transition: transform var(--t); transform-origin: 5px 8px; }
-.ptree .dirrow { cursor: pointer; color: var(--text-dim); user-select: none; }
-.ptree .dirrow:hover { color: var(--text); }
-.ptree .dirrow .twist { display: inline-block; width: 14px; color: var(--text-faint); }
-.ptree .filerow { cursor: pointer; color: var(--text); background: none; border: 0; padding: 0 2px; height: auto; font: inherit; text-align: left; }
-.ptree .filerow:hover { color: var(--cyan); text-decoration: underline; background: none; }
-.ptree .filerow .st { font-size: var(--fs-micro); color: var(--warn); margin-left: 6px; }
-.ptree .filerow.untracked { color: var(--text-dim); }
-.ptree .ignored { color: var(--text-faint); }
-
 /* ---- home timeline glyphs: notes and epics ---- */
 .tl-glyph { cursor: pointer; }
 .tl-glyph:hover rect, .tl-glyph:hover path { stroke: var(--text); stroke-width: 1; }
@@ -1861,11 +1839,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .ntree { position: static; width: 100%; max-height: 38dvh; }
   .npane { width: 100%; padding: 10px 12px; }
 
-  .ptree-toolbar input[type=search] { min-width: 0; flex-basis: 100%; }
-  .ptree ul { padding-left: 12px; }
-  .ptree li { line-height: 2; }
-  .ptree .filerow, .ptree .dirrow { min-height: 40px; display: inline-flex; align-items: center; }
-
   .mobile-only { display: inline-flex; }
   .focused-file-view { height: calc(100dvh - 96px); min-height: 0; margin: -8px -10px calc(-20px - env(safe-area-inset-bottom)); }
   .ff-head { padding: 5px 7px; gap: 5px; }
@@ -3348,7 +3321,6 @@ async function load() {
   // The list is the reconnect and tab-wake safety net for the open transcript.
   reconcileTranscript();
   if (unchanged) return;
-  projectTreeCache.clear(); // the tree may change while agents work
   refreshFilterOptions();
   if (!searchMode && tab === 'conv') applyFilter();
 }
@@ -6701,7 +6673,7 @@ function focusedFileCrumbs(row) {
     return convCrumbs(data.key, { label: 'diffs', title: 'Files this conversation changed', go: () => showConversationDiffs(data.key) }, fileSeg);
   if (data.scope === 'git') {
     if (data.backProject)
-      return [crumbHome(), crumbProject(data.backProject), { label: 'files', title: 'Project file tree', go: () => showProjectTree(data.backProject) }, fileSeg];
+      return [crumbHome(), crumbProject(data.backProject), { label: 'files', title: 'Project code', go: () => showProjectTree(data.backProject) }, fileSeg];
     return [crumbHome(), { label: 'repos', title: 'All Git repositories', go: () => { goHome(); setTab('repos'); } },
       { label: pathBase(data.cwd), title: data.cwd, go: () => showGitRepoHistory(data.cwd, true) }, fileSeg];
   }
@@ -8271,12 +8243,8 @@ function wireProjectSwitch(name, root = $('view')) {
   });
 }
 
-// ---- project tree mode (home ▸ project ▸ files) ----
-// The information view toggles into a full file tree: every tracked,
-// modified, untracked, and ignored path, plus branches and worktrees.
-// A file click lowers to the whole-file view (Git scope).
-let projectTreeCache = new Map(); // name -> response, cleared on reload
-
+// ---- project code (home ▸ project ▸ code) ----
+// Opens the busiest file of the project in the whole-file view.
 async function showProjectTree(name) {
   if (!name) return;
   markSettingsClosed();
@@ -8299,129 +8267,6 @@ async function showProjectTree(name) {
   const rows = data.rows || [];
   const row = rows.find(item => item.recent24 && item.recent24.events) || rows.find(item => item.workingTree) || rows[0];
   if (!row) { $('view').innerHTML = `<div class="project-overview"><h2>${esc(name)} · code</h2>${projectSwitchHtml('code')}<div class="empty">no files found.</div></div>`; wireProjectSwitch(name); return; }
-  enterFocusedFile(row);
-}
-
-function buildFileTreeNodes(repo) {
-  const root = { dirs: new Map(), files: [] };
-  const add = (rel, state) => {
-    const parts = String(rel).split('/').filter(Boolean);
-    if (!parts.length) return;
-    let node = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
-      node = node.dirs.get(parts[i]);
-    }
-    node.files.push({ name: parts[parts.length - 1], rel: parts.join('/'), state });
-  };
-  const mod = new Map((repo.modified || []).map(m => [m.path, m.status]));
-  for (const rel of repo.tracked || []) add(rel, mod.has(rel) ? 'modified:' + mod.get(rel) : 'tracked');
-  for (const rel of repo.untracked || []) add(rel, 'untracked');
-  for (const rel of repo.ignored || []) add(rel.replace(/\/$/, ''), rel.endsWith('/') ? 'ignored-dir' : 'ignored');
-  return root;
-}
-
-function fileTreeNodeHtml(node, repoIndex, depth = 0) {
-  const dirs = [...node.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name));
-  const rows = [];
-  for (const [dirName, child] of dirs) {
-    rows.push(`<li><details${depth < 1 ? ' open' : ''}><summary class="dirrow"><span class="twist">▸</span>${esc(dirName)}/</summary>${fileTreeNodeHtml(child, repoIndex, depth + 1)}</details></li>`);
-  }
-  for (const file of files) {
-    if (file.state === 'ignored' || file.state === 'ignored-dir') {
-      rows.push(`<li><span class="ignored" title="gitignored">${esc(file.name)}${file.state === 'ignored-dir' ? '/' : ''}</span></li>`);
-      continue;
-    }
-    const modified = file.state.startsWith('modified:');
-    const st = modified ? `<span class="st">${esc(file.state.slice(9) || 'M')}</span>` : file.state === 'untracked' ? `<span class="st">new</span>` : '';
-    rows.push(`<li><button class="filerow${file.state === 'untracked' ? ' untracked' : ''}" data-ptree-file="${esc(file.rel)}" data-ptree-repo="${repoIndex}" title="Open the whole-file view\n${esc(file.rel)}">${esc(file.name)}</button>${st}</li>`);
-  }
-  return `<ul>${rows.join('')}</ul>`;
-}
-
-function renderProjectTree(name, d) {
-  const repos = d.repos || [];
-  const q = ($('ptreeFilter') && $('ptreeFilter').value || '').trim().toLowerCase();
-  const repoHtml = repos.map((repo, i) => {
-    const total = (repo.tracked || []).length + (repo.untracked || []).length;
-    const worktrees = (repo.worktrees || []).map(wt => `<button class="ghost" data-ptree-wt="${esc(wt)}" title="Git history of this worktree">⌥ ${esc(pathBase(wt))}</button>`).join('');
-    let body;
-    if (q) {
-      const mod = new Map((repo.modified || []).map(m => [m.path, m.status]));
-      const hits = [];
-      for (const rel of repo.tracked || []) if (rel.toLowerCase().includes(q)) hits.push({ rel, state: mod.has(rel) ? 'modified:' + mod.get(rel) : 'tracked' });
-      for (const rel of repo.untracked || []) if (rel.toLowerCase().includes(q)) hits.push({ rel, state: 'untracked' });
-      body = `<ul>${hits.slice(0, 400).map(f => `<li><button class="filerow${f.state === 'untracked' ? ' untracked' : ''}" data-ptree-file="${esc(f.rel)}" data-ptree-repo="${i}">${esc(f.rel)}</button>${f.state.startsWith('modified:') ? `<span class="st">${esc(f.state.slice(9) || 'M')}</span>` : ''}</li>`).join('') || '<li class="ignored">no match in this repository.</li>'}${hits.length > 400 ? `<li class="ignored">… ${hits.length - 400} more — narrow the filter</li>` : ''}</ul>`;
-    } else {
-      body = fileTreeNodeHtml(buildFileTreeNodes(repo), i);
-    }
-    return `<div class="ptree-repo">
-      <div class="rhead"><b>⌂ ${esc(repo.name)}</b><code>${esc(shortDir(repo.root))}</code>
-        <span class="dim">${esc(repo.branch || 'detached')} · ${total} files · ${(repo.modified || []).length} changed</span>
-        <button data-ptree-history="${esc(repo.root)}" title="Commits and working tree over time">◆ git history</button>${worktrees}
-        ${(repo.refs || []).length > 1 ? `<span class="dim" title="${esc((repo.refs || []).join('\n'))}">${(repo.refs || []).length} branches</span>` : ''}
-      </div>
-      <div class="ptree">${body}</div>
-    </div>`;
-  }).join('') || '<div class="empty">no Git repository under this project.</div>';
-  $('view').innerHTML = `<div class="project-overview">
-    <div class="phead" style="border-left-color:${projectColor(name).fill}">
-      <h2>☷ ${esc(name)} · files</h2>
-      <div class="pmeta"><code>${esc(shortDir(d.cwd || ''))}</code> · ${repos.length} repositor${repos.length === 1 ? 'y' : 'ies'} · click a file for its whole-file view</div>
-      ${projectSwitchHtml('code')}
-    </div>
-    <div class="ptree-toolbar"><input id="ptreeFilter" type="search" placeholder="filter files" value="${esc(q)}"></div>
-    <div id="ptreeBody">${repoHtml}</div>
-  </div>`;
-  wireProjectSwitch(name);
-  let filterTimer;
-  $('ptreeFilter').oninput = () => {
-    clearTimeout(filterTimer);
-    filterTimer = setTimeout(() => {
-      const at = $('ptreeFilter'), pos = at.selectionStart, val = at.value;
-      renderProjectTree(name, d);
-      const again = $('ptreeFilter');
-      again.value = val; again.focus(); again.setSelectionRange(pos, pos);
-    }, 160);
-  };
-  $('view').querySelectorAll('[data-ptree-file]').forEach(b => b.onclick = () => {
-    const repo = repos[Number(b.dataset.ptreeRepo)];
-    if (repo) openRepoFile(repo.root, b.dataset.ptreeFile, name);
-  });
-  $('view').querySelectorAll('[data-ptree-history]').forEach(b => b.onclick = () => showGitRepoHistory(b.dataset.ptreeHistory));
-  $('view').querySelectorAll('[data-ptree-wt]').forEach(b => b.onclick = () => showGitRepoHistory(b.dataset.ptreeWt));
-  // Trust badges: only paths in the vouch ledger get a mark; everything else
-  // is unverified by default and stays unmarked.
-  fetch('/api/vouch/all').then(r => r.json()).then(all => {
-    if (!all || !all.paths) return;
-    $('view').querySelectorAll('[data-ptree-file]').forEach(b => {
-      const repo = repos[Number(b.dataset.ptreeRepo)];
-      const info = repo && all.paths[repo.root + '/' + b.dataset.ptreeFile];
-      if (!info) return;
-      const el = document.createElement('span');
-      el.className = 'st tmark';
-      el.textContent = info.disputed ? '✗' : info.state === 'fresh' ? '✓' : info.state === 'partial' ? '✓±' : '⚠';
-      el.title = 'trust: ' + (info.disputed ? 'disputed' : info.state === 'fresh' ? 'vouched' : info.state === 'partial' ? `partly vouched (${info.vouchedLines}/${info.totalLines} lines)` : 'vouch is stale · changed since review');
-      b.after(el);
-    });
-  }).catch(() => {});
-}
-
-// Open one repository file straight in the whole-file view (Git scope).
-async function openRepoFile(root, rel, backProject = null) {
-  let data = fileHistoryData && fileHistoryData.scope === 'git' && fileHistoryData.cwd === root ? fileHistoryData : null;
-  if (!data) {
-    toast('loading the repository history…');
-    data = await (await fetch('/api/git/file-history?repo=' + encodeURIComponent(root))).json();
-    if (data.error) return errToast(data.error);
-    invalidateFileCaches();
-  }
-  fileHistoryData = data;
-  data.backProject = backProject;
-  diffScope = { scope: 'git' };
-  const row = (data.rows || []).find(r => r.relativePath === rel);
-  if (!row) return errToast('this file has no Git history yet');
   enterFocusedFile(row);
 }
 
