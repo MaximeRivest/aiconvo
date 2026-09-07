@@ -1,0 +1,60 @@
+import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import fs from 'node:fs';
+import path from 'node:path';
+export default function (pi: any) {
+  let requests = 0;
+  pi.registerProvider('fixture', {
+    baseUrl: 'http://127.0.0.1:1/never-used', apiKey: 'fixture-only', api: 'openai-completions',
+    models: [{ id: 'one', name: 'Fixture', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 1000 }],
+    streamSimple(model: any, context: any, options: any) {
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(async () => {
+        await options?.onPayload?.({ input: 'fixture' }, model);
+        if (options?.signal?.aborted) {
+          const error = { role: 'assistant', api: model.api, provider: model.provider, model: model.id, content: [],
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
+            stopReason: 'aborted', errorMessage: 'Fixture request aborted before provider work.', timestamp: Date.now() };
+          stream.push({ type: 'error', reason: 'aborted', error }); stream.end(); return;
+        }
+        if (process.env.FIXTURE_REQUEST_MARKER) fs.appendFileSync(process.env.FIXTURE_REQUEST_MARKER, 'request\n');
+        const last = context.messages.at(-1);
+        const input = typeof last?.content === 'string' ? last.content : (last?.content || []).map((b: any) => b.text || '').join('');
+        const call = last?.role === 'user' && input.includes('capture environment');
+        const content = call ? [{ type: 'toolCall', id: 'env-probe', name: 'bash', arguments: {
+          command: `node -e 'console.log(JSON.stringify({session:process.env.PI_SESSION_ID,fixture:process.env.FIXTURE_SESSION,mode:process.env.PI_EFFECTIVE_PROMPT_MODE}))'`,
+        } }] : [{ type: 'text', text: 'Fixture reply.' }];
+        const result = { role: 'assistant', api: model.api, provider: model.provider, model: model.id, content,
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          stopReason: call ? 'toolUse' : 'stop', timestamp: Date.now() };
+        requests++;
+        if (process.env.FIXTURE_RETRY_ONCE && requests === 1) {
+          Object.assign(result, { content: [], stopReason: 'error', errorMessage: 'terminated' });
+          stream.push({ type: 'error', reason: 'error', error: result }); stream.end(); return;
+        }
+        if (process.env.FIXTURE_EXPECT_MODE && !context.systemPrompt.includes('# Current prompt mode: ' + process.env.FIXTURE_EXPECT_MODE)) {
+          Object.assign(result, { content: [], stopReason: 'error', errorMessage: 'Callback lost its prompt mode.' });
+          stream.push({ type: 'error', reason: 'error', error: result }); stream.end(); return;
+        }
+        stream.push({ type: 'start', partial: result });
+        stream.push({ type: 'done', reason: result.stopReason, message: result });
+        stream.end();
+      });
+      return stream;
+    },
+  });
+  pi.on('session_start', (_: any, ctx: any) => { process.env.FIXTURE_SESSION = ctx.sessionManager.getSessionId(); });
+  pi.on('before_agent_start', () => {
+    if (process.env.FIXTURE_MUTATE_MODE && process.env.PI_DELEGATION_ID) {
+      const file = path.join(process.env.PI_DELEGATION_ROOT!, process.env.PI_DELEGATION_ID, 'mode.json');
+      const mode = JSON.parse(fs.readFileSync(file, 'utf8')); mode.appendix = 'Changed fixture snapshot.';
+      fs.writeFileSync(file, JSON.stringify(mode));
+    }
+  });
+  pi.registerCommand('probe-dialog', { handler: async (_: any, ctx: any) => {
+    const value = await ctx.ui.select('Probe choice', ['yes', 'no']);
+    ctx.ui.notify('choice:' + value, 'info');
+  } });
+  pi.registerCommand('probe-later', { handler: async () => {
+    setTimeout(() => pi.sendMessage({ customType: 'fixture-callback', content: 'A fixture completed.', display: true }, { triggerTurn: true, deliverAs: 'followUp' }), 100);
+  } });
+}

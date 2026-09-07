@@ -59,6 +59,17 @@ if [ -f "$REPO/extensions/modes.ts" ]; then
   fi
 fi
 
+# Install missing prompt modes without replacing user-owned definitions.
+mkdir -p "$HOME/.pi/agent/modes"
+for mode in "$REPO"/extensions/modes/*.json; do
+  [ -f "$mode" ] || continue
+  dest="$HOME/.pi/agent/modes/$(basename "$mode")"
+  if [ ! -f "$dest" ]; then
+    cp "$mode" "$dest"
+    echo "installed pi mode: $(basename "$mode")"
+  fi
+done
+
 # --- 4. systemd user unit ----------------------------------------------------
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"
@@ -114,13 +125,17 @@ if [ -z "$ok" ]; then
   exit 1
 fi
 
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  PORT="$PORT" bash "$REPO/windows/install-from-wsl.sh"
+fi
+
 echo
 echo "aiconvo is running → http://localhost:$PORT"
 echo
 echo "Next steps:"
 echo "  1. Open http://localhost:$PORT in Chrome or Edge."
 if grep -qi microsoft /proc/version 2>/dev/null; then
-  echo "     (Open it in your WINDOWS browser — WSL2 forwards localhost.)"
+  echo "     Use the Windows desktop Aiconvo shortcut. It starts WSL automatically."
 fi
 echo "  2. Install it as an app: browser menu → 'Install aiconvo' (or 'Install app')."
 echo "     This gives an own window, own icon, and a launcher entry."

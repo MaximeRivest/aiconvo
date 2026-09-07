@@ -47,6 +47,18 @@ To use it from a tablet on the same local network, set `AICONVO_LAN=1` (the user
 
 Install the Android APK from `android/app/build/outputs/apk/debug/app-debug.apk`. It detects iFLYTEK hardware and keeps the wide binary e-ink UI. Phones use a separate touch layout: project cards and recent work replace the home Gantt, tabs move to the bottom, conversations use a fixed compose dock, and file diffs switch between full-screen file tree and stacked comparison. The native microphone writes live and final Parakeet transcripts directly into the compose box without opening the keyboard. On first launch, enter the laptop address and token `4148`. Terminals still start on the laptop. Rebuild with `cd android && ./gradlew assembleDebug`. See `design/23-phone-layout.md`.
 
+## Delegated conversations
+
+Select **pi-orchestrator** in the mode picker. The managed `delegate` tool starts a saved child conversation with an exact parent launch point. Children can delegate again. Expand **Delegated work** in the transcript, agent panel, or tree to inspect the hierarchy, open conversations, and control work. Delegation does not change branch or fork rules.
+
+Execution and parent review are separate. A returned result still needs checks. Pause prevents new descendants; cancellation requests stop the subtree without removing saved files. The ordinary response stop button stops only that response.
+
+Records live in `~/.local/share/aiconvo/delegations`, not the cache. Web SDK sessions run in separate processes. On systemd, delegated supervisors use independent user scopes. Existing unmanaged processes remain untracked; the app does not guess their parents.
+
+Aiconvo loads `extensions/delegation.ts` automatically. For the Pi terminal, load it explicitly with `pi -e /path/to/aiconvo/extensions/delegation.ts`. Terminal roots receive next-turn reminders; web roots receive tracked callbacks. Setup and update install the default mode only when missing, preserving personal mode files.
+
+This update requires matching frontend and server code. Restart the server only after active web runs finish, then reload clients. The implementation, limits, and trade-offs are in [design/29-delegation.md](design/29-delegation.md).
+
 ## Custom themes
 
 User themes live in `~/.config/aiconvo/themes/<theme-id>.css`. The fastest
@@ -168,6 +180,14 @@ built-in runtime source.
 - Every Pi or Claude conversation has **continue in alacritty** and an **open & send** box. aiconvo starts the native CLI in Alacritty through a thin PTY bridge. The window still looks like a normal Alacritty session. The web UI can read the screen and send keys. If Claude asks “resume from summary?”, the box shows that choice. Send pastes images (Ctrl+V) and text (bracketed paste), then Enter.
 - **start conversation** on a project overview does the same for a new session: it writes the briefing, then opens Alacritty with the kickoff as the first prompt.
 
+## Project setup
+
+Use **+ project** to create a new folder or add an existing folder. Setup never starts an agent. Existing folders keep their names and contents. The project page offers **Start conversation** and a separate **Edit project purpose** action.
+
+The form keeps entries after errors and supports keyboard and touch input. New folders show their resulting path and Git setting before creation. Purpose saves check for newer text before replacing it.
+
+This change needs matching server and frontend code. Wait for active work to finish, restart Aiconvo, then reload. The form blocks setup writes to an older server. See [design/30-project-setup.md](design/30-project-setup.md) for checks and trade-offs.
+
 ## Project folds
 
 A "project" is a name computed from a conversation's working directory. Git worktrees and second clones would split one project into several, so folds collapse raw names into one canonical project. Memory, epics, briefings, search, and the Gantt all follow the canonical name.
@@ -191,6 +211,11 @@ It then creates chronological phases, outcomes, the current state, and open ques
 - Epic markdown is stored in `~/notes/aiconvo/epics/`.
 - The exact evidence inputs for each new epic build are stored in `~/.cache/aiconvo/epic-inputs/`.
 - Rebuilding keeps the same epic file and includes all previous conversations.
+
+## License
+
+Aiconvo's original code and documentation are licensed under [Apache 2.0](LICENSE).
+See [NOTICE](NOTICE) for attribution and scope. Third-party components keep their own licenses and notices.
 
 ## Config
 

@@ -199,6 +199,22 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 @keyframes activepulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 #agentsPop { position: absolute; top: calc(var(--header-h) - 4px); right: var(--sp-3); z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); width: 460px; max-width: calc(100vw - 24px); max-height: 60vh; overflow: auto; padding: var(--sp-1) 0; }
 #agentsPop[hidden] { display: none; }
+.delegation-ui { margin: var(--sp-2) 0; padding: var(--sp-2); color: var(--text); background: var(--surface-1); border: 1px solid var(--border); overflow-anchor: none; font-size: var(--fs-meta); }
+.delegation-ui summary { cursor: pointer; padding: 6px 0; overflow-wrap: anywhere; }
+.delegation-ui button { min-height: 32px; white-space: normal; text-align: start; }
+.delegation-ui button:focus-visible, .delegation-ui summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.delegation-parent, .delegation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.delegation-parent { padding-bottom: var(--sp-2); }
+.delegation-parent[hidden], .delegation-ui [hidden] { display: none; }
+.delegation-row { border-top: 1px solid var(--border); padding: var(--sp-2) 0; overflow-wrap: anywhere; }
+.delegation-meta { color: var(--text-dim); }
+.delegation-state, .delegation-notice { padding: 4px 0; }
+.delegation-children { border-inline-start: 1px solid var(--border-strong); padding-inline-start: 8px; }
+.delegation-ui pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-meta); }
+.delegation-children.delegation-deep { padding-inline-start: 0; }
+#conversationDelegations { position: sticky; top: 0; z-index: 7; max-width: var(--read-max); margin: 0 auto; }
+#conversationDelegations .delegation-ui { max-height: 38vh; overflow: auto; }
+@media (pointer: coarse) { .delegation-ui button, .delegation-ui summary { min-height: 44px; } }
 #agentsPop .ag-row.kbd-selected { background: var(--surface-2); outline: 1px solid var(--accent); outline-offset: -1px; }
 .ag-sec { color: var(--text-faint); font-size: var(--fs-micro); padding: 8px 10px 3px; border-bottom: 1px solid var(--border); }
 /* Keep one stable inbox slot. New replies never shift the rest of the menu. */
@@ -217,6 +233,11 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 .ag-read-dot { border: 1px solid var(--text-faint); background: transparent; }
 .ag-row .ag-dir { color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-row .ag-age { flex: 0 0 auto; color: var(--text-faint); font-size: var(--fs-micro); white-space: nowrap; }
+.ag-row .ag-expand { flex: 0 0 auto; min-height: 24px; padding: 0 6px; font-size: var(--fs-micro); color: var(--text-dim); background: var(--surface-1); border: 1px solid var(--border); white-space: nowrap; }
+.ag-row .ag-expand[aria-expanded="true"] { color: var(--text); border-color: var(--border-strong); }
+.ag-row.ag-child { padding-inline-start: calc(10px + (var(--depth, 1) - 1) * 14px); }
+.ag-children { border-inline-start: 1px solid var(--border-strong); margin-inline-start: 14px; }
+@media (pointer: coarse) { .ag-row .ag-expand { min-height: 36px; padding: 0 10px; } }
 .ag-notifications { margin-top: 7px; border-top: 1px solid var(--border-strong); }
 .ag-notifications > summary { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; color: var(--text-dim); font-size: var(--fs-meta); list-style: none; }
 .ag-notifications > summary::-webkit-details-marker { display: none; }
@@ -441,6 +462,11 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .mgantt .mg-bar .mg-hint { flex: 1; font: 11px var(--font); color: var(--text-dim); }
 .mgantt .mg-bar button { min-height: 30px; min-width: 36px; }
 .mgantt .mg-scroll { overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; line-height: 0; }
+.mgantt[data-mg-open] { position: fixed; inset: var(--header-h) 0 0; z-index: 25; margin: 0; background: var(--bg); display: flex; flex-direction: column; }
+.mgantt[data-mg-open] .mg-bar { flex: none; flex-wrap: wrap; padding: 8px 12px; gap: 6px; }
+.mgantt[data-mg-open] .mg-scroll { flex: 1; min-height: 0; overscroll-behavior: contain; }
+.mgantt[data-mg-open] .tmark text { font-size: 12px; }
+.mgantt .mg-search { width: clamp(140px, 24vw, 320px); min-width: 0; }
 .mgantt .mg-tick line { stroke: var(--border); }
 .mgantt .mg-tick.major line { stroke: var(--border-strong); }
 .mgantt .mg-tick text { fill: var(--text-dim); font: 9px var(--font); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
@@ -1093,7 +1119,33 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .mm-foot, .cc-foot, .mf-foot { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .mf-foot .mf-err { flex: 1 1 auto; color: var(--warn); }
 .mf-body { overflow: auto; display: flex; flex-direction: column; gap: 6px; }
-/* new project form: caption above field, one calm column */
+/* Project setup: readable paths and keyboard/touch controls. */
+.ps-card { width: min(560px, 100%); box-sizing: border-box; max-height: 92dvh; gap: 12px; box-shadow: none; }
+.ps-card input[type="radio"], .ps-card input[type="checkbox"] { accent-color: var(--accent-strong); }
+.ps-card h2 { font-size: 17px; margin: 0; }
+.ps-body { overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 16px; }
+.ps-body label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.ps-body input[type="text"], .ps-body textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 9px; }
+.ps-body .ps-choice label, .ps-body .ps-check { flex-direction: row; align-items: center; min-height: 44px; }
+.ps-choice { margin: 0; border: 1px solid var(--border-strong); padding: 8px 12px; }
+.ps-choice legend { font-weight: 700; }
+.ps-create > *, .ps-add > * { margin-bottom: 12px; }
+.ps-help { color: var(--text-dim); font-size: 13px; line-height: 1.5; margin-top: 4px; }
+.ps-path { display: block; overflow-wrap: anywhere; font-size: 14px; }
+.ps-preview { border-left: 3px solid var(--border-strong); padding: 8px; }
+.ps-card button, .ps-card summary { min-height: 44px; font-size: 13px; }
+.ps-card summary { cursor: pointer; line-height: 44px; }
+.ps-status { margin: 0; color: var(--text); overflow-wrap: anywhere; font-size: 13px; }
+.ps-status:empty { display: none; }
+.ps-browser { border: 1px solid var(--border-strong); padding: 8px; }
+.ps-browser-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ps-browser-head .ps-path { flex: 1 1 180px; }
+.ps-folders { max-height: 220px; overflow: auto; margin-top: 8px; }
+.ps-folders button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--border); white-space: normal; overflow-wrap: anywhere; }
+.ps-card :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ps-card [hidden] { display: none !important; }
+@media (max-width: 700px) { .project-setup { padding: 8px; } .ps-body input[type="text"], .ps-body textarea { font-size: 16px; } }
+/* Shared area form styles. */
 .np-card { width: min(480px, 94vw); }
 .np-body { gap: 10px; }
 .np-body label { display: flex; flex-direction: column; gap: 4px; }
@@ -1433,6 +1485,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tnode.here { border-color: var(--accent); border-width: 2px; padding: 3px 7px; }
 .tnode .herechip { color: var(--accent); font-weight: 700; white-space: nowrap; }
 .tnode .ttools { color: var(--text-faint); white-space: nowrap; }
+.tnode .tdelegation { color: var(--accent); font-weight: 700; white-space: nowrap; }
 .tnode.work { color: var(--text-dim); }
 .tnode.work .tt { color: var(--text-dim); }
 .tnode.fanout { border-style: dashed; min-height: 86px; cursor: default; }
@@ -1928,7 +1981,7 @@ window.aiconvoSyncTheme();
 </header>
 <button id="zenExit" title="Leave zen mode (z)">zen ✕</button>
 <button id="gRecenter" title="Jump to now" aria-label="Jump to now">⌖</button>
-<div id="agentsPop" hidden></div>
+<div id="agentsPop" hidden><div id="agentsUnread"></div><div id="agentsLegacy"></div></div>
 <div id="searchOverlay" class="overlay" hidden>
   <div class="dialog search-dialog" role="dialog" aria-modal="true" aria-labelledby="searchModalInput">
     <div class="search-modal-head">
@@ -1963,7 +2016,7 @@ window.aiconvoSyncTheme();
       <span class="gsep"></span>
       <button id="ganttGroup" title="Toggle project rows or compact lanes">rows: project</button>
       <select id="ganttProject" title="Filter the timeline by project or repository"><option value="">all projects</option></select>
-      <button id="newProject" title="Create a new project: a folder, a git repository, and a vouched intent seed">+ project</button>
+      <button id="newProject" title="Create a project or add an existing folder. No agent starts during setup.">+ project</button>
       <input id="ganttDate" type="date" title="Jump to a date (t)">
     </div>
     <div id="list"></div>
@@ -2015,6 +2068,19 @@ window.aiconvoSyncTheme();
   <div id="readBody" tabindex="0"></div>
 </div>
 <script src="/linediff.js"></script>
+<script src="/delegation-ui.js"></script>
+<script>
+// An older running service can serve the updated HTML before it knows the
+// new module route. Keep existing conversations usable until its restart.
+if (!globalThis.DelegationUI) {
+  console.warn('Delegation UI needs the matching server update. Restart the service, then reload.');
+  globalThis.DelegationUI = {
+    isTerminal: () => true, trackedProcess: () => false,
+    createController: () => ({ index: () => ({ tasks: [] }), mount: () => {},
+      refresh: () => {}, invalidate: () => {}, repaint: () => {}, visibilityChanged: () => {} }),
+  };
+}
+</script>
 <script>
 let sessions = [];          // full index list
 const LOOSE_PROJECT = 'Loose conversations';
@@ -2069,6 +2135,7 @@ function setRouteKind(kind, crumbs) {
   // swap one document for another.
   if (kind !== 'doc' && kind !== 'project-docs' && typeof docState !== 'undefined' && docState) flushAndCloseDocument();
   viewKind = kind;
+  queueMicrotask(() => delegationUI.visibilityChanged());
   // Systematic: every navigation starts at the top. #view is the scroller;
   // without this, a new view inherits the old scroll offset and opens
   // mid-document (worst on the phone: head and TOC land off-screen).
@@ -2142,6 +2209,12 @@ function dispatchHash(h) {
     // "← conversation" pointing at the right place.
     const [docPath, project, origin] = h.slice(4).split('&').map(s => { try { return decodeURIComponent(s); } catch { return s; } });
     return openDocument(docPath, project || null, origin && origin.startsWith('conv=') ? origin.slice(5) : null);
+  }
+  if (h.startsWith('read=')) {
+    try {
+      const target = JSON.parse(h.slice(5));
+      if (typeof target.key === 'string') return open(target.key, target.entryId ? 'entry:' + target.entryId : undefined);
+    } catch { return errToast('invalid conversation entry link'); }
   }
   if (h.startsWith('tree=')) return showTree(h.slice(5));
   if (h === 'git') { goHome(); return setTab('repos'); }
@@ -2732,6 +2805,7 @@ function applyAgentReadFromServer(d, { replace = false } = {}) {
   saveAgentReadState();
   updateActiveBtn();
   renderAgentsPopSoon();
+  delegationUI.repaint();
 }
 // Fetch the whole state: at boot, on every SSE (re)connect, and from the
 // periodic list poll, so a missed event can never leave a stale dot.
@@ -2806,11 +2880,28 @@ function agentBusyKeys() {
   const keys = new Set(runningKeys);
   for (const r of activeRuns.values()) keys.add(r.fanoutRootKey || r.key);
   for (const p of agentsProcs) if (p.key && p.busy === true) keys.add(p.key);
+  for (const task of delegationUI.index().tasks) if (task.key && DelegationUI.isLive(task)) keys.add(task.key);
   return keys;
 }
+// A delegated worker's reply is addressed to its parent conversation. The
+// parent's review turn is what reaches a person, so the inbox counts that
+// turn, not each worker. A worker still counts when no callback can reach
+// anyone: blocked by a branch change, a failed callback, a terminal root.
+function delegationTaskByKey() {
+  const map = new Map();
+  for (const t of delegationUI.index().tasks) if (t.key && !map.has(t.key)) map.set(t.key, t);
+  return map;
+}
+function delegatedNeedsPerson(s, byKey = delegationTaskByKey()) {
+  if (!s || !s.delegationId) return true;
+  const task = byKey.get(s.key);
+  // Unknown task record (snapshot limit, deleted root): stay honest and show it.
+  if (!task) return true;
+  return DelegationUI.attentionState(task) === 'unreported';
+}
 function finishedUnreadSessions() {
-  const busy = agentBusyKeys();
-  return sessions.filter(s => agentUnreadAt(s) && !busy.has(s.key))
+  const busy = agentBusyKeys(), byKey = delegationTaskByKey();
+  return sessions.filter(s => agentUnreadAt(s) && !busy.has(s.key) && delegatedNeedsPerson(s, byKey))
     .sort((a, b) => agentUnreadAt(b) - agentUnreadAt(a));
 }
 function markAgentRead(key, at = Date.now()) {
@@ -2848,7 +2939,7 @@ function updateActiveBtn() {
   unread.forEach(s => attention.add(s.key));
   const runningJobs = [...jobs.values()].filter(j => j.status === 'running').length;
   const working = activeRuns.size > 0 || sessions.some(isWorking) || runningJobs > 0;
-  $('activeBtn').hidden = attention.size === 0 && !working && jobs.size === 0;
+  $('activeBtn').hidden = attention.size === 0 && !working && jobs.size === 0 && !delegationUI.index().tasks.some(DelegationUI.isLive);
   // The number is an inbox count. Its reserved slot stays empty when clear,
   // so activity changes never move the other header controls.
   $('activeGlyph').textContent = working ? '⚉' : '⚇';
@@ -2869,8 +2960,52 @@ function updateActiveBtn() {
 let agentsTimer = null;
 let agentsPopT = null;
 let agentsSelectedKey = null;
+const agentsExpanded = new Set(); // orchestration keys whose worker tree is open
 let agentsPids = new Map(); // key → terminal pid, from the last server fetch
 let agentsProcs = [];       // every pi/claude process, from the last server fetch
+const delegationUI = DelegationUI.createController({
+  document, fetch: (...args) => fetch(...args),
+  visible: () => !document.hidden && (!$('agentsPop').hidden || viewKind === 'conversation' || viewKind === 'tree'),
+  confirm: message => confirm(message),
+  openTarget: target => { if (!$('agentsPop').hidden) toggleAgents(false); open(target.key, target.entryId ? 'entry:' + target.entryId : undefined); },
+  titleForKey: key => { const s = sessions.find(s => s.key === key); return s && (s.title || s.timelineTitle); },
+  unread: key => { const s = sessions.find(s => s.key === key); return !!(s && agentUnreadAt(s)); },
+  onSnapshot: () => { updateActiveBtn(); renderAgentsPopSoon(); paintTreeDelegationBadges(); },
+});
+// The delegation section (controls, logs, review state) lives in the
+// conversation and tree views only. The agents panel is an attention list:
+// a delegated conversation is one more row there, marked with its parent.
+function mountDelegationView(kind) {
+  const host = $('conversationDelegations');
+  if (!host) return;
+  const selected = kind === 'tree' && treeNav && treeNav.byId.get(treeNav.sel);
+  const key = (selected && selected.key) || activeRel;
+  host.dataset.delegationKey = key || '';
+  delegationUI.mount(host, { kind, key, entryId: selected ? selected.id : null,
+    entryIds: selected?.entryIds, entryRefs: selected?.entryRefs, familyKeys: kind === 'tree' ? treeNav.familyKeys : null });
+  if (kind === 'tree') paintTreeDelegationBadges();
+}
+function paintTreeDelegationBadges() {
+  if (viewKind !== 'tree' || !treeNav?.wrap?.isConnected) return;
+  const counts = new Map();
+  for (const t of delegationUI.index().tasks) {
+    const key = t.parentKey + '\n' + t.parentEntryId;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  for (const box of treeNav.wrap.querySelectorAll('[data-tn]')) {
+    const n = treeNav.byId.get(box.dataset.tn);
+    if (!n) continue;
+    const refs = n.entryRefs || (n.entryIds || [n.id]).map(id => ({ key: n.key, id }));
+    const count = [...new Set(refs.map(ref => ref.key + '\n' + ref.id))].reduce((sum, key) => sum + (counts.get(key) || 0), 0);
+    let badge = box.querySelector('.tdelegation');
+    if (!count) { badge?.remove(); continue; }
+    if (!badge) { badge = document.createElement('span'); badge.className = 'tdelegation'; box.querySelector('.tm')?.append(badge); }
+    const label = count + ' tasks';
+    if (badge.textContent !== label) badge.textContent = label;
+    badge.title = 'Delegated work starts in this entry. Select it to inspect the task links.';
+  }
+}
+document.addEventListener('visibilitychange', () => delegationUI.visibilityChanged());
 function renderAgentsPopSoon() {
   if ($('agentsPop').hidden) return;
   clearTimeout(agentsPopT);
@@ -2888,8 +3023,60 @@ async function renderAgentsPop(refetch) {
     if (pop.hidden) return;
   }
   const now = Date.now();
+  const delegationIndex = delegationUI.index();
   const byKey = k => sessions.find(s => s.key === k);
+  // One row per orchestration, not one per worker. Workers fold under the
+  // conversation that launched them; that row shows progress and expands on
+  // request. A worker gets its own top-level row only when it is unread and
+  // no parent callback can reach a person (see finishedUnreadSessions).
+  // Controls stay in the conversation view.
+  const delegatedBy = new Map();
+  for (const t of delegationIndex.tasks) if (t.key && !delegatedBy.has(t.key)) delegatedBy.set(t.key, t);
+  const parentTitle = t => { const p = t.parentKey && byKey(t.parentKey); return (p && (p.title || p.timelineTitle)) || 'parent conversation'; };
   const secs = ms => ms < 60000 ? Math.max(1, Math.round(ms / 1000)) + 's' : ago(ms);
+  // Orchestrations: root tasks grouped by the conversation that launched them.
+  const orchestrations = new Map();
+  for (const id of delegationIndex.roots) {
+    const t = delegationIndex.byId.get(id), k = t.parentKey || '';
+    if (!orchestrations.has(k)) orchestrations.set(k, []);
+    orchestrations.get(k).push(id);
+  }
+  const orchProgress = new Map([...orchestrations].map(([k, ids]) => [k, DelegationUI.progress(delegationIndex, ids)]));
+  const attentionNote = t => {
+    const state = DelegationUI.attentionState(t);
+    if (state !== 'unreported') return '';
+    if (t.notificationState === 'blocked') return 'not reported · launch point left the active branch';
+    if (t.notificationState === 'error') return 'not reported · callback failed';
+    if (t.delivery !== 'web') return 'not reported · terminal root gets a next-turn reminder';
+    return 'not reported · parent conversation is not indexed';
+  };
+  // A worker's second line names its parent and, in the inbox, why no
+  // parent callback carried its result.
+  const origin = key => { const t = delegatedBy.get(key); return t ? '↳ ' + parentTitle(t) + (attentionNote(t) ? ' · ' + attentionNote(t) : '') : ''; };
+  const childRows = (ids, depth) => ids.map(id => {
+    const t = delegationIndex.byId.get(id); if (!t) return '';
+    const s = t.key ? byKey(t.key) : null;
+    const unread = !!(s && agentUnreadAt(s)), live = DelegationUI.isLive(t);
+    const kids = delegationIndex.children.get(id) || [];
+    const note = attentionNote(t) || (t.error ? String(t.error).slice(0, 80) : t.role || '');
+    return `<div class="ag-row ag-child${unread ? ' unread' : ''}${live ? ' working' : ''}${t.key ? '' : ' off'}" data-key="${esc(t.key || '')}" style="--depth:${depth}">` +
+      `<span class="src pi"><i></i></span>` +
+      (unread ? '<span class="ag-unread-dot" title="Unread" aria-label="Unread"></span>' : s && agentIsRead(s) ? '<span class="ag-read-dot" title="Read" aria-label="Read"></span>' : '') +
+      `<span class="ag-main"><span class="ag-title" title="${esc(t.title || 'Untitled task')}">${esc(t.title || 'Untitled task')}</span>` +
+      `<span class="ag-dir">${esc(note)}</span></span>` +
+      `<span class="ag-age">${esc((t.status || 'running') + (t.review && t.review !== 'unreviewed' ? ' · ' + t.review : ''))}</span></div>` +
+      (kids.length ? childRows(kids, depth + 1) : '');
+  }).join('');
+  const orchestration = key => {
+    const ids = orchestrations.get(key);
+    if (!ids) return { badge: '', children: '' };
+    const p = orchProgress.get(key), open = agentsExpanded.has(key);
+    const label = DelegationUI.progressLabel(p);
+    return {
+      badge: `<button class="ag-expand" data-orch="${esc(key)}" aria-expanded="${open}" title="${open ? 'Collapse' : 'Expand'} delegated work">${open ? '▾' : '▸'} ${esc(label)}</button>`,
+      children: open ? `<div class="ag-children">${childRows(ids, 1)}</div>` : '',
+    };
+  };
   // One process per conversation row: pid, owner, and a kill button live ON
   // the row. A separate section lists only processes with no conversation.
   const procByKey = new Map();
@@ -2902,14 +3089,17 @@ async function renderAgentsPop(refetch) {
   };
   // The full title, not the 10-char Gantt label: the row has room for it.
   const rowTitle = s => (s && (s.title || s.timelineTitle)) || '(untitled)';
+  // A delegated worker belongs to its supervisor, so its row has no kill
+  // button; cancel it from the parent conversation's delegation section.
   const row = (s, key, status, pid, readState = '', working = false) => `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}" data-key="${esc(key || '')}">` +
     `<span class="src ${esc((s && s.source) || 'pi')}"><i></i></span>` +
     (readState === 'unread' ? '<span class="ag-unread-dot" title="Unread" aria-label="Unread"></span>' :
       readState === 'read' ? '<span class="ag-read-dot" title="Read" aria-label="Read"></span>' : '') +
     `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}">${esc(rowTitle(s))}</span>` +
-    `<span class="ag-dir">${esc(shortDir((s && s.cwd) || ''))}</span></span>` +
+    `<span class="ag-dir">${esc(origin(key) || shortDir((s && s.cwd) || ''))}</span></span>` +
     `<span class="ag-age">${esc(status)}</span>` +
-    kill(pid, rowTitle(s)) + `</div>`;
+    orchestration(key).badge +
+    (delegatedBy.has(key) ? '' : kill(pid, rowTitle(s))) + `</div>` + orchestration(key).children;
   const webKeys = new Set([...activeRuns.values()].map(r => r.fanoutRootKey || r.key));
   const webGroups = new Map();
   for (const r of activeRuns.values()) {
@@ -2940,7 +3130,7 @@ async function renderAgentsPop(refetch) {
   const unreadSec = unread.map(s => row(s, s.key, 'replied ' + secs(now - agentUnreadAt(s)) + ' ago', null, 'unread')).join('');
   // "Writing" claims only sessions with a busy live process behind them. A
   // warm web process at the prompt is not work and must not hide a result.
-  const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key)
+  const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key) && !delegatedBy.has(s.key)
       && procByKey.has(s.key) && procByKey.get(s.key).busy !== false && !unreadKeys.has(s.key))
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const writeStatus = s => {
@@ -2951,28 +3141,42 @@ async function renderAgentsPop(refetch) {
   // A result moves into the read section immediately after it opens. Keep a
   // newly read old result here for one hour, instead of making it disappear.
   const recent = sessions.filter(s => {
-    if (!agentIsRead(s) || claimed.has(s.key)) return false;
+    if (!agentIsRead(s) || claimed.has(s.key) || delegatedBy.has(s.key)) return false;
     const readAt = Number(agentReadState.read[s.key]) || 0;
     return (s.mtimeMs && now - s.mtimeMs < 3600000) || (readAt && now - readAt < 3600000);
   }).sort((a, b) => Math.max(Number(agentReadState.read[b.key]) || 0, b.mtimeMs || 0)
     - Math.max(Number(agentReadState.read[a.key]) || 0, a.mtimeMs || 0)).slice(0, 15);
+  // Orchestrations with live workers whose launching conversation has no row
+  // above: one row per orchestration, with its progress and expandable tree.
+  const recentKeys = new Set(recent.map(s => s.key));
+  const delegatedSec = [...orchestrations.keys()].filter(k => orchProgress.get(k).live && !(claimed.has(k) || recentKeys.has(k))).map(k => {
+    if (!k) {
+      const o = orchestration('');
+      return `<div class="ag-row working off" data-key=""><span class="src pi"><i></i></span>` +
+        `<span class="ag-main"><span class="ag-title">Delegated work from an unindexed conversation</span><span class="ag-dir">records under ~/.local/share/aiconvo/delegations</span></span>` +
+        o.badge + `</div>` + o.children;
+    }
+    const p = orchProgress.get(k);
+    return row(byKey(k), k, p.live + ' working', null, '', true);
+  }).join('');
   const webSec = webRuns.join('');
   const workSec = termWork.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k), '', true)).join('');
   const idleSec = termIdle.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
   const writeSec = writing.map(s => row(s, s.key, writeStatus(s), (procByKey.get(s.key) || {}).pid, '', true)).join('');
   // Leftovers: processes no row above claimed — idle warm RPC sessions on
   // other conversations, server children, and untracked strays.
-  const others = agentsProcs.filter(p => !shownPids.has(p.pid) && !unreadKeys.has(p.key));
+  const others = agentsProcs.filter(p => !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !unreadKeys.has(p.key));
   const otherSec = others.map(p => `<div class="ag-row${p.busy === true ? ' working' : ''}" data-key="${esc(p.key || '')}">` +
     `<span class="src ${esc(p.kind === 'claude' ? 'claude' : 'pi')}"><i></i></span>` +
     `<span class="ag-main"><span class="ag-title">${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span>` +
-    `<span class="ag-dir">${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(secs(p.ageMs)) : ''}</span></span>` +
+    `<span class="ag-dir">untracked agent · ${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(secs(p.ageMs)) : ''}</span></span>` +
     `<span class="ag-age">pid ${p.pid}</span>` +
     kill(p.pid, p.title || p.kind + ' pid ' + p.pid) + `</div>`).join('');
   const st = pop.scrollTop;
   const notificationsSec = jobsNotificationsHtml();
   const unreadTray = '<div class="ag-unread-tray"><div class="ag-sec">● unread replies</div>' + unreadSec + '</div>';
-  pop.innerHTML = unreadTray +
+  $('agentsUnread').innerHTML = unreadTray;
+  $('agentsLegacy').innerHTML =
     (recent.length ? '<div class="ag-sec">○ read replies</div>' + recent.map(s => {
       const readAt = Number(agentReadState.read[s.key]) || 0;
       return row(s, s.key, readAt ? 'read ' + secs(now - readAt) + ' ago' : 'replied ' + secs(now - s.mtimeMs) + ' ago', null, 'read');
@@ -2980,6 +3184,7 @@ async function renderAgentsPop(refetch) {
     (webSec ? '<div class="ag-sec ag-active-sec">● web agents — responding</div>' + webSec : '') +
     (workSec ? '<div class="ag-sec ag-active-sec">● terminal agents — active</div>' + workSec : '') +
     (writeSec ? '<div class="ag-sec ag-active-sec">● agent activity</div>' + writeSec : '') +
+    (delegatedSec ? '<div class="ag-sec ag-active-sec">● delegated work — in progress</div>' + delegatedSec : '') +
     (idleSec ? '<div class="ag-sec ag-active-sec">○ open terminals</div>' + idleSec : '') +
     (otherSec ? '<div class="ag-sec ag-active-sec">⚙ background agent processes</div>' + otherSec : '') +
     notificationsSec;
@@ -3005,6 +3210,7 @@ function selectAgentRow(key, scroll = true) {
 }
 function agentsPopKeydown(e) {
   if ($('agentsPop').hidden) return false;
+  if (e.target.closest('.delegation-ui') && e.key !== 'Escape') return true;
   if (e.key === 'Escape' || e.key === 'a') {
     e.preventDefault();
     toggleAgents(false);
@@ -3025,6 +3231,15 @@ function agentsPopKeydown(e) {
     selectAgentRow(rows[at].dataset.key);
     return true;
   }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const row = selectAgentRow(agentsSelectedKey, false);
+    const expand = row && row.querySelector(':scope > .ag-expand');
+    if (!expand) return true;
+    e.preventDefault();
+    const open = expand.getAttribute('aria-expanded') === 'true';
+    if (open !== (e.key === 'ArrowRight')) toggleOrchestration(expand.dataset.orch);
+    return true;
+  }
   if (e.key === 'Enter') {
     e.preventDefault();
     const row = selectAgentRow(agentsSelectedKey, false);
@@ -3032,6 +3247,12 @@ function agentsPopKeydown(e) {
     return true;
   }
   return true;
+}
+function toggleOrchestration(key) {
+  if (agentsExpanded.has(key)) agentsExpanded.delete(key); else agentsExpanded.add(key);
+  const selected = agentsSelectedKey;
+  renderAgentsPop(true);
+  selectAgentRow(selected, false);
 }
 function toggleAgents(show) {
   const pop = $('agentsPop');
@@ -3042,6 +3263,7 @@ function toggleAgents(show) {
     renderAgentsPop(true);
     agentsTimer = setInterval(() => renderAgentsPop(true), 15000);
   } else agentNotificationsOpen = false;
+  delegationUI.visibilityChanged();
 }
 $('activeBtn').onclick = e => { e.stopPropagation(); toggleAgents(); };
 $('agentsPop').onclick = async e => {
@@ -3049,6 +3271,12 @@ $('agentsPop').onclick = async e => {
   if (notification) {
     e.stopPropagation();
     openJobNotification(jobs.get(notification.dataset.job));
+    return;
+  }
+  const expand = e.target.closest('.ag-expand');
+  if (expand) {
+    e.stopPropagation();
+    toggleOrchestration(expand.dataset.orch);
     return;
   }
   const kill = e.target.closest('.ag-kill');
@@ -3809,7 +4037,7 @@ function projectLabelsHtml(pos) {
   if (pos.type !== 'project') return '';
   const phone = phoneDevice();
   // A new project is a new row, so the entry point heads the row column.
-  const bornCell = `<div class="project-new-cell" data-new-project tabindex="0" title="New project — a folder is born; the first prompt starts the first conversation (P)">${phone ? '+' : '+ new project'}</div>`;
+  const bornCell = `<div class="project-new-cell" data-new-project tabindex="0" title="Create a project or add an existing folder (P)">${phone ? '+' : '+ new project'}</div>`;
   return `<div class="project-labels${phone ? ' narrow' : ''}">${bornCell}${pos.projects.map(row => {
     const top = LABEL_H + row.baseLane * PROJECT_LANE_H;
     const height = row.laneCount * PROJECT_LANE_H;
@@ -8381,7 +8609,9 @@ function mgPaint(host, items, color) {
 function mgCollapseOpen() {
   if (!mgUI.expanded || !mgLive || !mgLive.host.isConnected) return false;
   mgUI.expanded = false;
+  hideMarkPop();
   mgPaint(mgLive.host, mgLive.items, mgLive.color);
+  mgLive.host.focus({ preventScroll: true });
   return true;
 }
 
@@ -8431,7 +8661,9 @@ function mgPaintClosed(host, items, color) {
     </g>`;
   }).join('');
   host.innerHTML = `<svg width="${W}" height="${chartH}" viewBox="0 0 ${W} ${chartH}">${marks}</svg>`;
-  const expand = () => { mgUI.expanded = true; mgPaintOpen(host, items, color); };
+  host.tabIndex = 0;
+  const expand = () => { mgUI.expanded = true; mgPaintOpen(host, items, color); host.querySelector('.mg-scroll').focus(); };
+  host.onkeydown = e => { if (e.target === host && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); expand(); } };
   const coarse = matchMedia('(pointer: coarse)').matches;
   host.querySelectorAll('[data-mg]').forEach(g => {
     // Fine pointer: hover already named the mark, a click opens it.
@@ -8443,6 +8675,15 @@ function mgPaintClosed(host, items, color) {
 }
 
 function mgPaintOpen(host, items, color) {
+  host.setAttribute('data-mg-open', '1');
+  const oldTop = host.querySelector('.mg-scroll')?.scrollTop || 0;
+  const allItems = items;
+  const query = (mgUI.query || '').trim().toLowerCase();
+  const catalog = new Map(sessions.map(s => [s.key, s]));
+  const matches = items.filter(it => {
+    const s = catalog.get(it.key) || it;
+    return !query || `${s.title || ''} ${s.timelineTitle || ''} ${it.title || ''}`.toLowerCase().includes(query);
+  });
   const now = Date.now();
   const coarse = matchMedia('(pointer: coarse)').matches;
   const viewW = Math.max(320, host.clientWidth || 800);
@@ -8451,32 +8692,36 @@ function mgPaintOpen(host, items, color) {
   const t0 = items[0].a;
   const t1 = Math.max(now, ...items.map(i => i.b));
   const span = Math.max(t1 - t0, 3600000);
+  if (!mgUI.opened) {
+    mgUI.zoom = Math.min(maxZoom, Math.max(1, span / (7 * 86400000)));
+    mgUI.opened = true;
+  }
   const W = Math.round(viewW * mgUI.zoom);
-  const PAD = 8, TICK_H = 18;
+  const PAD = 8, TICK_H = 28;
   const xFor = t => PAD + ((t - t0) / span) * (W - 2 * PAD);
   const tFor = x => t0 + ((x - PAD) / (W - 2 * PAD)) * span;
   // Lane packing with room for a short title after each mark.
   const laneEnds = [];
-  const gapT = span * (90 / W);
-  for (const it of items) {
+  const gapT = span * (24 / W);
+  for (const it of matches) {
     let lane = laneEnds.findIndex(end => end + gapT <= it.a);
     if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-    laneEnds[lane] = Math.max(it.b, it.a + span * (60 / W));
+    laneEnds[lane] = Math.max(it.b, it.a + span * (280 / W));
     it.lane = lane;
   }
-  const laneH = 26; // same rhythm as the home chart: title above, violin on the line
+  const laneH = 44;
   const chartH = TICK_H + laneEnds.length * laneH + 8;
-  const maxH = Math.max(180, Math.round(window.innerHeight * 0.55));
   const pxDay = (W - 2 * PAD) / (span / 86400000);
-  const marks = items.map(it => {
-    const s = sessions.find(x => x.key === it.key) || it;
+  const marks = matches.map(it => {
+    const s = catalog.get(it.key) || it;
     const x0 = xFor(it.a), x1 = Math.max(x0 + (coarse ? 14 : 8), xFor(it.b));
     const cy = TICK_H + it.lane * laneH + laneH / 2;
     const profile = s.densityChat || [];
     const bins = it.b > it.a && profile.length ? profile : [Math.max(1, ...(profile.length ? profile : [1]))];
     const live = isActive(s);
     const work = typeof isWorking === 'function' && isWorking(s);
-    const label = String(s.timelineTitle || it.title || it.key).slice(0, mgUI.zoom >= 4 ? 34 : 18);
+    const title = String(s.title || it.title || s.timelineTitle || it.key);
+    const label = title.length > 36 ? title.slice(0, 35) + '…' : title;
     return `<g class="tmark${live ? ' active' : ''}" data-mg="${esc(it.key)}" tabindex="0">
       <title>${esc(mgTip(it, s))}</title>
       <line class="duration" style="stroke:${color.stroke}" x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}"/>
@@ -8488,21 +8733,51 @@ function mgPaintOpen(host, items, color) {
   host.setAttribute('data-mg-open', '1');
   host.removeAttribute('title');
   host.innerHTML = `<div class="mg-bar">
-      <span class="mg-hint">${coarse ? 'tap a mark for details · tap the card to open' : 'click a mark for details · double-click opens'}</span>
+      <input class="mg-search" type="search" aria-label="Search conversation titles" placeholder="Search conversation titles" value="${esc(mgUI.query || '')}">
+      <span class="mg-hint">${matches.length} conversations · ${coarse ? 'tap for details' : 'scroll · Shift: pan · Ctrl: zoom'}</span>
       <button type="button" class="ghost" data-mg-z="out" title="Zoom out">−</button>
       <button type="button" class="ghost" data-mg-z="in" title="Zoom in">+</button>
       <button type="button" class="ghost" data-mg-z="fit" title="Fit the whole history">fit</button>
       <button type="button" class="ghost" data-mg-fold title="Collapse the timeline (Esc)">▴ fold</button>
     </div>
-    <div class="mg-scroll" style="max-height:${maxH}px"><svg width="${W}" height="${chartH}" viewBox="0 0 ${W} ${chartH}">${mgTicks(t0, xFor, pxDay, chartH)}<line class="mg-now" x1="${xFor(now)}" y1="${TICK_H - 4}" x2="${xFor(now)}" y2="${chartH}"/>${marks}</svg></div>`;
+    <div class="mg-scroll" tabindex="0" aria-label="Project conversation timeline"><svg width="${W + 280}" height="${chartH}" viewBox="0 0 ${W + 280} ${chartH}">${mgTicks(t0, xFor, pxDay, chartH)}<line class="mg-now" x1="${xFor(now)}" y1="${TICK_H - 4}" x2="${xFor(now)}" y2="${chartH}"/>${marks}</svg></div>`;
   const scroller = host.querySelector('.mg-scroll');
+  scroller.scrollTop = oldTop;
+  host.onkeydown = e => {
+    if (e.target.matches('input')) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); mgCollapseOpen(); return; }
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === 'Home') scroller.scrollLeft = 0;
+      else if (e.key === 'End') scroller.scrollLeft = scroller.scrollWidth;
+      else {
+        const horizontal = e.shiftKey || ['ArrowLeft', 'ArrowRight'].includes(e.key);
+        const direction = ['ArrowUp', 'ArrowLeft', 'PageUp'].includes(e.key) ? -1 : 1;
+        const amount = e.key.startsWith('Page') ? (horizontal ? scroller.clientWidth : scroller.clientHeight) * 0.8 : 60;
+        scroller[horizontal ? 'scrollLeft' : 'scrollTop'] += direction * amount;
+      }
+    }
+  };
+  const search = host.querySelector('.mg-search');
+  search.oninput = () => {
+    const pos = search.selectionStart;
+    mgUI.query = search.value;
+    hideMarkPop();
+    mgPaintOpen(host, allItems, color);
+    const next = host.querySelector('.mg-search');
+    next.focus({ preventScroll: true });
+    try { next.setSelectionRange(pos, pos); } catch {}
+  };
+  search.onkeydown = e => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); mgCollapseOpen(); } };
   // Restore the view center; the first open lands on "now" (right edge).
   scroller.scrollLeft = mgUI.center == null ? Math.max(0, W - viewW) : Math.max(0, xFor(mgUI.center) - viewW / 2);
   scroller.onscroll = () => { mgUI.center = tFor(scroller.scrollLeft + viewW / 2); };
   const rezoom = (z, centerT) => {
     mgUI.zoom = Math.min(Math.max(1, z), maxZoom);
     if (centerT !== undefined) mgUI.center = centerT;
-    mgPaintOpen(host, items, color);
+    hideMarkPop();
+    mgPaintOpen(host, allItems, color);
+    host.querySelector('.mg-scroll').focus({ preventScroll: true });
   };
   host.querySelectorAll('[data-mg-z]').forEach(b => b.onclick = e => {
     e.stopPropagation();
@@ -8512,15 +8787,20 @@ function mgPaintOpen(host, items, color) {
   host.querySelector('[data-mg-fold]').onclick = e => {
     e.stopPropagation();
     hideMarkPop();
-    mgUI.expanded = false;
-    mgPaint(host, items, color);
+    mgCollapseOpen();
   };
   // Ctrl+wheel (and trackpad pinch) zooms toward the cursor's time.
   scroller.addEventListener('wheel', e => {
-    if (!e.ctrlKey) return;
+    if (!e.ctrlKey) {
+      if (e.shiftKey) { e.preventDefault(); scroller.scrollLeft += e.deltaY || e.deltaX; }
+      return;
+    }
     e.preventDefault();
-    const t = tFor(scroller.scrollLeft + (e.clientX - scroller.getBoundingClientRect().left));
-    rezoom(e.deltaY < 0 ? mgUI.zoom * 2 : mgUI.zoom / 2, t);
+    const pointerX = e.clientX - scroller.getBoundingClientRect().left;
+    const t = tFor(scroller.scrollLeft + pointerX);
+    const z = Math.min(maxZoom, Math.max(1, mgUI.zoom * Math.exp(-e.deltaY * 0.005)));
+    const newScale = (viewW * z - 2 * PAD) / span;
+    rezoom(z, t + (viewW / 2 - pointerX) / newScale);
   }, { passive: false });
   host.querySelectorAll('[data-mg]').forEach(g => {
     g.onclick = e => {
@@ -8685,9 +8965,12 @@ function renderProjectPanel(d) {
     ${miniGanttHtml(heroRows)}
     <div class="ptitle"><h1 id="pTitleBig" title="${esc(pTitleHint(displayTitle))}">${esc(displayTitle)}</h1><button id="pNew" class="primary pnewbtn" title="Start a new conversation in ${esc(d.project)} — you review the context before it goes">+ new in ${esc(d.project)}</button></div>
     <section class="psection pdesc">
+      <div class="pmeta ps-path">${esc(d.cwd || '')}</div>
+      ${!d.conversations ? '<p>No conversations yet. Start a conversation when you are ready.</p>' : ''}
+      <button id="pPurpose" class="ghost">Edit project purpose</button>
       ${memory
         ? `${o.identity ? `<div class="pidentity">${esc(o.identity)}</div>` : ''}<p class="psummary">${esc(vision || '(no project vision yet)')}</p>`
-        : `<p class="psummary dim">No project vision yet. ${haveLeaves ? 'The memory leaves exist — build the memory documents once; after that they stay current automatically.' : 'Build the memory leaves once — after that, the documents stay current automatically.'}</p>`}
+        : `<p class="psummary dim">${haveLeaves ? 'Build project memory from your existing conversations.' : 'Project memory will build from your conversations.'}</p>`}
       ${d.epics.length ? `<div class="pepicstrip"><span class="pes-label">epics</span>${d.epics.map(e => `<a href="#" data-p-epic-open="${esc(e.id)}" title="Open the epic · ${e.sessionIds.length} conversations · updated ${fmtDate(e.updatedAt)}">▸ ${esc(e.title)}<span class="pes-n">${e.sessionIds.length}</span></a>`).join('')}</div>` : ''}
     </section>
     ${(d.areas || []).length || areaCandidates.length ? `<section class="psection pareas"><h3>areas <span class="dim">declared inner scopes — own memory, own briefing</span></h3>${(d.areas || []).length ? `<div class="pareacards">${d.areas.map(a => `
@@ -8703,7 +8986,7 @@ function renderProjectPanel(d) {
         ${pyramid.backfillRunning ? '<span><span class="spin">░</span> extracting leaves…</span>' : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : ''}
         ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : haveLeaves ? `<button id="pDocsRegen" class="ghost" title="First build: overview, intent, environment, status from ${haveLeaves} memory ${haveLeaves === 1 ? 'leaf' : 'leaves'}">build memory docs</button>` : ''}
         <span class="psep"></span>
-        <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">unregister</button>' : ''}
+        <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">Remove from project list</button>' : ''}
       </div>
     </div>
     ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
@@ -8718,13 +9001,18 @@ function renderProjectPanel(d) {
   </div>`;
   wireMiniGantt($('view'), heroRows, color, 'p:' + d.project);
   wireProjectSwitch(d.project);
+  $('pPurpose').onclick = () => editProjectPurpose(d.project);
+  if (!d.conversations) $('pNew').textContent = 'Start conversation';
   $('pTitleBig').ondblclick = e => { e.preventDefault(); startProjectTitleEdit(d.project); };
   $('pFold').onclick = () => openFoldPicker(d);
   const pUnregister = $('pUnregister');
   if (pUnregister) pUnregister.onclick = async () => {
     if (!confirm(`Remove “${d.project}” from the project list? The folder stays on disk.`)) return;
-    await fetch('/api/project/unregister', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: d.project }) });
-    toast('✓ unregistered · ' + d.project + ' · folder kept');
+    try {
+      const out = await postJson('/api/project/unregister', { name: d.project });
+      if (out.error) throw new Error(out.error);
+    } catch (e) { errToast('Could not remove project: ' + e.message); return; }
+    toast('Project removed from list · folder kept');
     projectOverview = null; projectOverviewName = null;
     await load(); goHome();
   };
@@ -9463,7 +9751,7 @@ let current = null;
 function keepInMode(m, mode) {
   if (mode === 'commands') return m.role === 'tool';
   if (mode === 'all') return true;
-  return m.role === 'user' || m.role === 'assistant' || m.role === 'abort';
+  return m.role === 'user' || m.role === 'assistant' || m.role === 'abort' || m.role === 'event';
 }
 
 // Long messages collapse to an abstract-sized preview (about 5 lines).
@@ -9788,6 +10076,9 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
     return `<div class="abortbar"${anchor}${idxAttr}>⏹ ${esc(m.text || 'aborted')}</div>`;
   }
+  if (m.role === 'event') {
+    return `<details class="msg thinking delegation-event"${idxAttr}><summary>↳ Delegation event · not a user message</summary><div class="tool-out">${hl(m.text)}</div></details>`;
+  }
   if (m.role === 'thinking') {
     // Reasoning row (everything view): folded to one line, expand to read.
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
@@ -9832,7 +10123,8 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   }
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
-    const full = `<div class="md">${mdRender(m.text, q)}</div>${messageMediaHtml(m.images)}`;
+    const full = (m.origin === 'delegation' ? '<div class="role">Task from parent · not a direct user message</div>' : '') +
+      `<div class="md">${mdRender(m.text, q)}</div>${messageMediaHtml(m.images)}`;
     const actions = `<div class="msg-actions" aria-label="Message actions">` +
       `<button type="button" class="msg-copy" data-msg-index="${copyIndex}" title="Copy the message Markdown">copy</button>` +
       `<button type="button" class="msg-read" data-msg-index="${copyIndex}" title="Read this message aloud">read</button>` +
@@ -10248,6 +10540,8 @@ async function openTranscriptEditor(btn) {
   const i = Number(btn.dataset.msgIndex);
   const key = current && current.key;
   if (!key || !current.messages[i]) return;
+  const branchEdit = ['pi', 'pi-remote'].includes(current.source) && ['user', 'assistant'].includes(current.messages[i].role);
+  const pickedModels = fanModels().slice(0, 1);
   const msg = btn.closest('.msg');
   if (!msg || msg.querySelector('.msg-editor')) return;
   let d;
@@ -10259,8 +10553,8 @@ async function openTranscriptEditor(btn) {
   const editor = document.createElement('div');
   editor.className = 'msg-editor';
   editor.innerHTML = `<textarea spellcheck="false"></textarea>
-    <div class="msg-editor-bar"><span class="dim">${d.kind === 'json' ? 'tool input · must stay valid JSON' : 'plain text'} · saves into the session file · a running agent restarts with the edited context</span>
-    <button class="primary" data-me-save>save</button> <button data-me-cancel>cancel</button></div>`;
+    <div class="msg-editor-bar"><span class="dim">${branchEdit ? (d.role === 'user' ? 'Creates a new branch and answer. Keeps the original prompt.' : 'Keeps your correction on a new branch. Does not generate a reply.') : (d.kind === 'json' ? 'tool input · must stay valid JSON' : 'plain text') + ' · changes the original session file'}</span>
+    <button class="primary" data-me-save>${branchEdit ? (d.role === 'user' ? 'save and regenerate' : 'save as branch') : 'save'}</button> <button data-me-cancel>cancel</button></div>`;
   msg.appendChild(editor);
   const ta = editor.querySelector('textarea');
   ta.value = d.raw;
@@ -10275,9 +10569,19 @@ async function openTranscriptEditor(btn) {
     let out;
     try {
       out = await (await fetch('/api/transcript/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: key, i, baseSha: d.sha, text: ta.value }) })).json();
+        body: JSON.stringify({ id: key, i, eid: d.eid, baseSha: d.sha, text: ta.value, branch: branchEdit }) })).json();
     } catch { out = { error: 'network failure' }; }
     if (out.error) { save.disabled = false; save.textContent = 'save'; return errToast('edit failed: ' + out.error); }
+    if (out.branched) {
+      close();
+      if (out.role === 'user') {
+        const run = await postJson('/api/node/send', { id: key, node: out.node, prompt: 'Continue.\n<!-- aiconvo:regenerate -->', models: pickedModels, images: [] });
+        if (run.error) errToast('Your edited branch is saved, but the answer could not start: ' + run.error);
+        else toast('Prompt saved on a new branch. Generating an answer.');
+      } else toast('Correction saved on a new branch. Write below to continue.');
+      if (activeRel === key) await openAfterBranch(key);
+      return;
+    }
     toast(out.reopened ? 'saved · the agent restarts with the edited context' : 'saved into the session file');
     const ts = current.messages[i] && current.messages[i].ts;
     if (ts) openAtTs(key, ts); else open(key);
@@ -13085,10 +13389,16 @@ async function renderConv(scroll) {
   // A live-tail re-render must not steal the composer: keep its text,
   // caret, and focus across the DOM replacement.
   const oldTa = $('agentText');
+  const keepDelegationFocus = $('conversationDelegations')?.dataset.delegationKey === d.key
+    && document.activeElement.closest('.delegation-ui') ? document.activeElement : null;
   const keepCompose = oldTa ? {
     value: oldTa.value, start: oldTa.selectionStart, end: oldTa.selectionEnd,
     focused: document.activeElement === oldTa,
   } : null;
+  const entryId = typeof scroll === 'string' && scroll.startsWith('entry:') ? scroll.slice(6) : null;
+  const entryIndex = entryId == null ? -1 : d.messages.findIndex(m => m.eid === entryId);
+  const readEntry = entryIndex < 0 ? null : d.messages[entryIndex];
+  const isReadEntry = m => readEntry && m.eid === entryId;
   const mode = 'all'; // one transcript view: everything, tools folded
   const q = searchMode ? $('q').value.trim() : '';
   // Multi-word queries AND their terms: mark each term, not the whole string.
@@ -13121,7 +13431,7 @@ async function renderConv(scroll) {
       else if (m.role === 'toolresult') {
         m._merged = false;
         const call = (m.tid ? openCalls.find(c => c.id === m.tid) : openCalls[0]) || null;
-        if (call) { call._result = m; m._merged = true; openCalls.splice(openCalls.indexOf(call), 1); }
+        if (call) { call._result = m; m._merged = !isReadEntry(m); openCalls.splice(openCalls.indexOf(call), 1); }
       }
     }
   }
@@ -13146,7 +13456,7 @@ async function renderConv(scroll) {
   }
   const msgIndexes = new Map(d.messages.map((m, i) => [m, i]));
   // Merge transport is a real user turn for pi, but not for the reader.
-  msgs = msgs.filter(m => !isFanoutBridgeMessage(m));
+  msgs = msgs.filter(m => isReadEntry(m) || !isFanoutBridgeMessage(m));
   // Regenerate must send a real user turn to Pi. Hide that transport bridge
   // when it is one of several paths. The ancestor can be an old assistant or
   // tool node because earlier app versions branched at the wrong node.
@@ -13155,7 +13465,7 @@ async function renderConv(scroll) {
       isRegenerateBridgeMessage(m) &&
       (trace.children.get(trace.parents.get(m.eid)) || []).filter(id => trace.carries.has(id)).length > 1
     ).map(m => m.eid));
-    if (regenerateBridges.size) msgs = msgs.filter(m => !regenerateBridges.has(m.eid));
+    if (regenerateBridges.size) msgs = msgs.filter(m => isReadEntry(m) || !regenerateBridges.has(m.eid));
   }
   // The transcript view is always 'all' now. Settled fan-out still needs
   // the compare row: without it the live columns vanish and only one branch stays.
@@ -13219,7 +13529,7 @@ async function renderConv(scroll) {
     const isHit = m => !!qtest && qtest.test(m.text || '');
     if (trace || !msgs[i].off) {
       const m = msgs[i];
-      if (!skipAns.has(m.eid)) {
+      if (isReadEntry(m) || !skipAns.has(m.eid)) {
         const plainReasoning = m.role === 'assistant' && m.eid && toolTurnEids.has(m.eid);
         if (plainReasoning || ['tool', 'toolresult', 'thinking'].includes(m.role)) {
           const html = msgBlock(m, hl, isHit(m), q, msgIndexes.get(m));
@@ -13249,7 +13559,7 @@ async function renderConv(scroll) {
     flushTools();
     let j = i;
     while (j < msgs.length && msgs[j].off) j++;
-    const group = msgs.slice(i, j).filter(m => !skipAns.has(m.eid));
+    const group = msgs.slice(i, j).filter(m => isReadEntry(m) || !skipAns.has(m.eid));
     if (!group.length) { i = j; continue; }
     const chat = group.filter(m => m.role === 'user' || m.role === 'assistant').length;
     blocks.push(`<details class="branchblock"${group.some(isHit) ? ' open' : ''}>` +
@@ -13259,12 +13569,18 @@ async function renderConv(scroll) {
   }
   flushTools();
   const offNewest = trace && trace.leaf !== trace.fileLeaf;
-  $('view').innerHTML = head +
+  $('view').innerHTML = head + '<div id="conversationDelegations"></div>' +
     (msgs.length ? `<div class="transcript" id="conversationTranscript">` + blocks.join('') + `</div>`
                  : '<div class="empty" id="conversationTranscript">nothing to show in this view.</div>') +
     `<div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
     (offNewest ? `<div class="tracebanner">⑂ you follow an older branch — new messages continue from its end <button id="traceReset">back to newest</button></div>` : '') +
     agentComposerHtml(d);
+  mountDelegationView('conversation');
+  if (keepDelegationFocus?.isConnected) keepDelegationFocus.focus({ preventScroll: true });
+  if (entryId != null) {
+    if (entryIndex >= 0) scroll = 'hit:' + entryIndex;
+    else { errToast('The parent entry is not available in this transcript.'); scroll = 'top'; }
+  }
   // 'reply' lands on the START of the newest assistant answer, so an unread
   // result is read from its first line instead of its tail.
   const replyAnchorTop = () => {
@@ -13313,15 +13629,8 @@ async function renderConv(scroll) {
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.
-  const hitEl = typeof scroll === 'string' && scroll.startsWith('hit:')
-    ? $('view').querySelector(`.msg[data-i="${CSS.escape(scroll.slice(4))}"]`) : null;
-  if (hitEl) {
-    // The landing must be visible: open folded branches and reasoning,
-    // and expand a truncated message when its match hides in the cut part.
-    for (let el = hitEl; el; el = el.parentElement) if (el.tagName === 'DETAILS') el.open = true;
-    const more = hitEl.querySelector('button.more');
-    if (more && !hitEl.querySelector('.trunc mark')) more.click();
-  }
+  const hitEl = revealTranscriptHit($('view'), scroll);
+  if (readEntry && !hitEl) errToast('The parent entry could not be shown in this transcript.');
   const mk = $('view').querySelector('mark');
   const pillEl = typeof scroll === 'string' && scroll.startsWith('pill:')
     ? $('view').querySelector(`.branchpill[data-eid="${CSS.escape(scroll.slice(5))}"]`) : null;
@@ -13390,6 +13699,19 @@ async function renderConv(scroll) {
       updateMatchHud(marks.length);
     } else updateMatchHud(0);
   } else updateMatchHud(0);
+}
+
+// Read links use the complete transcript, including its folded off-path
+// blocks. Reuse hit navigation and open only DOM disclosures. All branches
+// already exist here, so reading needs no trace or continuation change.
+function revealTranscriptHit(view, scroll) {
+  const hit = typeof scroll === 'string' && scroll.startsWith('hit:')
+    ? view.querySelector(`#conversationTranscript [data-i="${CSS.escape(scroll.slice(4))}"]`) : null;
+  if (!hit) return null;
+  for (let el = hit; el; el = el.parentElement) if (el.tagName === 'DETAILS') el.open = true;
+  const more = hit.querySelector('button.more');
+  if (more && !hit.querySelector('.trunc mark')) more.click();
+  return hit;
 }
 
 // ---- trace machinery ----
@@ -14111,6 +14433,11 @@ function renderParallelStage() {
     ? 'folding the branches into this conversation…' : 'merge when replies finish');
 }
 
+function hasRunCardContent(r) {
+  return !!(r.uiRequests?.length || r.notices?.length
+    || Object.keys(r.widgets || {}).length || Object.keys(r.customViews || {}).length);
+}
+
 function renderRunCards() {
   const host = $('runCards');
   const v = $('view');
@@ -14119,8 +14446,7 @@ function renderRunCards() {
   // The everyday run has NO card: the dock's steps ledger and the live
   // pane carry it. The card survives only for the rare interactive
   // surfaces — extension questions, notices, widgets, hosted TUI views.
-  const cards = runs.filter(r => (r.uiRequests && r.uiRequests.length)
-    || (r.notices && r.notices.length) || r.widgets || r.customViews);
+  const cards = runs.filter(hasRunCardContent);
   if (host) {
     for (const el of [...host.children]) {
       if (!cards.some(r => r.jobId === el.dataset.job)) el.remove();
@@ -14284,8 +14610,12 @@ async function open(rel, scroll) {
     window._agentLiveText = '';
     window._ctxTouched = false;
     window._agentContext = [];
-    setRoute('conversation', encodeURIComponent(rel), convCrumbs(rel));
+    const hash = typeof scroll === 'string' && scroll.startsWith('entry:')
+      ? 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })) : encodeURIComponent(rel);
+    setRoute('conversation', hash, convCrumbs(rel));
     render();
+  } else if (typeof scroll === 'string' && scroll.startsWith('entry:')) {
+    setRoute('conversation', 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })), convCrumbs(rel));
   }
   // A file-watch refresh is not navigation. setRouteKind() resets #view to
   // the top before this fetch. Calling it here made the old transcript flash
@@ -14790,6 +15120,7 @@ function collapseFanoutTree(raw, typedGroups = []) {
       jumpTs: models[0].jumpTs || models[0].ts,
       model: undefined, count: models.length, chars: members.reduce((s, m) => s + (m.chars || 0), 0),
       active: members.some(m => m.active), key: n.key, picks, promptId: n.id,
+      entryRefs: members.flatMap(m => m.entryRefs || [{ key: m.key, id: m.id }]),
     };
     boxes.push(box);
     for (const m of members) { hidden.add(m.id); memberToBox.set(m.id, box); }
@@ -14880,6 +15211,7 @@ async function showTree(key) {
       <div class="tm"><b>${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : n.role === 'fanout' ? 'parallel' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role !== 'user' && n.role !== 'fanout' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} ${n.role === 'work' ? 'steps' : 'msgs'}</span>` : ''}${n.tools && n.role !== 'work' ? `<span class="ttools" title="this box carries ${n.tools} tool call${n.tools > 1 ? 's' : ''} — continue and fork keep them">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
       <div class="tt">${esc(n.title)}</div>${n.role === 'fanout' ? `<div class="tfanchoices">${fanChoicesHtml(n)}</div>` : ''}</div>`).join('');
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
+    <div id="conversationDelegations"></div>
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
       <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges}</svg>${boxes}
     </div></div>
@@ -14887,7 +15219,8 @@ async function showTree(key) {
   const wrap = $('treewrap');
   // Keyboard navigation state: T opens the tree, arrows walk it.
   const leaf = hereNode || rows[rows.length - 1] || null;
-  treeNav = { key, byId, children, roots, wrap, source: t.source, sel: leaf ? leaf.id : null };
+  treeNav = { key, byId, children, roots, wrap, source: t.source, familyKeys: (t.family || [{ key }]).map(f => f.key), sel: leaf ? leaf.id : null };
+  mountDelegationView('tree');
   // Click = select (the status bar shows the verbs) · double click = read.
   wrap.querySelectorAll('.tnode').forEach(el => {
     el.onclick = e => {
@@ -14965,6 +15298,7 @@ function treeSetSel(id, { scroll = true } = {}) {
 // The status bar: fixed at the bottom, painted by the selection. The verbs
 // keep one place and one order, so their positions become habit.
 function paintTreeBar() {
+  mountDelegationView('tree');
   const bar = $('treebar');
   if (!bar || !treeNav) return;
   const n = treeNav.byId.get(treeNav.sel);
@@ -15037,6 +15371,7 @@ function paintTreeBar() {
 }
 
 function treeKeydown(e) {
+  if (e.target.closest('.delegation-ui')) return true;
   if (viewKind !== 'tree' || !treeNav) return false;
   const n = treeNav.byId.get(treeNav.sel);
   if (!n) return false;
@@ -15641,138 +15976,165 @@ async function startLooseConversation() {
 }
 $('newLoose').onclick = startLooseConversation;
 
-// ---- new project (directory-first birth) ----
-// One form, one verb: folder + git init + vouched intent seed, and an
-// optional first prompt that starts the first conversation right away.
+// ---- project setup ----
 function openNewProjectForm() {
-  document.querySelectorAll('.ctx-confirm').forEach(el => el.remove());
-  const ov = document.createElement('div');
-  ov.className = 'ctx-confirm';
-  const lastParent = localStorage.getItem('aiconvo.newProjectParent') || '~/Projects';
-  ov.innerHTML = `<div class="cc-card np-card">
-    <div class="cc-head"><b>new project</b><span class="dim">a folder is born</span></div>
-    <div class="mf-body np-body">
-      <label><span class="np-cap">first prompt — starts the first conversation right away</span>
-        <textarea class="np-first" rows="5" placeholder="What should the agent do first? Leave empty to create the folder only."></textarea></label>
-      <label><span class="np-cap">name</span>
-        <input class="np-name" type="text" placeholder="named from your prompt — edit freely" autocomplete="off"></label>
-      <button type="button" class="np-browse-toggle">▸ or pick an existing folder — it joins the timeline as a project</button>
-      <div class="np-adopt" hidden></div>
-      <div class="np-browse" hidden></div>
-      <label><span class="np-cap">intent — why does this project exist? (becomes the vouched intent.md)</span>
-        <textarea class="np-intent" rows="3" placeholder="Optional — but every future agent briefing reads it."></textarea></label>
-      <details class="np-details"><summary>details</summary>
-        <div class="np-details-body">
-          <label><span class="np-cap">inside</span><input class="np-parent" type="text" value="${esc(lastParent)}" autocomplete="off"></label>
-          <label class="np-git-row"><input class="np-git" type="checkbox" checked> git init</label>
-        </div>
-      </details>
-    </div>
-    <div class="cc-foot">
-      <span class="mf-err np-err"></span>
-      <button type="button" class="ghost np-cancel">cancel</button>
-      <button type="button" class="primary np-go">create</button>
-    </div>
-  </div>`;
-  document.body.appendChild(ov);
-  const q = sel => ov.querySelector(sel);
-  const paintGo = () => {
-    const verb = typeof isAdopt === 'function' && isAdopt() ? 'adopt' : 'create';
-    q('.np-go').textContent = q('.np-first').value.trim() ? verb + ' + start' : verb;
-  };
-  // The name grows out of the prompt: client-side, no model call.
-  // A hand-typed name wins and stops the suggestion.
-  const nameFromPrompt = txt => String(txt).toLowerCase()
-    .replace(/[^a-z0-9\s._-]+/g, ' ').trim().split(/\s+/).slice(0, 4).join('-')
-    .replace(/^[^a-z0-9]+/, '').slice(0, 40).replace(/[-._]+$/, '');
-  let nameTouched = false;
-  // ---- adopt an existing folder: the picker browses real directories ----
-  // Picking only prefills name + parent; the server adopts what exists.
-  let adopt = null; // { name, parent, full } from the last pick
-  const isAdopt = () => !!adopt && q('.np-name').value.trim() === adopt.name && q('.np-parent').value.trim() === adopt.parent;
-  const syncAdopt = () => {
-    const on = isAdopt();
-    q('.np-adopt').hidden = !on;
-    if (on) q('.np-adopt').textContent = `existing folder — ${adopt.full} is adopted, nothing new is created`;
-    paintGo();
-  };
-  const pickFolder = full => {
-    const name = full.split('/').pop();
-    adopt = { name, parent: full.slice(0, -(name.length + 1)) || '/', full };
-    nameTouched = true;
-    q('.np-name').value = name;
-    q('.np-parent').value = adopt.parent;
-    q('.np-browse').hidden = true;
-    q('.np-browse-toggle').textContent = '▸ pick a different folder';
-    syncAdopt();
-  };
-  async function paintBrowse(p) {
-    const panel = q('.np-browse');
-    panel.hidden = false;
-    panel.innerHTML = '<div class="np-bempty">reading…</div>';
-    let out = null;
-    try { out = await (await fetch('/api/fs/dirs?path=' + encodeURIComponent(p))).json(); }
-    catch (e) { out = { error: e.message }; }
-    if (!out || out.error) { panel.innerHTML = `<div class="np-bempty">${esc((out && out.error) || 'network error')}</div>`; return; }
-    panel.innerHTML = `<div class="np-bhead">
-        <button type="button" class="ghost np-bup" title="Up one folder" ${out.parent ? '' : 'disabled'}>↑</button>
-        <span class="np-bpath" title="${esc(out.path)}">${esc(out.display)}</span>
-        <button type="button" class="ghost np-buse">adopt this folder</button>
-      </div>
-      <div class="np-blist">${out.dirs.map(d => `<div class="np-brow" data-dir="${esc(d.name)}">
-        <span class="np-bname" title="open ${esc(d.name)}">${esc(d.name)}</span>
-        ${d.git ? '<span class="np-btag">⌂ git</span>' : ''}
-        ${d.known ? '<span class="np-btag np-bknown">already a project</span>' : `<button type="button" class="ghost np-badopt" data-adopt="${esc(d.name)}">adopt</button>`}
-      </div>`).join('') || '<div class="np-bempty">no folders here</div>'}</div>`;
-    panel.querySelector('.np-bup').onclick = () => out.parent && paintBrowse(out.parent);
-    panel.querySelector('.np-buse').onclick = () => pickFolder(out.path);
-    panel.querySelectorAll('.np-bname').forEach(el =>
-      el.onclick = () => paintBrowse(out.path + '/' + el.closest('.np-brow').dataset.dir));
-    panel.querySelectorAll('[data-adopt]').forEach(b =>
-      b.onclick = () => pickFolder(out.path + '/' + b.dataset.adopt));
-  }
-  q('.np-browse-toggle').onclick = () => {
-    const panel = q('.np-browse');
-    if (panel.hidden) paintBrowse(adopt ? adopt.parent : (q('.np-parent').value.trim() || '~/Projects'));
-    else panel.hidden = true;
-  };
-  q('.np-name').addEventListener('input', () => { nameTouched = q('.np-name').value.trim() !== ''; syncAdopt(); });
-  q('.np-parent').addEventListener('input', syncAdopt);
-  q('.np-first').oninput = () => {
-    if (!nameTouched) q('.np-name').value = nameFromPrompt(q('.np-first').value);
-    syncAdopt();
-  };
-  q('.np-cancel').onclick = () => ov.remove();
-  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-  q('.np-go').onclick = async () => {
-    const name = q('.np-name').value.trim() || nameFromPrompt(q('.np-first').value);
-    if (!name) { q('.np-err').textContent = 'give the project a name, or write a first prompt.'; return; }
-    q('.np-go').disabled = true;
-    q('.np-err').textContent = 'creating…';
-    let out = null;
-    try {
-      out = await (await fetch('/api/project/create', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name, parent: q('.np-parent').value.trim(), git: q('.np-git').checked,
-          intent: q('.np-intent').value.trim(), firstPrompt: q('.np-first').value.trim(),
-        }),
-      })).json();
-    } catch (e) { out = { error: e.message }; }
-    if (!out || out.error) {
-      q('.np-go').disabled = false;
-      q('.np-err').textContent = (out && out.error) || 'network error';
-      return;
-    }
-    localStorage.setItem('aiconvo.newProjectParent', q('.np-parent').value.trim() || '~/Projects');
-    ov.remove();
-    toast('✓ project born · ' + out.project + (out.adopted ? ' (existing folder adopted)' : '') + (out.started ? ' · first conversation started' : ''));
-    await load();
-    if (out.started && out.started.key) await open(out.started.key, 'bottom');
-    else showProjectOverview(out.project);
-  };
-  q('.np-first').focus();
+  openProjectSetup();
 }
+// Dialog focus stays inside the form. Closing returns to its trigger.
+function projectSetupDialog(title, body) {
+  const trigger = document.activeElement;
+  const ov = document.createElement('div');
+  ov.className = 'ctx-confirm project-setup';
+  ov.innerHTML = `<form class="cc-card ps-card" role="dialog" aria-modal="true" aria-labelledby="ps-title" tabindex="-1">
+    <h2 id="ps-title">${esc(title)}</h2>${body}
+    <p class="ps-status" role="status" aria-live="polite"></p>
+    <div class="cc-foot"><button type="button" class="ghost ps-cancel">Cancel</button><button class="primary ps-submit" type="submit">Save</button></div>
+  </form>`;
+  const form = ov.querySelector('form');
+  const q = s => ov.querySelector(s);
+  let busy = false;
+  const background = [...document.body.children].filter(el => !el.inert && el.tagName !== 'SCRIPT');
+  background.forEach(el => { el.inert = true; });
+  const close = () => {
+    if (busy) return;
+    ov.remove(); background.forEach(el => { el.inert = false; });
+    if (trigger && trigger.isConnected) trigger.focus();
+  };
+  q('.ps-cancel').onclick = close;
+  ov.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    if (e.key === 'Tab') {
+      const items = [...form.querySelectorAll('button, input, textarea, summary, [tabindex="0"]')].filter(el => !el.disabled && (el.type !== 'radio' || el.checked) && el.getClientRects().length);
+      const first = items[0], last = items[items.length - 1];
+      if (!first) { e.preventDefault(); return; }
+      if (document.activeElement === form) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+  document.body.appendChild(ov);
+  return { ov, form, q, close, status: text => { q('.ps-status').textContent = text; }, busy(value) {
+    busy = value; form.setAttribute('aria-busy', String(value));
+    form.querySelectorAll('button, input, textarea').forEach(el => { el.disabled = value; });
+    if (value) form.focus();
+  } };
+}
+
+function projectFolderPreview(parent, name) {
+  return (parent || '~/Projects').replace(/\/+$/, '') + '/' + name.trim().replace(/\s+/g, '-');
+}
+
+function openProjectSetup() {
+  if (document.querySelector('.project-setup')) return;
+  const d = projectSetupDialog('Set up a project', `<div class="ps-body">
+    <fieldset class="ps-choice"><legend>Where will you work?</legend>
+      <label><input type="radio" name="operation" value="create" checked> Create new project</label>
+      <label><input type="radio" name="operation" value="add"> Add existing folder</label>
+    </fieldset>
+    <div class="ps-create">
+      <label>Project name<input class="ps-name" type="text" maxlength="81" autocomplete="off" aria-describedby="ps-name-hint"></label>
+      <p id="ps-name-hint" class="ps-help">Spaces become hyphens in the new folder name.</p>
+      <label>Parent folder<input class="ps-parent" type="text" autocomplete="off"></label>
+      <p class="ps-help">Folder to create</p><output class="ps-preview ps-path"></output>
+      <details><summary class="ps-git-summary">Version history: Git enabled</summary><label class="ps-check"><input class="ps-git" type="checkbox" checked> Initialize Git version history</label></details>
+    </div>
+    <div class="ps-add" hidden>
+      <label>Existing folder<input class="ps-existing" type="text" autocomplete="off" placeholder="Paste a full folder path"></label>
+      <button type="button" class="ps-browse">Browse folders</button>
+      <div class="ps-browser" hidden></div>
+      <p class="ps-help">Files stay where they are. Adding this folder does not change its contents.</p>
+    </div>
+    <p class="ps-help">No agent starts now. You can start a conversation after setup.</p>
+  </div>`);
+  const {q} = d;
+  let operation = 'create', browseVersion = 0;
+  q('.ps-parent').value = localStorage.getItem('aiconvo.newProjectParent') || '~/Projects';
+  q('.ps-existing').value = '';
+  const update = () => {
+    q('.ps-create').hidden = operation !== 'create'; q('.ps-add').hidden = operation !== 'add';
+    q('.ps-submit').textContent = operation === 'create' ? 'Create project' : 'Add project';
+    q('.ps-preview').textContent = q('.ps-name').value.trim() ? projectFolderPreview(q('.ps-parent').value, q('.ps-name').value) : 'Enter a project name to see the folder path.';
+    q('.ps-name').required = operation === 'create'; q('.ps-existing').required = operation === 'add';
+  };
+  d.form.querySelectorAll('[name="operation"]').forEach(el => el.onchange = () => { operation = el.value; d.status(''); update(); });
+  q('.ps-name').oninput = update; q('.ps-parent').oninput = update;
+  q('.ps-git').onchange = () => { q('.ps-git-summary').textContent = q('.ps-git').checked ? 'Version history: Git enabled' : 'Version history: off'; };
+  async function browse(folder) {
+    const version = ++browseVersion, panel = q('.ps-browser');
+    panel.hidden = false; panel.textContent = 'Loading folders…';
+    try {
+      const response = await fetch('/api/fs/dirs?path=' + encodeURIComponent(folder));
+      const out = await response.json();
+      if (version !== browseVersion || !d.ov.isConnected) return;
+      if (out.error) throw new Error(out.error);
+      panel.innerHTML = `<div class="ps-browser-head"><button type="button" class="ps-up" aria-label="Go to parent folder" ${out.parent ? '' : 'disabled'}>↑ Up</button><span class="ps-path">${esc(out.path)}</span><button type="button" class="ps-use">Choose this folder</button></div>
+        <div class="ps-folders">${out.dirs.map((dir, i) => `<button type="button" data-folder="${i}"><span>${esc(dir.name)}</span>${dir.known ? '<span class="ps-help">Already a project</span>' : '<span aria-hidden="true">›</span>'}</button>`).join('') || '<p>No subfolders. Choose this folder or go up.</p>'}</div>`;
+      panel.querySelector('.ps-up').onclick = () => { if (out.parent) browse(out.parent); };
+      panel.querySelector('.ps-use').onclick = () => {
+        q('.ps-existing').value = out.path; panel.hidden = true; q('.ps-existing').focus(); d.status('Folder selected. Click Add project to finish.');
+      };
+      panel.querySelectorAll('[data-folder]').forEach(b => b.onclick = () => browse(out.path.replace(/\/$/, '') + '/' + out.dirs[Number(b.dataset.folder)].name));
+      panel.querySelector('.ps-use').focus();
+    } catch (e) {
+      if (version !== browseVersion) return;
+      panel.textContent = 'Could not read this folder. Check the path and try Browse folders again.';
+      d.status(e.message);
+    }
+  }
+  q('.ps-browse').onclick = () => browse(q('.ps-existing').value || q('.ps-parent').value || '~/Projects');
+  d.form.onsubmit = async e => {
+    e.preventDefault();
+    const name = q('.ps-name').value.trim();
+    if (operation === 'create' && !/^[A-Za-z0-9][A-Za-z0-9._ -]{0,80}$/.test(name)) {
+      d.status('Start the name with a letter or number. Use letters, numbers, spaces, dots, hyphens, or underscores.'); q('.ps-name').focus(); return;
+    }
+    const parent = q('.ps-parent').value || '~/Projects';
+    const body = operation === 'create' ? {operation, name, parent, git: q('.ps-git').checked} : {operation, path: q('.ps-existing').value};
+    ++browseVersion;
+    d.busy(true); d.status(operation === 'create' ? 'Creating project…' : 'Adding project…');
+    let out;
+    try {
+      let capability;
+      try { capability = await (await fetch('/api/project/setup')).json(); } catch {}
+      if (!capability || capability.version !== 1) throw new Error('Project setup needs the updated server. Wait for active work to finish, restart Aiconvo, then retry.');
+      out = await postJson('/api/project/create', body);
+      if (out.error) throw new Error(out.error);
+    }
+    catch (error) { d.busy(false); d.status(error.message + ' Your entries are kept.'); return; }
+    if (operation === 'create') localStorage.setItem('aiconvo.newProjectParent', parent);
+    d.busy(false); d.close();
+    toast((operation === 'create' ? 'Project created' : 'Project added') + ' · ' + out.cwd);
+    if (out.warning) errToast(out.warning);
+    try { await load(); await showProjectOverview(out.project); }
+    catch { errToast('Project saved, but the view could not load. Refresh to find it.'); }
+  };
+  update(); q('.ps-name').focus();
+}
+
+async function editProjectPurpose(project) {
+  if (document.querySelector('.project-setup')) return;
+  const d = projectSetupDialog('Project purpose', `<div class="ps-body"><p>What is this project for? Agents read this when they start a conversation.</p><label>Purpose<textarea class="ps-purpose" rows="8"></textarea></label><p class="ps-help">Optional. This is the lasting goal, not the next task. Saving marks this text as reviewed by you.</p></div>`);
+  let baseText = '';
+  d.q('.ps-submit').textContent = 'Save purpose'; d.busy(true); d.status('Loading purpose…');
+  try {
+    const out = await (await fetch('/api/project/purpose?project=' + encodeURIComponent(project))).json();
+    if (out.error) throw new Error(out.error);
+    baseText = out.intent || '';
+    d.q('.ps-purpose').value = baseText; d.busy(false); d.status(''); d.q('.ps-purpose').focus();
+  } catch (e) { d.busy(false); d.q('.ps-submit').disabled = true; d.status('Could not load purpose: ' + e.message); return; }
+  d.form.onsubmit = async e => {
+    e.preventDefault(); const intent = d.q('.ps-purpose').value.trim();
+    d.busy(true); d.status('Saving…');
+    try {
+      const out = await postJson('/api/project/purpose', {project, intent, baseText});
+      if (out.error) throw new Error(out.error);
+      d.busy(false); d.close(); toast('Project purpose saved');
+      if (out.warning) errToast(out.warning);
+    } catch (error) { d.busy(false); d.status(error.message + ' Your text is kept.'); }
+  };
+}
+
 $('newProject').onclick = openNewProjectForm;
 
 // Drag the top edge of the bottom tray. Store a viewport-independent ratio.
@@ -17178,7 +17540,7 @@ function helpNow() {
       ['+ − 0', 'timeline zoom'],
       ['n / b / t', 'timeline: now / beginning / date'],
       ['C', 'new projectless conversation in your home directory'],
-      ['P', 'new project — a folder is born'],
+      ['P', 'create a project or add an existing folder'],
       ['f', 'filters']);
     sections.push({ label: 'list & timeline', keys: listKeys });
   }
@@ -17300,6 +17662,8 @@ document.addEventListener('keydown', e => {
   if (searchModalOpenNow()) return;
   if (readOverlayOpen()) { readingKeydown(e); return; }
   if (!$('agentsPop').hidden) { agentsPopKeydown(e); return; }
+  // Native task buttons and disclosures own Tab, Space, and Enter.
+  if (e.target.closest('.delegation-ui')) return;
   if (agentModalOpen()) {
     const ta = $('agentText');
     if (!inField && ta) ta.focus();
@@ -17540,6 +17904,7 @@ function toast(text, onClick, kind = '') {
 
 // ---- live updates ----
 const live = new EventSource('/api/events');
+live.addEventListener('delegation-update', () => delegationUI.invalidate());
 // On every (re)connect, reconcile jobs and run cards: a restart between
 // connections may have ended runs without their final run-event.
 let liveConnectedOnce = false;
@@ -17549,9 +17914,11 @@ live.onopen = () => {
   // the open transcript against it.
   if (liveConnectedOnce) { loadJobs(); load(); fetchAgentReadState().then(pushAgentReads); }
   liveConnectedOnce = true;
+  delegationUI.invalidate();
 };
 live.onmessage = ev => {
   const d = JSON.parse(ev.data);
+  if (d.type === 'delegation-update') { delegationUI.invalidate(); return; }
   if (d.type === 'timeline-titles') {
     for (const update of d.titles || []) {
       const s = sessions.find(x => x.key === update.key);

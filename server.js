@@ -31,6 +31,9 @@ const fanoutMerge = require('./fanoutmerge.js');
 const usageLib = require('./usageanalytics.js');
 const agentReadLib = require('./agentread.js');
 const { createModelHealth } = require('./modelhealth.js');
+const delegationLib = require('./delegation.js');
+const { createDelegationCoordinator, inspectDeliverySession, TERMINAL: DELEGATION_TERMINAL } = require('./server-delegations.js');
+const DELEGATION_ROOT = process.env.AICONVO_DELEGATION_ROOT || path.join(os.homedir(), '.local', 'share', 'aiconvo', 'delegations');
 const { execFileWithActivityTimeout } = require('./modelprocess.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
@@ -433,6 +436,10 @@ async function parseFile(absPath) {
       if (!meta.cwd && d.cwd) meta.cwd = d.cwd;
       if (d.parentSession) meta.parentSession = d.parentSession; // pi fork origin
       continue;
+    } else if (d.type === 'custom_message' && d.display !== false &&
+      ['delegation-complete', 'delegation-review-pending', 'orchestrator-event'].includes(d.customType)) {
+      messages.push({ role: 'event', customType: d.customType, text: textOf(d.content), ts: d.timestamp || null, _eid: eid });
+      continue;
     } else if (d.type === 'message' && d.message) {
       // pi message line
       role = d.message.role;
@@ -544,12 +551,23 @@ async function indexFile(source, relPath, stat) {
   const prev = index[key];
   try {
     const { meta, messages, entryParents } = await parseFile(absPath);
+    let delegated = null;
+    if (source === 'pi' && relPath.startsWith('--delegated--' + path.sep) && meta.sessionId) {
+      try {
+        const task = await delegationLib.getDelegation(meta.sessionId, { root: DELEGATION_ROOT });
+        if (path.resolve(task.sessionPath) === path.resolve(absPath)) delegated = task;
+      } catch {}
+    }
+    if (delegated) {
+      const kickoff = messages.find(m => m.role === 'user');
+      if (kickoff) kickoff.origin = 'delegation';
+    }
     const firstUser = titleSourceMessage(messages);
-    const fullTitle = firstUser ? firstUser.text.slice(0, 200).replace(/\s+/g, ' ').trim() : '(no user message)';
+    const fullTitle = delegated ? delegated.title : firstUser ? firstUser.text.slice(0, 200).replace(/\s+/g, ' ').trim() : '(no user message)';
     const titleHash = crypto.createHash('sha256').update('v2\x00' + fullTitle).digest('hex').slice(0, 16);
     const memoryHash = crypto.createHash('sha256').update('v1\x00' + JSON.stringify(
       messages.filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => [m.role, m.text || '', m.ts || null, !!m.off])
+        .map(m => [m.role, m.text || '', m.ts || null, !!m.off, m.origin || null])
     )).digest('hex').slice(0, 24);
     const savedTimelineTitle = timelineTitles[key];
     // A manual (or user-requested AI) title override wins over anything re-derived here.
@@ -564,6 +582,9 @@ async function indexFile(source, relPath, stat) {
       sessionId: meta.sessionId,
       rootId: meta.rootId,
       parentSession: meta.parentSession,
+      delegationId: delegated?.id || null,
+      delegationParentPath: delegated?.parentSessionPath || null,
+      delegationParentEntryId: delegated?.parentEntryId || null,
       // Parallel generation forks are implementation storage, not standalone
       // conversations. Preserve their hidden group identity across re-indexes.
       hiddenFanout: prev && prev.hiddenFanout || undefined,
@@ -582,7 +603,7 @@ async function indexFile(source, relPath, stat) {
       firstTs: meta.firstTs,
       lastTs: meta.lastTs,
       userCount: messages.filter(m => m.role === 'user').length,
-      realUserCount: messages.filter(m => m.role === 'user' && String(m.text || '').trim() && !isBootstrapMessage(m.text)).length,
+      realUserCount: messages.filter(m => m.role === 'user' && m.origin !== 'delegation' && String(m.text || '').trim() && !isBootstrapMessage(m.text)).length,
       assistantCount: messages.filter(m => m.role === 'assistant').length,
       densityChat: densityProfile(messages, meta.firstTs, meta.lastTs, false),
       densityAll: densityProfile(messages, meta.firstTs, meta.lastTs, true),
@@ -1386,6 +1407,8 @@ async function sessionTreeFor(key, opts = {}) {
     const tools = (isWork ? g.members.reduce((s, m) => s + (m.calls || 0), 0) : 0) + tailCalls;
     return {
       id: tail.id,                       // fork point: the whole turn package is kept
+      entryIds: [...new Set([...g.members.map(m => m.id), tail.id])],
+      entryRefs: [...new Map([...g.members, tail].flatMap(m => [...m.keys].map(k => [k + '\n' + m.id, { key: k, id: m.id }]))).values()],
       parent: up ? up.members[up.members.length - 1].id : null,
       role: isWork ? 'work' : first.role,
       ts: first.ts, lastTs: tail.ts || last.ts,
@@ -1526,7 +1549,10 @@ function sessionPathsFor(key) {
 const sessionFileOps = new Map();
 function withSessionOp(absPath, fn) {
   const prev = sessionFileOps.get(absPath) || Promise.resolve();
-  const run = prev.catch(() => {}).then(fn);
+  const run = prev.catch(() => {}).then(async () => {
+    await assertDelegationOwnership(absPath);
+    return fn();
+  });
   const gate = run.catch(() => {}).then(() => {
     if (sessionFileOps.get(absPath) === gate) sessionFileOps.delete(absPath);
   });
@@ -1763,7 +1789,8 @@ function scanAgentProcs() {
 // Join the raw process list with what the server knows: warm RPC sessions,
 // tracked terminal windows, and the conversation index.
 function agentProcsView(running) {
-  const warmByPid = new Map(pirpc.listWarmSessions().map(w => [w.pid, w]));
+  const warmByPid = new Map([...pirpc.listWarmSessions(), ...pisdk.listWarmSessions()].map(w => [w.pid, w]));
+  const taskByPid = new Map(delegationCoordinator.snapshot().tasks.filter(t => t.pid && (t.workerAlive || !DELEGATION_TERMINAL.has(t.status))).map(t => [t.pid, t]));
   const keyByBase = new Map(Object.keys(index).map(k => [path.basename(k), k]));
   const keyBySessionId = new Map();
   for (const [k, e] of Object.entries(index)) if (e.sessionId) keyBySessionId.set(e.sessionId, k);
@@ -1774,14 +1801,15 @@ function agentProcsView(running) {
     if (pr.kind === 'bridge') continue; // its pi child row carries the meaning
     const warm = warmByPid.get(pr.pid);
     const tracked = runningByPid.get(pr.pid);
-    const key = (pr.sessionPath && keyByBase.get(path.basename(pr.sessionPath)))
+    const task = taskByPid.get(pr.pid);
+    const key = (task && task.key) || (pr.sessionPath && keyByBase.get(path.basename(pr.sessionPath)))
       || (pr.resumeId && keyBySessionId.get(pr.resumeId))
       || (warm && keyByBase.get(path.basename(warm.sessionPath)))
       || (tracked && tracked.key)
       || null;
     const entry = key ? index[key] : null;
     const run = warm ? headlessOwner(path.resolve(warm.sessionPath)) : null;
-    const owner = warm ? 'web'
+    const owner = task ? 'delegated' : warm ? 'web'
       : (tracked || (key && runningKeys.has(key))) ? 'terminal'
       : pr.remotePi ? 'remote-pi'
       : pr.ppid === process.pid ? 'server'
@@ -1791,18 +1819,19 @@ function agentProcsView(running) {
       title: entry ? (entry.timelineTitle || entry.title) : null,
       cwd: entry ? entry.cwd : null, ageMs: pr.ageMs, owner,
       busy: warm ? warm.busy : undefined, model: warm && warm.model || undefined,
-      jobId: run ? run.jobId : undefined,
+      jobId: run ? run.jobId : undefined, delegationId: task?.id || undefined,
     });
   }
-  const weight = { web: 0, terminal: 1, server: 2, 'remote-pi': 3, untracked: 4 };
+  const weight = { web: 0, delegated: 1, terminal: 2, server: 3, 'remote-pi': 4, untracked: 5 };
   // In-process (sdk) sessions are not separate OS processes: add them as
   // virtual rows so the agents view shows and can kill every live session.
   for (const w of pisdk.listWarmSessions()) {
+    if (out.some(p => p.pid === w.pid)) continue;
     const key = keyByBase.get(path.basename(w.sessionPath)) || null;
     const entry = key ? index[key] : null;
     const run = headlessOwner(path.resolve(w.sessionPath));
     out.push({
-      pid: process.pid, kind: 'pi', rpc: true, engine: 'sdk', key,
+      pid: w.pid, kind: 'pi', rpc: true, engine: 'sdk', key,
       title: entry ? (entry.timelineTitle || entry.title) : null,
       cwd: entry ? entry.cwd : null, ageMs: null, owner: 'web',
       busy: w.busy, model: w.model || undefined, jobId: run ? run.jobId : undefined,
@@ -1815,16 +1844,19 @@ function agentProcsView(running) {
 // Extension-backed providers (claude-code) exist only when their extension
 // loads inside the RPC process; `--no-extensions` would hide them.
 function piProviderExtraArgs() {
-  return fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : [];
+  return [...(fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : []),
+    '-e', path.join(__dirname, 'extensions', 'delegation.ts')];
 }
 
 // Abort the headless run on a file and wait for it to let go.
 async function releaseHeadless(absPath, reason) {
+  await assertDelegationOwnership(absPath);
   const run = headlessRuns.get(absPath);
   if (run) {
     run.yielded = reason || 'released';
     try { if (run.handle && run.handle.abort) await run.handle.abort(); } catch {}
-    try { await Promise.race([run.handle.done, sleep(4000)]); } catch {}
+    try { await Promise.race([run.completion || run.handle?.done, sleep(4000)]); } catch {}
+    if (headlessRuns.get(absPath) === run) throw new Error('The web run has not released this conversation yet.');
   }
   stopAnyWarmSession(absPath);
   return !!(run);
@@ -2004,9 +2036,16 @@ function runEventForwarder(job) {
       } else if (event.type === 'agent_end') {
         job.statusText = 'finishing';
         push(true);
+      } else if (event.type === 'message_end' && event.message?.role === 'custom' &&
+        ['delegation-complete', 'orchestrator-event'].includes(event.message.customType)) {
+        addRunNotice(job, 'Delegated work returned. This response follows a runner event, not a new user message.');
+        push(true);
       } else if (event.type === 'extension_error') {
         // Informational, exactly like the TUI: show it, never kill the run.
         const name = path.basename(String(event.extensionPath || 'extension'));
+        if (path.resolve(String(event.extensionPath || '')) === path.join(__dirname, 'extensions', 'delegation.ts') && event.event === 'before_provider_request') {
+          job.errorMessage = 'Delegation guard: ' + String(event.error || 'contract check failed').slice(0, 300);
+        }
         addRunNotice(job, '⚠ ' + name + (event.event ? ' on ' + event.event : '') + ' — ' + String(event.error || 'error').split('\n')[0].slice(0, 200));
         push(true);
       } else if (event.type === 'extension_ui_request') {
@@ -2061,10 +2100,11 @@ function runEventForwarder(job) {
 
 // Start one headless run on a conversation. node (optional): continue from
 // that entry — an in-file pi branch anchor moves the leaf there first.
-async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context }) {
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
-  if (!String(message || '').trim()) throw new Error('empty prompt');
+  if (!customMessage && !String(message || '').trim()) throw new Error('empty prompt');
+  await assertDelegationLaunch(sessionPath, customMessage);
   const contextItems = context !== undefined ? normalizeContextItems(context) : conversationContextOf(key);
   if (context !== undefined) saveConversationContext(key, contextItems);
   const nextCtxSig = contextSig(contextItems);
@@ -2077,6 +2117,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       err.needsForce = true;
       throw err;
     }
+    await assertDelegationOwnership(sessionPath);
     await stopRunningAgent(running);
     await waitFileQuiet(sessionPath);
   }
@@ -2101,6 +2142,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     throw new Error('A web run is already active on this conversation. Wait or abort it.');
   }
   const ctxBundle = contextItems.length ? await writeAttachedContextFile(contextItems) : null;
+  if (headlessRuns.has(sessionPath)) throw new Error('A web run started while preparing this conversation.');
   const job = {
     id: 'run:' + crypto.randomUUID().slice(0, 8),
     type: 'agent-run', key,
@@ -2114,16 +2156,17 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
   };
   agentRunJobs.set(job.id, job);
   jobChanged(job);
-  const record = { jobId: job.id, key, startedAt: job.startedAt, model: job.model, handle: null, yielded: null };
+  const record = { jobId: job.id, key, startedAt: job.startedAt, model: job.model, handle: null, yielded: null,
+    callbackTaskIds: customMessage?.customType === 'delegation-complete' ? customMessage.details.taskIds : [], launchStarted: false };
   headlessRuns.set(sessionPath, record);
   const finish = async (status, statusText, error) => {
-    headlessRuns.delete(sessionPath);
+    if (headlessRuns.get(sessionPath) === record) headlessRuns.delete(sessionPath);
     job.status = status;
     job.statusText = statusText;
     job.uiRequests = [];
     if (error) job.error = error;
     job.finishedAt = Date.now();
-    await reindexIfChanged(key);
+    await reindexIfChanged(key).catch(e => console.error('[run index]', e.message));
     if (status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
     endLiveRunTail(job.id);
     jobChanged(job);
@@ -2131,9 +2174,20 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     maybeSettleFanout(job);
     speakRunDone(job);
   };
-  // The full run holds the file lock. Fire and forget: the caller gets the job.
-  withSessionOp(sessionPath, async () => {
+  // The caller gets the job immediately; internal callback delivery can also
+  // await the completion boundary without putting a Promise into job JSON.
+  record.completion = withSessionOp(sessionPath, async () => {
     try {
+      if (record.yielded) return await finish('done', 'stopped — ' + record.yielded);
+      if (customMessage?.customType === 'delegation-complete') {
+        // Recheck under the mutation lock: the branch can change between
+        // the coordinator's inspection and this queued operation.
+        const state = await inspectDeliverySession(sessionPath);
+        if (state.deliveries.has(customMessage.details.deliveryId)) return await finish('done', 'callback already delivered');
+        if (customMessage.details.parentEntryIds.some(id => id && !state.branch.has(id))) {
+          throw new Error('The callback launch point is no longer on the active branch.');
+        }
+      }
       if (node) {
         const leaf = await lastEntryIdOf(sessionPath);
         if (leaf !== node) {
@@ -2158,7 +2212,16 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       // session. Reload when the chip set changed, including a clear.
       if (ctxBundle || ctxChanged) stopAnyWarmSession(sessionPath);
       const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
-      const handle = piEng().piHeadlessRun({ sessionPath, cwd, env: agentEnv(), extraArgs }, { provider, modelId, message, images, onEvent: runEventForwarder(job) });
+      if (customMessage) pirpc.stopWarmSession(sessionPath);
+      const owner = await assertDelegationLaunch(sessionPath, customMessage);
+      if (findRunningConversation(key)) throw new Error('A terminal now owns this conversation.');
+      if (record.yielded) return await finish('done', 'stopped — ' + record.yielded);
+      // Identity belongs to this session, not to the returned child or host process.
+      const sessionEnv = owner ? { PI_DELEGATION_ID: owner.id, PI_DELEGATION_ROOT: DELEGATION_ROOT } : {};
+      // Existing warm sessions may have been opened without delegation identity.
+      if (owner) pisdk.stopWarmSession(sessionPath);
+      record.launchStarted = true;
+      const handle = (customMessage ? pisdk : piEng()).piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(), ...sessionEnv }, sessionEnv, extraArgs }, { provider, modelId, message, images, customMessage, onEvent: runEventForwarder(job) });
       appliedContextBySession.set(path.resolve(sessionPath), nextCtxSig);
       record.handle = handle;
       await handle.done;
@@ -2169,8 +2232,179 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     } catch (e) {
       await finish(record.yielded ? 'done' : 'error', record.yielded ? 'stopped — ' + record.yielded : e.message, record.yielded ? null : e.message);
     }
-  });
+  }).catch(e => finish('error', e.message, e.message));
   return job;
+}
+
+// Idle extension callbacks are real runs too. Register their owner before
+// forwarding their first event; preserve the same stop and completion path.
+if (typeof pisdk.setAutonomousRunHandler === 'function') pisdk.setAutonomousRunHandler((info, handle) => {
+  const sessionPath = path.resolve(info.sessionPath);
+  const key = delegationSessionKey(sessionPath);
+  if (!key || shuttingDown || headlessRuns.has(sessionPath)) {
+    handle.abort?.();
+    return () => {};
+  }
+  const job = { id: 'run:' + crypto.randomUUID().slice(0, 8), type: 'agent-run', key,
+    title: 'Extension callback', status: 'running', statusText: 'responding to an extension event',
+    startedAt: Date.now(), model: info.model || null };
+  const record = { jobId: job.id, key, startedAt: job.startedAt, model: job.model, handle, yielded: null };
+  headlessRuns.set(sessionPath, record);
+  agentRunJobs.set(job.id, job);
+  const forward = runEventForwarder(job);
+  jobChanged(job);
+  record.completion = (async () => {
+    try {
+      await withSessionOp(sessionPath, async () => {
+        await assertDelegationLaunch(sessionPath);
+        await handle.done;
+      });
+    } catch (e) {
+      job.errorMessage = e.message;
+      const abort = handle.abort?.();
+      stopAnyWarmSession(sessionPath);
+      try { await abort; } catch {}
+    }
+    finally {
+      if (headlessRuns.get(sessionPath) === record) headlessRuns.delete(sessionPath);
+      job.status = job.errorMessage && !record.yielded ? 'error' : 'done';
+      job.statusText = record.yielded ? 'stopped — ' + record.yielded : job.errorMessage || 'settled';
+      job.uiRequests = []; job.finishedAt = Date.now();
+      if (job.errorMessage) job.error = job.errorMessage;
+      await reindexIfChanged(key).catch(() => {});
+      if (job.status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
+      endLiveRunTail(job.id); jobChanged(job); broadcastRunFinal(job, key); speakRunDone(job);
+    }
+  })();
+  return forward;
+});
+
+async function assertDelegationOwnership(file) {
+  const owner = await delegationOwnerForFile(file);
+  if (owner && (owner.workerAlive || !DELEGATION_TERMINAL.has(owner.status))) {
+    throw new Error('A delegated worker owns this conversation. Stop its delegated work before changing or continuing it.');
+  }
+  return owner;
+}
+
+async function assertDelegationLaunch(file, message) {
+  if (message?.customType === 'delegation-complete') {
+    for (const id of message.details.taskIds) {
+      const task = await delegationLib.getDelegation(id, { root: DELEGATION_ROOT });
+      if (task.cancelRequested || task.status === 'cancelled' || task.paused) {
+        throw new Error('Delegation callback was cancelled or paused.');
+      }
+    }
+  }
+  const owner = await assertDelegationOwnership(file);
+  if (owner && (owner.cancelRequested || owner.status === 'cancelled' || owner.status === 'lost')) {
+    throw new Error('This delegated session is cancelled or lost.');
+  }
+  return owner;
+}
+
+async function abortCancelledDelegationRuns() {
+  // Exact owner reads include tasks omitted from the bounded list. Root work has no task owner.
+  await Promise.all([...headlessRuns].map(async ([file, record]) => {
+    const owner = await delegationOwnerForFile(file);
+    let cancelled = owner && (owner.cancelRequested || owner.status === 'cancelled');
+    if (!record.launchStarted) {
+      for (const id of record.callbackTaskIds || []) {
+        const task = await delegationLib.getDelegation(id, { root: DELEGATION_ROOT });
+        cancelled ||= task.cancelRequested || task.status === 'cancelled';
+      }
+    }
+    if (!cancelled) return;
+    record.yielded = 'delegated subtree cancelled';
+    let abort;
+    try { abort = record.handle?.abort?.(); } catch {}
+    stopAnyWarmSession(file);
+    try { await abort; } catch {}
+    await record.completion;
+  }));
+}
+
+async function delegationOwnerForFile(file) {
+  const match = path.basename(file).match(/_([0-9a-f-]{36})\.jsonl$/);
+  if (!match) return null;
+  try {
+    const task = await delegationLib.getDelegation(match[1], { root: DELEGATION_ROOT });
+    return path.resolve(task.sessionPath) === path.resolve(file) ? task : null;
+  } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+}
+function delegationSessionKey(file) {
+  if (!file) return null;
+  for (const [source, base] of Object.entries(SOURCES)) {
+    const rel = path.relative(base, file), key = source + ':' + rel;
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel) && index[key]) return key;
+  }
+  return null;
+}
+function delegationView(t) {
+  // Never serialize private launch environment or internal supervisor inputs.
+  const out = {};
+  for (const k of ['version', 'id', 'parentTaskId', 'parentSessionPath', 'parentEntryId', 'sessionPath', 'title',
+    'role', 'cwd', 'model', 'thinking', 'status', 'review', 'createdAt', 'updatedAt', 'startedAt', 'finishedAt',
+    'pid', 'supervisorPid', 'logPath', 'promptPath', 'modePath', 'modeHash', 'tools', 'outputDir', 'error',
+    'paused', 'cancelRequested', 'retryOf', 'delivery', 'notificationState', 'notificationError', 'supervision', 'survivesServiceRestart', 'workerAlive']) {
+    if (t[k] !== undefined) out[k] = t[k];
+  }
+  out.key = delegationSessionKey(t.sessionPath);
+  out.parentKey = delegationSessionKey(t.parentSessionPath);
+  out.sessionActive = !!headlessOwner(path.resolve(t.sessionPath));
+  return out;
+}
+const delegationCoordinator = createDelegationCoordinator({
+  root: DELEGATION_ROOT,
+  list: () => delegationLib.listDelegations({ root: DELEGATION_ROOT, includeSessionPaths: [...headlessRuns.keys()] }),
+  listAll: () => delegationLib.listDelegations({ root: DELEGATION_ROOT, all: true }),
+  decorate: delegationView,
+  canDeliver: async parent => {
+    const key = delegationSessionKey(parent);
+    const owner = await delegationOwnerForFile(parent);
+    return !!key && (!owner || (!owner.workerAlive && !owner.cancelRequested && owner.status !== 'lost' && DELEGATION_TERMINAL.has(owner.status))) && !shuttingDown && !headlessRuns.has(parent) && !findRunningConversation(key);
+  },
+  deliver: async (parent, customMessage) => {
+    const key = delegationSessionKey(parent);
+    if (!key) throw new Error('Parent conversation is not indexed.');
+    const job = await startAgentRun(key, { message: 'Review returned delegated work', customMessage });
+    await headlessRuns.get(parent)?.completion;
+    if (job.status === 'error') throw new Error(job.error || job.statusText);
+  },
+  onChange: snapshot => broadcast({ type: 'delegation-update', revision: snapshot.revision }),
+});
+let delegationTimer = null;
+function startDelegationMonitor() {
+  if (delegationTimer) return;
+  const tick = () => abortCancelledDelegationRuns().then(() => {
+    if (process.env.AICONVO_DISABLE_DELEGATION_CALLBACKS !== '1') return delegationCoordinator.processPending();
+  }).catch(e => console.error('[delegation]', e.message));
+  tick(); delegationTimer = setInterval(tick, 2000); delegationTimer.unref();
+}
+async function delegationDetail(id) {
+  const stored = await delegationLib.getDelegation(id, { root: DELEGATION_ROOT });
+  const task = (await delegationCoordinator.refresh()).tasks.find(t => t.id === id) || delegationView(stored);
+  const root = await fsp.realpath(DELEGATION_ROOT);
+  const readPart = async (file, limit, tail = false) => {
+    if (!file) return { text: '', truncated: false };
+    const resolved = await fsp.realpath(file);
+    const rel = path.relative(root, resolved);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Delegation detail is outside its record directory.');
+    const handle = await fsp.open(resolved, 'r');
+    try {
+      const size = (await handle.stat()).size, length = Math.min(size, limit), buf = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buf, 0, length, tail ? Math.max(0, size - length) : 0);
+      return { text: buf.subarray(0, bytesRead).toString('utf8'), truncated: size > limit };
+    } finally { await handle.close(); }
+  };
+  const log = await readPart(task.logPath, 24000, true).catch(e => ({ text: e.message, truncated: false }));
+  const prompt = await readPart(task.promptPath, 128000);
+  const mode = await readPart(task.modePath, 128000);
+  const stderr = await readPart(stored.stderrPath, 8000, true).catch(() => ({ text: '' }));
+  return { ...task, logTail: log.text, logTruncated: log.truncated, stderrTail: stderr.text,
+    modeVerification: stored.modeVerification, reviewEvidence: stored.reviewEvidence,
+    result: stored.result, permissions: stored.permissions,
+    prompt: prompt.text, promptTruncated: prompt.truncated, mode: mode.text, modeTruncated: mode.truncated };
 }
 
 // Fan out one prompt to several models: one pi-native fork per model, then
@@ -2230,6 +2464,13 @@ async function reintegrateFanout(rootKey, fanoutId) {
     .filter(([, e]) => e.hiddenFanout && e.fanoutId === fanoutId)
     .sort((a, b) => (a[1].fanoutIndex || 0) - (b[1].fanoutIndex || 0));
   if (!forks.length) return false;
+  // A delegation's parent path and launch entry are durable provenance.
+  // Keep backing fork files when they own assignments; renaming them would
+  // orphan callbacks and parent links. Comparison/merge views still use the
+  // existing indexed fork family. These files are no longer disposable.
+  const forkPaths = new Set(forks.map(([k]) => path.resolve(absPathForKey(k))));
+  const assignments = await delegationLib.listDelegations({ root: DELEGATION_ROOT, all: true });
+  if (assignments.some(t => forkPaths.has(path.resolve(t.parentSessionPath)))) return false;
   return withSessionOp(rootPath, async () => {
     stopAnyWarmSession(rootPath);
     const rootRaw = await fsp.readFile(rootPath, 'utf8');
@@ -2605,6 +2846,29 @@ function agentReadMark(keys) {
     if (d) { Object.assign(merged.read, d.read); any = true; }
   }
   if (any) agentReadApply(merged);
+  // Reading a conversation also reads the delegated results its callback
+  // turn already carried. This is deliberately asynchronous: the person's
+  // own read must never wait on delegation records.
+  agentReadDelegated(keys).catch(e => console.error('[agent-read delegated]', e.message));
+}
+async function agentReadDelegated(keys) {
+  const merged = { read: {} };
+  let any = false;
+  for (const key of keys) {
+    const file = key && index[key] ? absPathForKey(key) : null;
+    if (!file) continue;
+    for (const { task, deliveredAt } of await delegationCoordinator.reportedDescendants(path.resolve(file))) {
+      const childKey = delegationSessionKey(task.sessionPath);
+      if (!childKey || !index[childKey]) continue;
+      // Only what the callback reported. A worker conversation that moved
+      // after delivery (continued in web, new terminal turn) stays unread.
+      const activity = Math.max(Number(index[childKey].mtimeMs) || 0, Number(agentRead.finished[childKey]) || 0);
+      if (activity > deliveredAt) continue;
+      const d = agentReadLib.markRead(agentRead, childKey, { mtimeMs: index[childKey].mtimeMs });
+      if (d) { Object.assign(merged.read, d.read); any = true; }
+    }
+  }
+  if (any) agentReadApply(merged);
 }
 const MEMORY_DOC_KINDS = ['overview', 'intent', 'environment', 'status'];
 function normalizeContextItems(raw) {
@@ -2849,7 +3113,11 @@ let createdProjects = {}; // raw project name -> { cwd, createdAt, adopted? }
 try { createdProjects = JSON.parse(fs.readFileSync(CREATED_PROJECTS_FILE, 'utf8')); } catch { createdProjects = {}; }
 function saveCreatedProjects() {
   fs.mkdirSync(NOTES_DIR, { recursive: true });
-  fs.writeFileSync(CREATED_PROJECTS_FILE, JSON.stringify(createdProjects, null, 2) + '\n');
+  const temp = CREATED_PROJECTS_FILE + '.tmp-' + crypto.randomUUID();
+  try {
+    fs.writeFileSync(temp, JSON.stringify(createdProjects, null, 2) + '\n', { flag: 'wx' });
+    fs.renameSync(temp, CREATED_PROJECTS_FILE);
+  } finally { try { fs.unlinkSync(temp); } catch {} }
 }
 function createdRecordFor(project) {
   for (const [name, rec] of Object.entries(createdProjects)) {
@@ -4052,7 +4320,7 @@ async function extractLeaf(key) {
   let prevAssistant = '';
   messages.forEach((m, i) => {
     if (m.role === 'assistant') prevAssistant = m.text || '';
-    if (m.role !== 'user' || !String(m.text || '').trim() || isBootstrapMessage(m.text)) return;
+    if (m.role !== 'user' || m.origin === 'delegation' || !String(m.text || '').trim() || isBootstrapMessage(m.text)) return;
     intentItems.push({ id: i, ts: m.ts || null, user: m.text || '', assistantBefore: prevAssistant });
   });
   const toolLines = [];
@@ -5501,6 +5769,7 @@ function agentEnv() {
     DISPLAY: process.env.DISPLAY || ':0',
     ...(xauthority ? { XAUTHORITY: xauthority } : {}),
     PATH: agentPath(process.env.PATH),
+    PI_DELEGATION_ROOT: DELEGATION_ROOT,
   };
 }
 
@@ -5838,6 +6107,7 @@ async function actOnConversation(key, payload) {
   const opened = await openConversationInTerminal(key, { focus: !payload || !payload.quick });
   const title = opened.title;
   if (!(await waitForBridge(title))) throw new Error('Terminal bridge did not start.');
+  await assertDelegationLaunch(absPathForKey(key));
   if (payload && payload.keys != null) {
     await bridgeRequest(title, { op: 'keys', data: String(payload.keys) });
   } else if (payload && payload.choice != null) {
@@ -5864,21 +6134,27 @@ async function openConversationInTerminal(key, opts) {
   const kind = conversationKind(entry);
   if (!kind) throw new Error('This conversation source cannot open in a terminal.');
   const title = windowTitleFor(key);
-  // The terminal is sovereign: any headless web run on this file yields now.
-  await releaseHeadless(absPathForKey(key), 'terminal opened');
-  const running = findRunningConversation(key);
-  if (running) {
-    const focused = focus ? focusWindow(running.windowTitle || title) : false;
-    return { ok: true, created: false, focused, pid: running.pid, title: running.windowTitle || title, kind };
-  }
-  if (focus && focusWindow(title)) return { ok: true, created: false, focused: true, title, kind };
-  const { sessionPath, cwd } = sessionPathsFor(key);
-  const argv = kind === 'claude'
-    ? [claudeBin(), '--resume', entry.sessionId]
-    : [piBin(), '--session', sessionPath];
-  if (!argv[2]) throw new Error('This conversation has no session identifier.');
-  await spawnAlacritty(cwd, title, argv);
-  return { ok: true, created: true, focused: false, title, kind, cwd };
+  const file = absPathForKey(key);
+  await assertDelegationOwnership(file);
+  // Release outside the queue: a web run holds the queue until done.
+  await releaseHeadless(file, 'terminal opened');
+  return withSessionOp(file, async () => {
+    await assertDelegationLaunch(file);
+    const running = findRunningConversation(key);
+    if (running) {
+      const focused = focus ? focusWindow(running.windowTitle || title) : false;
+      return { ok: true, created: false, focused, pid: running.pid, title: running.windowTitle || title, kind };
+    }
+    if (focus && focusWindow(title)) return { ok: true, created: false, focused: true, title, kind };
+    const { sessionPath, cwd } = sessionPathsFor(key);
+    const argv = kind === 'claude'
+      ? [claudeBin(), '--resume', entry.sessionId]
+      : [piBin(), '--session', sessionPath];
+    if (!argv[2]) throw new Error('This conversation has no session identifier.');
+    await assertDelegationLaunch(file);
+    await spawnAlacritty(cwd, title, argv);
+    return { ok: true, created: true, focused: false, title, kind, cwd };
+  });
 }
 
 function decodeImagePayload(img) {
@@ -5972,6 +6248,7 @@ async function confirmSubmit(title, body) {
 }
 
 async function sendToConversation(key, payload) {
+  await assertDelegationOwnership(absPathForKey(key));
   let text = payload && payload.text != null ? String(payload.text) : '';
   const rawImages = Array.isArray(payload && payload.images) ? payload.images : [];
   const images = rawImages.map(decodeImagePayload).filter(Boolean).slice(0, 8);
@@ -6004,6 +6281,7 @@ async function sendToConversation(key, payload) {
       err.blocked = { ...pane, opened };
       throw err;
     }
+    await assertDelegationLaunch(absPathForKey(key));
     const files = [];
     for (let i = 0; i < images.length; i++) {
       files.push(await saveInboxImage(images[i], i));
@@ -6019,6 +6297,7 @@ async function sendToConversation(key, payload) {
       await waitForPasteEcho(title, body, opened.created ? 8000 : 2000);
       await sleep(150);
     }
+    await assertDelegationLaunch(absPathForKey(key));
     await bridgeRequest(title, { op: 'enter' });
     const submitted = body ? await confirmSubmit(title, body) : true;
     return { ok: true, sent: true, submitted, via: 'bridge', images: files.length, files, chars: text.length, ...opened };
@@ -6033,6 +6312,7 @@ async function sendToConversation(key, payload) {
   }
   if (opened.created) await sleep(1800);
   else await sleep(150);
+  await assertDelegationLaunch(absPathForKey(key));
   const files = [];
   for (let i = 0; i < images.length; i++) {
     files.push(await saveInboxImage(images[i], i));
@@ -6048,6 +6328,7 @@ async function sendToConversation(key, payload) {
     sendKeys(wid, 'ctrl+shift+v');
     await sleep(opened.created ? 600 : 150);
   }
+  await assertDelegationLaunch(absPathForKey(key));
   sendKeys(wid, 'Return');
   return { ok: true, sent: true, via: 'xdotool', images: files.length, files, chars: text.length, ...opened };
 }
@@ -6056,6 +6337,7 @@ async function sendFileFeedback(body) {
   const key = body.key || '';
   const entry = index[key];
   if (!entry) throw new Error('conversation not found');
+  await assertDelegationOwnership(absPathForKey(key));
   const image = String(body.image || '');
   const match = image.match(/^data:image\/png;base64,(.+)$/);
   if (!match) throw new Error('image must be a PNG data URL');
@@ -6088,8 +6370,14 @@ async function sendFileFeedback(body) {
   const argv = kind === 'claude'
     ? [claudeBin(), '--resume', entry.sessionId, prompt]
     : [piBin(), '--session', sessionPath, '@' + pngPath, prompt];
-  await spawnAlacritty(cwd || entry.cwd || os.homedir(), windowTitleFor(key) + ' feedback', argv);
-  return { ok: true, launched: true, pngPath, mdPath };
+  await assertDelegationOwnership(sessionPath);
+  await releaseHeadless(sessionPath, 'terminal feedback opened');
+  return withSessionOp(sessionPath, async () => {
+    await assertDelegationLaunch(sessionPath);
+    if (findRunningConversation(key)) throw new Error('A terminal now owns this conversation.');
+    await spawnAlacritty(cwd || entry.cwd || os.homedir(), windowTitleFor(key) + ' feedback', argv);
+    return { ok: true, launched: true, pngPath, mdPath };
+  });
 }
 
 // ---------- agent file diffs ----------
@@ -8615,12 +8903,32 @@ async function waitFileQuiet(abs, totalMs = 3000, quietMs = 500) {
 
 async function transcriptRawResponse(key, i) {
   const target = await transcriptTarget(key, i);
-  return { key, i, role: target.m.role, kind: target.kind, raw: target.raw, sha: sha256Hex(target.raw) };
+  return { key, i, eid: target.m.eid, role: target.m.role, kind: target.kind, raw: target.raw, sha: sha256Hex(target.raw) };
 }
 
 async function transcriptEditResponse(body) {
   const { id: key, i, baseSha, text } = body;
   if (typeof text !== 'string') throw new Error('missing text');
+  if (body.branch) {
+    const { entry, sessionPath } = sessionPathsFor(key);
+    if (entry.source !== 'pi' && entry.source !== 'pi-remote') throw new Error('Branch edits need a Pi conversation.');
+    return withSessionOp(sessionPath, async () => {
+      if (headlessRuns.has(sessionPath) || findRunningConversation(key)) throw new Error('Stop the active run or close its terminal before editing a branch.');
+      stopAnyWarmSession(sessionPath);
+      const target = await transcriptTarget(key, Number(i));
+      if (!body.eid || target.m.eid !== body.eid || !baseSha || sha256Hex(target.raw) !== baseSha) throw new Error('The message changed. Reload it before editing.');
+      if (target.m.role !== 'user' && target.m.role !== 'assistant') throw new Error('Only prompts and replies support branch edits.');
+      if (Array.isArray(target.d.message.content) && target.d.message.content.some(b => b && b.type === 'toolCall')) throw new Error('This reply also calls tools. Edit a text-only reply instead.');
+      target.apply(text);
+      const node = crypto.randomBytes(8).toString('hex');
+      target.d.id = node;
+      target.d.timestamp = new Date().toISOString();
+      // Append a sibling. All existing descendants keep their original parent.
+      await fsp.appendFile(sessionPath, (target.lines.at(-1) === '' ? '' : '\n') + JSON.stringify(target.d) + '\n');
+      await reindexIfChanged(key);
+      return { ok: true, branched: true, node, role: target.m.role };
+    });
+  }
   await releaseHeadless(absPathForKey(key), 'transcript edit');
   const running = findRunningConversation(key);
   if (running) {
@@ -8883,6 +9191,48 @@ async function projectResponse(project) {
 // "Create project" is directory-first: the folder IS the project. The
 // registry entry only keeps it visible until the first conversation lands.
 async function createProject(body) {
+  // Explicit setup is deliberately separate from the legacy birth/agent flow.
+  if (Object.prototype.hasOwnProperty.call(body, 'operation')) {
+    if (body.operation !== 'create' && body.operation !== 'add') throw new Error('unknown project operation');
+    const adopted = body.operation === 'add';
+    let cwd;
+    if (adopted) {
+      if (typeof body.path !== 'string' || !body.path.length || body.path.includes('\0')) throw new Error('project path is required');
+      // Do not trim or normalize directory names: spaces and Unicode are valid.
+      const expanded = expandHomePath(body.path);
+      if (!path.isAbsolute(expanded)) throw new Error('Use a full folder path, starting with / or ~/');
+      cwd = path.resolve(expanded);
+      if (!fs.statSync(cwd).isDirectory()) throw new Error('project path must be an existing directory');
+    } else {
+      const rawName = String(body.name || '').trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,80}$/.test(rawName)) throw new Error('project name: letters, digits, ". _ -" and spaces only');
+      if (typeof body.parent !== 'string' || !body.parent.length || body.parent.includes('\0')) throw new Error('existing parent directory is required');
+      const expanded = expandHomePath(body.parent);
+      if (!path.isAbsolute(expanded)) throw new Error('Use a full parent folder path, starting with / or ~/');
+      const parent = path.resolve(expanded);
+      if (!fs.statSync(parent).isDirectory()) throw new Error('parent must be an existing directory');
+      cwd = path.join(parent, rawName.replace(/\s+/g, '-'));
+    }
+    const raw = foldsLib.rawProjectOf(cwd);
+    const project = canonicalProjectName(raw);
+    if (!project || project === '?' || project === LOOSE_PROJECT) throw new Error('Choose a project folder, not your home folder, Projects folder, or a temporary folder.');
+    if (projectMetaFor(project)) throw new Error(`project "${project}" already exists`);
+    // No await between checking and registering: concurrent adds cannot both win.
+    // Exclusive mkdir also rejects existing files, directories and dangling links.
+    if (!adopted) fs.mkdirSync(cwd);
+    createdProjects[raw] = { cwd, createdAt: Date.now(), ...(adopted ? { adopted: true } : {}) };
+    try { saveCreatedProjects(); }
+    catch (e) {
+      delete createdProjects[raw];
+      throw new Error((adopted ? 'Folder was not added. ' : 'Folder created at ' + cwd + ', but not added. Use Add existing folder to retry. ') + e.message);
+    }
+    let warning = null;
+    if (!adopted && body.git !== false) {
+      try { await gitText(cwd, ['init']); }
+      catch { warning = 'Project created, but Git version history could not be initialized.'; }
+    }
+    return { ok: true, project, cwd, adopted, intentPath: null, started: null, warning };
+  }
   const rawName = String(body.name || '').trim();
   if (!rawName) throw new Error('project name is required');
   if (!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,80}$/.test(rawName)) throw new Error('project name: letters, digits, ". _ -" and spaces only');
@@ -10477,6 +10827,7 @@ const server = http.createServer(async (req, res) => {
     const staticFile = {
       '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
@@ -10969,6 +11320,47 @@ const server = http.createServer(async (req, res) => {
           dirs,
         });
       } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project/setup' && req.method === 'GET') {
+      json(res, 200, { version: 1 });
+    } else if (u.pathname === '/api/project/purpose' && (req.method === 'GET' || req.method === 'POST')) {
+      try {
+        let body = {};
+        if (req.method === 'POST') {
+          let text = '';
+          for await (const chunk of req) text += chunk;
+          body = JSON.parse(text || '{}');
+        }
+        const project = canonicalProjectName(String(req.method === 'GET' ? u.searchParams.get('project') || '' : body.project || ''));
+        if (!projectMetaFor(project)) throw new Error('project not found');
+        const paths = projectMemoryPaths(project);
+        if (req.method === 'POST') {
+          if (typeof body.intent !== 'string') throw new Error('purpose must be text');
+          const intent = body.intent.trim();
+          const text = intent ? intent + '\n' : '';
+          if (text.length > 500000) throw new Error('purpose is too large');
+          if (typeof body.baseText !== 'string') throw new Error('reload the purpose before saving');
+          await fsp.mkdir(paths.dir, { recursive: true });
+          // Compare and replace without yielding, so two app saves cannot interleave.
+          let current = '';
+          try { current = fs.readFileSync(paths.intent, 'utf8'); }
+          catch (e) { if (e.code !== 'ENOENT') throw e; }
+          if (current !== body.baseText) throw new Error('Purpose changed since you opened it. Keep your text, then reopen to review the latest version.');
+          const temp = paths.intent + '.purpose-' + process.pid + '-' + crypto.randomUUID();
+          try { fs.writeFileSync(temp, text, { flag: 'wx' }); fs.renameSync(temp, paths.intent); }
+          finally { try { fs.unlinkSync(temp); } catch {} }
+          let warning = null;
+          if (text) {
+            try { await vouchApply({ path: paths.intent, text, source: 'project-purpose', note: 'human-written project purpose' }); }
+            catch { warning = 'Purpose saved, but its review mark could not be recorded. Open the purpose and save it again to retry.'; }
+          }
+          json(res, 200, { intent: text, warning });
+        } else {
+          let intent = '';
+          try { intent = await fsp.readFile(paths.intent, 'utf8'); }
+          catch (e) { if (e.code !== 'ENOENT') throw e; }
+          json(res, 200, { intent });
+        }
+      } catch (e) { json(res, e.message === 'project not found' ? 404 : 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/create' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -11338,6 +11730,22 @@ const server = http.createServer(async (req, res) => {
         error: listed.error,
         piDefault: readPiDefault(),
       });
+    } else if (u.pathname === '/api/delegations' && req.method === 'GET') {
+      json(res, 200, await delegationCoordinator.refresh());
+    } else if (u.pathname === '/api/delegations/detail' && req.method === 'GET') {
+      try { json(res, 200, await delegationDetail(u.searchParams.get('id'))); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/delegations/control' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 4096) return json(res, 413, { error: 'Request too large.' }); }
+      try {
+        const p = JSON.parse(body || '{}');
+        if (!['pause', 'resume', 'cancel'].includes(p.action)) throw new Error('Unknown delegation action.');
+        await delegationLib.controlDelegation(p.id, p.action, { root: DELEGATION_ROOT });
+        if (p.action === 'cancel') await abortCancelledDelegationRuns();
+        await delegationCoordinator.refresh();
+        json(res, 200, { ok: true });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/agents/active') {
       // running: a live pi/claude process. writing: file changed in 5 min.
       // recent: file changed in the last hour and not already listed.
@@ -11433,9 +11841,12 @@ const server = http.createServer(async (req, res) => {
           stopAnyWarmSession(sessionPath);
           return json(res, 200, { ok: true, pid, kind: 'pi', owner: 'web', engine: 'sdk' });
         }
-        const proc = scanAgentProcs().find(x => x.pid === pid);
+        const tasks = await delegationLib.listDelegations({ root: DELEGATION_ROOT });
+        const delegated = tasks.find(t => t.pid === pid && (t.workerAlive || !DELEGATION_TERMINAL.has(t.status)));
+        if (delegated) return json(res, 409, { error: 'Use Stop delegated work. It cancels owned descendants and preserves their records.' });
+        const warm = [...pirpc.listWarmSessions(), ...pisdk.listWarmSessions()].find(w => w.pid === pid);
+        const proc = scanAgentProcs().find(x => x.pid === pid) || (warm && { kind: 'pi' });
         if (!proc) return json(res, 404, { error: 'pid ' + pid + ' is not a pi/claude/bridge process (already gone?)' });
-        const warm = pirpc.listWarmSessions().find(w => w.pid === pid);
         if (warm) {
           await releaseHeadless(path.resolve(warm.sessionPath), 'killed from the agents view');
           stopAnyWarmSession(warm.sessionPath);
@@ -11925,6 +12336,8 @@ let shuttingDown = false;
 async function shutdownGracefully() {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(delegationTimer);
+  delegationCoordinator.stop();
   const hardExit = setTimeout(() => process.exit(0), 8000);
   try {
     const active = [...headlessRuns.values()];
@@ -12013,6 +12426,7 @@ server.listen(PORT, HOST, () => {
   }
   fullScan().then(() => {
     watch(); watchNotes();
+    startDelegationMonitor();
     sweepOrphanFanouts();
     refreshProjectFolds().catch(() => {})
       .then(() => syncSearchIndex())

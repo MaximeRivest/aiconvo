@@ -28,6 +28,17 @@ if [ -f extensions/modes.ts ]; then
   fi
 fi
 
+# Modes are user-owned. Add defaults only when missing.
+mkdir -p "$HOME/.pi/agent/modes"
+for mode in extensions/modes/*.json; do
+  [ -f "$mode" ] || continue
+  dest="$HOME/.pi/agent/modes/$(basename "$mode")"
+  if [ ! -f "$dest" ]; then
+    cp "$mode" "$dest"
+    echo "installed pi mode: $(basename "$mode")"
+  fi
+done
+
 systemctl --user restart aiconvo
 
 ok=""
