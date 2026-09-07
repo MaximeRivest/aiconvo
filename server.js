@@ -1895,12 +1895,26 @@ function endLiveRunTail(jobId) {
 // The one place a web run's end reaches the browsers. It also stamps the
 // shared inbox, so a device that was closed still sees the reply as unread
 // when it comes back. Fan-out children report under their root conversation.
+// Title and a short plain excerpt ride along so a device that only listens
+// to the event stream (the phone app's notification service) can show a
+// useful notice without a second request.
 function broadcastRunFinal(job, key) {
   const finishedAt = job.finishedAt || Date.now();
   agentReadFinished(job.fanoutRootKey || key, finishedAt);
+  const entry = key && index[key];
+  const title = (entry && (entry.title || entry.timelineTitle) || '').trim() || null;
+  const excerpt = replyExcerpt(job.lastAssistantText || '');
   broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
     fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
-    fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true, finishedAt });
+    fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true, finishedAt, title, excerpt });
+}
+
+// First plain words of a reply: code blocks and markdown marks dropped.
+function replyExcerpt(text, max = 200) {
+  const plain = String(text).replace(/```[\s\S]*?```/g, ' ').replace(/[`*_#>|]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  if (!plain) return null;
+  return plain.length > max ? plain.slice(0, max - 1).replace(/\s+\S*$/, '') + '…' : plain;
 }
 
 function toolResultTail(result) {

@@ -33,6 +33,33 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val SPEECH_PERMISSION_REQUEST = 4107
         private const val FILE_CHOOSER_REQUEST = 4108
+        private const val NOTIFY_PERMISSION_REQUEST = 4109
+    }
+
+    // Settings page toggle for reply notifications. On Android 13+ the
+    // notification permission is asked first; the service starts once the
+    // user answers yes, and the page is told the final state either way.
+    inner class NotifyBridge {
+        @JavascriptInterface
+        fun isEnabled(): Boolean = NotifyService.isEnabled(this@MainActivity)
+
+        @JavascriptInterface
+        fun setEnabled(on: Boolean) {
+            runOnUiThread {
+                if (!on) { NotifyService.setEnabled(this@MainActivity, false); tellPageNotify(false); return@runOnUiThread }
+                if (Build.VERSION.SDK_INT >= 33 &&
+                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFY_PERMISSION_REQUEST)
+                    return@runOnUiThread
+                }
+                NotifyService.setEnabled(this@MainActivity, true)
+                tellPageNotify(true)
+            }
+        }
+    }
+
+    private fun tellPageNotify(on: Boolean) {
+        web.evaluateJavascript("window.nativeNotifyChanged&&window.nativeNotifyChanged($on)", null)
     }
 
     // The pending <input type=file> callback. The WebView contract: answer
@@ -106,8 +133,29 @@ class MainActivity : AppCompatActivity() {
         speech = SpeechBridge(this, web)
         configureWebView()
         val saved = prefs.getString("server", "") ?: ""
-        if (saved.isNotEmpty() && prefs.contains("token")) openServer(saved, prefs.getString("token", "") ?: "")
+        if (saved.isNotEmpty() && prefs.contains("token")) openServer(saved, prefs.getString("token", "") ?: "", intent?.getStringExtra(NotifyService.EXTRA_KEY))
         else showSetup()
+        NotifyService.startIfEnabled(this)
+    }
+
+    // A tapped notification lands here (singleTask): jump the loaded page to
+    // that conversation instead of reloading everything.
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        val key = intent?.getStringExtra(NotifyService.EXTRA_KEY) ?: return
+        if (web.visibility != View.VISIBLE) return
+        val encoded = Uri.encode(key)
+        web.evaluateJavascript("location.hash='#$encoded'", null)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        NotifyService.appOnScreen = true
+    }
+
+    override fun onPause() {
+        NotifyService.appOnScreen = false
+        super.onPause()
     }
 
     private fun showSetup() {
@@ -147,6 +195,7 @@ class MainActivity : AppCompatActivity() {
         }
         web.addJavascriptInterface(InkBridge(), "AiconvoInk")
         web.addJavascriptInterface(speech, "AiconvoSpeech")
+        web.addJavascriptInterface(NotifyBridge(), "AiconvoNotify")
         web.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 view: WebView?,
@@ -233,14 +282,19 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == SPEECH_PERMISSION_REQUEST) {
             speech.onPermissionResult(
                 grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+        } else if (requestCode == NOTIFY_PERMISSION_REQUEST) {
+            val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            NotifyService.setEnabled(this, granted)
+            tellPageNotify(granted)
         }
     }
 
-    private fun openServer(base: String, pin: String) {
+    private fun openServer(base: String, pin: String, conversationKey: String? = null) {
         error.visibility = View.GONE
         setup.visibility = View.GONE
         web.visibility = View.VISIBLE
-        val target = if (pin.isEmpty()) "$base/" else "$base/?token=$pin"
+        val hash = if (conversationKey != null) "#" + Uri.encode(conversationKey) else ""
+        val target = if (pin.isEmpty()) "$base/$hash" else "$base/?token=$pin$hash"
         web.loadUrl(target)
     }
 

@@ -15627,8 +15627,29 @@ function paneSound() {
     <p class="lead">What the speakers do when an agent reply is ready. Pick a mode to hear it.</p>
     ${setOptionsHtml('setDoneSound', DONE_SOUND_OPTIONS.map(([value, name, desc]) => ({ value, name, desc })), mode)}
     <div class="set-help">If speech cannot be made (voice server down), the chime plays instead.</div>
-    <div class="set-row" id="setMuteRow">${muteRowHtml()}</div>`;
+    <div class="set-row" id="setMuteRow">${muteRowHtml()}</div>
+    ${phoneNotifyRowHtml()}`;
 }
+
+// Only the Android app has the native bridge; browsers never see this row.
+// The setting lives on the device, not in settings.json: each phone decides
+// for itself whether it wants to be told.
+function phoneNotifyRowHtml() {
+  const bridge = window.AiconvoNotify;
+  if (!bridge) return '';
+  let on = false;
+  try { on = !!bridge.isEnabled(); } catch {}
+  return `<h3>this device</h3>
+    <label class="set-check"><input id="setPhoneNotify" type="checkbox"${on ? ' checked' : ''}> notify me here when a reply is ready</label>
+    <div class="set-help">Works while the app is in the background. A small “listening” notice stays in the shade while it is on; the phone must reach the laptop.</div>`;
+}
+
+window.nativeNotifyChanged = on => {
+  const box = $('setPhoneNotify');
+  if (box) box.checked = !!on;
+  if (!on && box && box.dataset.wanted === '1') toast('notifications were not allowed on this phone');
+  if (box) delete box.dataset.wanted;
+};
 
 function bindPaneSound(root) {
   bindOptions(root, 'setDoneSound', async v => {
@@ -15641,6 +15662,12 @@ function bindPaneSound(root) {
     } catch {}
   });
   bindMuteRow();
+  const phone = $('setPhoneNotify');
+  if (phone) phone.onchange = () => {
+    if (phone.checked) phone.dataset.wanted = '1';
+    try { window.AiconvoNotify.setEnabled(phone.checked); }
+    catch (e) { phone.checked = !phone.checked; errToast('could not change notifications: ' + e.message); }
+  };
 }
 
 function bindMuteRow() {
