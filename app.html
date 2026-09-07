@@ -35,7 +35,7 @@ try {
 :root[data-theme-mode="binary"] button:hover, :root[data-theme-mode="binary"] #brand:hover,
 :root[data-theme-mode="binary"] #ticker:hover { background: transparent; color: var(--text); text-decoration: underline; }
 :root[data-theme-mode="binary"] button.primary:hover { background: var(--text); color: var(--bg); filter: none; text-decoration: none; }
-:root[data-theme-mode="binary"] .ag-row:hover, :root[data-theme-mode="binary"] .item:hover,
+:root[data-theme-mode="binary"] .ag-row:hover, :root[data-theme-mode="binary"] .item:hover { background: transparent; }
 :root[data-theme-mode="binary"] .tmark.note .violin { fill: var(--bg) !important; stroke: var(--text) !important; }
 :root[data-theme-mode="binary"] mark { color: var(--text); font-weight: 700; text-decoration: underline; }
 :root[data-theme-mode="binary"] code, :root[data-theme-mode="binary"] a { color: var(--text); }
@@ -1811,7 +1811,7 @@ body.zen:not(.home) .msg .role,
 body.zen:not(.home) .cmp-badges,
 body.zen:not(.home) .model-strip,
 body.zen:not(.home) .think-pick,
-body.zen:not(.home) .agent-compose .ctxmeter,
+body.zen:not(.home) .agent-compose .ctxmeter { display: none !important; }
 body.zen:not(.home) .transcript, body.zen:not(.home) #runCards:not(:empty) { border: 0; }
 body.zen:not(.home) .msg { border-bottom: 0; padding: 14px 0; }
 body.zen:not(.home) .msg.user { border-left: 2px solid var(--border-strong); padding-left: 14px; }
