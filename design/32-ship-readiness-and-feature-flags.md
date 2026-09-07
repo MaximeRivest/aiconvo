@@ -1,6 +1,30 @@
 # Ship readiness: feature flags and dead code
 
-Date: 2026-09-07. Commit studied: `9f26f90`. Static study; nothing was changed.
+Date: 2026-09-07. Commit studied: `9f26f90`. The original study below used static inspection.
+
+## Cleanup result (2026-09-07)
+
+Implemented the verified frontend and backend clusters in separate commits, through `f23530f`.
+Tests ran after each cluster. Final independent check: 341 tests passed, zero failures or skips.
+Command: `node --test --test-concurrency=1 test/*.test.js`.
+Parallel runs sometimes hit process timing limits. Serial testing avoided that load.
+
+Review caught two shared CSS rules damaged by selector removal. Both now have regression tests.
+Saved `#q=` links still work through the current search dialog. A router test checks this.
+The hidden terminal dialog no longer polls the server.
+
+Corrections to the original audit:
+- No local caller does not prove a public route is unused.
+- Kept `/api/project/model`: it is the only writer of project model defaults.
+  `/api/project/context` is a preview, not its replacement.
+- Kept `/api/here`, `/api/modes/delete`, `/api/conversation/diffs`,
+  `/api/project/memory`, and `/api/memory/leaf`. Each provides a distinct operation.
+- Kept terminal slash-key support, both Pi engines, migrations, and live evidence builders.
+- Removed legacy routes can still affect unknown outside scripts. No general API compatibility claim applies.
+- Old project-distill notification handling remains compatible with an older running server.
+- Vendor files, platform setup, security changes, and feature flags were not part of this cleanup.
+
+This is not proof of zero dead code or release readiness. The original estimates and proposals below are historical.
 Companion reports with line numbers: `/tmp/aiconvo-audit-app.md`, `/tmp/aiconvo-audit-server.md`
 (copies live in the delegation output folders under `~/.local/share/aiconvo/delegations/`).
 The platform and security audit of 2026-09-06 (`/tmp/aiconvo-distribution-audit.md`) is not repeated here.
