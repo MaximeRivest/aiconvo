@@ -315,22 +315,6 @@ async function piForkBefore(target, nodeId) {
   });
 }
 
-// Set the session's model through pi's own runtime. pi writes its native
-// model_change tree entry, so resumes, branches, and forks inherit it.
-async function piSetModel(target, provider, modelId) {
-  await ensurePiProtocol(target.env);
-  const w = getWarmSession({ ...target, discoverExtensions: true });
-  clearTimeout(w.idleTimer);
-  try {
-    await w.sess.request({ type: 'set_model', provider, modelId });
-    w.model = provider + '/' + modelId;
-  } finally {
-    // pi persisted its model_change entry: our own write is the new baseline.
-    w.fileSig = fileSigOf(warmKey(target.sessionPath));
-    armWarmIdle(w, target.sessionPath);
-  }
-}
-
 // Set the session's reasoning (thinking) level through pi's own runtime.
 // pi writes its native thinking_level_change entry, so resumes, branches,
 // and forks inherit it. level 'cycle' steps to the next available level.
@@ -508,4 +492,4 @@ async function piBeginWarm(target) {
   return { file, sessionId, pid: sess.pid };
 }
 
-module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetModel, piSetThinking, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };
+module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetThinking, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };

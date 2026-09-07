@@ -2648,30 +2648,6 @@ async function ensureBothBridge(key, node) {
   });
 }
 
-// Set the conversation's model durably through pi's own runtime.
-async function setConversationModel(key, provider, modelId, force) {
-  const { entry, sessionPath, cwd } = sessionPathsFor(key);
-  if (conversationKind(entry) === 'claude') throw new Error('Model switching needs pi.');
-  if (!provider || !modelId) throw new Error('missing provider or model');
-  const running = findRunningConversation(key);
-  let reopen = false;
-  if (running) {
-    if (!force) {
-      const err = new Error('A terminal owns this conversation (pid ' + running.pid + ').');
-      err.needsForce = true;
-      throw err;
-    }
-    await stopRunningAgent(running);
-    await waitFileQuiet(sessionPath);
-    reopen = true;
-  }
-  if (headlessRuns.has(sessionPath)) throw new Error('A web run is active on this conversation. Wait or abort it.');
-  await withSessionOp(sessionPath, () => piEng().piSetModel({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, provider, modelId));
-  await reindexIfChanged(key);
-  if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
-  return { ok: true, model: provider + '/' + modelId, reopened: reopen };
-}
-
 // Set the conversation's reasoning level durably through pi's own runtime.
 async function setConversationThinking(key, level, force) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
@@ -11355,15 +11331,6 @@ const server = http.createServer(async (req, res) => {
         const p = JSON.parse(body || '{}');
         json(res, 200, await retitleEpic(String(p.id || '')));
       } catch (e) { json(res, 400, { error: e.message }); }
-    } else if (u.pathname === '/api/conversation/model' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      try {
-        const p = JSON.parse(body || '{}');
-        const out = await setConversationModel(p.id, p.provider, p.modelId, !!p.force);
-        saveConversationModels(p.id, [{ provider: p.provider, modelId: p.modelId }]);
-        json(res, 200, out);
-      } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
     } else if (u.pathname === '/api/conversation/thinking' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;

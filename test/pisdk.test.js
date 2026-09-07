@@ -160,9 +160,12 @@ function harness(t, config = {}) {
   return { proxy, workers };
 }
 
-test('full legacy surface remains exported without loading the installed SDK', () => {
+test('live engine surface remains exported without loading the installed SDK', () => {
   const api = require('../pisdk.js');
-  for (const key of ['piForkAt', 'piForkBefore', 'piSetModel', 'piSetThinking', 'piHeadlessRun',
+  assert.equal(api.piSetModel, undefined);
+  assert.equal(require('../pirpc.js').piSetModel, undefined);
+  assert.equal(createRuntimeEngine(fakeSdk()).piSetModel, undefined);
+  for (const key of ['piForkAt', 'piForkBefore', 'piSetThinking', 'piHeadlessRun',
     'piQueuePrompt', 'piBeginWarm', 'stopWarmSession', 'stopAllWarmSessions', 'listWarmSessions',
     'setEditorTextFor', 'loadSdk', 'sdkInfo', 'setAutonomousRunHandler']) assert.equal(typeof api[key], 'function');
   assert.equal(api.sdkInfo(), null);
@@ -207,12 +210,12 @@ test('simultaneous sessions use separate workers and warm calls reuse them', asy
 test('concurrent creation, model changes, and command-only runs share one initialized session', async t => {
   const gate = latch();
   const { proxy, workers } = harness(t, { load: () => gate.promise });
-  const model = proxy.piSetModel(target('same'), 'fake', 'two');
+  const begin = proxy.piBeginWarm(target('same'));
   const thinking = proxy.piSetThinking(target('same'), 'cycle');
-  const run = proxy.piHeadlessRun(target('same'), { message: '/command' });
+  const run = proxy.piHeadlessRun(target('same'), { message: '/command', provider: 'fake', modelId: 'two' });
   assert.equal(workers.length, 1);
   gate.resolve();
-  await model;
+  await begin;
   assert.deepEqual(await thinking, { level: 'high', levels: ['off', 'high'] });
   await run.done;
   assert.equal(workers[0].sdk.sessions.length, 1);
@@ -224,7 +227,7 @@ test('runtime ensureS also deduplicates direct concurrent creation', async () =>
   const gate = latch();
   const sdk = fakeSdk({ load: () => gate.promise });
   const engine = createRuntimeEngine(sdk);
-  const one = engine.piSetModel(target('concurrent'), 'fake', 'two');
+  const one = engine.piBeginWarm(target('concurrent'));
   const two = engine.piSetThinking(target('concurrent'), 'high');
   gate.resolve();
   await Promise.all([one, two]);

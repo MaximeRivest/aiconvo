@@ -266,7 +266,6 @@ function createPiSdkProxy(options = {}) {
       const W = sessions.get(path.resolve(target.sessionPath));
       return W && !W.dead ? request(W, 'queue', [wireTarget(target), message, behavior, images]) : false;
     },
-    piSetModel: async (target, provider, modelId) => request(start(target), 'model', [wireTarget(target), provider, modelId]),
     piSetThinking: async (target, level) => request(start(target), 'thinking', [wireTarget(target), level]),
     stopWarmSession: sessionPath => { const W = sessions.get(path.resolve(sessionPath)); return W ? stop(W) : false; },
     stopAllWarmSessions: () => { let count = 0; for (const W of children) if (stop(W)) count++; return count; },

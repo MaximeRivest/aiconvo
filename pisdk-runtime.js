@@ -581,23 +581,6 @@ async function piForkBefore(target, nodeId) {
   return { file, sessionId: SDK.SessionManager.open(file).getSessionId(), text };
 }
 
-// Set the session model through pi's own runtime (persists a native
-// model_change entry, so resumes and branches inherit it).
-async function piSetModel(target, provider, modelId) {
-  const S = await ensureS(target);
-  clearTimeout(S.idleTimer);
-  try {
-    const models = S.session.modelRuntime.getAvailableSnapshot();
-    const model = models.find(m => m.provider === provider && m.id === modelId);
-    if (!model) throw new Error('Model not found: ' + provider + '/' + modelId);
-    await S.session.setModel(model);
-    S.model = provider + '/' + modelId;
-  } finally {
-    S.fileSig = fileSigOf(S.file);
-    armIdle(S);
-  }
-}
-
 // Set the session's reasoning (thinking) level through pi's own runtime
 // (persists a native thinking_level_change entry, so resumes and branches
 // inherit it). level 'cycle' steps to the next available level.
@@ -718,7 +701,7 @@ function setEditorTextFor(sessionPath, text) {
 }
 
 return {
-  piForkAt, piForkBefore, piSetModel, piSetThinking, piHeadlessRun, piQueuePrompt, piBeginWarm,
+  piForkAt, piForkBefore, piSetThinking, piHeadlessRun, piQueuePrompt, piBeginWarm,
   stopWarmSession, stopAllWarmSessions, listWarmSessions,
   setEditorTextFor, abort, respondUi, uiInput, waitForIdle, dispose,
 };

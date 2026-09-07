@@ -91,7 +91,7 @@ function createWorkerController({ send, exit, engineFactory = createRuntimeEngin
   async function operation(message) {
     const { id, method, args = [] } = message;
     if (closing) throw new Error('Pi worker is stopping');
-    // Model/thinking changes and explicit prompts must not steal the event
+    // Thinking changes and explicit prompts must not steal the event
     // stream from a turn started by an idle extension.
     while (active?.kind === 'auto') await active.done;
     if (closing) throw new Error('Pi worker is stopping');
@@ -109,7 +109,6 @@ function createWorkerController({ send, exit, engineFactory = createRuntimeEngin
       }
     }
     if (method === 'begin') return engine.piBeginWarm(...args);
-    if (method === 'model') return engine.piSetModel(...args);
     if (method === 'thinking') return engine.piSetThinking(...args);
     throw new Error('Unknown Pi worker method: ' + method);
   }
