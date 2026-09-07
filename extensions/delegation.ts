@@ -3,7 +3,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { readFileSync } from "node:fs";
 import {
-  launchDelegation, listDelegations, getDelegation, controlDelegation, reportDelegationReview, normalizeMode, modeSha256,
+  launchDelegation, resumeDelegation, listDelegations, getDelegation, controlDelegation, reportDelegationReview, normalizeMode, modeSha256,
 } from "../delegation.js";
 
 // Load with -e /absolute/path/extensions/delegation.ts. Do not also install a global copy.
@@ -28,7 +28,8 @@ function compact(task: any) {
     sessionPath: task.sessionPath, parentSessionPath: task.parentSessionPath, parentEntryId: task.parentEntryId,
     model: task.model, tools: task.tools, modeHash: task.modeHash, modePath: task.modePath,
     promptPath: task.promptPath, outputDir: task.outputDir, logPath: task.logPath, stderrPath: task.stderrPath,
-    delivery: task.delivery, error: task.error, result: task.result };
+    delivery: task.delivery, error: task.error, failure: task.failure ?? null, attempt: task.attempt,
+    modelsUsed: task.modelsUsed, takenOver: task.takenOver ?? null, result: task.result };
 }
 function result(value: any) {
   const full = JSON.stringify(value, null, 2);
@@ -77,7 +78,8 @@ export default function delegation(pi: ExtensionAPI) {
         modeSha256(normalizeMode(effective.definition)) !== task.modeHash || effective.sha256 !== task.modeHash ||
         !Array.isArray(effective.effectiveTools) || !sameTools(effective.effectiveTools, task.tools) ||
         !sameTools(pi.getActiveTools(), task.tools)) throw new Error("Delegated mode contract does not match the saved mode or active tools.");
-      if (!ctx.model || `${ctx.model.provider}/${ctx.model.id}` !== task.model) throw new Error("Delegated model does not match the requested model.");
+      // After a human takeover the person picks the model; the mode and tool contract still holds.
+      if (!task.takenOver && (!ctx.model || `${ctx.model.provider}/${ctx.model.id}` !== task.model)) throw new Error("Delegated model does not match the requested model.");
     } catch (error) {
       // Pi reports provider-hook errors and continues. Explicit abort also cancels the provider signal.
       ctx.abort();
@@ -147,6 +149,26 @@ export default function delegation(pi: ExtensionAPI) {
     },
   });
   pi.registerTool({
+    name: "delegation_resume", label: "Continue delegated work",
+    description: "Continue a failed or lost direct child on its own saved session, with all its history and files. Use after a usage limit, overload, interruption, or context overflow. Optionally change the model or reasoning level (for example a larger context window after context-overflow) and add short instructions. Refused when the child is cancelled, paused, still alive, taken over by a person, or stopped on a contract violation.",
+    parameters: Type.Object({ id: Type.String(), model: Type.Optional(Type.String()),
+      thinking: Type.Optional(StringEnum(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const)),
+      instructions: Type.Optional(Type.String()) }),
+    async execute(_id, params, signal, _update, ctx) {
+      signal?.throwIfAborted();
+      const task = await getDelegation(params.id);
+      if (task.parentSessionPath !== sessionPath(ctx)) throw new Error("Only the direct parent can continue this delegation.");
+      if (params.model) {
+        const slash = params.model.indexOf("/");
+        if (slash < 1 || !ctx.modelRegistry.find(params.model.slice(0, slash), params.model.slice(slash + 1))) throw new Error("Select an exact known provider/model.");
+      }
+      const resumed = await resumeDelegation(params.id, { model: params.model, thinking: params.thinking, instructions: params.instructions,
+        parentSessionPath: sessionPath(ctx), by: "parent" });
+      if (ctx.hasUI) ctx.ui.notify(`Delegation ${resumed.id} continues (attempt ${resumed.attempt}, ${resumed.model}).`, "info");
+      return result(compact(resumed));
+    },
+  });
+  pi.registerTool({
     name: "delegation_review", label: "Review delegated work",
     description: "Record this parent conversation's review of a direct child after checking its results. Requires evidence. This is not a human vouch. A worker cannot accept itself or a sibling.",
     parameters: Type.Object({ id: Type.String(), review: StringEnum(["accepted", "rejected"] as const), evidence: Type.String() }),
@@ -162,14 +184,21 @@ export default function delegation(pi: ExtensionAPI) {
       if (!ctx.hasUI) return;
       const tasks = await related(ctx);
       if (!tasks.length) { ctx.ui.notify("No delegations for this conversation.", "info"); return; }
-      const choices = tasks.slice(0, 100).map((t: any) => `${t.id} | ${t.status} | ${t.review} | ${t.title}`);
+      const choices = tasks.slice(0, 100).map((t: any) => `${t.id} | ${t.status}${t.failure ? ` (${t.failure.kind})` : ""} | ${t.review} | ${t.title}`);
       const choice = await ctx.ui.select("Delegations (up to 100; success still needs review)", choices);
       if (!choice) return;
       const task = tasks[choices.indexOf(choice)];
-      const action = await ctx.ui.select(`${task.title}: ${task.status}`, ["Show saved paths", "Pause new descendants", "Resume new descendants", "Cancel subtree"]);
+      const canContinue = ["failed", "lost"].includes(task.status) && task.parentSessionPath === sessionPath(ctx) && !task.takenOver;
+      const action = await ctx.ui.select(`${task.title}: ${task.status}`, ["Show saved paths", ...(canContinue ? ["Continue on its session"] : []), "Pause new descendants", "Resume new descendants", "Cancel subtree"]);
       if (!action) return;
       if (action === "Show saved paths") {
         ctx.ui.notify(`Session: ${task.sessionPath}\nPrompt: ${task.promptPath}\nMode: ${task.modePath}\nOutput: ${task.outputDir}\nLog: ${task.logPath}`, "info");
+        return;
+      }
+      if (action === "Continue on its session") {
+        const model = await ctx.ui.input("Model (provider/model; empty keeps " + task.model + ")", "");
+        const resumed = await resumeDelegation(task.id, { model: model?.trim() || undefined, parentSessionPath: sessionPath(ctx), by: "parent" });
+        ctx.ui.notify(`Attempt ${resumed.attempt} started with ${resumed.model}.`, "info");
         return;
       }
       await controlledTask(task.id, ctx);
@@ -186,7 +215,7 @@ export default function delegation(pi: ExtensionAPI) {
       t.delivery === "nextTurn" && terminal.has(t.status) && t.review === "unreviewed");
     if (!pending.length) return;
     return { message: { customType: "delegation-review-pending", display: true,
-      content: "Delegation results need parent review. Do not treat completion as acceptance.\n" +
-        pending.slice(0, 30).map((t: any) => `${t.id}: ${t.status}; session ${t.sessionPath}`).join("\n") } };
+      content: "Delegation results need parent review. Do not treat completion as acceptance. Stopped work (failed or lost) keeps its session; delegation_resume continues it.\n" +
+        pending.slice(0, 30).map((t: any) => `${t.id}: ${t.status}${t.failure ? ` (${t.failure.kind})` : ""}; session ${t.sessionPath}`).join("\n") } };
   });
 }

@@ -106,3 +106,27 @@ test('reading a parent covers only the delivered descendants, recursively, up to
   assert.deepEqual(reported.map(r => [r.task.id, r.deliveredAt]), [['a', 1000], ['g', 900]]);
   assert.deepEqual(await host.reportedDescendants(path.join(root, 'nobody.jsonl')), []);
 });
+
+test('a continued attempt reaches the parent again; the message names the stop reason and the way back', async t => {
+  const { root, parent, task } = await fixture(t);
+  const current = { ...task, status: 'failed', failure: { kind: 'usage-limit', message: '429', resumable: true } };
+  const tasks = [current]; const sent = [];
+  const host = createDelegationCoordinator({ root, list: async () => tasks, canDeliver: async () => true,
+    deliver: async (file, message) => { sent.push(message); await appendEvent(file, message); } });
+  await host.processPending();
+  await until(async () => (await host.refresh()).tasks[0].notificationState === 'delivered');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].content, /failed \(usage-limit\)/);
+  assert.match(sent[0].content, /delegation_resume can continue it/);
+  // The parent continued it. The host forgets the old outcome; the new one is a new delivery.
+  await host.forget('a');
+  tasks[0] = { ...task, status: 'running', attempt: 2 };
+  await host.processPending(); assert.equal(sent.length, 1);
+  tasks[0] = { ...task, status: 'succeeded', attempt: 2 };
+  await host.processPending();
+  await until(async () => (await host.refresh()).tasks[0].notificationState === 'delivered');
+  assert.equal(sent.length, 2);
+  assert.notEqual(sent[0].details.deliveryId, sent[1].details.deliveryId);
+  assert.match(sent[1].content, /succeeded, attempt 2/);
+  await host.processPending(); assert.equal(sent.length, 2);
+});

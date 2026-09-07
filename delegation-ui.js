@@ -186,11 +186,29 @@
     }
     switch (t.status) {
       case 'succeeded': return { glyph: '✓', word: 'done', tone: 'ok' };
-      case 'failed': return { glyph: '✗', word: 'failed', tone: 'bad' };
+      case 'failed': return { glyph: '✗', word: failureWord(t) || 'failed', tone: 'bad' };
       case 'lost': return { glyph: '✗', word: 'lost', tone: 'bad' };
       case 'cancelled': return { glyph: '⏹', word: 'cancelled', tone: 'dim' };
       default: return { glyph: '?', word: text(t.status || 'unknown'), tone: 'dim' };
     }
+  }
+  // The stop reason in one or two words. It tells the reader whether waiting,
+  // another model, or a person is the answer.
+  function failureWord(t) {
+    const kind = t && t.failure && t.failure.kind;
+    switch (kind) {
+      case 'usage-limit': return 'stopped: usage limit';
+      case 'overload': return 'stopped: provider overloaded';
+      case 'context-overflow': return 'stopped: context full';
+      case 'interrupted': return 'stopped: interrupted';
+      case 'auth': return 'stopped: sign-in needed';
+      case 'contract': return 'failed: contract';
+      default: return '';
+    }
+  }
+  function canContinue(t) {
+    return !!t && (t.status === 'failed' || t.status === 'lost') && !isLive(t) && !t.workerAlive && !t.cancelRequested && !t.paused &&
+      !t.takenOver && !(t.failure && t.failure.resumable === false);
   }
   function duration(ms) {
     if (!(ms > 0)) return '';
@@ -225,6 +243,8 @@
     if (typeof t.files === 'number' && t.files > 0) parts.push(t.files + ' file' + (t.files === 1 ? '' : 's'));
     const review = reviewWord(t);
     if (review) parts.push(review);
+    if (Number(t.attempt) > 1) parts.push('attempt ' + t.attempt);
+    if (t.takenOver) parts.push('continued by you');
     if (t.paused) parts.push('paused');
     if (options.unread) parts.push('unread');
     return parts.join(' · ');
@@ -233,6 +253,7 @@
   function warningOf(index, t) {
     if (!t) return '';
     return [index && index.warnings.get(t.id), t.error,
+      t.takenOver ? 'You continued this conversation yourself; the worker will not restart on it.' : '',
       terminal.has(t.status) && t.workerAlive ? 'The worker process is still alive. Inspect it before you continue this conversation.' : '',
       t.notificationError,
       t.notificationState === 'blocked' ? 'The result could not reach the parent conversation.' : '',
@@ -348,6 +369,21 @@
       } catch (e) { notice?.(text(e.message)); }
       finally { busy.delete(id); paintAll(); }
     }
+    // Continue a stopped worker on its own session. Same task, next attempt.
+    async function resume(id, model, notice) {
+      if (busy.has(id)) return;
+      busy.add(id); paintAll();
+      try {
+        const body = { id };
+        if (model) body.model = model;
+        const response = await requestJSON('/api/delegations/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const result = response.data;
+        if (!response.ok || result.ok !== true) throw new Error(result.error || 'Continue request failed.');
+        notice?.('Attempt ' + (result.task && result.task.attempt || '') + ' started on the same session' + (model ? ' with ' + stripName(model) : '') + '.');
+        await refresh();
+      } catch (e) { notice?.(text(e.message)); }
+      finally { busy.delete(id); paintAll(); }
+    }
     async function loadDetail(id, force = false) {
       if (!force && details.has(id)) return details.get(id);
       const response = await requestJSON('/api/delegations/detail?id=' + encodeURIComponent(id));
@@ -383,12 +419,18 @@
       const open = button('open', () => { const t = card.task; if (t?.key) openTarget({ key: t.key }); });
       const cancel = button('cancel…', () => control(card.task.id, 'cancel', m => setText(notice, m)));
       const pause = button('pause new work', () => control(card.task.id, card.task.paused ? 'resume' : 'pause', m => setText(notice, m)));
+      const cont = button('continue', () => resume(card.task.id, card.task.model, m => setText(notice, m)));
+      const contAs = button('continue as…', () => {
+        const t = card.task;
+        if (!options.pickModel) return resume(t.id, t.model, m => setText(notice, m));
+        options.pickModel(contAs, t.model, picked => { if (picked) resume(t.id, picked, m => setText(notice, m)); });
+      });
       const notice = el('div', 'dg-notice'); notice.setAttribute('role', 'status');
-      actions.append(open, cancel, pause);
+      actions.append(open, cont, contAs, cancel, pause);
       body.append(warn, result, brief, records, actions, notice);
       box.append(line, body);
       host.append(box);
-      const card = { host, box, line, title, model, state, warn, result, resultV, brief, briefBody, records, recordsBody, open, cancel, pause, notice, task: null, briefLoaded: false, recordsLoaded: false };
+      const card = { host, box, line, title, model, state, warn, result, resultV, brief, briefBody, records, recordsBody, open, cont, contAs, cancel, pause, notice, task: null, briefLoaded: false, recordsLoaded: false };
       box.ontoggle = () => { if (card.task) openState.set(card.task.id, box.open); };
       brief.ontoggle = () => { if (brief.open) fillBrief(card); };
       records.ontoggle = () => { if (records.open) fillRecords(card); };
@@ -419,7 +461,8 @@
         row('session', d.sessionPath); row('output', d.outputDir); row('log', d.logPath); row('prompt', d.promptPath); row('mode', d.modePath);
         row('tools', Array.isArray(d.tools) ? d.tools.join(', ') : d.tools); row('thinking', d.thinking); row('model', d.model);
         row('supervision', d.supervision ? text(d.supervision) + (d.survivesServiceRestart === true ? ' · survives a service restart' : ' · may not survive a service restart') : '');
-        row('review evidence', d.reviewEvidence); row('error', d.error);
+        if (Number(d.attempt) > 1) row('attempts', String(d.attempt) + (Array.isArray(d.modelsUsed) && d.modelsUsed.length > 1 ? ' · models: ' + d.modelsUsed.map(stripName).join(', ') : ''));
+        row('review evidence', d.reviewEvidence); row('stop reason', d.failure ? text(d.failure.kind) : ''); row('error', d.error);
         const tail = text(d.logTail ?? '').slice(-16000);
         if (tail) { const pre = el('pre', 'dg-log', tail); card.recordsBody.append(el('div', 'dg-k', 'log tail'), pre); }
         const stderr = text(d.stderrTail).slice(-8000);
@@ -438,6 +481,7 @@
         setText(card.state, loaded ? (error ? '? status unavailable' : '? no record found') : '… loading');
         show(card.warn, false); show(card.result, false); show(card.brief, false); show(card.records, false);
         card.title.disabled = true; card.open.disabled = true; card.cancel.disabled = true; card.pause.disabled = true;
+        show(card.cont, false); show(card.contAs, false);
         return;
       }
       if (changed) { card.briefLoaded = false; card.recordsLoaded = false; card.box.open = !!openState.get(t.id); }
@@ -455,6 +499,10 @@
       show(card.brief, true); show(card.records, true);
       card.open.disabled = !t.key;
       const live = subtreeLive(t.id);
+      const resumable = canContinue(t);
+      show(card.cont, resumable); show(card.contAs, resumable);
+      card.cont.disabled = busy.has(t.id); card.contAs.disabled = busy.has(t.id);
+      card.cont.title = resumable ? 'Start the worker again on its own session with ' + stripName(t.model) : '';
       show(card.cancel, live); card.cancel.disabled = busy.has(t.id);
       show(card.pause, live && !!(index.recordedChildren.get(t.id) || []).length || !!t.paused);
       setText(card.pause, t.paused ? 'resume new work' : 'pause new work');
@@ -566,7 +614,7 @@
       visibilityChanged() { if (visible()) refresh(); else schedule(); },
       destroy() { destroyed = true; clearTimeout(timer); clearInterval(tick); for (const abort of requests) abort.abort(); views.clear(); cards.clear(); details.clear(); } };
   }
-  return { escape, indexTasks, descendants, contextTasks, trackedProcess, taskState, isLive, summaryState,
+  return { escape, indexTasks, descendants, contextTasks, trackedProcess, taskState, isLive, summaryState, canContinue, failureWord,
     attentionState, rootOf, progress, progressLabel, isTerminal: status => terminal.has(status), parentTarget, cancellationMessage, detailText,
     stateOf, stateLine, reviewWord, warningOf, duration, taskForCall, taskIdInResult, treeNodes, eventSummary, stripName, createController };
 });

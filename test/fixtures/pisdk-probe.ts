@@ -5,7 +5,8 @@ export default function (pi: any) {
   let requests = 0;
   pi.registerProvider('fixture', {
     baseUrl: 'http://127.0.0.1:1/never-used', apiKey: 'fixture-only', api: 'openai-completions',
-    models: [{ id: 'one', name: 'Fixture', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 1000 }],
+    models: [{ id: 'one', name: 'Fixture', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 1000 },
+      { id: 'two', name: 'Fixture two', reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 64000, maxTokens: 1000 }],
     streamSimple(model: any, context: any, options: any) {
       const stream = createAssistantMessageEventStream();
       queueMicrotask(async () => {
@@ -27,6 +28,14 @@ export default function (pi: any) {
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
           stopReason: call ? 'toolUse' : 'stop', timestamp: Date.now() };
         requests++;
+        if (process.env.FIXTURE_LIMIT_MODEL && model.id === process.env.FIXTURE_LIMIT_MODEL) {
+          Object.assign(result, { content: [], stopReason: 'error', errorMessage: 'Fixture request failed (429): rate_limit_error' });
+          stream.push({ type: 'error', reason: 'error', error: result }); stream.end(); return;
+        }
+        if (process.env.FIXTURE_ECHO_HISTORY && !call) {
+          const seen = context.messages.filter((m: any) => m.role === 'user').length;
+          result.content = [{ type: 'text', text: `Fixture reply after ${seen} user messages.` }];
+        }
         if (process.env.FIXTURE_RETRY_ONCE && requests === 1) {
           Object.assign(result, { content: [], stopReason: 'error', errorMessage: 'terminated' });
           stream.push({ type: 'error', reason: 'error', error: result }); stream.end(); return;

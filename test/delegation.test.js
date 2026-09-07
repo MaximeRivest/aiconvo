@@ -19,13 +19,21 @@ const fs = require('node:fs'), path = require('node:path');
 const args = process.argv.slice(2), arg = k => args[args.indexOf(k)+1];
 const file = arg('--session'), mode = JSON.parse(fs.readFileSync(arg('--prompt-mode-file'),'utf8'));
 const prompt = fs.readFileSync(args.at(-1).slice(1),'utf8');
-const behavior = prompt.split('\n')[0];
+const behavior = prompt.startsWith('Your previous attempt') ? 'resumed' : prompt.split('\n')[0];
 const S = require(process.env.FIXTURE_STORE);
 const append = entry => fs.appendFileSync(file, JSON.stringify(entry)+'\n');
 const emit = entry => process.stdout.write(JSON.stringify(entry)+'\n');
 S.atomic(path.join(path.dirname(arg('--prompt-mode-file')), 'observed.json'), JSON.stringify({args, cwd:process.cwd(), env:Object.fromEntries(Object.entries(process.env).filter(([k]) => /^PI_(PROMPT|EFFECTIVE|SESSION|ORCHESTRATOR|DELEGATION)/.test(k)))}));
-if(behavior !== 'missing-mode') append({type:'custom',id:'mode1',parentId:null,customType:'mode-switch',data:{version:1,mode:mode.key,definition:mode,sha256:behavior === 'bad-mode' ? 'wrong' : S.sha256(mode),effectiveTools:behavior === 'bad-tools' ? ['write'] : mode.tools}});
-if(behavior === 'error') {
+if(behavior !== 'missing-mode' && behavior !== 'resumed') append({type:'custom',id:'mode1',parentId:null,customType:'mode-switch',data:{version:1,mode:mode.key,definition:mode,sha256:behavior === 'bad-mode' ? 'wrong' : S.sha256(mode),effectiveTools:behavior === 'bad-tools' ? ['write'] : mode.tools}});
+if(behavior === 'resumed') {
+  const lines = fs.readFileSync(file,'utf8').trim().split('\n').map(l=>JSON.parse(l));
+  const leaf = lines.filter(e=>e.type!=='session').at(-1);
+  const [provider, model] = arg('--model').split('/');
+  append({type:'custom',id:'mode-again',parentId:leaf?leaf.id:null,customType:'mode-switch',data:{version:1,mode:mode.key,definition:mode,sha256:S.sha256(mode),effectiveTools:mode.tools}});
+  const message={role:'assistant',provider,model,stopReason:'stop',content:[{type:'text',text:'resumed after: '+prompt.split('\n')[0]}]};
+  append({type:'message',id:'resumed-'+arg('--thinking'),parentId:'mode-again',message});
+  emit({type:'message_end',message}); emit({type:'agent_end',messages:[message]});
+} else if(behavior === 'error') {
   const message={role:'assistant',provider:'fake',model:'test',stopReason:'error',errorMessage:'fixture model quota error',content:[]};
   append({type:'message',id:'answer',message}); emit({type:'message_end',message});
   emit({type:'agent_end',messages:[message]});
@@ -341,4 +349,124 @@ test('bounded parser handles split UTF-8, LF framing and a huge unterminated rec
   parsed.push('\n' + text); parsed.end();
   assert.equal(parsed.result.parseProblems, 1); assert.equal(parsed.result.stopReason, 'stop');
   assert.equal(S.sameProcess({ ...S.identity(process.pid), start: 'wrong' }), false);
+});
+
+test('a stopped worker continues on its own session; the record keeps every attempt', async t => {
+  const f = await fixture(t);
+  const task = await f.launch({ prompt: 'error' });
+  const failed = await f.done(task.id);
+  assert.equal(failed.status, 'failed');
+  assert.deepEqual(failed.failure, { kind: 'usage-limit', message: 'fixture model quota error', resumable: true });
+  assert.equal(failed.attempt, 1);
+  assert.equal(failed.leafId, 'answer');
+  const resumed = await D.resumeDelegation(task.id, { instructions: 'Finish the fixture.' }, f.options);
+  assert.ok(['starting', 'running'].includes(resumed.status));
+  assert.equal(resumed.attempt, 2);
+  const done = await f.done(task.id);
+  assert.equal(done.status, 'succeeded', done.error);
+  assert.equal(done.attempt, 2);
+  assert.equal(done.model, 'fake/test');
+  assert.equal(done.result.summary, 'resumed after: Your previous attempt on this task stopped. Reason: usage-limit: fixture model quota error');
+  assert.equal(done.resumes.length, 1);
+  assert.equal(done.resumes[0].previousStatus, 'failed');
+  assert.equal(done.resumes[0].previousFailure.kind, 'usage-limit');
+  assert.equal(done.sessionPath, failed.sessionPath);
+  const entries = fs.readFileSync(task.sessionPath, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(entries.filter(e => e.type !== 'session').map(e => e.id), ['mode1', 'answer', 'mode-again', 'resumed-off']);
+  assert.equal(S.readJson(path.join(f.root, task.id, 'request.json')).model, 'fake/test');
+  const resumePrompt = fs.readFileSync(path.join(f.root, task.id, 'resume-1.md'), 'utf8');
+  assert.match(resumePrompt, /inspect the working tree and your output directory/);
+  assert.match(resumePrompt, /Finish the fixture\./);
+  assert.ok(fs.existsSync(path.join(f.root, task.id, 'supervisor-1.json')), 'previous supervisor claim is kept as history');
+  const events = fs.readFileSync(task.eventLogPath, 'utf8');
+  assert.match(events, /"type":"failed".*"failure":"usage-limit"/);
+  assert.match(events, /resume-requested/);
+  assert.match(events, /"type":"succeeded"/);
+  // Both attempts left their stdout in one log.
+  assert.equal((fs.readFileSync(task.logPath, 'utf8').match(/message_end/g) || []).length, 2);
+  await assert.rejects(D.resumeDelegation(task.id, {}, f.options), /Only failed or lost/);
+});
+
+test('continuing with another model or reasoning level changes only the next attempt', async t => {
+  const f = await fixture(t);
+  const task = await f.launch({ prompt: 'error' });
+  await f.done(task.id);
+  await assert.rejects(D.resumeDelegation(task.id, { model: 'fake/*' }, f.options), /exact provider\/model/);
+  await assert.rejects(D.resumeDelegation(task.id, { thinking: 'ultra' }, f.options), /thinking/);
+  await assert.rejects(D.resumeDelegation(task.id, { parentSessionPath: task.sessionPath }, f.options), /exact parent/);
+  const resumed = await D.resumeDelegation(task.id, { model: 'fake/other', thinking: 'high', parentSessionPath: f.parent }, f.options);
+  assert.equal(resumed.model, 'fake/other'); assert.equal(resumed.thinking, 'high');
+  const done = await f.done(task.id);
+  assert.equal(done.status, 'succeeded', done.error);
+  assert.deepEqual(done.modelsUsed, ['fake/test', 'fake/other']);
+  assert.match(fs.readFileSync(path.join(f.root, task.id, 'resume-1.md'), 'utf8'), /You now run as fake\/other; earlier messages came from fake\/test/);
+  const observed = S.readJson(path.join(f.root, task.id, 'observed.json'));
+  assert.equal(observed.args[observed.args.indexOf('--model') + 1], 'fake/other');
+  assert.equal(observed.args[observed.args.indexOf('--thinking') + 1], 'high');
+  assert.equal(observed.args.at(-1), '@' + path.join(f.root, task.id, 'resume-1.md'));
+  assert.equal(S.readJson(path.join(f.root, task.id, 'request.json')).model, 'fake/test');
+});
+
+test('lost work continues after its supervisor vanished; refusals name the reason', async t => {
+  const f = await fixture(t);
+  const task = await f.launch({ prompt: 'short-wait' });
+  const running = await until(async () => { const r = await D.getDelegation(task.id, f.options); return r.status === 'running' ? r : null; });
+  process.kill(running.supervisorPid, 'SIGKILL');
+  await until(() => !S.sameProcess(running.supervisorIdentity));
+  const lost = await D.getDelegation(task.id, f.options);
+  assert.equal(lost.status, 'lost'); assert.equal(lost.failure.kind, 'interrupted');
+  await assert.rejects(D.resumeDelegation(task.id, {}, f.options), /still alive/);
+  await until(() => !S.sameProcess(running.processIdentity));
+  const resumed = await D.resumeDelegation(task.id, {}, f.options);
+  assert.equal(resumed.attempt, 2);
+  assert.ok(['starting', 'running', 'succeeded'].includes(resumed.status), resumed.status);
+  const done = await f.done(task.id);
+  assert.equal(done.status, 'succeeded', done.error);
+  assert.ok(fs.existsSync(path.join(f.root, task.id, 'lost-1.json')));
+
+  const good = await f.launch({});
+  await f.done(good.id);
+  await assert.rejects(D.resumeDelegation(good.id, {}, f.options), /Only failed or lost/);
+
+  const cancelled = await f.launch({ prompt: 'error' });
+  await f.done(cancelled.id);
+  await D.controlDelegation(cancelled.id, 'cancel', f.options);
+  await assert.rejects(D.resumeDelegation(cancelled.id, {}, f.options), /cancelled/);
+
+  const paused = await f.launch({ prompt: 'error' });
+  await f.done(paused.id);
+  await D.controlDelegation(paused.id, 'pause', f.options);
+  await assert.rejects(D.resumeDelegation(paused.id, {}, f.options), /paused/);
+
+  const taken = await f.launch({ prompt: 'error' });
+  await f.done(taken.id);
+  const marked = await D.markDelegationTakeover(taken.id, { model: 'fake/human' }, f.options);
+  assert.equal(marked.takenOver.model, 'fake/human');
+  await assert.rejects(D.resumeDelegation(taken.id, {}, f.options), /continued this conversation by hand/);
+
+  const moved = await f.launch({ prompt: 'error' });
+  await f.done(moved.id);
+  fs.appendFileSync(moved.sessionPath, JSON.stringify({ type: 'message', id: 'human-edit', parentId: 'answer', message: { role: 'user', content: 'hi' } }) + '\n');
+  await assert.rejects(D.resumeDelegation(moved.id, {}, f.options), /session changed/);
+});
+
+test('failure classification names the stop reason and keeps the raw message', () => {
+  const c = S.classifyFailure;
+  assert.equal(c('Claude Code request failed (429): {"type":"rate_limit_error"}').kind, 'usage-limit');
+  assert.equal(c("You've hit your limit · resets 3pm").kind, 'usage-limit');
+  assert.equal(c('insufficient_quota').kind, 'usage-limit');
+  assert.equal(c('Codex error: Our servers are currently overloaded. Please try again later.').kind, 'overload');
+  assert.equal(c('Request was aborted').kind, 'overload');
+  assert.equal(c('prompt is too long: 213462 tokens > 200000 maximum').kind, 'context-overflow');
+  assert.equal(c('Your input exceeds the context window of this model').kind, 'context-overflow');
+  assert.equal(c('ThrottlingException: Too many tokens, please wait').kind, 'usage-limit');
+  assert.equal(c('Worker exited with SIGTERM').kind, 'interrupted');
+  assert.equal(c('Worker exited with 137', { exitSignal: 'SIGKILL' }).kind, 'interrupted');
+  assert.equal(c('401 Unauthorized').kind, 'auth');
+  assert.equal(c('Pi used a model other than the exact requested model').kind, 'contract');
+  assert.equal(c('Delegated mode contract does not match the saved mode or active tools.').kind, 'contract');
+  assert.equal(c('Delegated mode contract does not match').resumable, false);
+  assert.equal(c('something odd').kind, 'unknown');
+  assert.equal(c('something odd').resumable, true);
+  assert.equal(c('x'.repeat(5000)).message.length, 2000);
 });

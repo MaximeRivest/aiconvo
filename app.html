@@ -3007,6 +3007,11 @@ const delegationUI = DelegationUI.createController({
   titleForKey: key => { const s = sessions.find(s => s.key === key); return s && (s.title || s.timelineTitle); },
   unread: key => { const s = sessions.find(s => s.key === key); return !!(s && agentUnreadAt(s)); },
   renderMarkdown: text => { const box = document.createElement('div'); box.className = 'md'; box.innerHTML = mdRender(text, ''); return box; },
+  // Continue a stopped worker with another model: the same picker as everywhere else.
+  pickModel: (anchor, current, onPick) => openModelPicker(anchor, { multi: false, selected: new Set(current ? [current] : []) }, picked => {
+    const m = picked && picked[0];
+    onPick(m ? m.provider + '/' + m.modelId : null);
+  }),
   onSnapshot: () => { updateActiveBtn(); renderAgentsPopSoon(); paintTreeDelegations(); renderRunCards(); },
 });
 // Delegation shows where it happens. A delegated conversation carries one

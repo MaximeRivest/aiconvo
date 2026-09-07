@@ -114,6 +114,7 @@ function fixture(t, tasks, overrides = {}) {
       if (failure) return { ok: false, json: async () => ({ error: 'offline' }) };
       if (url.includes('/detail?')) return { ok: true, json: async () => ({ prompt: '<script>bad()</script>', mode: { tools: ['read'] }, logTail: 'tail', sessionPath: '/saved/x' }) };
       if (url.endsWith('/control')) return { ok: true, json: async () => ({ ok: true }) };
+      if (url.endsWith('/resume')) return { ok: true, json: async () => ({ ok: true, task: { id: 'a', attempt: 2 } }) };
       return { ok: true, json: async () => ({ tasks: records, revision: 'v1' }) };
     },
     openTarget: target => opened.push(target), confirm: message => { confirms.push(message); return true; },
@@ -459,4 +460,35 @@ test('orchestration progress counts the recorded subtree, not verdicts', () => {
   assert.equal(D.progressLabel(D.progress(index, [])), '');
   assert.equal(D.rootOf(index, 'd'), 'a');
   assert.equal(D.rootOf(index, 'other'), 'other');
+});
+
+test('a stopped worker offers continue and continue-as; done, cancelled, taken-over or contract stops do not', async t => {
+  let picked = null;
+  const f = fixture(t, [task('a', { status: 'failed', failure: { kind: 'usage-limit', message: '429', resumable: true }, model: 'openai/gpt-6' })],
+    { pickModel: (_anchor, current, onPick) => { picked = current; onPick('anthropic/claude-x'); } });
+  const host = cardHost(f, { dgId: 'a' });
+  // Back-to-back refreshes coalesce; settle before reading the painted state.
+  const settle = async () => { await f.controller.refresh(); await new Promise(r => setTimeout(r, 10)); await f.controller.refresh(); };
+  f.controller.attachCards(f.host); await settle();
+  assert.match(cls(host, 'dg-state').textContent, /stopped: usage limit/);
+  assert.equal(control(host, 'continue').hidden, false);
+  assert.equal(control(host, 'continue as…').hidden, false);
+  await control(host, 'continue').click();
+  assert.match(cls(host, 'dg-notice').textContent, /Attempt 2 started on the same session/);
+  await control(host, 'continue as…').click();
+  assert.equal(picked, 'openai/gpt-6');
+  const posts = f.calls.filter(c => c.url.endsWith('/resume')).map(c => JSON.parse(c.options.body));
+  assert.deepEqual(posts, [{ id: 'a', model: 'openai/gpt-6' }, { id: 'a', model: 'anthropic/claude-x' }]);
+  for (const record of [task('a', { status: 'succeeded' }), task('a', { status: 'cancelled' }), task('a', { status: 'running' }),
+    task('a', { status: 'failed', takenOver: { at: 1 } }), task('a', { status: 'failed', failure: { kind: 'contract', message: 'x', resumable: false } }),
+    task('a', { status: 'lost', workerAlive: true })]) {
+    f.setRecords([record]); await settle();
+    assert.equal(control(host, 'continue').hidden, true, record.status + ' ' + JSON.stringify(record.failure || record.takenOver || ''));
+  }
+  f.setRecords([task('a', { status: 'lost', attempt: 2, failure: { kind: 'interrupted', message: 'gone', resumable: true } })]); await settle();
+  assert.equal(control(host, 'continue').hidden, false);
+  assert.match(cls(host, 'dg-state').textContent, /lost · .*attempt 2/);
+  f.setRecords([task('a', { status: 'failed', takenOver: { at: 1 } })]); await settle();
+  assert.match(cls(host, 'dg-state').textContent, /continued by you/);
+  assert.match(cls(host, 'dg-warn').textContent, /continued this conversation yourself/);
 });

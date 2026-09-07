@@ -41,12 +41,14 @@ async function inspectDeliverySession(file) {
   return { branch, deliveries };
 }
 
+// A resumed attempt is a new outcome: it must reach the parent again.
 function deliveryId(tasks) {
-  return crypto.createHash('sha256').update(tasks.map(t => t.id).sort().join('\n')).digest('hex');
+  return crypto.createHash('sha256').update(tasks.map(t => t.id + (Number(t.attempt) > 1 ? ':' + t.attempt : '')).sort().join('\n')).digest('hex');
 }
 
 function completionMessage(tasks, id) {
-  const lines = tasks.map(t => `- ${t.title}: ${t.status}; review: ${t.review || 'unreviewed'}. Task ${t.id}. Session: ${t.sessionPath}. Results: ${t.outputDir}.`);
+  const lines = tasks.map(t => `- ${t.title}: ${t.status}${t.failure ? ` (${t.failure.kind})` : ''}${Number(t.attempt) > 1 ? `, attempt ${t.attempt}` : ''}; review: ${t.review || 'unreviewed'}. Task ${t.id}. Session: ${t.sessionPath}. Results: ${t.outputDir}.` +
+    (t.status === 'failed' || t.status === 'lost' ? ` Stopped work keeps its session; delegation_resume can continue it with the same or another model.` : ''));
   return {
     customType: 'delegation-complete', display: true,
     content: 'Delegated work returned. This is a runner event, not a user request.\n' + lines.join('\n') +
@@ -230,7 +232,11 @@ function createDelegationCoordinator({ root, list, listAll = list, decorate = t 
     await walk(parentSessionPath);
     return out;
   }
-  return { refresh, processPending, snapshot: () => snapshot, stop: () => { stopped = true; }, reportedDescendants };
+  // Forget a delivered outcome so the next attempt's outcome is delivered.
+  async function forget(id) {
+    await fs.unlink(path.join(notificationDir, id + '.json')).catch(e => { if (e.code !== 'ENOENT') throw e; });
+  }
+  return { refresh, processPending, snapshot: () => snapshot, stop: () => { stopped = true; }, reportedDescendants, forget };
 }
 
 module.exports = { createDelegationCoordinator, inspectDeliverySession, completionMessage, deliveryId, TERMINAL };

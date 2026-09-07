@@ -76,14 +76,7 @@ async function launchDelegation(spec, options = {}) {
     ...(spec.retryOf ? { retryOf: spec.retryOf } : {}),
     permissions: 'Same user permissions. Prompt scopes are advisory, not a sandbox.',
     callbackPurpose: 'Request parent review. Completion never accepts the work.' };
-  const argv = ['--mode', 'json', '--session', sessionPath, '--model', input.model, '--thinking', input.thinking,
-    '--name', input.title, '-e', path.join(__dirname, 'extensions/delegation.ts'),
-    '-e', path.join(__dirname, 'extensions/records.ts')];
-  if (options.modeExtensionPath) argv.push('-e', path.resolve(options.modeExtensionPath));
-  argv.push('--prompt-mode-file', modePath);
-  if (input.tools.length) argv.push('--tools', input.tools.join(','));
-  else argv.push('--no-tools');
-  argv.push('-p', `@${promptPath}`);
+  const argv = workerArgv({ sessionPath, model: input.model, thinking: input.thinking, title: input.title, modePath, tools: input.tools, promptPath }, options);
   // The request is the commit marker. No supervisor runs before all inputs are durable.
   S.atomic(promptPath, input.prompt + `\n\nDelegation ID: ${id}\nRole: ${input.role}\nOutput directory: ${outputDir}\nCompletion requests parent review. Do not accept your own work.\nScopes in this prompt are advisory, not a sandbox.\n`);
   S.atomic(modePath, input.mode);
@@ -92,6 +85,26 @@ async function launchDelegation(spec, options = {}) {
   S.atomic(path.join(dir, 'request.json'), record);
   S.appendEvent(dir, 'requested');
   S.syncDir(root);
+  await startSupervisor(root, id, options);
+  return S.readTask(root, id);
+}
+function workerArgv({ sessionPath, model, thinking, title, modePath, tools, promptPath }, options = {}) {
+  const argv = ['--mode', 'json', '--session', sessionPath, '--model', model, '--thinking', thinking,
+    '--name', title, '-e', path.join(__dirname, 'extensions/delegation.ts'),
+    '-e', path.join(__dirname, 'extensions/records.ts')];
+  if (options.modeExtensionPath) argv.push('-e', path.resolve(options.modeExtensionPath));
+  argv.push('--prompt-mode-file', modePath);
+  if (tools.length) argv.push('--tools', tools.join(','));
+  else argv.push('--no-tools');
+  argv.push('-p', `@${promptPath}`);
+  return argv;
+}
+async function startSupervisor(root, id, options = {}) {
+  const dir = S.taskDir(root, id);
+  const failed = (error, event) => {
+    S.atomic(path.join(dir, 'state.json'), { status: 'failed', updatedAt: Date.now(), finishedAt: Date.now(), error, failure: S.classifyFailure(error) });
+    if (event) S.appendEvent(dir, 'failed', { error });
+  };
   let fd;
   try {
     const env = childEnvironment(options.env || process.env, root, id);
@@ -106,17 +119,74 @@ async function launchDelegation(spec, options = {}) {
     await new Promise((resolve, reject) => { supervisor.once('spawn', resolve); supervisor.once('error', reject); });
     supervisor.once('exit', code => {
       if (code && !fs.existsSync(path.join(dir, 'supervisor.json'))) {
-        try {
-          S.atomic(path.join(dir, 'state.json'), { status: 'failed', updatedAt: Date.now(), finishedAt: Date.now(),
-            error: 'Supervisor could not start. Inspect supervisor.log.' });
-        } catch {}
+        try { failed('Supervisor could not start. Inspect supervisor.log.'); } catch {}
       }
     });
     supervisor.unref();
   } catch (error) {
-    S.atomic(path.join(dir, 'state.json'), { status: 'failed', updatedAt: Date.now(), finishedAt: Date.now(), error: `Supervisor launch failed: ${error.message}` });
-    S.appendEvent(dir, 'failed', { error: `Supervisor launch failed: ${error.message}` });
+    failed(`Supervisor launch failed: ${error.message}`, true);
   } finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+
+// Restart a stopped worker on its own saved session. History, files and the
+// mode contract stay. Only model, reasoning and a short instruction can change.
+async function resumeDelegation(id, spec = {}, options = {}) {
+  const root = S.rootPath(options), dir = S.taskDir(root, id);
+  const task = reconcile(root, S.readTask(root, id));
+  if (!S.RESUMABLE.has(task.status)) throw new Error(`Only failed or lost delegations can continue; this one is ${task.status}`);
+  if (task.workerAlive || (task.processIdentity && S.sameProcess(task.processIdentity))) throw new Error('The previous worker process is still alive. Inspect it before you continue');
+  // The terminal state is written before the supervisor exits. Give it a moment to leave.
+  for (let i = 0; task.supervisorIdentity && S.sameProcess(task.supervisorIdentity); i++) {
+    if (i >= 30) throw new Error('The previous supervisor is still running');
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const gate = S.gate(root, task);
+  if (task.cancelRequested || gate.cancelled) throw new Error('This delegation or an ancestor is cancelled');
+  if (gate.paused) throw new Error('This delegation or an ancestor is paused');
+  if (task.takenOver) throw new Error('A user continued this conversation by hand. The worker cannot take it back');
+  if (task.failure && task.failure.resumable === false) throw new Error(`This failure is not resumable (${task.failure.kind}): ${task.failure.message}`);
+  if (spec.parentSessionPath !== undefined && path.resolve(spec.parentSessionPath) !== task.parentSessionPath) throw new Error('Only the exact parent session can continue this delegation');
+  if (task.leafId && (await S.sessionLeaf(task.sessionPath)) !== task.leafId) throw new Error('The session changed since the worker stopped. Inspect it before you continue');
+  const model = spec.model === undefined ? task.model : S.text(spec.model, 'model', 512);
+  if (!/^[a-zA-Z0-9_.-]+\/[^\s:*?\[\]\0]+$/.test(model)) throw new Error('model must be an exact provider/model, without patterns or thinking suffix');
+  const thinking = spec.thinking === undefined ? task.thinking : spec.thinking;
+  if (!S.THINKING.includes(thinking)) throw new Error('Invalid thinking level');
+  const instructions = spec.instructions === undefined || spec.instructions === null ? '' : S.text(spec.instructions, 'instructions', 64 * 1024);
+  const n = task.attempt, now = Date.now();
+  const promptPath = path.join(dir, `resume-${n}.md`), launchPath = path.join(dir, `launch-${n}.json`);
+  const why = task.failure ? `${task.failure.kind}: ${task.failure.message}` : String(task.error || task.status);
+  const prompt = `Your previous attempt on this task stopped. Reason: ${why}\n` +
+    `This is attempt ${n + 1}. Your full history for this task is loaded above.\n` +
+    `First inspect the working tree and your output directory (${task.outputDir}) for unfinished or half-applied work; a stopped tool may have run partly. ` +
+    `Then continue the task from where it stopped. Do not redo finished work.\n` +
+    (model !== task.model ? `You now run as ${model}; earlier messages came from ${task.model}.\n` : '') +
+    (instructions ? `\nInstructions from the delegating conversation:\n${instructions}\n` : '') +
+    `\nDelegation ID: ${id}\nRole: ${task.role}\nOutput directory: ${task.outputDir}\nCompletion requests parent review. Do not accept your own work.\n`;
+  const record = { at: now, by: spec.by === 'user' ? 'user' : 'parent', model, thinking, instructions, promptPath, launchPath,
+    previousStatus: task.status, previousFailure: task.failure || null, previousError: task.error || null, previousLeafId: task.leafId || null };
+  // Old attempt records stay readable. New ones are complete before the state flips.
+  for (const name of ['supervisor.json', 'lost.json']) {
+    const file = path.join(dir, name);
+    if (fs.existsSync(file)) fs.renameSync(file, path.join(dir, `${name.replace('.json', '')}-${n}.json`));
+  }
+  S.atomic(promptPath, prompt);
+  S.atomic(launchPath, { command: options.piExecutable || 'pi', args: [...(options.piArgs || []),
+    ...workerArgv({ sessionPath: task.sessionPath, model, thinking, title: task.title, modePath: task.modePath, tools: task.tools, promptPath }, options)] });
+  S.atomic(path.join(dir, `resume-${n}.json`), record);
+  S.atomic(path.join(dir, 'state.json'), { status: 'starting', attempt: n + 1, updatedAt: now });
+  S.appendEvent(dir, 'resume-requested', { attempt: n + 1, by: record.by, model, thinking, previousStatus: task.status });
+  S.syncDir(dir);
+  await startSupervisor(root, id, options);
+  return getDelegation(id, options);
+}
+// A person continued the worker's conversation directly. The task keeps its
+// last outcome, the parent can see it, and no worker restarts on that session.
+async function markDelegationTakeover(id, details = {}, options = {}) {
+  const root = S.rootPath(options), dir = S.taskDir(root, id);
+  const task = S.readTask(root, id);
+  if (task.takenOver) return task;
+  S.atomic(path.join(dir, 'takeover.json'), { at: Date.now(), model: details.model || null });
+  S.appendEvent(dir, 'takeover', { model: details.model || null });
   return S.readTask(root, id);
 }
 
@@ -124,9 +194,10 @@ function reconcile(root, task) {
   if (S.TERMINAL.has(task.status)) return task;
   const dir = S.taskDir(root, task.id);
   const owner = S.readJson(path.join(dir, 'supervisor.json'), null);
-  if (owner ? !S.sameProcess(owner) : Date.now() - task.createdAt > 15000) {
+  if (owner ? !S.sameProcess(owner) : Date.now() - task.attemptRequestedAt > 15000) {
     // Never kill an orphan from a saved PID and never infer success from an exit.
-    const lost = { status: 'lost', updatedAt: Date.now(), finishedAt: Date.now(), error: 'Supervisor is missing. Worker outcome is unknown; inspect saved logs before any new attempt.' };
+    const error = 'Supervisor is missing. Worker outcome is unknown; inspect saved logs before any new attempt.';
+    const lost = { status: 'lost', updatedAt: Date.now(), finishedAt: Date.now(), error, failure: { kind: 'interrupted', message: error, resumable: true } };
     if (!fs.existsSync(path.join(dir, 'lost.json'))) {
       S.atomic(path.join(dir, 'lost.json'), lost);
       S.appendEvent(dir, 'lost');
@@ -217,5 +288,5 @@ async function reportDelegationReview(id, review, evidence, options = {}) {
   S.appendEvent(S.taskDir(root, id), 'review', { review, evidence, reviewerSessionPath: task.parentSessionPath });
   return getDelegation(id, options);
 }
-module.exports = { launchDelegation, listDelegations, getDelegation, controlDelegation, reportDelegationReview,
+module.exports = { launchDelegation, resumeDelegation, markDelegationTakeover, listDelegations, getDelegation, controlDelegation, reportDelegationReview,
   normalizeMode: S.normalizeMode, modeSha256: S.sha256, childEnvironment };

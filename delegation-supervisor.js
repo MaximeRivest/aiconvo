@@ -50,11 +50,11 @@ function resultParser(expectedModel, onFatalFailure = () => {}, onRetryEvent = (
 }
 async function verifyTranscript(task) {
   if (S.sha256(S.normalizeMode(S.readJson(task.modePath))) !== task.modeHash) throw new Error('Persisted mode snapshot changed during execution');
-  let found = 0, mismatch = false, problem = false, header = false;
+  let found = 0, mismatch = false, problem = false, header = false, leafId = null;
   await S.scanJsonLines(task.sessionPath, entry => {
     if (entry.type === 'session') {
       header = entry.id === task.id && entry.cwd === task.cwd && !entry.parentSession;
-    }
+    } else if (typeof entry.id === 'string') leafId = entry.id;
     if (entry.type === 'custom' && entry.customType === 'mode-switch') {
       found++;
       try {
@@ -68,7 +68,7 @@ async function verifyTranscript(task) {
   if (mismatch) throw new Error('Saved mode-switch does not match the requested mode hash or tools');
   if (!found) throw new Error('No saved mode-switch contract. Ensure the modes extension is loaded; work is not verified');
   if (problem) throw new Error('Saved transcript contains invalid or oversize JSON records; contract verification is incomplete');
-  return { status: 'verified', snapshots: found, sha256: task.modeHash };
+  return { status: 'verified', snapshots: found, sha256: task.modeHash, leafId };
 }
 
 async function supervise(root, id) {
@@ -85,7 +85,7 @@ async function supervise(root, id) {
   finally { fs.unlinkSync(preparedClaim); }
   let child = null, childIdentity = null, exited = false, cancelling = false, cancelAt = 0, killed = false;
   let failureStopAt = 0, monitorError = null;
-  let state = { status: 'starting', supervisorPid: process.pid, supervisorIdentity: owner, updatedAt: Date.now() };
+  let state = { status: 'starting', attempt: task.attempt, supervisorPid: process.pid, supervisorIdentity: owner, updatedAt: Date.now() };
   function save(patch) {
     state = { ...state, ...patch, updatedAt: Date.now() };
     S.atomic(path.join(dir, 'state.json'), state);
@@ -118,7 +118,8 @@ async function supervise(root, id) {
     }
     const mode = S.normalizeMode(S.readJson(task.modePath));
     if (S.sha256(mode) !== task.modeHash || !S.sameTools(mode.tools, task.tools)) throw new Error('Persisted mode snapshot changed before launch');
-    const invocation = S.readJson(path.join(dir, 'launch.json'));
+    // Each attempt has its own frozen command line. The first is launch.json.
+    const invocation = S.readJson(task.launchPath || path.join(dir, 'launch.json'));
     stdoutFd = fs.openSync(task.logPath, 'a', 0o600);
     stderrFd = fs.openSync(task.stderrPath, 'a', 0o600);
     const parsed = resultParser(task.model, reason => {
@@ -196,16 +197,21 @@ async function supervise(root, id) {
     if (!error && (!result.assistantCount || result.stopReason !== 'stop' || !result.summary.trim())) error = 'Pi exited without a complete final assistant result';
     if (!error && result.parseProblems) error = 'Pi JSON output contains invalid or oversize records; result verification is incomplete';
     const status = cancelled ? 'cancelled' : error ? 'failed' : 'succeeded';
+    const failure = status === 'failed' ? S.classifyFailure(error, { exitCode: exit.code, exitSignal: exit.signal }) : null;
+    // The leaf marks where this attempt ended. A later resume refuses a moved session.
+    let leafId = verification?.leafId ?? null;
+    if (leafId === null) { try { leafId = await S.sessionLeaf(task.sessionPath); } catch {} }
     // Terminal state is the publication boundary. Readers can rely on its
     // result log and terminal audit event already being durable.
-    S.appendEvent(dir, status, { exitCode: exit.code, exitSignal: exit.signal });
-    save({ status, finishedAt: Date.now(), exitCode: exit.code, exitSignal: exit.signal,
+    S.appendEvent(dir, status, { exitCode: exit.code, exitSignal: exit.signal, ...(failure ? { failure: failure.kind } : {}) });
+    save({ status, finishedAt: Date.now(), exitCode: exit.code, exitSignal: exit.signal, leafId,
       result: { summary: result.summary, stopReason: result.stopReason, parseProblems: result.parseProblems,
         skippedAggregateRecords: result.skippedAggregateRecords },
-      modeVerification: verification || { status: 'failed', error: verificationError }, ...(error ? { error } : {}) });
+      modeVerification: verification ? { status: verification.status, snapshots: verification.snapshots, sha256: verification.sha256 } : { status: 'failed', error: verificationError },
+      ...(error ? { error, failure } : {}) });
   } catch (error) {
     S.appendEvent(dir, 'failure-signalled', { reason: String(error.message).slice(0, 2000), signalled: signalChild('SIGTERM') });
-    save({ status: 'failed', error: String(error.message).slice(0, 4000), finishedAt: Date.now() });
+    save({ status: 'failed', error: String(error.message).slice(0, 4000), failure: S.classifyFailure(error.message), finishedAt: Date.now() });
     S.appendEvent(dir, 'failed', { error: String(error.message).slice(0, 2000) });
   } finally {
     clearInterval(timer);

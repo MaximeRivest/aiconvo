@@ -7,6 +7,9 @@ const { createHash, randomUUID } = require('node:crypto');
 const { StringDecoder } = require('node:string_decoder');
 
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'lost']);
+// Only these can restart on the same session. cancelled is a user decision; succeeded needs no restart.
+const RESUMABLE = new Set(['failed', 'lost']);
+const THINKING = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 function rootPath(options = {}) {
   return path.resolve(options.root || process.env.PI_DELEGATION_ROOT || path.join(os.homedir(), '.local/share/aiconvo/delegations'));
@@ -85,6 +88,36 @@ function normalizeMode(raw) {
   if (raw.tools !== undefined) mode.tools = tools(raw.tools);
   return mode;
 }
+// Why a worker stopped, in words a parent can act on. Text patterns are the
+// only evidence a JSON printer leaves; the raw message is always kept beside it.
+const OVERFLOW = [/prompt is too long/i, /request_too_large/i, /input is too long for requested model/i, /exceeds the context window/i,
+  /exceeds (?:the )?(?:model'?s )?maximum context length/i, /input token count.*exceeds the maximum/i, /maximum prompt length is \d+/i,
+  /reduce the length of the messages/i, /maximum context length is \d+ tokens/i, /exceeds (?:the )?maximum allowed input length/i,
+  /longer than the model'?s context length/i, /exceeds the limit of \d+/i, /exceeds the available context size/i, /greater than the context length/i,
+  /context window exceeds limit/i, /exceeded model token limit/i, /too large for model with \d+ maximum context length/i,
+  /configured context size is/i, /model_context_window_exceeded/i, /prompt too long; exceeded/i, /range of input length should be/i,
+  /context[_ ]length[_ ]exceeded/i, /too many tokens/i, /token limit exceeded/i, /^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i];
+const NOT_OVERFLOW = [/^(?:Throttling error|Service unavailable):/i, /rate.?limit/i, /too many requests/i];
+function classifyFailure(message, exit = {}) {
+  const m = String(message || '');
+  const kind = (() => {
+    if (exit.exitSignal === 'SIGKILL' || exit.exitSignal === 'SIGTERM' || /^Worker exited with SIG/.test(m)) return 'interrupted';
+    if (/\b(?:401|403)\b|unauthori[sz]ed|invalid (?:api )?key|authentication|expired token|not logged in|login required|permission_error/i.test(m)) return 'auth';
+    if (/\b429\b|rate.?limit|throttl|too many requests|quota|usage limit|usage_limit|out of (?:usage|credits)|insufficient_quota|insufficient credits|billing|resets? (?:at|in)|limit reached|hit your limit|exceed(?:ed|s)? your (?:account'?s )?(?:current )?(?:rate|usage|quota|limit)/i.test(m)) return 'usage-limit';
+    if (OVERFLOW.some(p => p.test(m)) && !NOT_OVERFLOW.some(p => p.test(m))) return 'context-overflow';
+    if (/overloaded|\b(?:500|502|503|504|529)\b|internal server error|bad gateway|service unavailable|gateway time.?out|timed? ?out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|network|terminated|stream (?:closed|ended)|Request was aborted/i.test(m)) return 'overload';
+    if (/mode contract|mode-switch|mode snapshot|does not match the (?:requested|saved)|model other than the exact|Delegated (?:mode|model)|Extension failed/i.test(m)) return 'contract';
+    if (/Supervisor is missing|Supervisor could not start|Supervisor launch failed/i.test(m)) return 'interrupted';
+    return 'unknown';
+  })();
+  return { kind, message: m.slice(0, 2000), resumable: kind !== 'contract' };
+}
+function resumeFiles(dir) {
+  let names;
+  try { names = fs.readdirSync(dir); } catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  return names.map(n => /^resume-(\d+)\.json$/.exec(n)).filter(Boolean).map(m => Number(m[1])).sort((a, b) => a - b)
+    .map(n => ({ n, ...readJson(path.join(dir, `resume-${n}.json`)) }));
+}
 function readTask(root, id) {
   const dir = taskDir(root, id);
   const spec = readJson(path.join(dir, 'request.json'));
@@ -94,9 +127,18 @@ function readTask(root, id) {
   const pause = readJson(path.join(dir, 'pause.json'), {});
   const cancel = readJson(path.join(dir, 'cancel.json'), {});
   const supervision = readJson(path.join(dir, 'supervision.json'), {});
-  return { ...spec, ...state, supervision: supervision.kind || null, survivesServiceRestart: supervision.survivesServiceRestart === true, ...(lost && !TERMINAL.has(state.status) ? lost : {}), ...review,
-    paused: !!pause.paused, cancelRequested: !!cancel.at,
-    updatedAt: Math.max(spec.updatedAt, state.updatedAt || 0, lost?.updatedAt || 0, review.updatedAt || 0, pause.at || 0, cancel.at || 0) };
+  const takeover = readJson(path.join(dir, 'takeover.json'), null);
+  const resumes = resumeFiles(dir);
+  const last = resumes.at(-1);
+  // The latest attempt owns the model and reasoning level. request.json keeps the original contract.
+  const attempt = { attempt: resumes.length + 1, attemptRequestedAt: last ? last.at : spec.createdAt,
+    ...(last ? { model: last.model, thinking: last.thinking, promptPath: last.promptPath, launchPath: last.launchPath } : {}),
+    resumes: resumes.map(r => ({ attempt: r.n + 1, at: r.at, by: r.by, model: r.model, thinking: r.thinking, previousStatus: r.previousStatus, previousFailure: r.previousFailure || null })) };
+  const models = [spec.model, ...resumes.map(r => r.model)].filter((m, i, all) => all.indexOf(m) === i);
+  return { ...spec, ...attempt, ...state, supervision: supervision.kind || null, survivesServiceRestart: supervision.survivesServiceRestart === true, ...(lost && !TERMINAL.has(state.status) ? lost : {}), ...review,
+    paused: !!pause.paused, cancelRequested: !!cancel.at, takenOver: takeover ? { at: takeover.at, model: takeover.model || null } : null,
+    modelsUsed: models,
+    updatedAt: Math.max(spec.updatedAt, state.updatedAt || 0, lost?.updatedAt || 0, review.updatedAt || 0, pause.at || 0, cancel.at || 0, last?.at || 0, takeover?.at || 0) };
 }
 function allIds(root) {
   try { return fs.readdirSync(root).filter(id => ID.test(id) && fs.existsSync(path.join(root, id, 'request.json'))); }
@@ -148,5 +190,11 @@ async function scanJsonLines(file, onObject, onProblem) {
   for await (const chunk of fs.createReadStream(file)) parser.push(chunk);
   parser.end();
 }
-module.exports = { TERMINAL, ID, rootPath, taskDir, readJson, atomic, appendEvent, syncDir, identity, sameProcess,
-  canonicalJson, sha256, text, tools, sameTools, normalizeMode, readTask, allIds, ancestors, gate, jsonLines, scanJsonLines };
+// The last written entry ID. Pi appends in order, so this is where a resumed run continues.
+async function sessionLeaf(file) {
+  let leaf = null;
+  await scanJsonLines(file, entry => { if (entry.type !== 'session' && typeof entry.id === 'string') leaf = entry.id; });
+  return leaf;
+}
+module.exports = { TERMINAL, RESUMABLE, THINKING, classifyFailure, resumeFiles, ID, rootPath, taskDir, readJson, atomic, appendEvent, syncDir, identity, sameProcess,
+  canonicalJson, sha256, text, tools, sameTools, normalizeMode, readTask, allIds, ancestors, gate, jsonLines, scanJsonLines, sessionLeaf };

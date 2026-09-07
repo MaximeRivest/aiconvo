@@ -22,7 +22,7 @@ function setup(t) {
   S.atomic(path.join(dir, 'request.json'), { id, sessionPath: file, status: 'succeeded', createdAt: Date.now(), parentTaskId: null });
   fs.writeFileSync(file, '');
   const box = vm.createContext({ path, crypto, console, delegationLib: D, DELEGATION_ROOT: root,
-    DELEGATION_TERMINAL: S.TERMINAL, sessionFileOps: new Map(), headlessRuns: new Map(),
+    DELEGATION_TERMINAL: S.TERMINAL, sessionFileOps: new Map(), headlessRuns: new Map(), delegationCoordinator: { refresh: async () => {} },
     stopAnyWarmSession() {}, sleep: async () => {}, index: { child: {} },
     conversationKind: () => 'pi', windowTitleFor: () => 'test', absPathForKey: () => file,
     sessionPathsFor: () => ({ entry: {}, sessionPath: file, cwd: root }),
@@ -65,7 +65,8 @@ test('a failed delegation guard is a run error, not an ordinary informational ex
 
 test('lost worker identity blocks mutations, terminal open, send, and actions before release', async t => {
   const { box: b, root, id, dir, file } = setup(t);
-  S.atomic(path.join(dir, 'state.json'), { status: 'running', createdAt: Date.now() - 30000, processIdentity: S.identity(process.pid) });
+  S.atomic(path.join(dir, 'request.json'), { ...S.readJson(path.join(dir, 'request.json')), createdAt: Date.now() - 30000 });
+  S.atomic(path.join(dir, 'state.json'), { status: 'running', processIdentity: S.identity(process.pid) });
   const owner = await D.getDelegation(id, { root });
   assert.equal(owner.status, 'lost'); assert.equal(owner.workerAlive, true);
   b.releaseHeadless = async () => assert.fail('released before guard');
@@ -230,4 +231,18 @@ test('lock refusal finishes a registered job cleanly', async t => {
   S.atomic(path.join(dir, 'state.json'), { status: 'running', createdAt: Date.now() });
   release(); await completion;
   assert.equal(job.status, 'error'); assert.equal(b.targets.length, 0); assert.equal(b.headlessRuns.size, 0);
+});
+
+test('a person continuing a stopped worker records a takeover; a callback does not', async t => {
+  const { box: b, root, id, dir, file } = runSetup(t);
+  S.atomic(path.join(dir, 'state.json'), { status: 'failed', error: '429', failure: { kind: 'usage-limit', message: '429', resumable: true } });
+  fs.writeFileSync(file, JSON.stringify({ type: 'session', id }) + '\n');
+  const job = await b.startAgentRun('child', { message: 'Review returned delegated work', customMessage: message([id]) }).catch(e => ({ status: 'error', error: e.message }));
+  await b.headlessRuns.get(file)?.completion;
+  assert.equal((await D.getDelegation(id, { root })).takenOver, null, 'a runner callback is not a takeover: ' + (job.error || ''));
+  await b.startAgentRun('child', { message: 'I will finish this myself', provider: 'fake', modelId: 'human' });
+  await b.headlessRuns.get(file)?.completion;
+  const taken = await D.getDelegation(id, { root });
+  assert.equal(taken.takenOver.model, 'fake/human');
+  await assert.rejects(D.resumeDelegation(id, {}, { root }), /continued this conversation by hand/);
 });

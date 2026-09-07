@@ -2109,7 +2109,13 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
   if (!customMessage && !String(message || '').trim()) throw new Error('empty prompt');
-  await assertDelegationLaunch(sessionPath, customMessage);
+  const delegatedOwner = await assertDelegationLaunch(sessionPath, customMessage);
+  // A person now drives a stopped worker's conversation. Record it: the parent
+  // sees it, and no worker restarts on this session afterwards.
+  if (delegatedOwner && !customMessage) {
+    await delegationLib.markDelegationTakeover(delegatedOwner.id, { model: provider && modelId ? provider + '/' + modelId : null }, { root: DELEGATION_ROOT });
+    delegationCoordinator.refresh().catch(() => {});
+  }
   const contextItems = context !== undefined ? normalizeContextItems(context) : conversationContextOf(key);
   if (context !== undefined) saveConversationContext(key, contextItems);
   const nextCtxSig = contextSig(contextItems);
@@ -2284,6 +2290,19 @@ if (typeof pisdk.setAutonomousRunHandler === 'function') pisdk.setAutonomousRunH
   return forward;
 });
 
+// Continue a stopped worker on its own session. The host checks that nothing
+// else drives that conversation right now; the library checks the record.
+async function resumeDelegationFromHost(id, spec) {
+  const stored = await delegationLib.getDelegation(id, { root: DELEGATION_ROOT });
+  const file = path.resolve(stored.sessionPath);
+  if (headlessRuns.has(file) || headlessOwner(file)) throw new Error('This conversation is working right now. Wait for it to stop.');
+  const key = delegationSessionKey(file);
+  if (key && findRunningConversation(key)) throw new Error('A terminal owns this conversation. Close it before the worker continues.');
+  const task = await delegationLib.resumeDelegation(id, spec, { root: DELEGATION_ROOT, env: agentEnv() });
+  await delegationCoordinator.forget(id);
+  await delegationCoordinator.refresh();
+  return task;
+}
 async function assertDelegationOwnership(file) {
   const owner = await delegationOwnerForFile(file);
   if (owner && (owner.workerAlive || !DELEGATION_TERMINAL.has(owner.status))) {
@@ -2351,7 +2370,8 @@ function delegationView(t) {
   for (const k of ['version', 'id', 'parentTaskId', 'parentSessionPath', 'parentEntryId', 'sessionPath', 'title',
     'role', 'cwd', 'model', 'thinking', 'status', 'review', 'createdAt', 'updatedAt', 'startedAt', 'finishedAt',
     'pid', 'supervisorPid', 'logPath', 'promptPath', 'modePath', 'modeHash', 'tools', 'outputDir', 'error',
-    'paused', 'cancelRequested', 'retryOf', 'delivery', 'notificationState', 'notificationError', 'supervision', 'survivesServiceRestart', 'workerAlive']) {
+    'paused', 'cancelRequested', 'retryOf', 'delivery', 'notificationState', 'notificationError', 'supervision', 'survivesServiceRestart', 'workerAlive',
+    'attempt', 'failure', 'takenOver', 'resumes', 'modelsUsed']) {
     if (t[k] !== undefined) out[k] = t[k];
   }
   out.key = delegationSessionKey(t.sessionPath);
@@ -11800,6 +11820,14 @@ const server = http.createServer(async (req, res) => {
         if (p.action === 'cancel') await abortCancelledDelegationRuns();
         await delegationCoordinator.refresh();
         json(res, 200, { ok: true });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/delegations/resume' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 128 * 1024) return json(res, 413, { error: 'Request too large.' }); }
+      try {
+        const p = JSON.parse(body || '{}');
+        const task = await resumeDelegationFromHost(p.id, { model: p.model, thinking: p.thinking, instructions: p.instructions, by: 'user' });
+        json(res, 200, { ok: true, task: delegationView(task) });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/agents/active') {
       // running: a live pi/claude process. writing: file changed in 5 min.

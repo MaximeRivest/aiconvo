@@ -30,7 +30,10 @@ const fs=require('node:fs'); const args=process.argv.slice(2); const arg=k=>args
 const S=require(process.env.FIXTURE_STORE), mode=JSON.parse(fs.readFileSync(arg('--prompt-mode-file'),'utf8'));
 const append=o=>fs.appendFileSync(arg('--session'),JSON.stringify(o)+'\n');
 append({type:'custom',customType:'mode-switch',data:{mode:mode.key,definition:mode,sha256:S.sha256(mode),effectiveTools:mode.tools}});
-const message={role:'assistant',provider:'fake',model:'test',stopReason:'stop',content:[{type:'text',text:'Extension fixture done'}]};
+const [provider, modelId]=arg('--model').split('/');
+const prompt=fs.readFileSync(args.at(-1).slice(1),'utf8');
+const limited=prompt.includes('Fixture limit') && !prompt.startsWith('Your previous attempt');
+const message=limited?{role:'assistant',provider,model:modelId,stopReason:'error',errorMessage:'Fixture request failed (429): rate_limit_error',content:[]}:{role:'assistant',provider,model:modelId,stopReason:'stop',content:[{type:'text',text:'Extension fixture done'}]};
 append({type:'message',message}); console.log(JSON.stringify({type:'message_end',message}));
 `;
   fs.writeFileSync(path.join(dir, 'pi'), script, { mode: 0o700 });
@@ -44,7 +47,7 @@ append({type:'message',message}); console.log(JSON.stringify({type:'message_end'
   let currentFile = file, branch = [], aborts = 0;
   const notices = [], choices = [];
   const ctx = { cwd: dir, mode: 'rpc', hasUI: true, model: { provider: 'fake', id: 'test' }, thinkingLevel: 'off',
-    modelRegistry: { find: (provider, id) => provider === 'fake' && id === 'test' ? { provider, id } : undefined },
+    modelRegistry: { find: (provider, id) => provider === 'fake' && ['test', 'other'].includes(id) ? { provider, id } : undefined },
     sessionManager: { getSessionFile: () => currentFile, getLeafId: () => 'actual-leaf', getBranch: () => branch },
     abort: () => { aborts++; },
     ui: { notify: text => notices.push(text), select: async (_title, items) => { choices.push(items); return choices.length === 1 ? items[0] : 'Show saved paths'; }, confirm: async () => true },
@@ -71,7 +74,7 @@ append({type:'message',message}); console.log(JSON.stringify({type:'message_end'
 const skip = !available && 'Pi package is unavailable; set PI_CODING_AGENT_PACKAGE to run extension tests';
 test('real Pi extension loader registers standard tools and web-safe dialogs; launch uses context identity', { skip }, async t => {
   const f = await setup(t);
-  assert.deepEqual([...f.ext.tools.keys()], ['delegate', 'delegation_status', 'delegation_control', 'delegation_review']);
+  assert.deepEqual([...f.ext.tools.keys()], ['delegate', 'delegation_status', 'delegation_control', 'delegation_resume', 'delegation_review']);
   assert.ok(f.ext.commands.has('delegations'));
   const stale = process.env.PI_SESSION_FILE;
   process.env.PI_SESSION_FILE = '/stale-shared-session';
@@ -130,4 +133,24 @@ test('worker mode guard aborts on mismatch but permits model recovery; unrelated
   f.setBranch([]);
   await assert.rejects(f.hook('before_provider_request'), /contract/);
   assert.equal(f.aborts(), 2, 'retries must still enforce the mode contract');
+});
+
+test('the parent continues a limited worker on its own session, with another model; workers and strangers cannot', { skip }, async t => {
+  const f = await setup(t);
+  const task = JSON.parse((await f.call('delegate', { title: 'Limited', role: 'tester', prompt: 'Fixture limit', mode: f.mode, tools: f.mode.tools })).content[0].text);
+  const stopped = await f.done(task.id);
+  assert.equal(stopped.status, 'failed'); assert.equal(stopped.failure.kind, 'usage-limit');
+  const status = JSON.parse((await f.call('delegation_status', { id: task.id })).content[0].text);
+  assert.equal(status.failure.kind, 'usage-limit'); assert.equal(status.attempt, 1);
+  await assert.rejects(f.call('delegation_resume', { id: task.id, model: 'fake/unknown' }), /exact known/);
+  f.setFile(stopped.sessionPath);
+  await assert.rejects(f.call('delegation_resume', { id: task.id }), /direct parent/);
+  f.setFile(f.file);
+  const resumed = JSON.parse((await f.call('delegation_resume', { id: task.id, model: 'fake/other', instructions: 'Go on.' })).content[0].text);
+  assert.equal(resumed.attempt, 2); assert.equal(resumed.model, 'fake/other');
+  const finished = await f.done(task.id);
+  assert.equal(finished.status, 'succeeded', finished.error);
+  assert.deepEqual(finished.modelsUsed, ['fake/test', 'fake/other']);
+  assert.match(f.notices.at(-1), /attempt 2, fake\/other/);
+  await assert.rejects(f.call('delegation_resume', { id: task.id }), /Only failed or lost/);
 });
