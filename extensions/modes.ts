@@ -6,6 +6,11 @@ import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
 const CUSTOM_TYPE = "mode-switch";
+// Opt-in tools. A mode without an explicit `tools` list never gets them.
+// Each active tool puts its description and guidance into the system prompt.
+// The delegation tools carry orchestration text that only orchestrator modes
+// should see; every other mode stays free of subagent context.
+const OPT_IN_TOOLS = new Set(["web_search", "delegate", "delegation_status", "delegation_control", "delegation_resume", "delegation_review"]);
 const SYSTEM_PROMPT_SECTIONS = new Set(["available_tools", "custom_tools_note", "guidelines", "pi_docs", "append_prompt", "project_context", "skills", "date", "cwd"]);
 const SECTION_HEADINGS: Record<string, string[]> = {
   available_tools: ["Tools", "Available tools"],
@@ -786,7 +791,7 @@ export default function(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     startupError = undefined;
-    defaultTools = pi.getActiveTools().filter((tool) => tool !== "web_search");
+    defaultTools = pi.getActiveTools().filter((tool) => !OPT_IN_TOOLS.has(tool));
     try {
       const selected = resolveStartup(ctx);
       activate(selected.mode, selected.source, selected.resolution, ctx, selected.persist, selected.strictTools);
