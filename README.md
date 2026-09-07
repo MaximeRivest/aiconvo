@@ -59,6 +59,23 @@ Aiconvo loads `extensions/delegation.ts` automatically. For the Pi terminal, loa
 
 This update requires matching frontend and server code. Restart the server only after active web runs finish, then reload clients. The implementation, limits, and trade-offs are in [design/29-delegation.md](design/29-delegation.md).
 
+## Records for agents: the `aiconvo` command and the Pi tools
+
+Every conversation, distilled note, project memory document, epic and evidence card is queryable from any folder, by people and by agents:
+
+```
+aiconvo                                  where was I? (last session in this folder)
+aiconvo search "session abort rpc" --since 30d [--project X]
+aiconvo show <id> [--at 214 --context 3]  one conversation: outline, or a slice around a message
+aiconvo conversations | notes | epics | projects [PROJECT]
+aiconvo memory [PROJECT] [overview|intent|environment|status] [--area REL] | --epic ID
+aiconvo note <id|file> · aiconvo epic <id> · aiconvo evidence <id> · aiconvo help
+```
+
+Answers are compact plain text made for a context window: short ids, dates, trust labels (`[unverified]` = no person reviewed the note), and the exact follow-up command. Output is capped (`--max`) and paged. `--json` prints the raw record. The same text is served by `GET /api/records/<op>` and by the Pi tools `aiconvo_search`, `aiconvo_show`, `aiconvo_memory`, `aiconvo_read`, `aiconvo_list` (`extensions/records.ts`, loaded automatically for web sessions and delegated workers; terminal: `pi -e /path/to/aiconvo/extensions/records.ts`). The Pi tools drop the running conversation's own hits from search.
+
+Conversations started from a project get a short "Looking things up" section in their injected context that names these commands. Records are AI transcripts and AI-written notes: a map of what was said, not verified truth.
+
 ## Custom themes
 
 User themes live in `~/.config/aiconvo/themes/<theme-id>.css`. The fastest

@@ -1849,7 +1849,8 @@ function agentProcsView(running) {
 // loads inside the RPC process; `--no-extensions` would hide them.
 function piProviderExtraArgs() {
   return [...(fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : []),
-    '-e', path.join(__dirname, 'extensions', 'delegation.ts')];
+    '-e', path.join(__dirname, 'extensions', 'delegation.ts'),
+    '-e', path.join(__dirname, 'extensions', 'records.ts')];
 }
 
 // Abort the headless run on a file and wait for it to let go.
@@ -5855,6 +5856,26 @@ function matchArgsToKey(args) {
   return null;
 }
 
+// Records read API (records.js): built once, on first use, after every
+// function it needs exists. Mutable state goes in as getters.
+let recordsApiInstance = null;
+function recordsApi() {
+  if (recordsApiInstance) return recordsApiInstance;
+  recordsApiInstance = require('./records.js').createRecords({
+    fsp,
+    index: () => index,
+    epics: () => epics,
+    cachePathFor, keyForSessionPath, projectNameOf, projectMetaFor, projectMemoryIndex,
+    projectMemoryDocument, areaMemoryDocument, epicMemoryDocument, declaredAreasFor,
+    trustLabel, existingEvidenceFor,
+    searchIdx: () => searchIdx,
+    semanticEnabled, semFetch, semNs, semanticGroups,
+    runningKeys: () => new Set(runningAgentKeys()),
+    notesDir: NOTES_DIR, port: PORT,
+  });
+  return recordsApiInstance;
+}
+
 function listRunningAgents() {
   const running = [];
   const seen = new Set();
@@ -9469,6 +9490,25 @@ async function areaFoldersResponse(rawProject) {
 const BRIEFINGS_DIR = path.join(CACHE_DIR, 'briefings');
 fs.mkdirSync(BRIEFINGS_DIR, { recursive: true });
 
+// The one paragraph every launched agent gets about the records: what the
+// CLI is, the three commands that matter, and the trust rule. The Pi tools
+// (extensions/records.ts) repeat the same rule in their descriptions.
+function recordsHowToSection(project, conversationCount) {
+  const p = /\s/.test(project) ? JSON.stringify(project) : project;
+  return [
+    '## Looking things up (aiconvo records)',
+    '',
+    `This project has ${conversationCount} conversations on record, plus notes, evidence and memory documents; only a map is inlined here.`,
+    'Before you ask the user what was decided, tried, or why, look it up. The `aiconvo` command works from any folder (Pi also has the aiconvo_search / aiconvo_show tools):',
+    '',
+    `- aiconvo search "<words>" [--project ${p}] [--since 30d]   ranked passages across all conversations, notes, memory`,
+    '- aiconvo show <id> [--at N]                                one conversation: outline, or the messages around #N',
+    `- aiconvo conversations ${p} · aiconvo notes ${p} · aiconvo memory ${p} · aiconvo help`,
+    '',
+    'Records are AI transcripts and AI-written notes: what was said, not verified truth. Quote the conversation id and date when you use one. Prefer [vouched] notes over [unverified] ones, and the transcript over both when it matters.',
+  ].join('\n');
+}
+
 async function buildProjectBriefing(project, include, focusName) {
   const info = await projectResponse(project);
   const meta = projectMetaFor(project);
@@ -9556,6 +9596,7 @@ async function buildProjectBriefing(project, include, focusName) {
     }
   }
 
+  lines.push('', recordsHowToSection(project, info.conversations));
   lines.push('', '## More');
   lines.push(`- Browse, search, and export everything: http://localhost:${PORT}/`);
   const file = path.join(BRIEFINGS_DIR,
@@ -9652,6 +9693,7 @@ async function buildProjectContextBundle(project, include, focusName) {
   if (focusName) parts.push(`- Focus for this new conversation: ${focusName}`);
   parts.push('');
   parts.push('Injected by aiconvo at conversation start. This is AI-generated work memory — a map, not verified truth. Items labeled [unverified] were never human-reviewed.');
+  parts.push('', recordsHowToSection(project, info.conversations));
 
   let docCount = 0;
   // Narrow before wide: area memory (when the start targets a declared area)
@@ -12269,6 +12311,13 @@ const server = http.createServer(async (req, res) => {
       } catch {}
       const beat = setInterval(() => res.write(': ping\n\n'), 30000);
       req.on('close', () => { clearInterval(beat); sseClients.delete(res); });
+    } else if (u.pathname.startsWith('/api/records/') && req.method === 'GET') {
+      // The agent-facing read API: same text the CLI and the Pi tools print.
+      // Failures are plain text too, so a shell or a tool call reads them as is.
+      const op = u.pathname.slice('/api/records/'.length);
+      const params = Object.fromEntries(u.searchParams.entries());
+      try { json(res, 200, await recordsApi().run(op, params)); }
+      catch (e) { json(res, e.message.startsWith('unknown records op') ? 404 : 400, { error: e.message, text: 'error: ' + e.message }); }
     } else if (u.pathname === '/api/notes') {
       let files = [];
       try { files = (await fsp.readdir(NOTES_DIR)).filter(f => f.endsWith('.md')); } catch {}

@@ -1,43 +1,154 @@
 #!/usr/bin/env node
-// aiconvo — "Where was I?" Run it in a project directory.
-// Prints the last session there: when it ended, and the final exchange.
+// aiconvo — query the conversation records from any folder, for people and
+// for agents. `aiconvo` alone answers "where was I?". The other commands
+// search and read conversations, notes, project memory, epics and evidence.
+// Every answer is plain text rendered by the server (records.js), so this
+// file only parses arguments and prints. Run `aiconvo help` for the list.
 'use strict';
 const http = require('http');
+const path = require('path');
 
-const PORT = process.env.AICONVO_PORT || 7433;
-const dir = process.argv[2] ? require('path').resolve(process.argv[2]) : process.cwd();
+const PORT = Number(process.env.AICONVO_PORT || process.env.PORT || 7433);
+const TOKEN = process.env.AICONVO_TOKEN || '';
 
-const B = '\x1b[1m', D = '\x1b[2m', C = '\x1b[36m', G = '\x1b[32m', R = '\x1b[0m';
+// Long options that take a value. Anything else that starts with -- is a flag.
+const VALUED = new Set(['project', 'since', 'role', 'type', 'limit', 'offset', 'exclude', 'at', 'context',
+  'from', 'to', 'last', 'roles', 'max', 'area', 'epic', 'kind', 'dir']);
 
-function ago(ts) {
-  const s = (Date.now() - new Date(ts)) / 1000;
-  if (s < 3600) return Math.round(s / 60) + ' min ago';
-  if (s < 86400) return Math.round(s / 3600) + ' h ago';
-  return Math.round(s / 86400) + ' days ago';
+function parse(argv) {
+  const positional = [];
+  const opts = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--') { positional.push(...argv.slice(i + 1)); break; }
+    if (!a.startsWith('--')) { positional.push(a); continue; }
+    const eq = a.indexOf('=');
+    let name = eq > 0 ? a.slice(2, eq) : a.slice(2);
+    let value = eq > 0 ? a.slice(eq + 1) : undefined;
+    if (name.startsWith('no-')) { opts[name.slice(3)] = 'false'; continue; }
+    if (VALUED.has(name)) {
+      if (value === undefined) {
+        if (i + 1 >= argv.length) fail(`--${name} needs a value`);
+        value = argv[++i];
+      }
+      opts[name] = value;
+    } else {
+      opts[name] = value === undefined ? 'true' : value;
+    }
+  }
+  return { positional, opts };
 }
 
-function clip(text, lines) {
-  const l = text.trim().split('\n');
-  return l.length <= lines ? l.join('\n') : l.slice(0, lines).join('\n') + `\n${D}… (${l.length - lines} more lines — open the link below)${R}`;
+function fail(msg, code = 2) {
+  process.stderr.write(msg + '\n');
+  process.exit(code);
 }
 
-http.get(`http://127.0.0.1:${PORT}/api/here?dir=${encodeURIComponent(dir)}`, res => {
-  let body = '';
-  res.on('data', c => body += c);
-  res.on('end', () => {
-    if (res.statusCode !== 200) {
-      console.log(`${D}No sessions found for ${dir}${R}`);
-      return;
+// Command → server op + query parameters.
+function plan(positional, opts) {
+  const [cmd, ...rest] = positional;
+  const cwd = process.cwd();
+  const params = { dir: opts.dir ? path.resolve(opts.dir) : cwd };
+  const pass = names => { for (const n of names) if (opts[n] !== undefined) params[n] = opts[n]; };
+  switch (cmd || 'here') {
+    case 'help': case '--help': case '-h': return { op: 'help', params: {} };
+    case 'here':
+      if (rest[0]) params.dir = path.resolve(rest[0]);
+      return { op: 'here', params };
+    case 'search': {
+      const q = rest.join(' ').trim();
+      if (!q) fail('usage: aiconvo search "<words>" [--project NAME] [--since 30d]');
+      params.q = q;
+      pass(['project', 'since', 'role', 'type', 'limit', 'offset', 'exclude', 'max', 'semantic', 'prefix']);
+      return { op: 'search', params };
     }
-    const d = JSON.parse(body);
-    console.log(`${B}${d.title}${R}`);
-    console.log(`${D}[${d.source}] ${d.sessionCount} session${d.sessionCount > 1 ? 's' : ''} here · last ended ${ago(d.lastTs)}${R}\n`);
-    for (const m of d.lastExchange) {
-      const tag = m.role === 'user' ? `${C}you${R}` : `${G}assistant${R}`;
-      console.log(`${tag}\n${clip(m.text, m.role === 'user' ? 12 : 30)}\n`);
+    case 'show': {
+      if (!rest[0]) fail('usage: aiconvo show <id> [--at N] [--context K] [--from A --to B] [--last N] [--roles all]');
+      params.id = rest[0];
+      pass(['at', 'context', 'from', 'to', 'last', 'roles', 'max']);
+      return { op: 'show', params };
     }
-    console.log(`${D}full session → http://localhost:${PORT}/#${encodeURIComponent(d.key)}${R}`);
+    case 'conversations': case 'convs': case 'ls':
+      if (rest[0]) params.project = rest[0];
+      pass(['project', 'since', 'limit', 'max']);
+      if (opts.here) params.underDir = 'true';
+      return { op: 'conversations', params };
+    case 'projects': return { op: 'projects', params };
+    case 'memory': case 'map': {
+      // aiconvo memory [PROJECT] [KIND] | aiconvo memory --epic ID [KIND]
+      const kinds = new Set(['overview', 'intent', 'environment', 'status']);
+      for (const r of rest) { if (kinds.has(r)) params.kind = r; else params.project = r; }
+      pass(['project', 'area', 'epic', 'kind', 'max']);
+      return { op: 'memory', params };
+    }
+    case 'notes':
+      if (rest[0]) params.project = rest[0];
+      pass(['project', 'limit', 'max']);
+      return { op: 'notes', params };
+    case 'note':
+      if (!rest[0]) fail('usage: aiconvo note <conversation id | file under ~/notes/aiconvo>');
+      params.id = rest[0].startsWith('~/') ? path.join(require('os').homedir(), rest[0].slice(2)) : rest[0];
+      pass(['max']);
+      return { op: 'note', params };
+    case 'epics':
+      if (rest[0]) params.project = rest[0];
+      pass(['project', 'limit', 'max']);
+      return { op: 'epics', params };
+    case 'epic':
+      if (!rest[0]) fail('usage: aiconvo epic <id>');
+      params.id = rest[0];
+      pass(['max']);
+      return { op: 'epic', params };
+    case 'evidence':
+      if (!rest[0]) fail('usage: aiconvo evidence <id>');
+      params.id = rest[0];
+      pass(['max']);
+      return { op: 'evidence', params };
+    default:
+      fail(`unknown command "${cmd}". Run: aiconvo help`);
+  }
+}
+
+function get(op, params) {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  const headers = TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {};
+  return new Promise((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port: PORT, path: `/api/records/${op}?${qs}`, headers }, res => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        let data = null;
+        try { data = JSON.parse(body); } catch { data = { error: body.slice(0, 300) || `HTTP ${res.statusCode}` }; }
+        resolve({ status: res.statusCode, data });
+      });
+    });
+    req.on('error', reject);
   });
-}).on('error', () => {
-  console.log(`${D}aiconvo server is not running. Start it: systemctl --user start aiconvo${R}`);
-});
+}
+
+async function main() {
+  const { positional, opts } = parse(process.argv.slice(2));
+  const { op, params } = plan(positional, opts);
+  let r;
+  try { r = await get(op, params); }
+  catch (e) {
+    fail(`aiconvo server is not answering on port ${PORT} (${e.code || e.message}).\n` +
+      `Start it: systemctl --user start aiconvo   (or: node ~/Projects/aiconvo/server.js)`, 3);
+  }
+  if (opts.json) {
+    process.stdout.write(JSON.stringify(r.data, null, 2) + '\n');
+    process.exit(r.status === 200 ? 0 : 1);
+  }
+  if (r.status !== 200) fail(r.data.text || ('error: ' + (r.data.error || r.status)), 1);
+  let text = r.data.text || '';
+  // A person at a terminal gets a bold first line; agents and pipes get plain text.
+  if (process.stdout.isTTY && text) {
+    const nl = text.indexOf('\n');
+    text = nl > 0 ? '\x1b[1m' + text.slice(0, nl) + '\x1b[0m' + text.slice(nl) : '\x1b[1m' + text + '\x1b[0m';
+  }
+  process.stdout.write(text + '\n');
+}
+
+main();

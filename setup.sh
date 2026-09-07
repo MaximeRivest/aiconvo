@@ -70,6 +70,19 @@ for mode in "$REPO"/extensions/modes/*.json; do
   fi
 done
 
+# --- 3c. the `aiconvo` command ---------------------------------------------
+# Agents and people query the records from any folder with it. A symlink,
+# so `git pull` updates it. Only a foreign file at that path is left alone.
+mkdir -p "$HOME/.local/bin"
+CLI_LINK="$HOME/.local/bin/aiconvo"
+if [ -L "$CLI_LINK" ] || [ ! -e "$CLI_LINK" ]; then
+  ln -sfn "$REPO/aiconvo" "$CLI_LINK"
+  chmod +x "$REPO/aiconvo"
+  echo "installed command: aiconvo → $CLI_LINK"
+else
+  echo "note: $CLI_LINK exists and is not a symlink — not replaced."
+fi
+
 # --- 4. systemd user unit ----------------------------------------------------
 UNIT_DIR="$HOME/.config/systemd/user"
 mkdir -p "$UNIT_DIR"

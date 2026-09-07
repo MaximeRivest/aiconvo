@@ -77,7 +77,8 @@ async function launchDelegation(spec, options = {}) {
     permissions: 'Same user permissions. Prompt scopes are advisory, not a sandbox.',
     callbackPurpose: 'Request parent review. Completion never accepts the work.' };
   const argv = ['--mode', 'json', '--session', sessionPath, '--model', input.model, '--thinking', input.thinking,
-    '--name', input.title, '-e', path.join(__dirname, 'extensions/delegation.ts')];
+    '--name', input.title, '-e', path.join(__dirname, 'extensions/delegation.ts'),
+    '-e', path.join(__dirname, 'extensions/records.ts')];
   if (options.modeExtensionPath) argv.push('-e', path.resolve(options.modeExtensionPath));
   argv.push('--prompt-mode-file', modePath);
   if (input.tools.length) argv.push('--tools', input.tools.join(','));
