@@ -58,6 +58,17 @@ if [ -f "$REPO/extensions/modes.ts" ]; then
     echo "note: $PI_EXT_DIR/modes.ts differs from $REPO/extensions/modes.ts — not overwritten."
   fi
 fi
+# The prompt-capture extension records the system prompt each turn and
+# adds /sysprompt. Same rule: install when missing, never clobber.
+if [ -f "$REPO/extensions/prompt-capture.ts" ]; then
+  mkdir -p "$PI_EXT_DIR"
+  if [ ! -f "$PI_EXT_DIR/prompt-capture.ts" ]; then
+    cp "$REPO/extensions/prompt-capture.ts" "$PI_EXT_DIR/prompt-capture.ts"
+    echo "installed pi extension: prompt-capture.ts → $PI_EXT_DIR"
+  elif ! cmp -s "$REPO/extensions/prompt-capture.ts" "$PI_EXT_DIR/prompt-capture.ts"; then
+    echo "note: $PI_EXT_DIR/prompt-capture.ts differs from $REPO/extensions/prompt-capture.ts — not overwritten."
+  fi
+fi
 
 # Install missing prompt modes without replacing user-owned definitions.
 mkdir -p "$HOME/.pi/agent/modes"

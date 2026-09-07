@@ -57,6 +57,8 @@ Records live in `~/.local/share/aiconvo/delegations`, not the cache. Web SDK ses
 
 The delegation tools and the browser tools (`agent_browser`, `agent_browser_session`) are opt-in. A mode gets them only when its `tools` list names them: `pi-orchestrator` lists the delegation tools, `browser` lists the browser tools. Every other mode runs without them, so their guidance text stays out of its system prompt.
 
+`extensions/prompt-capture.ts` (installed to `~/.pi/agent/extensions` by setup) records the system prompt twice per turn: `pending` as assembled before the turn, and `wire` as found in the real provider payload. `/sysprompt` shows the wire copy, `/sysprompt pending` and `/sysprompt diff` the rest. Copies land in `~/.pi/agent/cache/sysprompt/<session>-{pending,wire}.md`.
+
 Aiconvo loads `extensions/delegation.ts` automatically. For the Pi terminal, load it explicitly with `pi -e /path/to/aiconvo/extensions/delegation.ts`. Terminal roots receive next-turn reminders; web roots receive tracked callbacks. Setup and update install the default mode only when missing, preserving personal mode files.
 
 This update requires matching frontend and server code. Restart the server only after active web runs finish, then reload clients. The implementation, limits, and trade-offs are in [design/29-delegation.md](design/29-delegation.md).
