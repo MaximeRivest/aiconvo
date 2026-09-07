@@ -1169,12 +1169,6 @@ function nodeTitle(text) {
   return t || '(empty)';
 }
 
-function treeFieldsFor(source) {
-  return source === 'claude'
-    ? { idField: 'uuid', parentField: 'parentUuid' }
-    : { idField: 'id', parentField: 'parentId' };
-}
-
 function parseTreeEntries(kind, raw) {
   const out = [];
   for (const line of raw.split('\n')) {
@@ -1260,12 +1254,6 @@ function keyForSessionPath(p) {
     if (!rel.startsWith('..') && index[source + ':' + rel]) return source + ':' + rel;
   }
   return null;
-}
-
-// Group every indexed session into its fork family in one pass. The pure
-// union-find lives in sessionfork.js (groupFamilies) with its own tests.
-function familyGroups() {
-  return groupFamilies(Object.entries(index), keyForSessionPath);
 }
 
 // A fork family: conversations that share their first entry id (forks copy
@@ -2581,9 +2569,6 @@ function bridgeKindOf(text) {
   if (isMergeBridgeText(text)) return 'merge';
   if (isBothBridgeText(text)) return 'both';
   return undefined;
-}
-function isFanoutBridgeText(text) {
-  return !!(isMergeBridgeText(text) || isBothBridgeText(text));
 }
 // The "both" entry writer lives in fanoutmerge.js with the rest of the
 // reintegration logic.
