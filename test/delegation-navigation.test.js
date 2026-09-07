@@ -32,7 +32,8 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   let current = null, activeRel = null, viewKind = 'home', conversationLoadSeq = 0;
   let progressStream = null, currentHash = '', suppressHashEvents = 0, lastNavProject = null, matchIdx = -1;
   const lastNavConversation = new Map(), modelTouchAt = new Map(), traceLeaves = new Map(), fanoutFocus = new Map(), toolGroupOpen = new Map();
-  const sessions = [], searchMode = false, calls = [], errors = [];
+  const sessions = [], calls = [], errors = [];
+  let transcriptQuery = '';
   const parent = {key:'parent', source:'pi', entryParents:[['root',null],['launch','root'],['result','launch'],['abort','result'],['other','root']], messages:[
     {eid:'root',role:'user',text:'start'},
     {eid:'launch',role:'thinking',text:'launch reasoning',off:true},
