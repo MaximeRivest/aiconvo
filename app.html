@@ -1583,7 +1583,7 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .chnav button:hover { color: var(--text); background: var(--surface-2); }
 .chnav button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
 
-/* ---- continue in Alacritty ---- */
+/* ---- agent composer ---- */
 /* width: 100% matters: inside a flex column, the auto margins otherwise
    shrink-wrap the composer to its content (a small island on e-ink, where
    --read-max is none). Full width, then max-width caps and centers it. */
@@ -1812,7 +1812,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .agent-compose.compose-min textarea { flex: 1 1 auto; min-width: 0; min-height: 46px; height: 46px; max-height: 46px; }
   .agent-compose.compose-min .agent-compose-row { flex: 0 0 auto; }
   .agent-compose .agent-state { min-height: 24px; white-space: nowrap; overflow: hidden; }
-  #agentBarHint { overflow: hidden; text-overflow: ellipsis; }
   .agent-compose textarea { min-height: 48px; max-height: 40vh; resize: none; font-size: 16px; scrollbar-width: none; }
   /* Expanded composer: the chips scroll sideways in one row; the send
      button stays pinned at the right edge, always visible. */
@@ -2507,10 +2506,6 @@ $('qBtn').onclick = () => {
 const BUILTIN_THEMES = new Set(['dark', 'light', 'gray', 'eink']);
 function themeToken(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function themeMode() { return document.documentElement.dataset.themeMode || themeToken('--theme-mode') || 'color'; }
-function themeNumber(name, fallback) {
-  const n = parseFloat(themeToken(name));
-  return Number.isFinite(n) ? n : fallback;
-}
 function syncActiveTheme() {
   if (window.aiconvoSyncTheme) window.aiconvoSyncTheme();
   const selected = document.documentElement.dataset.theme
@@ -7255,23 +7250,12 @@ function pathBase(p) {
 
 // ---- agent file diffs (design/15-file-diff-timeline.md) ----
 let diffScope = null;
-let diffSelectedEvent = null;
 
 function diffKindGlyph(kind) { return kind === 'write' ? '+' : kind === 'multi-edit' ? '±' : kind === 'shell' ? '›' : '~'; }
 function diffStats(e) {
   const oldLines = e.stats && e.stats.oldLines || 0;
   const newLines = e.stats && e.stats.newLines || 0;
   return e.kind === 'write' ? `+${newLines}` : e.kind === 'shell' ? 'shell path' : `-${oldLines} +${newLines}`;
-}
-function diffRowsFromEvents(events) {
-  const files = new Map();
-  for (const e of events || []) {
-    let row = files.get(e.path);
-    if (!row) { row = { path: e.path, relativePath: e.relativePath || e.path, events: [], latestTs: null }; files.set(e.path, row); }
-    row.events.push(e);
-    if (!row.latestTs || String(e.ts || '') > String(row.latestTs)) row.latestTs = e.ts;
-  }
-  return [...files.values()].sort((a, b) => String(b.latestTs || '').localeCompare(String(a.latestTs || '')));
 }
 
 function renderDiffTimeline(events) {
@@ -7344,7 +7328,6 @@ async function showDiffEvent(id) {
     (project ? '&project=' + encodeURIComponent(project) : '') +
     (key ? '&key=' + encodeURIComponent(key) : ''))).json();
   if (event.error) return errToast(event.error);
-  diffSelectedEvent = event;
   let card = $('diffCard');
   if (!card) {
     card = document.createElement('div');
@@ -11336,31 +11319,6 @@ async function aiEpicRetitle(id) {
   toast('title · ' + out.title);
 }
 
-// The distill button controls the job only. Opening the note is the switcher's job.
-function distillAction(rel) {
-  const running = jobs.get('distill:' + rel);
-  if (running && running.status === 'running') { toggleJobs(true); return; }
-  const entry = sessions.find(s => s.key === rel) || {};
-  const hasNote = entry.notePath || (current && current.key === rel && current.notePath);
-  queueDistill(rel, !!hasNote);
-}
-
-async function continueInAlacritty(btn) {
-  if (!activeRel) return;
-  const old = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = 'opening…'; }
-  try {
-    const res = await fetch('/api/conversation/open', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: activeRel }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Could not open Alacritty.');
-    toast(data.created ? 'opened in Alacritty' : (data.focused ? 'focused the open Alacritty window' : 'already open in a terminal'));
-  } catch (e) { errToast(e.message); }
-  if (btn) { btn.disabled = false; btn.textContent = old || 'continue in alacritty'; }
-}
-
 function agentComposerHtml(d) {
   if (!['claude', 'pi', 'pi-remote'].includes(d.source)) return '';
   return `<div class="composer-dock" id="composerDock">
@@ -12649,7 +12607,6 @@ window.agentSpeechEvent = payload => {
   try { if (typeof event === 'string') event = JSON.parse(event); } catch { return; }
   if (!event || !event.type) return;
   const mic = $('agentMic');
-  const hint = $('agentBarHint');
   if (event.type === 'recording') {
     window._agentSpeechState = 'recording';
     if (mic) {
@@ -12660,7 +12617,6 @@ window.agentSpeechEvent = payload => {
       mic.setAttribute('aria-label', 'Stop dictation');
       mic.setAttribute('aria-pressed', 'true');
     }
-    if (hint) hint.textContent = 'listening — press the microphone again when done';
   } else if (event.type === 'preview') {
     window._agentSpeechPreview = event.text || '';
     applyAgentSpeechText(window._agentSpeechPreview);
@@ -12674,7 +12630,6 @@ window.agentSpeechEvent = payload => {
       mic.setAttribute('aria-label', 'Transcribing speech');
       mic.setAttribute('aria-pressed', 'false');
     }
-    if (hint) hint.textContent = 'transcribing speech…';
   } else if (event.type === 'final') {
     applyAgentSpeechText(event.text || window._agentSpeechPreview || '');
     window._agentSpeechBase = window._agentSpeechValue || '';
@@ -12687,7 +12642,6 @@ window.agentSpeechEvent = payload => {
       mic.setAttribute('aria-label', 'Start dictation');
       mic.setAttribute('aria-pressed', 'false');
     }
-    if (hint) hint.textContent = 'dictation ready — edit or send';
   } else if (event.type === 'error') {
     window._agentSpeechState = '';
     if (mic) {
@@ -12697,10 +12651,9 @@ window.agentSpeechEvent = payload => {
       mic.setAttribute('aria-label', 'Start dictation');
       mic.setAttribute('aria-pressed', 'false');
     }
-    if (hint) hint.textContent = event.message || 'dictation failed';
     errToast(event.message || 'Dictation failed.');
   } else if (event.type === 'permission' || event.type === 'notice') {
-    if (hint) hint.textContent = event.message || 'dictation status';
+    if (event.message) toast(event.message);
   }
   updateComposeMin(); // dictation state changes the resting bar
 };
@@ -13847,9 +13800,6 @@ function ledgerAbsorb(r) {
     L.blocks.set(id, b); // the newest snapshot wins; pruned blocks keep their last one
   }
 }
-
-// The everything view: running tool calls render open, streaming.
-function runToolDefaultOpen() { return true; }
 
 function setLiveText(node, s) {
   if (node._t === s) return;
@@ -17078,27 +17028,6 @@ document.addEventListener('touchend', e => {
   }
 }, { passive: false });
 
-// ← → outside a field: move between sibling branches at the newest branch
-// point — the open compare columns first, else the last branch pill.
-function nudgeBranch(dir) {
-  if (viewKind !== 'conversation' || !current) return false;
-  const rows = [...$('view').querySelectorAll('.cmpblock[open] .cmp-row')];
-  const row = rows[rows.length - 1];
-  if (row) {
-    const cols = [...row.querySelectorAll('[data-cmp-id]')];
-    const at = cols.findIndex(c => c.classList.contains('on'));
-    const next = cols[at < 0 ? (dir > 0 ? 0 : cols.length - 1) : at + dir];
-    if (next && !next.classList.contains('on')) { next.click(); return true; }
-    return false;
-  }
-  const pills = [...$('view').querySelectorAll('.branchpill')];
-  const pill = pills[pills.length - 1];
-  if (!pill) return false;
-  const b = pill.querySelector(`[data-pill-go="${dir}"]`);
-  if (b && !b.disabled) { b.click(); return true; }
-  return false;
-}
-
 // ---- reading view: the last message, full screen, keyboard scrolling ----
 function readOverlayOpen() { return $('readOverlay') && !$('readOverlay').hidden; }
 
@@ -17704,7 +17633,7 @@ document.addEventListener('keydown', e => {
       break;
     }
     case '?': toggleHelpOverlay(); break;
-    case 'c': if (current) copyAsMarkdown([activeRel], $('copyConv')); break;
+    case 'c': if (current) copyAsMarkdown([activeRel]); break;
     case 'e': if (current) $('export').click(); break;
     case 'd': if (current) startDistill(activeRel); break;
   }
@@ -17922,9 +17851,7 @@ live.onmessage = ev => {
         else if (d.job.type === 'distill') startDistill(d.job.key);
       }, 'ok');
       if ((d.job.type === 'project-distill' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && d.job.project && viewKind === 'project' && projectOverviewName === d.job.project) {
-        showProjectOverview(d.job.project).then(() => {
-          if (d.job.type === 'project-distill' && $('pMemNotes')) $('pMemNotes').checked = true;
-        });
+        showProjectOverview(d.job.project);
       }
       if (d.job.type === 'memory-docs' && d.job.epicId && viewKind === 'epic' && currentHash === 'epic=' + encodeURIComponent(d.job.epicId)) {
         showEpic(d.job.epicId);
