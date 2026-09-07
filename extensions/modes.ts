@@ -38,7 +38,7 @@ const EFFECTIVE_ENV_KEYS = [
 ] as const;
 
 const BUILTIN: ModeDef[] = [
-  { key: "coding", label: "Coding", opener: "", appendix: "Focus on concise, practical coding help." },
+  { key: "coding", label: "Coding", appendix: "Focus on concise, practical coding help." },
   { key: "plan", label: "Plan", opener: "Make a concise implementation plan before changing files.", appendix: "Do not edit files unless the user asks you to proceed." },
   { key: "review", label: "Review", opener: "Review the current work for correctness, risks, and missing tests." },
   { key: "explain", label: "Explain", opener: "Explain the relevant code and decisions clearly before proposing changes." },
@@ -80,8 +80,11 @@ function canonicalJson(value: unknown): string {
   }
   return JSON.stringify(value);
 }
+// Hash the normalized shape (empty fields dropped) so the checksum does not
+// depend on how a definition was written. Resume re-validates the snapshot
+// through valid(), so hashing anything else breaks every later startup.
 function modeSha256(mode: ModeDef): string {
-  return createHash("sha256").update(canonicalJson(mode)).digest("hex");
+  return createHash("sha256").update(canonicalJson(valid(mode) ?? mode)).digest("hex");
 }
 function strictMode(raw: unknown, origin: string): ModeDef {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${origin}: expected a JSON object`);
@@ -656,7 +659,9 @@ export default function(pi: ExtensionAPI) {
       const mode = strictMode(stored.definition, "persisted prompt-mode snapshot");
       if (stored.mode !== undefined && stored.mode !== mode.key) throw new Error("persisted prompt-mode snapshot key does not match data.mode");
       const sha256 = modeSha256(mode);
-      if (typeof stored.sha256 !== "string" || stored.sha256 !== sha256) throw new Error(`persisted prompt-mode snapshot SHA-256 mismatch (computed ${sha256})`);
+      // Older snapshots hashed the raw definition (with empty fields kept); accept those too.
+      const rawSha256 = createHash("sha256").update(canonicalJson(stored.definition)).digest("hex");
+      if (typeof stored.sha256 !== "string" || (stored.sha256 !== sha256 && stored.sha256 !== rawSha256)) throw new Error(`persisted prompt-mode snapshot SHA-256 mismatch (computed ${sha256})`);
       return { mode, source: sourceValue(stored.source), resolution: "session-snapshot", persist: false, strictTools: false };
     }
     if (typeof stored?.mode === "string") {
