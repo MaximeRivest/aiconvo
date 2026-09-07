@@ -1035,15 +1035,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 @media (hover: none) { .msg-actions { transition: none; } }
 :root[data-theme-mode="binary"] .msg-actions { transition: none; }
 /* branch switcher pill (the transcript is a trace through the tree) */
-.branchpill { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; padding: 4px 8px; border: 1px dashed var(--border-strong); color: var(--text-dim); font-size: var(--fs-micro); max-width: var(--read-max); }
-.branchpill > button { height: 22px; min-width: 26px; padding: 0 6px; }
-.branchpill details { position: relative; }
-.branchpill summary { cursor: pointer; list-style: none; color: var(--text-faint); }
-.branchpill summary:hover { color: var(--text); text-decoration: underline; }
-.bp-list { position: absolute; left: 0; top: 20px; z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: 320px; max-width: 480px; }
-.bp-alt { text-align: left; height: auto; padding: 4px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bp-alt.on { border-color: var(--accent); }
-.tracebanner { display: flex; align-items: center; gap: 10px; margin: 8px auto; max-width: var(--read-max); padding: 6px 10px; border: 1px solid var(--accent); color: var(--text-dim); font-size: var(--fs-micro); }
 /* live headless run card */
 /* The live run is an assistant message that is still coming into being:
    same column, same frame, same skin as the transcript — the one ephemeral
@@ -1427,9 +1418,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 .msg .msg-file { margin-left: auto; height: 18px; padding: 0 5px; border-color: transparent; background: transparent; color: var(--cyan); font-size: 10px; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg .msg-file:hover { background: transparent; text-decoration: underline; }
 /* file changes: a quiet right-aligned footer under the assistant reply */
-.msg.filetouch { background: transparent; padding: 0 14px 12px; margin: -6px 10% 0 0; display: flex; flex-wrap: wrap; gap: var(--sp-1); align-items: center; justify-content: flex-end; }
-.msg.filetouch button { height: 18px; padding: 0 6px; font-size: 10px; color: var(--text-faint); background: transparent; border: 0; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msg.filetouch button:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
 .msg .more { color: var(--cyan); cursor: pointer; background: none; border: 0; padding: 0; height: auto; font: inherit; }
 .msg .trunc, .msg .full { display: block; }
 /* rendered markdown inside messages and note panes */
@@ -1867,8 +1855,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
   .mpick .mp-row { min-height: 42px; }
   .mpick .mp-foot button { min-height: 44px; }
   /* branch alternatives list must fit the screen */
-  .bp-list { min-width: 0; max-width: min(480px, 92vw); }
-  .bp-alt { min-height: 42px; white-space: normal; }
   /* the model control sized for touch */
   .model-pick { height: 40px; }
   .mpick .mp-prov { height: 30px; min-height: 30px; border-radius: 15px; }
@@ -1886,8 +1872,6 @@ body.zen:not(.home) header,
 body.zen:not(.home) #left,
 body.zen:not(.home) .convhead,
 body.zen:not(.home) #cornerStack,
-body.zen:not(.home) .branchpill,
-body.zen:not(.home) .tracebanner,
 body.zen:not(.home) .msg .role,
 body.zen:not(.home) .cmp-badges,
 body.zen:not(.home) .model-strip,
@@ -9484,12 +9468,6 @@ function buildDiscoveredEpic(d, candidateId) {
 // ---- conversation view ----
 let current = null;
 
-function keepInMode(m, mode) {
-  if (mode === 'commands') return m.role === 'tool';
-  if (mode === 'all') return true;
-  return m.role === 'user' || m.role === 'assistant' || m.role === 'abort' || m.role === 'event';
-}
-
 // Long messages collapse to an abstract-sized preview (about 5 lines).
 
 // Chat messages fold by measured height, not text length: only a message
@@ -9808,13 +9786,6 @@ document.addEventListener('pointerover', e => {
 });
 
 function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
-  if (m.role === 'filetouch') {
-    // Synthetic row: file writes hidden by the current view mode still
-    // surface as links into the whole-file diff view.
-    const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
-    return `<div class="msg filetouch"${anchor}>` +
-      m.files.map(f => `<button data-file-diff="${esc(f.path)}" data-file-ts="${esc(f.ts || '')}" data-file-anchor="${esc(m.ts || '')}" data-file-call="${esc(f.call || '')}" title="Open this file change\n${esc(f.path)}">${esc(shortFilePath(f.path))}</button>`).join('') + `</div>`;
-  }
   // data-i: the message's index in the cached array — the anchor a search
   // hit lands on (renderConv scroll 'hit:N').
   const idxAttr = copyIndex >= 0 ? ` data-i="${copyIndex}"` : '';
@@ -12877,7 +12848,6 @@ async function renderConv(scroll) {
   const entryIndex = entryId == null ? -1 : d.messages.findIndex(m => m.eid === entryId);
   const readEntry = entryIndex < 0 ? null : d.messages[entryIndex];
   const isReadEntry = m => readEntry && m.eid === entryId;
-  const mode = 'all'; // one transcript view: everything, tools folded
   const q = searchMode ? $('q').value.trim() : '';
   // Multi-word queries AND their terms: mark each term, not the whole string.
   const qrx = q ? termRegex(q) : null;
@@ -12886,20 +12856,8 @@ async function renderConv(scroll) {
   const related = await relatedFor(activeRel);
   if (d !== current || seq !== conversationLoadSeq) return;
   const head = convHead(d, entry, related);
-  if (mode === 'uniqcmd' || mode === 'files') {
-    $('view').innerHTML = head + `<div class="dprog">` + renderDerived(d, mode, hl) + `</div>` + agentComposerHtml(d);
-    wireHead();
-    wireAgentComposer();
-    $('view').scrollTop = scroll === 'top' ? 0 : $('view').scrollHeight;
-    return;
-  }
-  // Trace: in every mode except 'all', the transcript is ONE path through
-  // the entry tree (root → selected leaf). Branch points get a switcher
-  // pill. 'all' keeps the complete file record with fold blocks.
   const qtest = q ? termRegex(q, 'i') : null; // non-global: .test() stays stateless
-  const trace = mode === 'all' ? null : computeTrace(d);
-  const inTrace = m => !trace || !m.eid || trace.onPath.has(m.eid);
-  let msgs = d.messages.filter(m => inTrace(m) && keepInMode(m, mode));
+  let msgs = d.messages.slice();
   // Pair tool calls with their results: the transcript shows one line per
   // tool; the result rides inside the call's fold.
   {
@@ -12913,45 +12871,15 @@ async function renderConv(scroll) {
       }
     }
   }
-  if (mode !== 'all' && mode !== 'commands') {
-    // The chat view hides tool calls, but file writes must stay reachable:
-    // collapse each hidden run of write/edit calls into one row of links.
-    const merged = [];
-    let run = null;
-    for (const m of d.messages) {
-      if (!inTrace(m)) continue;
-      if (keepInMode(m, mode)) { merged.push(m); run = null; continue; }
-      // Structured write/edit calls AND bash-mined writes both surface here.
-      const touched = isFileWriteTool(m) ? [m.path] : (m.role === 'tool' && m.writes) || [];
-      if (!touched.length) continue;
-      if (!run || run.off !== !!m.off) { run = { role: 'filetouch', ts: m.ts, off: !!m.off, files: [] }; merged.push(run); }
-      for (const p of touched) {
-        const seen = run.files.find(f => f.path === p);
-        if (seen) { seen.ts = m.ts; seen.call = m.id || seen.call; } else run.files.push({ path: p, ts: m.ts, call: m.id || null });
-      }
-    }
-    msgs = merged;
-  }
   const msgIndexes = new Map(d.messages.map((m, i) => [m, i]));
   // Merge transport is a real user turn for pi, but not for the reader.
   msgs = msgs.filter(m => isReadEntry(m) || !isFanoutBridgeMessage(m));
-  // Regenerate must send a real user turn to Pi. Hide that transport bridge
-  // when it is one of several paths. The ancestor can be an old assistant or
-  // tool node because earlier app versions branched at the wrong node.
-  if (trace) {
-    const regenerateBridges = new Set(d.messages.filter(m =>
-      isRegenerateBridgeMessage(m) &&
-      (trace.children.get(trace.parents.get(m.eid)) || []).filter(id => trace.carries.has(id)).length > 1
-    ).map(m => m.eid));
-    if (regenerateBridges.size) msgs = msgs.filter(m => isReadEntry(m) || !regenerateBridges.has(m.eid));
-  }
-  // The transcript view is always 'all' now. Settled fan-out still needs
-  // the compare row: without it the live columns vanish and only one branch stays.
+  // Settled fan-out still needs the compare row: without it the live
+  // columns vanish and only one branch stays.
   const groups = d.source !== 'claude' ? await loadCompare(d.key) : [];
   if (d !== current || seq !== conversationLoadSeq) return;
   const groupByNode = new Map(groups.map(g => [g.node, g]));
-  const pills = trace ? tracePills(d, trace, msgs, groupByNode) : new Map();
-  const cmp = compareAnchors(d, msgs, groups, trace || computeTrace(d), fanoutFocus.get(d.key) || null);
+  const cmp = compareAnchors(d, msgs, groups, computeTrace(d), fanoutFocus.get(d.key) || null);
   const compares = cmp.rows;
   const skipAns = cmp.skip;
   // Branch-aware transcript: a branch is a deliberate strategy (a side
@@ -12960,12 +12888,11 @@ async function renderConv(scroll) {
   // their chronological position. A search hit inside a folded branch opens
   // that block.
   const blocks = [];
-  if (pills.has('')) blocks.push(pills.get(''));
   if (compares.has('')) blocks.push(compares.get(''));
   let barModel = null; // the model bar marks changes, not every reply
   // The newest on-path message always shows in full — no fold to click.
   let lastMain = -1;
-  for (let k = msgs.length - 1; k >= 0; k--) if (trace || !msgs[k].off) { lastMain = k; break; }
+  for (let k = msgs.length - 1; k >= 0; k--) if (!msgs[k].off) { lastMain = k; break; }
   // Some providers (notably OpenRouter kimi-k3) emit their private work
   // plan as ordinary assistant text before a tool call, not as `thinking`.
   // Shared entry id is the reliable signal: text + tool in one assistant
@@ -13017,7 +12944,7 @@ async function renderConv(scroll) {
   };
   for (let i = 0; i < msgs.length;) {
     const isHit = m => !!qtest && qtest.test(m.text || '');
-    if (trace || !msgs[i].off) {
+    if (!msgs[i].off) {
       const m = msgs[i];
       if (isReadEntry(m) || !skipAns.has(m.eid)) {
         const plainReasoning = m.role === 'assistant' && m.eid && toolTurnEids.has(m.eid);
@@ -13042,7 +12969,6 @@ async function renderConv(scroll) {
       const nextEid = msgs[i + 1] && msgs[i + 1].eid;
       if (m.eid && nextEid !== m.eid) {
         if (compares.has(m.eid)) { flushTools(); blocks.push(compares.get(m.eid)); }
-        else if (pills.has(m.eid)) { flushTools(); blocks.push(pills.get(m.eid)); }
       }
       i++;
       continue;
@@ -13059,12 +12985,10 @@ async function renderConv(scroll) {
     i = j;
   }
   flushTools();
-  const offNewest = trace && trace.leaf !== trace.fileLeaf;
   $('view').innerHTML = head + '<div id="conversationDelegations"></div>' +
     (msgs.length ? `<div class="transcript" id="conversationTranscript">` + blocks.join('') + `</div>`
                  : '<div class="empty" id="conversationTranscript">nothing to show in this view.</div>') +
     `<div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
-    (offNewest ? `<div class="tracebanner">⑂ you follow an older branch — new messages continue from its end <button id="traceReset">back to newest</button></div>` : '') +
     agentComposerHtml(d);
   mountDelegationView();
   delegationUI.attachCards($('conversationTranscript'));
@@ -13096,16 +13020,6 @@ async function renderConv(scroll) {
   if (scroll == null || scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
   else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
   try {
-  if ($('traceReset')) $('traceReset').onclick = () => { traceLeaves.delete(d.key); renderConv('bottom'); };
-  $('view').querySelectorAll('[data-pill-go]').forEach(b => b.onclick = () => {
-    const tr = computeTrace(current);
-    if (!tr) return;
-    const kids = (tr.children.get(b.dataset.eid) || []).filter(k => tr.carries.has(k)).sort((x, y) => tr.order.get(x) - tr.order.get(y));
-    const at = kids.findIndex(k => tr.onPath.has(k));
-    const target = kids[at + Number(b.dataset.pillGo)];
-    if (target) switchTraceBranch(b.dataset.eid, target);
-  });
-  $('view').querySelectorAll('[data-pill-alt]').forEach(b => b.onclick = () => switchTraceBranch(b.dataset.eid, b.dataset.pillAlt));
   wireCompareRow();
   renderRunCards();
   foldLongMessages();
@@ -13133,13 +13047,10 @@ async function renderConv(scroll) {
   const hitEl = revealTranscriptHit($('view'), scroll);
   if (readEntry && !hitEl && !cardForEntry) errToast('The parent entry could not be shown in this transcript.');
   const mk = $('view').querySelector('mark');
-  const pillEl = typeof scroll === 'string' && scroll.startsWith('pill:')
-    ? $('view').querySelector(`.branchpill[data-eid="${CSS.escape(scroll.slice(5))}"]`) : null;
   {
     // Land on the first marked term inside the hit message: a long message
     // centers its match, not its middle.
     if (hitEl) (hitEl.querySelector('mark') || hitEl).scrollIntoView({ block: 'center' });
-    else if (pillEl) pillEl.scrollIntoView({ block: 'center' });
     else if (scroll === 'top') $('view').scrollTop = 0;
     else if (scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
     else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
@@ -13287,61 +13198,6 @@ function isRegenerateBridgeMessage(m) {
   if (!m || m.role !== 'user' || !m.eid) return false;
   const text = String(m.text || '').trim();
   return /^continue\.?$/i.test(text) || /<!--\s*aiconvo:regenerate\s*-->/.test(text);
-}
-
-function branchPreview(d, trace, childId) {
-  const sub = new Set([childId]);
-  const stack = [childId];
-  while (stack.length) {
-    for (const c of trace.children.get(stack.pop()) || []) { sub.add(c); stack.push(c); }
-  }
-  const branchMessages = d.messages.filter(m => m.eid && sub.has(m.eid));
-  const bridge = branchMessages.find(isRegenerateBridgeMessage);
-  const first = branchMessages.find(m => (m.role === 'user' || m.role === 'assistant') && m !== bridge);
-  const modelMsg = branchMessages.find(m => m.role === 'assistant' && m.model);
-  return {
-    text: first ? first.text.replace(/\s+/g, ' ').slice(0, 60) : '(no message)',
-    model: modelMsg ? modelMsg.model : null,
-  };
-}
-
-// One switcher pill per branch point on the current path.
-// Returns Map(anchorEid → html); '' anchors before the first message.
-function tracePills(d, trace, msgs, groupByNode = new Map()) {
-  const out = new Map();
-  const displayed = new Set(msgs.map(m => m.eid).filter(Boolean));
-  for (const [eid, kids] of trace.children) {
-    if (groupByNode.has(eid)) continue; // a compare row replaces the pill
-    const carrying = kids.filter(k => trace.carries.has(k));
-    if (carrying.length < 2 || !trace.onPath.has(eid)) continue;
-    carrying.sort((a, b) => trace.order.get(a) - trace.order.get(b));
-    const at = carrying.findIndex(k => trace.onPath.has(k));
-    if (at < 0) continue;
-    let anchor = eid;
-    while (anchor && !displayed.has(anchor)) anchor = trace.parents.get(anchor);
-    const versioned = carrying.some(k => d.messages.some(m => m.eid === k && isRegenerateBridgeMessage(m)));
-    const alts = carrying.map((k, i) => {
-      const p = branchPreview(d, trace, k);
-      return `<button class="bp-alt${i === at ? ' on' : ''}" data-pill-alt="${esc(k)}" data-eid="${esc(eid)}" title="Switch the transcript to this ${versioned ? 'version' : 'branch'}">${i === at ? '● ' : ''}${i + 1} · ${p.model ? esc(p.model) + ' · ' : ''}${esc(p.text)}</button>`;
-    }).join('');
-    const pill = `<div class="branchpill" data-eid="${esc(eid)}">
-      <button data-pill-go="-1" data-eid="${esc(eid)}"${at === 0 ? ' disabled' : ''} title="previous ${versioned ? 'version' : 'branch'}">◀</button>
-      <span>${versioned ? `version ${at + 1} of ${carrying.length}` : `⑂ branch ${at + 1}/${carrying.length}`}</span>
-      <button data-pill-go="1" data-eid="${esc(eid)}"${at === carrying.length - 1 ? ' disabled' : ''} title="next ${versioned ? 'version' : 'branch'}">▶</button>
-      <details><summary>list</summary><div class="bp-list">${alts}</div></details>
-    </div>`;
-    const a = anchor || '';
-    out.set(a, (out.get(a) || '') + pill);
-  }
-  return out;
-}
-
-function switchTraceBranch(eid, targetChild) {
-  const d = current;
-  const trace = d && computeTrace(d);
-  if (!trace) return;
-  traceLeaves.set(d.key, deepestUnder(trace, targetChild));
-  renderConv('pill:' + eid);
 }
 
 const compareCache = new Map();
@@ -14047,58 +13903,6 @@ function updateLiveStrip(runs) {
     host.onscroll = () => { chip.hidden = host.scrollHeight - host.scrollTop - host.clientHeight < 40; };
     chip.onclick = () => { host.scrollTop = host.scrollHeight; chip.hidden = true; };
   }
-}
-
-// Pair tool calls with their results (by id when present, else in order).
-function pairTools(messages) {
-  const pairs = [];
-  const open = [];
-  for (const m of messages) {
-    if (m.role === 'tool') { const p = { call: m, result: null }; pairs.push(p); open.push(p); }
-    else if (m.role === 'toolresult') {
-      let p = m.tid ? open.find(x => x.call.id === m.tid) : null;
-      if (!p) p = open[0];
-      if (p) { p.result = m; open.splice(open.indexOf(p), 1); }
-    }
-  }
-  return pairs;
-}
-
-const READ_TOOLS = /^(read|read_file|view|cat|notebookread)$/i;
-
-function derive(d, mode) {
-  const pairs = pairTools(d.messages);
-  if (mode === 'uniqcmd') {
-    const tools = new Map(), commands = new Map();
-    for (const { call } of pairs) {
-      tools.set(call.name, (tools.get(call.name) || 0) + 1);
-      if (/bash|shell|exec|command/i.test(call.name) && call.text)
-        commands.set(call.text, (commands.get(call.text) || 0) + 1);
-    }
-    return { tools: [...tools.entries()].sort((a, b) => b[1] - a[1]), commands: [...commands.entries()] };
-  }
-  const files = new Map();
-  for (const { call, result } of pairs) {
-    if (call.path && READ_TOOLS.test(call.name) && result)
-      files.set(call.path, result.text);
-  }
-  return [...files.entries()].map(([path, text]) => ({ path, text }));
-}
-
-function renderDerived(d, mode, hl) {
-  if (mode === 'uniqcmd') {
-    const { tools, commands } = derive(d, mode);
-    return `<div class="transcript"><div class="msg tool"><div class="role">tools used</div>` +
-      tools.map(([n, c]) => `${esc(n)} ×${c}`).join('\n') + `</div>` +
-      (commands.length
-        ? commands.map(([cmd, c]) =>
-            `<div class="msg tool"><div class="role">command${c > 1 ? ` ×${c}` : ''}</div>${hl(cmd)}</div>`).join('')
-        : '<div class="msg toolresult">no shell commands in this conversation.</div>') + `</div>`;
-  }
-  const files = derive(d, mode);
-  if (!files.length) return '<div class="empty">no file reads in this conversation.</div>';
-  return `<div class="transcript">` + files.map(f =>
-    `<details class="msg toolresult"><summary style="cursor:pointer;color:var(--cyan)">${esc(f.path)}</summary><pre style="white-space:pre-wrap;margin:8px 0 0">${hl(f.text)}</pre></details>`).join('') + `</div>`;
 }
 
 function flashCopied(btn) {
@@ -16630,7 +16434,7 @@ function cornerStack() {
 //   over the toggle role that a plain tap has on other devices.
 // Buttons, links, marks, rows, and form fields keep their normal taps.
 // The terminal pane and the open mini-gantt keep their own touch handlers.
-const einkTapSkip = 'button, a, input, select, textarea, summary, label, .more, .tmark, .item, .ag-row, .sr-hit, .sr-chip, .branchpill, [data-close], .job, .fg-mark, .mgantt';
+const einkTapSkip = 'button, a, input, select, textarea, summary, label, .more, .tmark, .item, .ag-row, .sr-hit, .sr-chip, [data-close], .job, .fg-mark, .mgantt';
 
 function einkFlash(text) {
   let el = $('einkFlash');
