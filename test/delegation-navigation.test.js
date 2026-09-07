@@ -59,6 +59,9 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   // A compare row would normally suppress its answer. The raw link must still show it.
   const compareAnchors=()=>({rows:new Map(),skip:new Set(['launch'])});
   const mountDelegationView=noop, wireCompareRow=noop, renderRunCards=noop, foldLongMessages=noop;
+  const delegationUI = { attachCards: noop, index: () => ({ tasks: [] }) };
+  const DelegationUI = { taskIdInResult: () => null, eventSummary: type => '↩ ' + type };
+  const delegateCallOf = m => ({ eid: m.eid || '', call: m.id || '', title: '', taskId: null });
   const wireRunButtons=noop, hintReadKey=noop, wireHead=noop, wireAgentComposer=noop, wireTranscriptPathCandidates=noop, wireToolGroups=noop, updateMatchHud=noop;
   const errToast=m=>errors.push(m), isFileWriteTool=()=>false;
   const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));

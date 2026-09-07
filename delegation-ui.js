@@ -1,5 +1,6 @@
 /* Delegation UI contract: serve this file at /delegation-ui.js.
- * GET /api/delegations -> {tasks, revision}; records include key, parentKey, paused.
+ * GET /api/delegations -> {tasks, revision}; records include key, parentKey, paused,
+ *   and the summary facts steps, files, summary (the worker's final words).
  * GET /api/delegations/detail?id= -> record plus logTail, prompt, mode.
  * POST /api/delegations/control {id, action} -> {ok:true}.
  * SSE delegation-update (named event or JSON type) invalidates the compact snapshot.
@@ -7,8 +8,14 @@
  * to remove duplicate process rows before indexing supplies key. PID alone is unsafe.
  * Existing /api/session messages need eid for exact parent-entry landing; the
  * read=<encoded JSON {key,entryId}> hash reuses open() and the hit landing path.
- * Logs load only on disclosure, then refresh on explicit request. Snapshot
- * fallback runs every 30 seconds while a relevant surface and tab are visible.
+ *
+ * Surfaces. Delegation is shown where it happens, not in a separate panel:
+ *   cards   one <div class="dg-card"> per `delegate` tool call in a transcript,
+ *           painted in place by attachCards(root); collapsed to one line.
+ *   origin  one line at the top of a delegated conversation (mount 'conversation').
+ *   tree    treeNodes() turns tasks into nodes of the conversation tree.
+ * Logs and prompts load only on disclosure, then refresh on explicit request.
+ * Snapshot fallback runs every 30 seconds while a relevant surface and tab are visible.
  * This module never starts workers, changes review, or infers ancestry from cwd/PIDs.
  */
 (function (root, factory) {
@@ -167,10 +174,140 @@
     return `Prompt (up to 24000 characters)\n${prompt || 'Not available.'}\nFull prompt: ${text(record.promptPath)}\n\nMode contract (up to 24000 characters)\n${mode || 'Not available.'}\nFull mode: ${text(record.modePath)}\n\nMode hash: ${text(record.modeHash)}\nTools: ${text(record.tools)}\nThinking: ${text(record.thinking)}\nOutput: ${text(record.outputDir)}\nSupervision: ${text(record.supervision)}\nSurvives web service restart: ${record.survivesServiceRestart === true ? 'yes' : 'not guaranteed'}\nPermissions: ${text(record.permissions || 'Same user permissions. Not a sandbox.')}\nReview evidence: ${text(record.reviewEvidence)}\nError: ${text(record.error)}\n\nLog tail (up to 16000 characters)\n${tail || 'No log output.'}\nFull log: ${text(record.logPath)}\n\nStandard error (up to 8000 characters)\n${text(record.stderrTail).slice(-8000)}`;
   }
 
+  // ---- presentation facts ----
+  // One glyph and one word per task. Glyphs carry the state, never color alone.
+  function stateOf(t) {
+    if (!t) return { glyph: '?', word: 'unknown', tone: 'dim' };
+    if (t.cancelRequested && isLive(t)) return { glyph: '◌', word: 'stopping', tone: 'dim' };
+    if (isLive(t)) {
+      if (t.status === 'planned' || t.status === 'starting') return { glyph: '◌', word: 'starting', tone: 'live' };
+      if (terminal.has(t.status)) return { glyph: '●', word: t.sessionActive ? 'continuing' : 'still running', tone: 'live' };
+      return { glyph: '●', word: 'running', tone: 'live' };
+    }
+    switch (t.status) {
+      case 'succeeded': return { glyph: '✓', word: 'done', tone: 'ok' };
+      case 'failed': return { glyph: '✗', word: 'failed', tone: 'bad' };
+      case 'lost': return { glyph: '✗', word: 'lost', tone: 'bad' };
+      case 'cancelled': return { glyph: '⏹', word: 'cancelled', tone: 'dim' };
+      default: return { glyph: '?', word: text(t.status || 'unknown'), tone: 'dim' };
+    }
+  }
+  function duration(ms) {
+    if (!(ms > 0)) return '';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + ' s';
+    const m = Math.round(s / 60);
+    if (m < 60) return m + ' min';
+    const h = Math.floor(m / 60), r = m % 60;
+    return h + ' h' + (r ? ' ' + r + ' min' : '');
+  }
+  function elapsedOf(t, now) {
+    const start = Number(t.startedAt || t.createdAt || 0);
+    if (!start) return '';
+    const end = terminal.has(t.status) && !isLive(t) ? Number(t.finishedAt || t.updatedAt || 0) : now;
+    return duration(end - start);
+  }
+  // Review is a fact about the parent's verdict. It matters only once the
+  // work is done and only when it is not simply accepted.
+  function reviewWord(t) {
+    if (!t || isLive(t) || t.status !== 'succeeded') return '';
+    if (t.review === 'accepted') return 'accepted';
+    if (t.review === 'rejected') return 'rejected';
+    return 'needs review';
+  }
+  // The collapsed line: state, time, size, verdict. Nothing else.
+  function stateLine(t, now = Date.now(), options = {}) {
+    const s = stateOf(t);
+    const parts = [s.glyph + ' ' + s.word];
+    const time = elapsedOf(t, now);
+    if (time) parts.push(time);
+    if (typeof t.steps === 'number' && t.steps > 0) parts.push(t.steps + ' step' + (t.steps === 1 ? '' : 's'));
+    if (typeof t.files === 'number' && t.files > 0) parts.push(t.files + ' file' + (t.files === 1 ? '' : 's'));
+    const review = reviewWord(t);
+    if (review) parts.push(review);
+    if (t.paused) parts.push('paused');
+    if (options.unread) parts.push('unread');
+    return parts.join(' · ');
+  }
+  // Problems the reader must know. Absent when nothing is wrong.
+  function warningOf(index, t) {
+    if (!t) return '';
+    return [index && index.warnings.get(t.id), t.error,
+      terminal.has(t.status) && t.workerAlive ? 'The worker process is still alive. Inspect it before you continue this conversation.' : '',
+      t.notificationError,
+      t.notificationState === 'blocked' ? 'The result could not reach the parent conversation.' : '',
+      t.notificationState === 'error' ? 'The parent could not process the result.' : ''].filter(Boolean).join(' ');
+  }
+  function stripName(model) {
+    const v = text(model);
+    const slash = v.indexOf('/');
+    return slash > 0 ? v.slice(slash + 1) : v;
+  }
+  // Which task does a `delegate` tool call in a transcript belong to?
+  // Exact: the task ID inside the tool result. Fallback: the same parent
+  // entry, matched by title then order. Never by PID, cwd, or time.
+  function taskForCall(index, call) {
+    if (!index) return null;
+    if (call.taskId && index.byId.has(call.taskId)) return index.byId.get(call.taskId);
+    const same = index.tasks.filter(t => t.parentKey === call.key && t.parentEntryId === call.entryId);
+    if (!same.length) return null;
+    const byTitle = same.filter(t => call.title && t.title === call.title);
+    const pool = byTitle.length ? byTitle : same;
+    return pool[Math.min(Number(call.ordinal) || 0, pool.length - 1)] || null;
+  }
+  function taskIdInResult(resultText) {
+    const m = /"id"\s*:\s*"([0-9a-f-]{36})"/.exec(text(resultText));
+    return m ? m[1] : null;
+  }
+  // Delegated conversations as tree nodes: children of the entry that
+  // launched them, and of each other when they delegated in turn.
+  function treeNodes(index, familyKeys, hostNodes) {
+    const keys = new Set(familyKeys || []);
+    const hostFor = new Map();
+    for (const n of hostNodes) {
+      const refs = n.entryRefs || (n.entryIds || [n.id]).map(id => ({ key: n.key, id }));
+      for (const ref of refs) if (!hostFor.has(ref.key + '\n' + ref.id)) hostFor.set(ref.key + '\n' + ref.id, n);
+    }
+    const out = [], byTask = new Map();
+    for (const t of index.tasks) {
+      const host = t.parentKey && keys.has(t.parentKey) ? hostFor.get(t.parentKey + '\n' + t.parentEntryId) : null;
+      if (!host && !(t.parentTaskId && index.byId.has(t.parentTaskId))) continue;
+      const node = { id: 'dg:' + t.id, parent: host ? host.id : 'dg:' + t.parentTaskId, role: 'delegated', delegated: true, task: t,
+        title: text(t.title || 'Untitled task'), model: t.model, key: t.key || null,
+        ts: t.createdAt ? new Date(Number(t.createdAt)).toISOString() : '',
+        lastTs: new Date(Number(t.finishedAt || t.updatedAt || t.createdAt || 0)).toISOString(),
+        jumpTs: null, chars: 0, active: false, entryRefs: [] }; // another session: never on this path
+      out.push(node); byTask.set(t.id, node);
+    }
+    // A task whose ancestor is not drawn has nowhere to hang: drop it (and
+    // its subtree), rather than inventing a parent.
+    const ids = new Set(out.map(n => n.id)), hostIds = new Set(hostNodes.map(n => n.id));
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const n of [...out]) {
+        if (ids.has(n.parent) || hostIds.has(n.parent)) continue;
+        ids.delete(n.id); out.splice(out.indexOf(n), 1); changed = true;
+      }
+    }
+    return out;
+  }
+  function eventSummary(customType, content) {
+    const body = text(content);
+    if (customType === 'delegation-complete') {
+      const n = (body.match(/^- /gm) || []).length;
+      return '↩ ' + (n || 'delegated') + ' delegated result' + (n === 1 ? '' : 's') + ' returned';
+    }
+    if (customType === 'delegation-review-pending') return '↩ delegated results wait for review';
+    return '↩ ' + text(customType || 'runner event').replace(/[-_]/g, ' ');
+  }
+
   function createController(options) {
     const { document: doc, fetch: request, visible, openTarget, confirm: ask } = options;
-    let index = indexTasks([]), error = '', loaded = false, limited = false, pending = null, dirty = false, timer = null, destroyed = false;
-    const views = new Map(), details = new Map(), busy = new Set(), requests = new Set();
+    const now = options.now || (() => Date.now());
+    let index = indexTasks([]), error = '', loaded = false, limited = false, pending = null, dirty = false, timer = null, destroyed = false, tick = null;
+    const views = new Map(), cards = new Map(), details = new Map(), busy = new Set(), requests = new Set(), openState = new Map();
+    const cardRoots = new Set();
     async function requestJSON(url, init = {}) {
       const abort = new AbortController();
       const timeout = setTimeout(() => abort.abort(), 10000);
@@ -187,44 +324,17 @@
       return node;
     };
     const setText = (node, value) => { if (node.textContent !== value) node.textContent = value; };
-    function button(label, fn) {
-      const b = el('button', '', label); b.type = 'button'; b.onclick = fn; return b;
+    const show = (node, on) => { if (node.hidden !== !on) node.hidden = !on; };
+    function button(label, fn, cls) {
+      const b = el('button', cls || '', label); b.type = 'button'; b.onclick = fn; return b;
     }
-    // Reuse nodes by task/group ID. Never replace an open details element or
-    // its controls during an update. Only changed text and attributes patch.
-    function place(container, nodes) {
-      const wanted = new Set(nodes);
-      for (const child of [...container.children]) if (!wanted.has(child)) child.remove();
-      nodes.forEach((node, i) => { if (container.children[i] !== node) container.insertBefore(node, container.children[i] || null); });
+    function isUnread(task) {
+      return !!(task && !isLive(task) && terminal.has(task.status) && task.key && options.unread?.(task.key));
     }
-    function group(view, id, label, open = false) {
-      let g = view.groups.get(id);
-      if (!g) {
-        const node = el('details', 'delegation-group'), summary = el('summary'), body = el('div', 'delegation-list');
-        node.open = open; node.append(summary, body);
-        g = { node, summary, body }; view.groups.set(id, g);
-        node.ontoggle = () => { if (node.open) paint(view); };
-      }
-      setText(g.summary, label); return g;
-    }
-    async function loadDetail(row, force = false) {
-      const task = index.byId.get(row.id);
-      if (!task) return;
-      if (!force && details.has(row.id)) { setText(row.pre, details.get(row.id)); return; }
-      if (row.loading) return;
-      row.loading = true; row.refresh.disabled = true;
-      setText(row.pre, 'Loading task details…');
-      try {
-        const response = await requestJSON('/api/delegations/detail?id=' + encodeURIComponent(row.id));
-        if (!response.ok) throw new Error('Task details are not available.');
-        const record = response.data;
-        if (record.error && !record.id && !record.task) throw new Error(text(record.error));
-        const value = detailText(record.task ? { ...record.task, ...record } : record);
-        details.set(row.id, value); setText(row.pre, value);
-      } catch (e) { setText(row.pre, text(e.message)); }
-      finally { row.loading = false; row.refresh.disabled = false; }
-    }
-    async function control(id, action) {
+    function titleOfKey(key) { return (key && options.titleForKey?.(key)) || ''; }
+
+    // ---- shared task controls ----
+    async function control(id, action, notice) {
       if (busy.has(id)) return;
       if (action === 'cancel' && !ask(cancellationMessage(index, id))) return;
       busy.add(id); paintAll();
@@ -232,182 +342,195 @@
         const response = await requestJSON('/api/delegations/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }) });
         const result = response.data;
         if (!response.ok || result.ok !== true) throw new Error(result.error || 'Control request failed.');
-        for (const view of views.values()) if (view.rows.has(id)) {
-          const row = view.rows.get(id);
-          row.requestedAction = action;
-          setText(row.notice, action === 'cancel' ? 'Cancellation requested. Waiting for supervisor status.' :
-            action === 'pause' ? 'Pause requested. Running workers continue.' : 'Resume requested. New descendants can start when the pause clears.');
-        }
+        notice?.(action === 'cancel' ? 'Cancellation requested. Running work stops when the supervisor handles it.' :
+          action === 'pause' ? 'Paused: no new delegated work starts under this task. Running work continues.' : 'Resumed: new delegated work may start again.');
         await refresh();
-      } catch (e) {
-        for (const view of views.values()) if (view.rows.has(id)) setText(view.rows.get(id).notice, text(e.message));
-      } finally { busy.delete(id); paintAll(); }
+      } catch (e) { notice?.(text(e.message)); }
+      finally { busy.delete(id); paintAll(); }
     }
-    function taskRow(view, id) {
-      let row = view.rows.get(id);
-      if (!row) {
-        const node = el('div', 'delegation-row'); node.dataset.delegationId = id;
-        const title = el('b'), meta = el('div', 'delegation-meta'), state = el('div', 'delegation-state');
-        const warning = el('div', 'delegation-meta'), actions = el('div', 'delegation-actions');
-        const child = button('Open child conversation', () => { const t = index.byId.get(id); if (t?.key) openTarget({ key: t.key }); });
-        const parent = button('Parent launch point', () => { const target = parentTarget(index.byId.get(id)); if (target) openTarget(target); });
-        const pause = button('Pause new descendants', () => control(id, index.byId.get(id)?.paused ? 'resume' : 'pause'));
-        const cancel = button('Cancel subtree…', () => control(id, 'cancel'));
-        actions.append(child, parent);
-        const notice = el('div', 'delegation-notice'); notice.setAttribute('role', 'status');
-        const info = el('details', 'delegation-info'), summary = el('summary', '', 'Details and controls');
-        const pre = el('pre'), refresh = button('Refresh details', () => loadDetail(row, true));
-        info.append(summary, pause, cancel, refresh, pre);
-        const children = el('details', 'delegation-children'), childSummary = el('summary'), childBody = el('div', 'delegation-list');
-        children.append(childSummary, childBody);
-        node.append(title, meta, state, warning, actions, notice, info, children);
-        row = { id, node, title, meta, state, warning, child, parent, pause, cancel, notice, info, pre, refresh, children, childSummary, childBody };
-        view.rows.set(id, row);
-        info.ontoggle = () => { if (info.open) loadDetail(row); };
-        children.ontoggle = () => { if (children.open) paint(view); };
-      }
-      const t = index.byId.get(id), state = taskState(t);
-      setText(row.title, text(t.title || 'Untitled task'));
-      setText(row.meta, [t.role || 'worker', text(t.model) || 'model not recorded'].join(' · '));
-      setText(row.state, `Execution: ${state.execution} · Parent review: ${state.review}${activityLabel(t) ? ' · ' + activityLabel(t) : ''}${t.paused ? ' · New descendants paused; running workers continue' : ''}${isUnread(t) ? ' · Unread reply' : ''}`);
-      const warning = [index.warnings.get(id), t.error,
-        terminal.has(t.status) && t.workerAlive ? 'The worker process is still alive. Inspect it before continuing this conversation.' : '',
-        t.notificationError, t.notificationState === 'pending' ? 'Parent review callback pending.' :
-          t.notificationState === 'delivering' ? 'Parent review in progress.' : ''].filter(Boolean).join(' ');
-      setText(row.warning, warning);
-      row.warning.hidden = !warning;
-      row.child.disabled = !t.key; row.child.title = t.key ? 'Read the saved conversation' : 'Conversation is not indexed yet';
-      row.parent.disabled = !parentTarget(t); row.parent.title = t.parentKey ? 'Read the exact parent entry' : 'Parent conversation is not indexed';
-      setText(row.pause, t.paused ? 'Resume new descendants' : 'Pause new descendants');
-      row.pause.disabled = busy.has(id);
-      const subtreeLive = [...descendants(index, [id], true)].some(k => isLive(index.byId.get(k)));
-      row.cancel.disabled = busy.has(id) || !subtreeLive;
-      if (row.requestedAction === 'cancel' && !subtreeLive) {
-        setText(row.notice, 'This subtree has no active tasks. Completed work stays saved.');
-        row.requestedAction = null;
-      } else if ((row.requestedAction === 'pause' && t.paused) || (row.requestedAction === 'resume' && !t.paused)) {
-        setText(row.notice, t.paused ? 'New descendants paused. Running workers continue.' : 'New descendants are not paused on this task.');
-        row.requestedAction = null;
-      }
-      return row;
+    async function loadDetail(id, force = false) {
+      if (!force && details.has(id)) return details.get(id);
+      const response = await requestJSON('/api/delegations/detail?id=' + encodeURIComponent(id));
+      if (!response.ok) throw new Error('Task details are not available.');
+      const record = response.data;
+      if (record.error && !record.id && !record.task) throw new Error(text(record.error));
+      const value = record.task ? { ...record.task, ...record } : record;
+      details.set(id, value);
+      return value;
     }
-    function renderRows(view, container, roots, allowed) {
-      // Only create deeper rows after their parent expands. The explicit
-      // stack also handles 2000-deep snapshots without JS call-stack growth.
-      const stack = [{ container, ids: roots, depth: 0 }];
-      while (stack.length) {
-        const { container, ids, depth } = stack.pop();
-        const rows = ids.filter(id => allowed.has(id)).map(id => taskRow(view, id));
-        place(container, rows.map(row => row.node));
-        for (const row of rows) {
-          const kids = (index.children.get(row.id) || []).filter(id => allowed.has(id));
-          row.children.hidden = !kids.length;
-          const members = new Set([...descendants(index, kids)].filter(id => allowed.has(id)));
-          setText(row.childSummary, `Delegated tasks (${kids.length})${unreadLabel(members)}`);
-          // Deep work keeps real nested disclosures without narrowing the
-          // reading column forever on a phone.
-          row.children.className = 'delegation-children' + (depth >= 5 ? ' delegation-deep' : '');
-          if (row.children.open) stack.push({ container: row.childBody, ids: kids, depth: depth + 1 });
+    function subtreeLive(id) {
+      return [...descendants(index, [id], true)].some(k => isLive(index.byId.get(k)));
+    }
+
+    // ---- transcript card ----
+    // One card per `delegate` call. Built once, patched by text. The reader's
+    // open/closed choice is kept per task across every re-render.
+    function buildCard(host) {
+      const box = el('details', 'dg'), line = el('summary', 'dg-line');
+      const glyph = el('span', 'dg-glyph', '↳');
+      const title = button('', () => { const t = card.task; if (t?.key) openTarget({ key: t.key }); }, 'dg-open');
+      const model = el('span', 'dg-model'), state = el('span', 'dg-state');
+      line.append(glyph, title, model, state);
+      const body = el('div', 'dg-body');
+      const warn = el('div', 'dg-warn'); warn.setAttribute('role', 'status');
+      const result = el('div', 'dg-row'), resultK = el('span', 'dg-k', 'result'), resultV = el('span', 'dg-v');
+      result.append(resultK, resultV);
+      const brief = el('details', 'dg-fold'), briefS = el('summary', '', 'brief · the task as it was given'), briefBody = el('div', 'dg-md');
+      brief.append(briefS, briefBody);
+      const records = el('details', 'dg-fold'), recordsS = el('summary', '', 'records · session, output, log, mode'), recordsBody = el('div', 'dg-records');
+      records.append(recordsS, recordsBody);
+      const actions = el('div', 'dg-actions');
+      const open = button('open', () => { const t = card.task; if (t?.key) openTarget({ key: t.key }); });
+      const cancel = button('cancel…', () => control(card.task.id, 'cancel', m => setText(notice, m)));
+      const pause = button('pause new work', () => control(card.task.id, card.task.paused ? 'resume' : 'pause', m => setText(notice, m)));
+      const notice = el('div', 'dg-notice'); notice.setAttribute('role', 'status');
+      actions.append(open, cancel, pause);
+      body.append(warn, result, brief, records, actions, notice);
+      box.append(line, body);
+      host.append(box);
+      const card = { host, box, line, title, model, state, warn, result, resultV, brief, briefBody, records, recordsBody, open, cancel, pause, notice, task: null, briefLoaded: false, recordsLoaded: false };
+      box.ontoggle = () => { if (card.task) openState.set(card.task.id, box.open); };
+      brief.ontoggle = () => { if (brief.open) fillBrief(card); };
+      records.ontoggle = () => { if (records.open) fillRecords(card); };
+      return card;
+    }
+    async function fillBrief(card, force = false) {
+      const id = card.task?.id;
+      if (!id || (card.briefLoaded && !force)) return;
+      card.briefLoaded = true;
+      setText(card.briefBody, 'Loading the task prompt…');
+      try {
+        const d = await loadDetail(id, force);
+        const prompt = text(d.prompt ?? d.promptText ?? '').slice(0, 24000) || 'Not available.';
+        const rendered = options.renderMarkdown?.(prompt);
+        if (rendered) { card.briefBody.textContent = ''; card.briefBody.append(rendered); }
+        else setText(card.briefBody, prompt);
+      } catch (e) { card.briefLoaded = false; setText(card.briefBody, text(e.message)); }
+    }
+    async function fillRecords(card, force = false) {
+      const id = card.task?.id;
+      if (!id || (card.recordsLoaded && !force)) return;
+      card.recordsLoaded = true;
+      setText(card.recordsBody, 'Loading…');
+      try {
+        const d = await loadDetail(id, force);
+        card.recordsBody.textContent = '';
+        const row = (k, v) => { if (!v) return; const r = el('div', 'dg-row'); r.append(el('span', 'dg-k', k), el('span', 'dg-v', text(v))); card.recordsBody.append(r); };
+        row('session', d.sessionPath); row('output', d.outputDir); row('log', d.logPath); row('prompt', d.promptPath); row('mode', d.modePath);
+        row('tools', Array.isArray(d.tools) ? d.tools.join(', ') : d.tools); row('thinking', d.thinking); row('model', d.model);
+        row('supervision', d.supervision ? text(d.supervision) + (d.survivesServiceRestart === true ? ' · survives a service restart' : ' · may not survive a service restart') : '');
+        row('review evidence', d.reviewEvidence); row('error', d.error);
+        const tail = text(d.logTail ?? '').slice(-16000);
+        if (tail) { const pre = el('pre', 'dg-log', tail); card.recordsBody.append(el('div', 'dg-k', 'log tail'), pre); }
+        const stderr = text(d.stderrTail).slice(-8000);
+        if (stderr.trim()) { const pre = el('pre', 'dg-log', stderr); card.recordsBody.append(el('div', 'dg-k', 'stderr'), pre); }
+        card.recordsBody.append(button('refresh', () => fillRecords(card, true)));
+      } catch (e) { card.recordsLoaded = false; setText(card.recordsBody, text(e.message)); }
+    }
+    function paintCard(card, host) {
+      const ds = host.dataset || {};
+      const t = taskForCall(index, { key: ds.dgKey, entryId: ds.dgEid, taskId: ds.dgId || null, title: ds.dgTitle || '', ordinal: ds.dgOrdinal });
+      const changed = card.task?.id !== t?.id;
+      card.task = t;
+      if (!t) {
+        setText(card.title, ds.dgTitle || 'delegated work');
+        setText(card.model, '');
+        setText(card.state, loaded ? (error ? '? status unavailable' : '? no record found') : '… loading');
+        show(card.warn, false); show(card.result, false); show(card.brief, false); show(card.records, false);
+        card.title.disabled = true; card.open.disabled = true; card.cancel.disabled = true; card.pause.disabled = true;
+        return;
+      }
+      if (changed) { card.briefLoaded = false; card.recordsLoaded = false; card.box.open = !!openState.get(t.id); }
+      setText(card.title, text(t.title || 'Untitled task'));
+      card.title.disabled = !t.key;
+      card.title.title = t.key ? 'Open the delegated conversation' : 'The delegated conversation is not indexed yet';
+      setText(card.model, stripName(t.model));
+      const s = stateOf(t);
+      setText(card.state, stateLine(t, now(), { unread: isUnread(t) }));
+      card.state.dataset.tone = s.tone;
+      const w = warningOf(index, t);
+      setText(card.warn, w); show(card.warn, !!w);
+      const summary = text(t.summary || '').trim();
+      setText(card.resultV, summary); show(card.result, !!summary);
+      show(card.brief, true); show(card.records, true);
+      card.open.disabled = !t.key;
+      const live = subtreeLive(t.id);
+      show(card.cancel, live); card.cancel.disabled = busy.has(t.id);
+      show(card.pause, live && !!(index.recordedChildren.get(t.id) || []).length || !!t.paused);
+      setText(card.pause, t.paused ? 'resume new work' : 'pause new work');
+      card.pause.disabled = busy.has(t.id);
+    }
+    // Paint every card host under the registered transcript roots.
+    function paintCards() {
+      const seen = new Set();
+      for (const root of cardRoots) {
+        if (!root.isConnected) { cardRoots.delete(root); continue; }
+        for (const host of root.querySelectorAll('.dg-card')) {
+          let card = cards.get(host);
+          if (!card) { card = buildCard(host); cards.set(host, card); }
+          paintCard(card, host);
+          seen.add(host);
         }
       }
+      for (const host of cards.keys()) if (!seen.has(host)) cards.delete(host);
+      const anyLive = [...cards.values()].some(c => c.task && isLive(c.task));
+      if (anyLive && !tick) tick = setInterval(() => { if (visible()) paintCards(); }, 30000);
+      if (!anyLive && tick) { clearInterval(tick); tick = null; }
     }
-    function isUnread(task) {
-      return task && !isLive(task) && terminal.has(task.status) && task.key && options.unread?.(task.key);
+    function attachCards(root) {
+      if (!root) return;
+      cardRoots.add(root);
+      paintCards();
     }
-    function unreadLabel(ids) {
-      const count = [...ids].filter(id => isUnread(index.byId.get(id))).length;
-      return count ? ` · ${count} unread ${count === 1 ? 'reply' : 'replies'}` : '';
-    }
-    function paint(view) {
-      if (!view.host.isConnected) return;
-      const focused = doc.activeElement;
-      const scroll = [];
-      for (let node = view.node; node; node = node.parentNode) {
-        if (typeof node.scrollTop === 'number') scroll.push([node, node.scrollTop, node.scrollLeft]);
-      }
-      paintContent(view);
-      if (focused?.isConnected && doc.activeElement !== focused) focused.focus({ preventScroll: true });
-      for (const [node, top, left] of scroll) { node.scrollTop = top; node.scrollLeft = left; }
-    }
-    function paintContent(view) {
+
+    // ---- origin line (a delegated conversation, read from its own view) ----
+    function paintOrigin(view) {
       const { context } = view;
-      const scoped = contextTasks(index, context.key, context.entryIds || context.entryId, context);
-      const parent = scoped.self;
-      view.parent.hidden = !parent;
-      if (parent) {
-        setText(view.parentLabel, `Delegated conversation · ${text(parent.role || 'worker')} · ${taskState(parent).execution} · ${taskState(parent).review}${activityLabel(parent) ? ' · ' + activityLabel(parent) : ''}`);
-        view.parentButton.disabled = !parentTarget(parent);
-        view.parentButton.onclick = () => { const target = parentTarget(parent); if (target) openTarget(target); };
-      }
-      const count = context.kind === 'agents' ? index.tasks.length : scoped.all.size;
-      view.node.hidden = !error && count === 0 && !parent;
-      view.main.hidden = loaded && count === 0 && !error;
-      const activity = summaryState(index, context.kind === 'agents' ? index.byId.keys() : scoped.all);
-      setText(view.summary, `Delegated work (${count})${activity ? ' · ' + activity : ''}${unreadLabel(context.kind === 'agents' ? index.byId.keys() : scoped.all)}${error ? ' · unavailable' : !loaded ? ' · loading' : ''}`);
-      setText(view.health, error ? `${error}${loaded ? ' Showing the last saved snapshot.' : ''}` : !loaded ? 'Loading delegated work…' : limited ? 'Showing a bounded snapshot. Older completed tasks may not appear.' : '');
-      view.health.hidden = loaded && !error && !limited;
-      view.retry.hidden = !error;
-      const groups = [];
-      if (context.kind === 'agents') {
-        const origins = new Map();
-        for (const id of index.roots) {
-          const t = index.byId.get(id), origin = t.parentKey || t.parentSessionPath || 'unknown';
-          if (!origins.has(origin)) origins.set(origin, []);
-          origins.get(origin).push(id);
-        }
-        for (const [origin, roots] of origins) {
-          const key = index.byId.get(roots[0]).parentKey;
-          const label = options.titleForKey?.(key) || (key ? text(key) : 'Parent not indexed: ' + text(index.byId.get(roots[0]).parentSessionPath || 'origin not recorded'));
-          const members = descendants(index, roots);
-          const g = group(view, 'origin:' + origin, `${label} · ${members.size} tasks${unreadLabel(members)}`, members.size <= 20);
-          groups.push(g.node);
-          if (view.main.open && g.node.open) renderRows(view, g.body, roots, new Set(index.byId.keys()));
-        }
-      } else {
-        if (context.kind === 'tree' && context.entryId != null) {
-          const g = group(view, 'selected:' + context.key + ':' + context.entryId, `From selected entry (${scoped.selected.size})${unreadLabel(scoped.selected)}`, true);
-          groups.push(g.node);
-          if (view.main.open && g.node.open) renderRows(view, g.body, scoped.selectedRoots, scoped.selected);
-        }
-        const g = group(view, 'conversation:' + context.key, `${context.kind === 'tree' ? 'Other work in this tree' : 'From this conversation'} (${scoped.other.size})${unreadLabel(scoped.other)}`, context.kind !== 'tree');
-        groups.push(g.node);
-        if (view.main.open && g.node.open) renderRows(view, g.body, scoped.roots, scoped.other);
-      }
-      place(view.body, groups);
-      view.empty.hidden = !loaded || count > 0;
-      for (const [id, row] of view.rows) if (!index.byId.has(id)) { row.node.remove(); view.rows.delete(id); }
-    }
-    function paintAll() {
-      for (const view of views.values()) paint(view);
+      const self = index.tasks.find(t => context.key && t.key === context.key);
+      show(view.node, !!self);
+      if (!self) return;
+      const parentTitle = titleOfKey(self.parentKey);
+      setText(view.by, 'delegated by');
+      setText(view.parentBtn, parentTitle || (self.parentKey ? 'its parent conversation' : 'a conversation that is not indexed'));
+      view.parentBtn.disabled = !parentTarget(self);
+      view.parentBtn.title = self.parentKey ? 'Open the parent conversation at the line that delegated this work' : 'The parent conversation is not indexed';
+      const s = stateOf(self);
+      const review = reviewWord(self);
+      setText(view.state, [text(self.role || 'worker'), s.glyph + ' ' + s.word, review ? review + (review === 'needs review' ? ' by the parent' : ' by the parent') : ''].filter(Boolean).join(' · '));
+      view.state.dataset.tone = s.tone;
+      const live = isLive(self);
+      show(view.lock, live);
+      setText(view.lockText, self.workerAlive ? 'a worker owns this conversation — cancel it to continue here' : self.sessionActive ? 'this conversation is still working' : 'this conversation is starting');
+      show(view.cancel, live && !self.cancelRequested);
+      view.cancel.disabled = busy.has(self.id);
+      const w = warningOf(index, self);
+      setText(view.warn, w); show(view.warn, !!w);
     }
     function mount(host, context) {
+      if (context.kind !== 'conversation') throw new Error('Only the conversation surface mounts. Cards attach; the tree gets nodes.');
       let view = views.get(context.kind);
       if (!view) {
-        const node = el('section', 'delegation-ui'); node.setAttribute('aria-label', 'Delegated work');
-        const parent = el('div', 'delegation-parent'), parentLabel = el('span'), parentButton = button('Parent launch point', () => {});
-        parent.append(parentLabel, parentButton);
-        const main = el('details', 'delegation-main'), summary = el('summary'), health = el('div', 'delegation-meta');
-        const retry = button('Retry delegation snapshot', () => refresh());
-        const empty = el('p', 'delegation-meta', 'No delegated tasks recorded for this conversation.');
-        const body = el('div'); main.append(summary, health, retry, empty, body); node.append(parent, main);
-        view = { node, main, summary, health, retry, empty, body, parent, parentLabel, parentButton, rows: new Map(), groups: new Map(), contextStates: new Map() };
-        main.open = context.kind !== 'conversation';
-        main.ontoggle = () => { if (main.open) { paint(view); if (!loaded) refresh(); } };
+        const node = el('div', 'dg-origin'); node.setAttribute('aria-label', 'Origin of this delegated conversation');
+        const line = el('div', 'dg-origin-line');
+        const glyph = el('span', 'dg-glyph', '↰'), by = el('span'), parentBtn = button('', () => { const self = index.tasks.find(t => t.key === view.context.key); const target = parentTarget(self); if (target) openTarget(target); }, 'dg-open');
+        const state = el('span', 'dg-state');
+        line.append(glyph, by, parentBtn, state);
+        const lock = el('div', 'dg-lock'), lockText = el('span'), cancel = button('cancel…', () => { const self = index.tasks.find(t => t.key === view.context.key); if (self) control(self.id, 'cancel', m => setText(notice, m)); });
+        lock.append(lockText, cancel);
+        const warn = el('div', 'dg-warn'); warn.setAttribute('role', 'status');
+        const notice = el('div', 'dg-notice'); notice.setAttribute('role', 'status');
+        node.append(line, lock, warn, notice);
+        view = { node, by, parentBtn, state, lock, lockText, cancel, warn, notice };
         views.set(context.kind, view);
-      }
-      // A new conversation gets its own disclosure state, but updates of
-      // the same context retain every node, focus, and expansion.
-      if (view.context && view.context.key !== context.key) {
-        view.contextStates.set(view.context.key, { rows: view.rows, groups: view.groups, open: view.main.open });
-        const saved = view.contextStates.get(context.key);
-        view.rows = saved?.rows || new Map(); view.groups = saved?.groups || new Map();
-        view.main.open = saved ? saved.open : context.kind !== 'conversation';
-        if (view.contextStates.size > 12) view.contextStates.delete(view.contextStates.keys().next().value);
       }
       view.host = host; view.context = context;
       if (view.node.parentNode !== host) host.append(view.node);
-      paint(view);
+      paintOrigin(view);
       return view.node;
+    }
+    function paintAll() {
+      for (const view of views.values()) if (view.host?.isConnected) paintOrigin(view);
+      paintCards();
     }
     function schedule() {
       clearTimeout(timer); timer = null;
@@ -438,10 +561,12 @@
         else schedule();
       }
     }
-    return { mount, refresh, invalidate: refresh, repaint: paintAll, index: () => index,
+    return { mount, attachCards, refresh, invalidate: refresh, repaint: paintAll, index: () => index,
+      control: (id, action) => control(id, action), state: () => ({ loaded, error, limited }),
       visibilityChanged() { if (visible()) refresh(); else schedule(); },
-      destroy() { destroyed = true; clearTimeout(timer); for (const abort of requests) abort.abort(); views.clear(); details.clear(); } };
+      destroy() { destroyed = true; clearTimeout(timer); clearInterval(tick); for (const abort of requests) abort.abort(); views.clear(); cards.clear(); details.clear(); } };
   }
   return { escape, indexTasks, descendants, contextTasks, trackedProcess, taskState, isLive, summaryState,
-    attentionState, rootOf, progress, progressLabel, isTerminal: status => terminal.has(status), parentTarget, cancellationMessage, detailText, createController };
+    attentionState, rootOf, progress, progressLabel, isTerminal: status => terminal.has(status), parentTarget, cancellationMessage, detailText,
+    stateOf, stateLine, reviewWord, warningOf, duration, taskForCall, taskIdInResult, treeNodes, eventSummary, stripName, createController };
 });

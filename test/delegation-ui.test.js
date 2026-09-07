@@ -81,7 +81,7 @@ test('malicious labels escape HTML and detail payloads have bounded prompt, mode
 // A small DOM fixture tests the actual controller with no packages, live
 // APIs, model launches, browser profiles, or filesystem mutations.
 class Node {
-  constructor(tag, doc) { this.tagName = tag.toUpperCase(); this.doc = doc; this.children = []; this.dataset = {}; this.attrs = {}; this._text = ''; this.hidden = false; this.open = false; }
+  constructor(tag, doc) { this.tagName = tag.toUpperCase(); this.doc = doc; this.children = []; this.dataset = {}; this.attrs = {}; this._text = ''; this.hidden = false; this.open = false; this.className = ''; }
   set textContent(value) { this._text = String(value); for (const child of this.children) child.parentNode = null; this.children = []; }
   get textContent() { return this._text + this.children.map(c => c.textContent).join(''); }
   set innerHTML(_) { throw new Error('Delegation content must not use innerHTML'); }
@@ -95,6 +95,11 @@ class Node {
   remove() { if (this.parentNode) { const siblings = this.parentNode.children; siblings.splice(siblings.indexOf(this), 1); this.parentNode = null; } }
   focus() { this.doc.activeElement = this; }
   click() { if (!this.disabled) return this.onclick?.(); }
+  querySelectorAll(selector) {
+    const name = selector.replace(/^\./, ''), out = [];
+    const walk = n => { for (const c of n.children) { if (c.className.split(' ').includes(name)) out.push(c); walk(c); } };
+    walk(this); return out;
+  }
 }
 function fixture(t, tasks, overrides = {}) {
   const document = { createElement(tag) { return new Node(tag, this); } };
@@ -107,7 +112,7 @@ function fixture(t, tasks, overrides = {}) {
     fetch: async (url, options) => {
       calls.push({ url, options });
       if (failure) return { ok: false, json: async () => ({ error: 'offline' }) };
-      if (url.includes('/detail?')) return { ok: true, json: async () => ({ prompt: '<script>bad()</script>', mode: { tools: ['read'] }, logTail: 'tail' }) };
+      if (url.includes('/detail?')) return { ok: true, json: async () => ({ prompt: '<script>bad()</script>', mode: { tools: ['read'] }, logTail: 'tail', sessionPath: '/saved/x' }) };
       if (url.endsWith('/control')) return { ok: true, json: async () => ({ ok: true }) };
       return { ok: true, json: async () => ({ tasks: records, revision: 'v1' }) };
     },
@@ -118,9 +123,14 @@ function fixture(t, tasks, overrides = {}) {
   return { controller, document, host, calls, opened, confirms,
     setRecords: value => { records = value; }, hide: () => { isVisible = false; }, fail: () => { failure = true; } };
 }
+// A transcript root with one .dg-card host per `delegate` call, as renderConv emits them.
+function cardHost(f, data) {
+  const host = f.document.createElement('div'); host.className = 'dg-card';
+  Object.assign(host.dataset, { dgKey: 'origin', dgEid: 'entry-a', dgTitle: '', dgOrdinal: '0', ...data });
+  f.host.append(host); return host;
+}
 function find(node, predicate) { if (predicate(node)) return node; for (const child of node.children) { const found = find(child, predicate); if (found) return found; } }
 function cls(node, name) { return find(node, n => n.className === name); }
-function row(host, id) { return find(host, n => n.dataset.delegationId === id); }
 function control(host, label) { return find(host, n => n.tagName === 'BUTTON' && n.textContent === label); }
 function expand(node) { node.open = true; return node.ontoggle?.(); }
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -134,134 +144,176 @@ test('tree package membership matches raw entries and source sessions without in
   assert.deepEqual([...view.other], ['b']);
 });
 
-test('new conversations start collapsed and returning restores their disclosure state', async t => {
-  const f = fixture(t, [task('a'), task('b', { parentKey: 'other-origin' })]);
-  f.controller.mount(f.host, { kind: 'conversation', key: 'origin' }); await f.controller.refresh();
-  expand(cls(f.host, 'delegation-main'));
-  f.controller.mount(f.host, { kind: 'conversation', key: 'other-origin' });
-  assert.equal(cls(f.host, 'delegation-main').open, false);
-  f.controller.mount(f.host, { kind: 'conversation', key: 'origin' });
-  assert.equal(cls(f.host, 'delegation-main').open, true);
+test('the collapsed line carries state, time, size, and verdict as facts', () => {
+  const now = 1_000_000;
+  assert.equal(D.stateLine(task('a', { startedAt: now - 125_000 }), now), '● running · 2 min');
+  assert.equal(D.stateLine(task('a', { status: 'succeeded', startedAt: 0, finishedAt: 90_000, steps: 76, files: 14 }), now), '✓ done · 2 min · 76 steps · 14 files · needs review');
+  assert.equal(D.stateLine(task('a', { status: 'succeeded', review: 'accepted', steps: 1, files: 1 }), now), '✓ done · 1 step · 1 file · accepted');
+  assert.equal(D.stateLine(task('a', { status: 'failed' }), now), '✗ failed');
+  assert.equal(D.stateLine(task('a', { status: 'lost', workerAlive: true, createdAt: 0 }), now), '● still running');
+  assert.equal(D.stateLine(task('a', { status: 'cancelled' }), now), '⏹ cancelled');
+  assert.equal(D.stateLine(task('a', { status: 'running', cancelRequested: true, createdAt: 0 }), now), '◌ stopping');
+  assert.equal(D.stateLine(task('a', { status: 'succeeded', paused: true }), now, { unread: true }), '✓ done · needs review · paused · unread');
+  assert.equal(D.reviewWord(task('a', { status: 'failed', review: 'accepted' })), '', 'a verdict on failed work is not a success word');
+  assert.equal(D.duration(3_600_000 * 2 + 60_000 * 5), '2 h 5 min');
 });
 
-test('actual rendering uses text nodes, lazily expands depth, and retains focus and details during updates', async t => {
+test('a transcript call finds its record by result ID, then by launch entry and title, never by time', () => {
+  const index = D.indexTasks([task('a', { title: 'first' }), task('b', { title: 'second' }), task('c', { parentEntryId: 'entry-z', title: 'first' })]);
+  assert.equal(D.taskIdInResult('{"id": "0f0f0f0f-1111-2222-3333-444444444444", "status": "starting"}'), '0f0f0f0f-1111-2222-3333-444444444444');
+  assert.equal(D.taskIdInResult('nothing here'), null);
+  assert.equal(D.taskForCall(index, { key: 'origin', entryId: 'entry-a', taskId: 'b' }).id, 'b');
+  assert.equal(D.taskForCall(index, { key: 'origin', entryId: 'entry-a', title: 'second' }).id, 'b');
+  assert.equal(D.taskForCall(index, { key: 'origin', entryId: 'entry-a', title: 'first', ordinal: 5 }).id, 'a', 'ordinal never leaves the pool');
+  assert.equal(D.taskForCall(index, { key: 'origin', entryId: 'entry-a', ordinal: 1 }).id, 'b');
+  assert.equal(D.taskForCall(index, { key: 'other', entryId: 'entry-a', title: 'first' }), null);
+});
+
+test('tree nodes hang from the launching entry and from each other, and drop orphans instead of inventing parents', () => {
+  const index = D.indexTasks([task('a', { createdAt: 10 }), task('b', { parentTaskId: 'a', parentKey: 'child-a', createdAt: 20 }),
+    task('c', { parentTaskId: 'missing-elsewhere', parentKey: 'child-x', createdAt: 30 }), task('d', { parentKey: 'other', createdAt: 40 })]);
+  const hosts = [{ id: 'n1', key: 'origin', active: true, entryIds: ['entry-a'] }, { id: 'n2', key: 'origin', active: false, entryRefs: [{ key: 'fork', id: 'entry-a' }] }];
+  const nodes = D.treeNodes(index, ['origin'], hosts);
+  assert.deepEqual(nodes.map(n => [n.id, n.parent, n.active]), [['dg:a', 'n1', false], ['dg:b', 'dg:a', false]], 'another session is never on this path');
+  assert.equal(nodes[0].role, 'delegated');
+  assert.equal(nodes[0].key, 'child-a');
+  assert.equal(nodes[0].ts, new Date(10).toISOString());
+  const forked = D.treeNodes(D.indexTasks([task('f', { parentKey: 'fork' })]), ['origin', 'fork'], hosts);
+  assert.deepEqual(forked.map(n => [n.id, n.parent, n.active]), [['dg:f', 'n2', false]]);
+});
+
+test('the runner event bar summarizes what came back', () => {
+  assert.equal(D.eventSummary('delegation-complete', 'Delegated work returned.\n- x: succeeded\n- y: failed\nInspect.'), '↩ 2 delegated results returned');
+  assert.equal(D.eventSummary('delegation-complete', 'Delegated work returned.\n- x: succeeded'), '↩ 1 delegated result returned');
+  assert.equal(D.eventSummary('delegation-review-pending', ''), '↩ delegated results wait for review');
+  assert.equal(D.eventSummary('orchestrator-event', ''), '↩ orchestrator event');
+});
+
+test('cards render from text nodes, open the child, keep DOM identity, open state, and focus across snapshots', async t => {
   const evil = '<img src=x onerror="bad()">';
-  const f = fixture(t, [task('a', { title: evil }), task('b', { parentTaskId: 'a', parentKey: 'child-a' }), task('c', { parentTaskId: 'b', parentKey: 'child-b' })]);
-  f.controller.mount(f.host, { kind: 'agents' });
+  const f = fixture(t, [task('a', { title: evil, model: 'openai/gpt-6', startedAt: 1, steps: 3 }), task('b', { title: 'by title', status: 'succeeded', summary: 'Ready for review.' })]);
+  const hostA = cardHost(f, { dgId: 'a' }), hostB = cardHost(f, { dgTitle: 'by title', dgOrdinal: '0' });
+  f.controller.attachCards(f.host);
+  assert.match(cls(hostA, 'dg-state').textContent, /loading/);
   await f.controller.refresh();
-  const a = row(f.host, 'a');
-  assert.ok(a.textContent.includes(evil));
+  const box = find(hostA, n => n.className === 'dg');
+  assert.ok(hostA.textContent.includes(evil));
   assert.equal(find(f.host, n => n.tagName === 'IMG'), undefined);
-  assert.equal(row(f.host, 'b'), undefined, 'deeper DOM is not built until requested');
-  expand(cls(a, 'delegation-children'));
-  assert.ok(row(f.host, 'b'));
-  assert.equal(row(f.host, 'c'), undefined);
-  const pause = control(a, 'Pause new descendants'); pause.focus();
-  const info = cls(a, 'delegation-info'); expand(info); await settle();
+  assert.equal(cls(hostA, 'dg-model').textContent, 'gpt-6');
+  assert.match(cls(hostA, 'dg-state').textContent, /^● running · .*3 steps$/);
+  assert.equal(cls(hostA, 'dg-state').dataset.tone, 'live');
+  assert.match(cls(hostB, 'dg-state').textContent, /^✓ done · needs review$/);
+  assert.equal(cls(hostB, 'dg-v').textContent, 'Ready for review.');
+  assert.equal(cls(hostB, 'dg-open').disabled, false);
+  cls(hostB, 'dg-open').click();
+  assert.deepEqual(f.opened, [{ key: 'child-b' }]);
+  assert.equal(control(hostA, 'cancel…').hidden, false, 'live work can be cancelled');
+  assert.equal(control(hostB, 'cancel…').hidden, true, 'finished work has no cancel');
+  assert.equal(f.calls.filter(c => c.url.includes('/detail?')).length, 0, 'prompts and logs load only on disclosure');
+  expand(box);
+  const brief = find(hostA, n => n.className === 'dg-fold');
+  expand(brief); await settle();
   assert.equal(f.calls.filter(c => c.url.includes('/detail?')).length, 1);
-  assert.ok(info.textContent.includes('<script>bad()</script>'));
-  f.setRecords([task('a', { title: evil, status: 'succeeded' }), task('b', { parentTaskId: 'a', parentKey: 'child-a' })]);
+  assert.ok(cls(hostA, 'dg-md').textContent.includes('<script>bad()</script>'));
+  const cancel = control(hostA, 'cancel…'); cancel.focus();
+  f.setRecords([task('a', { title: evil, model: 'openai/gpt-6', status: 'succeeded', steps: 9 }), task('b', { title: 'by title', status: 'succeeded' })]);
   await f.controller.refresh();
-  assert.equal(row(f.host, 'a'), a);
-  assert.equal(f.document.activeElement, pause);
-  assert.equal(cls(a, 'delegation-info'), info);
-  assert.equal(info.open, true);
-  assert.equal(cls(a, 'delegation-children').open, true);
-  assert.match(a.textContent, /Execution: succeeded · Parent review: unreviewed/);
+  assert.equal(find(hostA, n => n.className === 'dg'), box, 'the card is patched, never rebuilt');
+  assert.equal(box.open, true);
+  assert.equal(f.document.activeElement, cancel);
+  assert.match(cls(hostA, 'dg-state').textContent, /✓ done · 9 steps · needs review/);
   assert.equal(f.calls.filter(c => c.url.includes('/detail?')).length, 1, 'snapshot updates never read logs');
 });
 
-test('tree selection isolates exact tasks while conversation-level work stays discoverable', async t => {
-  const f = fixture(t, [task('a'), task('b', { parentEntryId: 'entry-b' })]);
-  f.controller.mount(f.host, { kind: 'tree', key: 'origin', entryId: 'entry-a' });
-  await f.controller.refresh();
-  assert.ok(row(f.host, 'a'));
-  assert.equal(row(f.host, 'b'), undefined);
-  const other = find(f.host, n => n.tagName === 'DETAILS' && n.children[0]?.textContent.startsWith('Other work'));
-  assert.match(other.textContent, /\(1\)/);
-  expand(other); assert.ok(row(f.host, 'b'));
-  assert.equal(control(f.host, 'fork'), undefined);
-  assert.equal(control(f.host, 'branch'), undefined);
-  f.controller.mount(f.host, { kind: 'tree', key: 'origin', entryId: 'entry-b' });
-  const selected = find(f.host, n => n.tagName === 'DETAILS' && n.children[0]?.textContent.startsWith('From selected'));
-  assert.ok(row(selected, 'b'));
-  assert.equal(row(selected, 'a'), undefined);
+test('a card without a record says so and stays inert', async t => {
+  const f = fixture(t, [task('a')]);
+  const host = cardHost(f, { dgEid: 'entry-none', dgTitle: 'vanished' });
+  f.controller.attachCards(f.host); await f.controller.refresh();
+  assert.equal(cls(host, 'dg-open').textContent, 'vanished');
+  assert.equal(cls(host, 'dg-open').disabled, true);
+  assert.match(cls(host, 'dg-state').textContent, /no record/);
 });
 
-test('completed child keeps parent link outside the closed work block and opens exact launch entry', async t => {
-  const f = fixture(t, [task('a', { status: 'succeeded' })]);
+test('a delegated conversation shows one origin line that opens the exact launch entry and locks while a worker owns it', async t => {
+  const f = fixture(t, [task('a', { status: 'running', workerAlive: true, role: 'spec writer' })], { titleForKey: key => key === 'origin' ? 'Parent title' : '' });
   f.controller.mount(f.host, { kind: 'conversation', key: 'child-a' });
   await f.controller.refresh();
-  const parent = cls(f.host, 'delegation-parent');
-  assert.equal(parent.hidden, false);
-  assert.equal(cls(f.host, 'delegation-main').open, false);
-  control(parent, 'Parent launch point').click();
+  const origin = cls(f.host, 'dg-origin');
+  assert.equal(origin.hidden, false);
+  assert.equal(cls(origin, 'dg-open').textContent, 'Parent title');
+  assert.match(cls(origin, 'dg-state').textContent, /spec writer · ● running/);
+  assert.match(cls(origin, 'dg-lock').textContent, /a worker owns this conversation/);
+  assert.equal(control(origin, 'cancel…').hidden, false);
+  cls(origin, 'dg-open').click();
   assert.deepEqual(f.opened, [{ key: 'origin', entryId: 'entry-a' }]);
+  f.setRecords([task('a', { status: 'succeeded', review: 'accepted', role: 'spec writer' })]);
+  await f.controller.refresh();
+  assert.match(cls(origin, 'dg-state').textContent, /✓ done · accepted by the parent/);
+  assert.equal(cls(origin, 'dg-lock').hidden, true);
+  f.controller.mount(f.host, { kind: 'conversation', key: 'origin' });
+  assert.equal(origin.hidden, true, 'a conversation that was not delegated shows nothing');
+  assert.throws(() => f.controller.mount(f.host, { kind: 'tree', key: 'origin' }), /tree gets nodes/);
 });
 
 test('controls confirm subtree cancellation, report requests, and never write review', async t => {
   const f = fixture(t, [task('a'), task('b', { parentTaskId: 'a', parentKey: 'child-a' })]);
-  f.controller.mount(f.host, { kind: 'agents' }); await f.controller.refresh();
-  const a = row(f.host, 'a');
-  await control(a, 'Pause new descendants').click();
-  assert.match(cls(a, 'delegation-notice').textContent, /Running workers continue/);
+  const host = cardHost(f, { dgId: 'a' });
+  f.controller.attachCards(f.host); await f.controller.refresh();
+  assert.equal(control(host, 'pause new work').hidden, false, 'a task with recorded descendants can pause them');
+  await control(host, 'pause new work').click();
+  assert.match(cls(host, 'dg-notice').textContent, /Running work continues/);
   f.setRecords([task('a', { paused: true }), task('b', { parentTaskId: 'a', parentKey: 'child-a' })]);
   await f.controller.refresh();
-  await control(a, 'Resume new descendants').click();
-  await control(a, 'Cancel subtree…').click();
+  assert.match(cls(host, 'dg-state').textContent, /paused/);
+  await control(host, 'resume new work').click();
+  await control(host, 'cancel…').click();
   assert.match(f.confirms[0], /2 tasks/);
-  assert.match(cls(a, 'delegation-notice').textContent, /Waiting for supervisor/);
+  assert.match(cls(host, 'dg-notice').textContent, /Cancellation requested/);
   const mutations = f.calls.filter(c => c.options?.method === 'POST').map(c => JSON.parse(c.options.body));
   assert.deepEqual(mutations, [{ id: 'a', action: 'pause' }, { id: 'a', action: 'resume' }, { id: 'a', action: 'cancel' }]);
 });
 
 test('declining cancellation sends no mutation and controls show request failures', async t => {
   const f = fixture(t, [task('a')], { confirm: () => false });
-  f.controller.mount(f.host, { kind: 'agents' }); await f.controller.refresh();
-  await control(f.host, 'Cancel subtree…').click();
+  const host = cardHost(f, { dgId: 'a' });
+  f.controller.attachCards(f.host); await f.controller.refresh();
+  await control(host, 'cancel…').click();
   assert.equal(f.calls.filter(c => c.options?.method === 'POST').length, 0);
-  f.fail(); await control(f.host, 'Pause new descendants').click();
-  assert.match(cls(f.host, 'delegation-notice').textContent, /offline/);
+  f.fail();
+  f.controller = { ...f.controller };
+  const g = fixture(t, [task('a')]);
+  const h2 = cardHost(g, { dgId: 'a' });
+  g.controller.attachCards(g.host); await g.controller.refresh();
+  g.fail(); await control(h2, 'cancel…').click();
+  assert.match(cls(h2, 'dg-notice').textContent, /offline/);
 });
 
-test('hidden surfaces do not fetch, failures retain prior tasks, and a retry control stays available', async t => {
+test('hidden surfaces do not fetch and failures retain prior tasks', async t => {
   const f = fixture(t, [task('a')]);
-  f.controller.mount(f.host, { kind: 'agents' }); await f.controller.refresh();
+  const host = cardHost(f, { dgId: 'a' });
+  f.controller.attachCards(f.host); await f.controller.refresh();
   f.fail(); await f.controller.refresh();
-  assert.ok(row(f.host, 'a'));
-  assert.match(f.host.textContent, /last saved snapshot/);
-  assert.equal(control(f.host, 'Retry delegation snapshot').hidden, false);
+  assert.equal(cls(host, 'dg-open').textContent, 'a', 'the last good snapshot stays');
+  assert.match(f.controller.state().error, /offline|not available/);
   f.hide(); const count = f.calls.length;
   f.controller.visibilityChanged(); await f.controller.invalidate();
   assert.equal(f.calls.length, count);
 });
 
-test('collapsed ancestors show unread results without accepting them or labelling live prompts as replies', async t => {
-  const f = fixture(t, [task('a'), task('b', { parentTaskId: 'a', parentKey: 'child-a', status: 'succeeded' })], { unread: () => true });
-  f.controller.mount(f.host, { kind: 'agents' }); await f.controller.refresh();
-  assert.match(cls(f.host, 'delegation-main').children[0].textContent, /1 unread reply/);
-  const a = row(f.host, 'a');
-  assert.doesNotMatch(cls(a, 'delegation-state').textContent, /Unread reply/);
-  assert.match(cls(a, 'delegation-children').children[0].textContent, /1 unread reply/);
-  assert.equal(row(f.host, 'b'), undefined);
-  expand(cls(a, 'delegation-children'));
-  assert.match(cls(row(f.host, 'b'), 'delegation-state').textContent, /Parent review: unreviewed.*Unread reply/);
-});
-
-test('a cancelled subtree clears its pending notice only after the snapshot has no active tasks', async t => {
-  const f = fixture(t, [task('a')]);
-  f.controller.mount(f.host, { kind: 'agents' }); await f.controller.refresh();
-  await control(f.host, 'Cancel subtree…').click();
-  f.setRecords([task('a', { status: 'cancelled' })]); await f.controller.refresh();
-  assert.match(cls(f.host, 'delegation-notice').textContent, /no active tasks/);
-  assert.equal(control(f.host, 'Cancel subtree…').disabled, true);
+test('an unread finished reply shows on its line without accepting it', async t => {
+  const f = fixture(t, [task('a', { status: 'succeeded' }), task('b')], { unread: () => true });
+  const done = cardHost(f, { dgId: 'a' }), live = cardHost(f, { dgId: 'b' });
+  f.controller.attachCards(f.host); await f.controller.refresh();
+  assert.match(cls(done, 'dg-state').textContent, /needs review · unread$/);
+  assert.doesNotMatch(cls(live, 'dg-state').textContent, /unread/, 'live work is not a reply');
 });
 
 test('snapshot refreshes never navigate, fetch logs, or change scroller positions', async t => {
   const f = fixture(t, [task('a')]);
   f.host.scrollTop = 42; f.host.scrollLeft = 9;
   f.document.body.scrollTop = 210; f.document.body.scrollLeft = 0;
-  f.controller.mount(f.host, { kind: 'agents' }); await f.controller.refresh();
+  cardHost(f, { dgId: 'a' });
+  f.controller.attachCards(f.host); await f.controller.refresh();
   f.setRecords([task('a', { status: 'failed' }), task('b')]); await f.controller.invalidate();
   assert.deepEqual([f.host.scrollTop, f.host.scrollLeft, f.document.body.scrollTop], [42, 9, 210]);
   assert.deepEqual(f.opened, []);
@@ -271,7 +323,7 @@ test('snapshot refreshes never navigate, fetch logs, or change scroller position
 test('fallback polling runs at 30 seconds only while an appropriate surface is visible', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture(t, [task('a')]);
-  f.controller.mount(f.host, { kind: 'agents' }); await f.controller.refresh();
+  f.controller.mount(f.host, { kind: 'conversation', key: 'child-a' }); await f.controller.refresh();
   const initial = f.calls.length;
   t.mock.timers.tick(29999); await settle();
   assert.equal(f.calls.length, initial);
@@ -290,14 +342,15 @@ test('concurrent invalidations share a request and reconcile one more snapshot a
     if (calls === 1) await new Promise(resolve => { release = resolve; });
     return { ok: true, json: async () => ({ tasks: [task('a')] }) };
   } });
-  f.controller.mount(f.host, { kind: 'agents' });
+  const host = cardHost(f, { dgId: 'a' });
+  f.controller.attachCards(f.host);
   const first = f.controller.refresh();
   const second = f.controller.invalidate();
   f.controller.invalidate();
   assert.equal(calls, 1);
   release(); await first; await second; await settle();
   assert.equal(calls, 2);
-  assert.ok(row(f.host, 'a'));
+  assert.equal(cls(host, 'dg-open').textContent, 'a');
 });
 
 test('dispatching an entry route again restores the exact launch target without fork or branch calls', () => {
@@ -315,32 +368,26 @@ test('dispatching an entry route again restores the exact launch target without 
   assert.deepEqual(opened, [[target.key, 'entry:' + target.entryId], ['child-conversation'], [target.key, 'entry:' + target.entryId]]);
 });
 
-test('resumed web activity and surviving workers keep counts and subtree cancellation live', async t => {
+test('resumed web activity and surviving workers keep cancellation live and say so', async t => {
   const records = [task('a', { status: 'succeeded', review: 'accepted' }),
     task('b', { parentTaskId: 'a', parentKey: 'child-a', status: 'succeeded', sessionActive: true }),
     task('c', { status: 'lost', workerAlive: true })];
   const f = fixture(t, records, { unread: () => true });
-  f.controller.mount(f.host, { kind: 'agents' }); await f.controller.refresh();
-  assert.match(cls(f.host, 'delegation-main').children[0].textContent, /2 running/);
-  const a = row(f.host, 'a'), c = row(f.host, 'c');
-  assert.equal(control(a, 'Cancel subtree…').disabled, false, 'collapsed resumed descendant stays cancellable');
-  assert.equal(control(c, 'Cancel subtree…').disabled, false, 'lost live worker stays cancellable');
-  assert.match(cls(c, 'delegation-state').textContent, /Execution: lost.*Worker process alive/);
-  expand(cls(a, 'delegation-children'));
-  const b = row(f.host, 'b');
-  assert.match(cls(b, 'delegation-state').textContent, /Execution: succeeded · Parent review: unreviewed · Continuing in web/);
-  assert.doesNotMatch(cls(b, 'delegation-state').textContent, /Unread reply/);
-  assert.match(cls(a, 'delegation-state').textContent, /Parent review: accepted/);
-  await control(a, 'Cancel subtree…').click();
-  assert.doesNotMatch(cls(a, 'delegation-notice').textContent, /no active tasks/);
-  const conversation = f.controller.mount(f.host, { kind: 'conversation', key: 'child-b' });
-  assert.match(cls(conversation, 'delegation-parent').textContent, /Continuing in web/);
+  const a = cardHost(f, { dgId: 'a' }), c = cardHost(f, { dgId: 'c' });
+  f.controller.attachCards(f.host); await f.controller.refresh();
+  assert.equal(control(a, 'cancel…').hidden, false, 'collapsed resumed descendant stays cancellable');
+  assert.equal(control(c, 'cancel…').hidden, false, 'lost live worker stays cancellable');
+  assert.match(cls(c, 'dg-state').textContent, /● still running/);
+  assert.match(cls(c, 'dg-warn').textContent, /worker process is still alive/);
+  assert.match(cls(a, 'dg-state').textContent, /accepted · unread/, 'the parent accepted; the person has not read it');
+  const origin = f.controller.mount(f.host, { kind: 'conversation', key: 'child-b' });
+  assert.match(cls(origin, 'dg-state').textContent, /● continuing/);
+  assert.match(cls(origin, 'dg-lock').textContent, /still working/);
   f.setRecords(records.map(r => ({ ...r, sessionActive: false, workerAlive: false })));
   await f.controller.refresh();
-  f.controller.mount(f.host, { kind: 'agents' });
-  assert.equal(control(row(f.host, 'a'), 'Cancel subtree…').disabled, true);
-  assert.equal(control(row(f.host, 'c'), 'Cancel subtree…').disabled, true);
-  assert.match(cls(row(f.host, 'a'), 'delegation-notice').textContent, /no active tasks/);
+  assert.equal(control(a, 'cancel…').hidden, true);
+  assert.equal(control(c, 'cancel…').hidden, true);
+  assert.equal(cls(origin, 'dg-lock').hidden, true);
 });
 
 test('real agent busy-key function includes terminal tasks with web or worker activity', () => {
@@ -366,11 +413,15 @@ test('app scripts parse and integration uses separate task hosts and read-only n
   assert.ok(html.includes("d.type === 'delegation-update'"));
   assert.ok(html.includes("$('agentsUnread').innerHTML = unreadTray"));
   // The agents panel is an attention list. Delegated conversations are
-  // normal rows there (parent named on the second line); the task controls
-  // and logs mount only in the conversation and tree views.
+  // normal rows there (parent named on the second line). Task cards live in
+  // the parent transcript, the origin line in the child, nodes in the tree.
   assert.ok(html.includes('<div id="agentsUnread"></div><div id="agentsLegacy"></div>'));
   assert.ok(!html.includes('agentDelegations'));
   assert.ok(!html.includes("mountDelegationView('agents')"));
+  assert.ok(!html.includes("mountDelegationView('tree')"));
+  assert.ok(html.includes("delegationUI.attachCards($('conversationTranscript'))"));
+  assert.ok(html.includes("DelegationUI.treeNodes(delegationUI.index(), familyKeys, hostNodes)"));
+  assert.ok(html.includes('class="dg-card" data-dg-key='));
   assert.ok(html.includes("origin(key) || shortDir"));
   assert.ok(html.includes("d.messages.findIndex(m => m.eid === entryId)"));
   assert.ok(html.includes("if (h.startsWith('read='))"));

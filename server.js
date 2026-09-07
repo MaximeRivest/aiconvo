@@ -603,6 +603,10 @@ async function indexFile(source, relPath, stat) {
       firstTs: meta.firstTs,
       lastTs: meta.lastTs,
       userCount: messages.filter(m => m.role === 'user').length,
+      // Cheap activity facts for cards that summarize this conversation
+      // elsewhere (a delegated worker's card in its parent transcript).
+      toolCount: messages.filter(m => m.role === 'tool').length,
+      fileCount: new Set(messages.flatMap(m => m.role !== 'tool' ? [] : [...(m.path && /^(write|edit|multiedit|multi_edit|notebookedit|notebook_edit|str_replace_editor)$/i.test(m.name || '') ? [m.path] : []), ...(m.writes || [])])).size,
       realUserCount: messages.filter(m => m.role === 'user' && m.origin !== 'delegation' && String(m.text || '').trim() && !isBootstrapMessage(m.text)).length,
       assistantCount: messages.filter(m => m.role === 'assistant').length,
       densityChat: densityProfile(messages, meta.firstTs, meta.lastTs, false),
@@ -2352,6 +2356,15 @@ function delegationView(t) {
   out.key = delegationSessionKey(t.sessionPath);
   out.parentKey = delegationSessionKey(t.parentSessionPath);
   out.sessionActive = !!headlessOwner(path.resolve(t.sessionPath));
+  // The worker's final words, bounded. The full text is its conversation.
+  const summary = t.result && typeof t.result.summary === 'string' ? t.result.summary.trim() : '';
+  if (summary) out.summary = summary.length > 600 ? summary.slice(0, 600) + '…' : summary;
+  const child = out.key && index[out.key];
+  if (child) {
+    if (typeof child.toolCount === 'number') out.steps = child.toolCount;
+    if (typeof child.fileCount === 'number') out.files = child.fileCount;
+    if (child.lastTs) out.lastTs = child.lastTs;
+  }
   return out;
 }
 const delegationCoordinator = createDelegationCoordinator({

@@ -49,7 +49,7 @@ Install the Android APK from `android/app/build/outputs/apk/debug/app-debug.apk`
 
 ## Delegated conversations
 
-Select **pi-orchestrator** in the mode picker. The managed `delegate` tool starts a saved child conversation with an exact parent launch point. Children can delegate again. Expand **Delegated work** in the transcript, agent panel, or tree to inspect the hierarchy, open conversations, and control work. Delegation does not change branch or fork rules.
+Select **pi-orchestrator** in the mode picker. The managed `delegate` tool starts a saved child conversation with an exact parent launch point. Children can delegate again. Delegation shows where it happens: each `delegate` call is a one-line card under its step group in the parent transcript (open it for the result, the brief, the records, and cancel); the runner's return is a quiet `↩` bar; a delegated conversation carries one `↰ delegated by` line at its top that leads back to the exact launch line; the tree shows delegated conversations as dashed nodes under the entry that launched them, recursively. Delegation does not change branch or fork rules.
 
 Execution and parent review are separate. A returned result still needs checks. Pause prevents new descendants; cancellation requests stop the subtree without removing saved files. The ordinary response stop button stops only that response.
 

@@ -21,9 +21,12 @@ Do not infer delegation from a working directory, a process parent, a title, or 
 
 Reuse three existing surfaces:
 
-1. **Transcript:** show a compact Delegated work group. Open a child in the normal transcript. Its parent link returns to the launch entry.
-2. **Agents:** group delegated work by its origin, with expandable descendants. Do not show the same managed process again as an unrelated background agent.
-3. **Tree:** show labelled delegation links for the selected entry and the wider conversation. Keep these links separate from message ancestry.
+1. **Transcript (parent):** each `delegate` call is a card under its step group: one collapsed line (`↳ title · model · state · time · steps · files · verdict`). Open it for the worker's final words, the brief (rendered), the records (paths, tools, log tail on request), and cancel or pause. The raw call stays inside the step fold. The runner's return is a quiet `↩ N delegated results returned` bar with the raw event one click away. The live strip above the composer says `↳ N delegated running` while the parent waits.
+2. **Transcript (child):** one `↰ delegated by <parent>` line at the top, with role, state, and the parent's verdict. It leads to the exact launch line (the card). While a worker owns the conversation, the line says so and offers cancel.
+3. **Agents:** group delegated work by its origin, with expandable descendants. Do not show the same managed process again as an unrelated background agent.
+4. **Tree:** a delegated conversation is a dashed node under the entry that launched it; its own delegations hang under it. Dotted edges, a column of their own, never the `here` marker. The bar offers open and cancel only.
+
+Vocabulary on these surfaces is plain: `running`, `done`, `failed`, `lost`, `cancelled`, `needs review`, `accepted`, `rejected`. Internal names (delivery, supervision, mode hash, notification state) appear only inside the records fold or as a warning when something is broken.
 
 Read, continue, branch, fork, and multimodel merge keep their existing meanings. Delegation links never receive branch or fork actions.
 

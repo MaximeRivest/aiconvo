@@ -95,7 +95,7 @@ mark { background: none; color: var(--warn); font-weight: 700; }
 .sr-snip { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
 .sr-flag { color: var(--text-faint); font-size: var(--fs-meta); flex: 0 0 auto; }
 :root[data-theme-mode="binary"] .sr-group, :root[data-theme-mode="binary"] .sr-head { border-color: var(--text); }
-.msg.hit-flash { outline: 2px solid var(--warn); outline-offset: -2px; }
+.msg.hit-flash, .dg-card.hit-flash { outline: 2px solid var(--warn); outline-offset: -2px; }
 .sr-hit.sel { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
 :root[data-theme-mode="binary"] .sr-hit.sel { box-shadow: inset 4px 0 0 var(--text); }
 .sr-chips { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -199,22 +199,53 @@ body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; 
 @keyframes activepulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 #agentsPop { position: absolute; top: calc(var(--header-h) - 4px); right: var(--sp-3); z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); width: 460px; max-width: calc(100vw - 24px); max-height: 60vh; overflow: auto; padding: var(--sp-1) 0; }
 #agentsPop[hidden] { display: none; }
-.delegation-ui { margin: var(--sp-2) 0; padding: var(--sp-2); color: var(--text); background: var(--surface-1); border: 1px solid var(--border); overflow-anchor: none; font-size: var(--fs-meta); }
-.delegation-ui summary { cursor: pointer; padding: 6px 0; overflow-wrap: anywhere; }
-.delegation-ui button { min-height: 32px; white-space: normal; text-align: start; }
-.delegation-ui button:focus-visible, .delegation-ui summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.delegation-parent, .delegation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
-.delegation-parent { padding-bottom: var(--sp-2); }
-.delegation-parent[hidden], .delegation-ui [hidden] { display: none; }
-.delegation-row { border-top: 1px solid var(--border); padding: var(--sp-2) 0; overflow-wrap: anywhere; }
-.delegation-meta { color: var(--text-dim); }
-.delegation-state, .delegation-notice { padding: 4px 0; }
-.delegation-children { border-inline-start: 1px solid var(--border-strong); padding-inline-start: 8px; }
-.delegation-ui pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-meta); }
-.delegation-children.delegation-deep { padding-inline-start: 0; }
-#conversationDelegations { position: sticky; top: 0; z-index: 7; max-width: var(--read-max); margin: 0 auto; }
-#conversationDelegations .delegation-ui { max-height: 38vh; overflow: auto; }
-@media (pointer: coarse) { .delegation-ui button, .delegation-ui summary { min-height: 44px; } }
+/* Delegation, shown where it happens.
+   .dg-card   one `delegate` call in a parent transcript: a one-line fold.
+   .dg-origin one line at the top of a delegated conversation.
+   .dg-event  the runner's return, a quiet bar like the model-change bar.
+   Glyphs (↳ ↰ ↩ ● ✓ ✗ ⏹) carry the state; color is only a hint. */
+.dg-cards { margin: 2px 0 6px; padding: 0 14px; overflow-anchor: none; }
+.dg-card .dg { font-size: var(--fs-meta); color: var(--text-dim); }
+.dg-card .dg > summary { list-style: none; cursor: pointer; user-select: none; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 3px 0; min-height: 22px; }
+.dg-card .dg > summary::-webkit-details-marker { display: none; }
+.dg-card .dg > summary:hover { color: var(--text); }
+.dg-glyph { color: var(--accent); font-weight: 700; }
+.dg-open { border: 0; background: transparent; padding: 0; color: var(--text); font-size: inherit; font-weight: 600; text-align: start; cursor: pointer; }
+.dg-open:hover:not(:disabled) { color: var(--cyan); text-decoration: underline; background: transparent; }
+.dg-open:disabled { color: var(--text-dim); cursor: default; }
+.dg-model { color: var(--text-faint); }
+.dg-state { color: var(--text-dim); white-space: nowrap; }
+.dg-state[data-tone="live"] { color: var(--accent); }
+.dg-state[data-tone="bad"] { color: var(--danger); }
+.dg-state[data-tone="ok"] { color: var(--text-dim); }
+.dg-body { padding: 4px 0 6px 18px; display: flex; flex-direction: column; gap: 6px; }
+.dg-row { display: flex; gap: 10px; align-items: baseline; overflow-wrap: anywhere; }
+.dg-k { color: var(--text-faint); min-width: 64px; flex: none; }
+.dg-v { min-width: 0; white-space: pre-wrap; }
+.dg-warn { color: var(--danger); overflow-wrap: anywhere; }
+.dg-fold > summary { cursor: pointer; list-style: none; user-select: none; color: var(--text-faint); }
+.dg-fold > summary::-webkit-details-marker { display: none; }
+.dg-fold > summary::before { content: "▸ "; }
+.dg-fold[open] > summary::before { content: "▾ "; }
+.dg-fold > summary:hover { color: var(--text-dim); }
+.dg-md { padding: 6px 0 0 14px; color: var(--text); max-height: 55vh; overflow: auto; }
+.dg-records { padding: 6px 0 0 14px; display: flex; flex-direction: column; gap: 4px; }
+.dg-log { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-meta); margin: 0; }
+.dg-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.dg-actions button, .dg-lock button, .dg-records button { min-height: 26px; }
+.dg-actions button[hidden], .dg-lock button[hidden], .dg-body [hidden], .dg-origin [hidden] { display: none; }
+.dg-notice { color: var(--text-dim); }
+.dg-notice:empty { display: none; }
+.dg-origin { max-width: var(--read-max); margin: 8px auto 4px; padding: 0 14px; font-size: var(--fs-meta); color: var(--text-dim); overflow-anchor: none; }
+.dg-origin-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dg-lock { display: flex; align-items: center; gap: 10px; margin-top: 4px; color: var(--warn); }
+.dg-event { margin: 4px 0; font-size: var(--fs-micro); color: var(--text-faint); }
+.dg-event > summary { display: flex; align-items: center; gap: 10px; padding: 0 14px; list-style: none; cursor: pointer; user-select: none; }
+.dg-event > summary::-webkit-details-marker { display: none; }
+.dg-event > summary::before, .dg-event > summary::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.dg-event > summary:hover { color: var(--text-dim); }
+.dg-event .tool-out { margin: 4px 14px; }
+@media (pointer: coarse) { .dg-actions button, .dg-lock button, .dg-card .dg > summary { min-height: 44px; } }
 #agentsPop .ag-row.kbd-selected { background: var(--surface-2); outline: 1px solid var(--accent); outline-offset: -1px; }
 .ag-sec { color: var(--text-faint); font-size: var(--fs-micro); padding: 8px 10px 3px; border-bottom: 1px solid var(--border); }
 /* Keep one stable inbox slot. New replies never shift the rest of the menu. */
@@ -1485,7 +1516,11 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .tnode.here { border-color: var(--accent); border-width: 2px; padding: 3px 7px; }
 .tnode .herechip { color: var(--accent); font-weight: 700; white-space: nowrap; }
 .tnode .ttools { color: var(--text-faint); white-space: nowrap; }
-.tnode .tdelegation { color: var(--accent); font-weight: 700; white-space: nowrap; }
+.tnode.delegated, .tnode.delegated.inactive { border-style: dashed; border-color: var(--accent); color: var(--text); }
+.tnode.delegated .tm b { color: var(--accent); }
+.tnode.delegated .tdstate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tnode.delegated .tdstate[data-tone="live"] { color: var(--accent); }
+.tnode.delegated .tdstate[data-tone="bad"] { color: var(--danger); }
 .tnode.work { color: var(--text-dim); }
 .tnode.work .tt { color: var(--text-dim); }
 .tnode.fanout { border-style: dashed; min-height: 86px; cursor: default; }
@@ -2076,8 +2111,9 @@ if (!globalThis.DelegationUI) {
   console.warn('Delegation UI needs the matching server update. Restart the service, then reload.');
   globalThis.DelegationUI = {
     isTerminal: () => true, trackedProcess: () => false,
-    createController: () => ({ index: () => ({ tasks: [] }), mount: () => {},
-      refresh: () => {}, invalidate: () => {}, repaint: () => {}, visibilityChanged: () => {} }),
+    stateOf: () => ({ glyph: '?', word: 'unknown', tone: 'dim' }), taskIdInResult: () => null, treeNodes: () => [], eventSummary: (type) => '↩ ' + String(type || 'runner event'),
+    createController: () => ({ index: () => ({ tasks: [] }), mount: () => {}, attachCards: () => {},
+      refresh: () => {}, invalidate: () => {}, repaint: () => {}, visibilityChanged: () => {}, control: () => {} }),
   };
 }
 </script>
@@ -2970,40 +3006,42 @@ const delegationUI = DelegationUI.createController({
   openTarget: target => { if (!$('agentsPop').hidden) toggleAgents(false); open(target.key, target.entryId ? 'entry:' + target.entryId : undefined); },
   titleForKey: key => { const s = sessions.find(s => s.key === key); return s && (s.title || s.timelineTitle); },
   unread: key => { const s = sessions.find(s => s.key === key); return !!(s && agentUnreadAt(s)); },
-  onSnapshot: () => { updateActiveBtn(); renderAgentsPopSoon(); paintTreeDelegationBadges(); },
+  renderMarkdown: text => { const box = document.createElement('div'); box.className = 'md'; box.innerHTML = mdRender(text, ''); return box; },
+  onSnapshot: () => { updateActiveBtn(); renderAgentsPopSoon(); paintTreeDelegations(); renderRunCards(); },
 });
-// The delegation section (controls, logs, review state) lives in the
-// conversation and tree views only. The agents panel is an attention list:
-// a delegated conversation is one more row there, marked with its parent.
-function mountDelegationView(kind) {
+// Delegation shows where it happens. A delegated conversation carries one
+// origin line at its top; a parent transcript carries one card per
+// `delegate` call (painted by attachCards); the tree carries nodes.
+function mountDelegationView() {
   const host = $('conversationDelegations');
   if (!host) return;
-  const selected = kind === 'tree' && treeNav && treeNav.byId.get(treeNav.sel);
-  const key = (selected && selected.key) || activeRel;
-  host.dataset.delegationKey = key || '';
-  delegationUI.mount(host, { kind, key, entryId: selected ? selected.id : null,
-    entryIds: selected?.entryIds, entryRefs: selected?.entryRefs, familyKeys: kind === 'tree' ? treeNav.familyKeys : null });
-  if (kind === 'tree') paintTreeDelegationBadges();
+  host.dataset.delegationKey = activeRel || '';
+  delegationUI.mount(host, { kind: 'conversation', key: activeRel });
 }
-function paintTreeDelegationBadges() {
+// Tree: delegated conversations are nodes. A snapshot can change a node's
+// state (patched in place) or add nodes (the tree re-renders, selection kept).
+function paintTreeDelegations() {
   if (viewKind !== 'tree' || !treeNav?.wrap?.isConnected) return;
-  const counts = new Map();
-  for (const t of delegationUI.index().tasks) {
-    const key = t.parentKey + '\n' + t.parentEntryId;
-    counts.set(key, (counts.get(key) || 0) + 1);
+  const wanted = DelegationUI.treeNodes(delegationUI.index(), treeNav.familyKeys, treeNav.hostNodes || []);
+  const have = new Set([...treeNav.byId.keys()].filter(id => id.startsWith('dg:')));
+  if (wanted.length !== have.size || wanted.some(n => !have.has(n.id))) {
+    const keep = treeNav.sel;
+    showTree(treeNav.key, { keepSel: keep });
+    return;
   }
-  for (const box of treeNav.wrap.querySelectorAll('[data-tn]')) {
-    const n = treeNav.byId.get(box.dataset.tn);
-    if (!n) continue;
-    const refs = n.entryRefs || (n.entryIds || [n.id]).map(id => ({ key: n.key, id }));
-    const count = [...new Set(refs.map(ref => ref.key + '\n' + ref.id))].reduce((sum, key) => sum + (counts.get(key) || 0), 0);
-    let badge = box.querySelector('.tdelegation');
-    if (!count) { badge?.remove(); continue; }
-    if (!badge) { badge = document.createElement('span'); badge.className = 'tdelegation'; box.querySelector('.tm')?.append(badge); }
-    const label = count + ' tasks';
-    if (badge.textContent !== label) badge.textContent = label;
-    badge.title = 'Delegated work starts in this entry. Select it to inspect the task links.';
+  for (const n of wanted) {
+    const box = treeNav.wrap.querySelector(`[data-tn="${CSS.escape(n.id)}"]`);
+    const state = box && box.querySelector('.tdstate');
+    if (!state) continue;
+    const host = treeNav.byId.get(n.id);
+    if (host) host.task = n.task;
+    const s = DelegationUI.stateOf(n.task);
+    const label = s.glyph + ' ' + s.word;
+    if (state.textContent !== label) state.textContent = label;
+    state.title = DelegationUI.stateLine(n.task, Date.now());
+    state.dataset.tone = s.tone;
   }
+  if (treeNav.sel && treeNav.sel.startsWith('dg:')) paintTreeBar();
 }
 document.addEventListener('visibilitychange', () => delegationUI.visibilityChanged());
 function renderAgentsPopSoon() {
@@ -3210,7 +3248,7 @@ function selectAgentRow(key, scroll = true) {
 }
 function agentsPopKeydown(e) {
   if ($('agentsPop').hidden) return false;
-  if (e.target.closest('.delegation-ui') && e.key !== 'Escape') return true;
+  if (e.target.closest('.dg-card, .dg-origin') && e.key !== 'Escape') return true;
   if (e.key === 'Escape' || e.key === 'a') {
     e.preventDefault();
     toggleAgents(false);
@@ -9764,6 +9802,17 @@ function keepInMode(m, mode) {
 const FILE_WRITE_TOOLS = /^(write|edit|multiedit|multi_edit|notebookedit|notebook_edit|str_replace_editor)$/i;
 const isFileWriteTool = m => m && m.role === 'tool' && m.path && FILE_WRITE_TOOLS.test(m.name || '');
 const shortFilePath = p => String(p).split('/').slice(-2).join('/');
+// A `delegate` tool call: its title from the arguments, the task ID from
+// the result. The card matches the durable record through these facts.
+function delegateCallOf(m) {
+  let title = '';
+  try { const args = JSON.parse(m.text || ''); title = typeof args.title === 'string' ? args.title : ''; } catch {
+    const hit = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(m.text || '');
+    if (hit) title = hit[1];
+  }
+  const res = m._result || null;
+  return { eid: m.eid || '', call: m.id || '', title, taskId: res ? DelegationUI.taskIdInResult(res.text) : null };
+}
 const transcriptMediaUrl = image => '/api/conversation/media?id=' + encodeURIComponent(activeRel || '') +
   '&entry=' + encodeURIComponent(image.entry || '') + '&path=' + encodeURIComponent(image.path || '');
 function messageMediaHtml(images) {
@@ -10077,7 +10126,10 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
     return `<div class="abortbar"${anchor}${idxAttr}>⏹ ${esc(m.text || 'aborted')}</div>`;
   }
   if (m.role === 'event') {
-    return `<details class="msg thinking delegation-event"${idxAttr}><summary>↳ Delegation event · not a user message</summary><div class="tool-out">${hl(m.text)}</div></details>`;
+    // The runner's return lands as a quiet bar, like a model change: what
+    // came back, in one line. The raw event text stays one click away.
+    const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
+    return `<details class="dg-event"${anchor}${idxAttr}><summary title="A runner event, not a message from a person. Click for the raw text.">${esc(DelegationUI.eventSummary(m.customType, m.text))} · runner event</summary><div class="tool-out">${hl(m.text)}</div></details>`;
   }
   if (m.role === 'thinking') {
     // Reasoning row (everything view): folded to one line, expand to read.
@@ -10123,7 +10175,7 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   }
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
-    const full = (m.origin === 'delegation' ? '<div class="role">Task from parent · not a direct user message</div>' : '') +
+    const full = (m.origin === 'delegation' ? '<div class="role" title="The parent conversation wrote this brief. No person typed it."><span>↰ brief from the parent conversation</span></div>' : '') +
       `<div class="md">${mdRender(m.text, q)}</div>${messageMediaHtml(m.images)}`;
     const actions = `<div class="msg-actions" aria-label="Message actions">` +
       `<button type="button" class="msg-copy" data-msg-index="${copyIndex}" title="Copy the message Markdown">copy</button>` +
@@ -13389,8 +13441,11 @@ async function renderConv(scroll) {
   // A live-tail re-render must not steal the composer: keep its text,
   // caret, and focus across the DOM replacement.
   const oldTa = $('agentText');
-  const keepDelegationFocus = $('conversationDelegations')?.dataset.delegationKey === d.key
-    && document.activeElement.closest('.delegation-ui') ? document.activeElement : null;
+  // A focused delegation control survives the re-render by identity: the
+  // card's launch entry (or the origin line) plus the control's class.
+  const dgFocus = document.activeElement && document.activeElement.closest('.dg-card, .dg-origin');
+  const keepDelegationFocus = dgFocus && $('conversationDelegations')?.dataset.delegationKey === d.key
+    ? { eid: dgFocus.dataset.dgEid ?? null, cls: document.activeElement.className } : null;
   const keepCompose = oldTa ? {
     value: oldTa.value, start: oldTa.selectionStart, end: oldTa.selectionEnd,
     focused: document.activeElement === oldTa,
@@ -13523,6 +13578,18 @@ async function renderConv(scroll) {
       blocks.push(`<details class="tg-files"><summary>▤ ${files.length} files changed</summary><div class="tg-files-list">` +
         files.map(fileBtn).join(' ') + `</div></details>`);
     }
+    // Delegated work is a first-class object of the transcript, not a step:
+    // each `delegate` call gets a card under the group line. The raw call
+    // stays inside the fold. The card is painted from the task snapshot.
+    const launches = toolBuf.filter(t => t.delegate);
+    if (launches.length) {
+      const ordinal = new Map();
+      blocks.push(`<div class="dg-cards">` + launches.map(t => {
+        const dg = t.delegate, o = ordinal.get(dg.eid) || 0;
+        ordinal.set(dg.eid, o + 1);
+        return `<div class="dg-card" data-dg-key="${esc(d.key)}" data-dg-eid="${esc(dg.eid || '')}" data-dg-call="${esc(dg.call || '')}" data-dg-id="${esc(dg.taskId || '')}" data-dg-title="${esc(dg.title)}" data-dg-ordinal="${o}"></div>`;
+      }).join('') + `</div>`);
+    }
     toolBuf = [];
   };
   for (let i = 0; i < msgs.length;) {
@@ -13538,6 +13605,7 @@ async function renderConv(scroll) {
             html, name, gkey: m.ts || 'i' + i,
             files: isFileWriteTool(m) ? [{ path: m.path, ts: m.ts, call: m.id }]
               : (m.writes || []).map(p => ({ path: p, ts: m.ts, call: m.id })),
+            delegate: m.role === 'tool' && m.name === 'delegate' ? delegateCallOf(m) : null,
           });
         } else {
           flushTools();
@@ -13575,10 +13643,20 @@ async function renderConv(scroll) {
     `<div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
     (offNewest ? `<div class="tracebanner">⑂ you follow an older branch — new messages continue from its end <button id="traceReset">back to newest</button></div>` : '') +
     agentComposerHtml(d);
-  mountDelegationView('conversation');
-  if (keepDelegationFocus?.isConnected) keepDelegationFocus.focus({ preventScroll: true });
+  mountDelegationView();
+  delegationUI.attachCards($('conversationTranscript'));
+  if (keepDelegationFocus) {
+    const host = keepDelegationFocus.eid == null ? $('conversationDelegations')
+      : $('view').querySelector(`.dg-card[data-dg-eid="${CSS.escape(keepDelegationFocus.eid)}"]`);
+    const again = host && keepDelegationFocus.cls && host.querySelector('.' + keepDelegationFocus.cls.split(' ').join('.'));
+    if (again) again.focus({ preventScroll: true });
+  }
+  // A delegation card is the readable face of its launch entry: land on it
+  // when the entry has one, else on the raw entry inside its fold.
+  const cardForEntry = entryId != null ? $('view').querySelector(`.dg-card[data-dg-eid="${CSS.escape(entryId)}"]`) : null;
   if (entryId != null) {
-    if (entryIndex >= 0) scroll = 'hit:' + entryIndex;
+    if (cardForEntry) scroll = 'card:' + entryId;
+    else if (entryIndex >= 0) scroll = 'hit:' + entryIndex;
     else { errToast('The parent entry is not available in this transcript.'); scroll = 'top'; }
   }
   // 'reply' lands on the START of the newest assistant answer, so an unread
@@ -13630,7 +13708,7 @@ async function renderConv(scroll) {
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.
   const hitEl = revealTranscriptHit($('view'), scroll);
-  if (readEntry && !hitEl) errToast('The parent entry could not be shown in this transcript.');
+  if (readEntry && !hitEl && !cardForEntry) errToast('The parent entry could not be shown in this transcript.');
   const mk = $('view').querySelector('mark');
   const pillEl = typeof scroll === 'string' && scroll.startsWith('pill:')
     ? $('view').querySelector(`.branchpill[data-eid="${CSS.escape(scroll.slice(5))}"]`) : null;
@@ -13706,7 +13784,9 @@ async function renderConv(scroll) {
 // already exist here, so reading needs no trace or continuation change.
 function revealTranscriptHit(view, scroll) {
   const hit = typeof scroll === 'string' && scroll.startsWith('hit:')
-    ? view.querySelector(`#conversationTranscript [data-i="${CSS.escape(scroll.slice(4))}"]`) : null;
+    ? view.querySelector(`#conversationTranscript [data-i="${CSS.escape(scroll.slice(4))}"]`)
+    : typeof scroll === 'string' && scroll.startsWith('card:')
+    ? view.querySelector(`#conversationTranscript .dg-card[data-dg-eid="${CSS.escape(scroll.slice(5))}"]`) : null;
   if (!hit) return null;
   for (let el = hit; el; el = el.parentElement) if (el.tagName === 'DETAILS') el.open = true;
   const more = hit.querySelector('button.more');
@@ -14466,6 +14546,10 @@ function renderRunCards() {
   if ((cards.length || runs.length || parallelLedgersFor(activeRel).length) && pinned) v.scrollTop = v.scrollHeight;
 }
 
+function delegatedLiveFor(key) {
+  if (!key || typeof delegationUI === 'undefined') return [];
+  return delegationUI.index().tasks.filter(t => t.parentKey === key && DelegationUI.isLive(t));
+}
 // The live strip, both states. Runs on every run event and on the 1 Hz tick.
 function updateLiveStrip(runs) {
   const strip = $('liveStrip');
@@ -14482,13 +14566,33 @@ function updateLiveStrip(runs) {
   if (!live && liveOpen) {
     for (const L of runLedgers.values()) if (L.key === activeRel && L.done) frozenL = L;
   }
-  if (!live && !pending && !frozenL) {
+  // The parent's own turn is over, but its delegated conversations still
+  // work: the strip carries that, so nobody scrolls to know. Click goes to
+  // the newest live card.
+  const delegated = !live && !pending && !frozenL ? delegatedLiveFor(activeRel) : [];
+  if (!live && !pending && !frozenL && !delegated.length) {
     strip.hidden = true;
     for (const [id, L] of runLedgers) if (L.key === activeRel) runLedgers.delete(id);
     return;
   }
   strip.hidden = false;
-  strip.classList.toggle('work', live);
+  strip.classList.toggle('work', live || delegated.length > 0);
+  if (delegated.length) {
+    const sum = $('lsSum');
+    const done = delegationUI.index().tasks.filter(t => t.parentKey === activeRel && !DelegationUI.isLive(t)).length;
+    setLiveText(sum, '↳ ' + delegated.length + ' delegated running' + (done ? ' · ' + done + ' done' : '') + ' — waiting for their results');
+    $('lsAbort').hidden = true;
+    $('lsFull').hidden = true;
+    const line = $('lsLine');
+    line.setAttribute('aria-expanded', 'false');
+    line.title = 'Go to the newest running delegated work';
+    line.onclick = () => {
+      const cards = [...$('view').querySelectorAll('.dg-card')].filter(c => c.querySelector('.dg-state[data-tone="live"]'));
+      const target = cards[cards.length - 1];
+      if (target) target.scrollIntoView({ block: 'center' });
+    };
+    return;
+  }
   const L = r ? runLedgers.get(r.jobId) : frozenL;
   const sum = $('lsSum');
   if (r) setLiveText(sum, lsSummary(r, L));
@@ -15134,14 +15238,19 @@ function collapseFanoutTree(raw, typedGroups = []) {
   return nodes;
 }
 
-async function showTree(key) {
+async function showTree(key, opts = {}) {
   activeRel = key;
   setRoute('tree', 'tree=' + encodeURIComponent(key), convCrumbs(key, { label: 'tree', title: 'The conversation as a message tree' }));
   let t;
   try { t = await (await fetch('/api/tree?id=' + encodeURIComponent(key))).json(); }
   catch { return errToast('could not load the conversation tree'); }
   if (t.error) return errToast(t.error);
-  const nodes = collapseFanoutTree(t.nodes || [], t.fanouts || []);
+  if (activeRel !== key || viewKind !== 'tree') return; // the reader moved on while the tree loaded
+  const hostNodes = collapseFanoutTree(t.nodes || [], t.fanouts || []);
+  const familyKeys = (t.family || [{ key }]).map(f => f.key);
+  // Delegated conversations hang from the entry that launched them, and
+  // from each other when they delegated in turn: the whole recursion, one tree.
+  const nodes = hostNodes.concat(DelegationUI.treeNodes(delegationUI.index(), familyKeys, hostNodes));
   const byId = new Map(nodes.map(n => [n.id, n]));
   const children = new Map();
   for (const n of nodes) {
@@ -15169,8 +15278,10 @@ async function showTree(key) {
   while (stack.length) {
     const [n, col] = stack.pop();
     n.col = col;
-    const kids = (children.get(n.id) || []).sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
-    const assigned = kids.map((k, i) => [k, i === 0 ? col : ++nextCol]);
+    // This conversation's own continuation keeps the column; delegated
+    // conversations always open a column of their own, whatever their time.
+    const kids = (children.get(n.id) || []).sort((a, b) => (!!a.delegated - !!b.delegated) || (a.ts || '').localeCompare(b.ts || ''));
+    const assigned = kids.map((k, i) => [k, i === 0 && !k.delegated ? col : ++nextCol]);
     for (let i = assigned.length - 1; i >= 0; i--) stack.push(assigned[i]);
   }
   let prevDay = '';
@@ -15191,6 +15302,9 @@ async function showTree(key) {
     if (!p) return '';
     const x1 = px(p) + bw / 2, y1 = py(p) + boxHeight(p), x2 = px(n) + bw / 2, y2 = py(n);
     const act = n.active && p.active;
+    // A delegated conversation is another session: its edge is a thin
+    // dotted accent line, never the solid path of this conversation.
+    if (n.delegated) return `<path d="M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}" fill="none" stroke="var(--accent)" stroke-width="1" stroke-dasharray="2 4"/>`;
     const stroke = act ? 'var(--accent)' : n.fork ? 'var(--magenta)' : 'var(--border-strong)';
     return `<path d="M ${x1} ${y1} C ${x1} ${(y1 + y2) / 2}, ${x2} ${(y1 + y2) / 2}, ${x2} ${y2}" fill="none" stroke="${stroke}" stroke-width="${act ? 2 : 1}"${act ? '' : ' stroke-dasharray="4 3"'}/>`;
   }).join('');
@@ -15200,18 +15314,23 @@ async function showTree(key) {
   };
   // The "here" marker: the newest box on the active path. The next send
   // continues from this box; read never moves it.
-  const hereNode = [...rows].reverse().find(n => n.active) || null;
+  const hereNode = [...rows].reverse().find(n => n.active && !n.delegated) || null;
   const fanChoicesHtml = n => (n.picks || []).map(p => {
     const label = p.kind === 'both' ? 'both · all replies' : p.kind === 'merge' ? 'merge · ' + (p.title || shortModelName(p.model)) : shortModelName(p.model) + ' · ' + (p.title || 'reply');
     const tip = p.kind === 'both' ? 'Continue with every reply in context' : p.kind === 'merge' ? 'Continue from the merged reply: ' + (p.title || '') : `Continue from ${p.model || 'this model'} only: ${p.title || ''}`;
     return `<button class="tfanchoice${p.active ? ' current on' : ''}" data-fan-choice="${esc(p.id || '')}" data-fan-kind="${esc(p.kind)}" title="${esc(tip)}">${esc(label)}</button>`;
   }).join('');
-  const boxes = nodes.map(n =>
+  const delegatedBox = n => {
+    const st = DelegationUI.stateOf(n.task);
+    return `<div class="tnode delegated${n.active ? '' : ' inactive'}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc('delegated conversation: ' + n.title)}">
+      <div class="tm"><b>↳ delegated</b><span>${esc(n.tlabel)}</span><span class="tdstate" data-tone="${esc(st.tone)}" title="${esc(DelegationUI.stateLine(n.task, Date.now()))}">${esc(st.glyph + ' ' + st.word)}</span></div>
+      <div class="tt">${esc(n.title)}</div></div>`;
+  };
+  const boxes = nodes.map(n => n.delegated ? delegatedBox(n) :
     `<div class="tnode ${n.role}${n.active ? '' : ' inactive'}${n.fork ? ' fork' : ''}${n === hereNode ? ' here' : ''}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc(n.fork ? 'in fork: ' + forkTitle(n) : n.title)}">
       <div class="tm"><b>${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : n.role === 'fanout' ? 'parallel' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role !== 'user' && n.role !== 'fanout' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} ${n.role === 'work' ? 'steps' : 'msgs'}</span>` : ''}${n.tools && n.role !== 'work' ? `<span class="ttools" title="this box carries ${n.tools} tool call${n.tools > 1 ? 's' : ''} — continue and fork keep them">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
       <div class="tt">${esc(n.title)}</div>${n.role === 'fanout' ? `<div class="tfanchoices">${fanChoicesHtml(n)}</div>` : ''}</div>`).join('');
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
-    <div id="conversationDelegations"></div>
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
       <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${edges}</svg>${boxes}
     </div></div>
@@ -15219,8 +15338,8 @@ async function showTree(key) {
   const wrap = $('treewrap');
   // Keyboard navigation state: T opens the tree, arrows walk it.
   const leaf = hereNode || rows[rows.length - 1] || null;
-  treeNav = { key, byId, children, roots, wrap, source: t.source, familyKeys: (t.family || [{ key }]).map(f => f.key), sel: leaf ? leaf.id : null };
-  mountDelegationView('tree');
+  const keepSel = opts.keepSel && byId.has(opts.keepSel) ? opts.keepSel : null;
+  treeNav = { key, byId, children, roots, wrap, hostNodes, source: t.source, familyKeys, sel: keepSel || (leaf ? leaf.id : null) };
   // Click = select (the status bar shows the verbs) · double click = read.
   wrap.querySelectorAll('.tnode').forEach(el => {
     el.onclick = e => {
@@ -15230,7 +15349,7 @@ async function showTree(key) {
     el.ondblclick = e => {
       if (e.target.closest('[data-fan-choice]')) return;
       const n = byId.get(el.dataset.tn);
-      if (n) openAtTs(n.key || key, n.jumpTs);
+      if (n) treeOpenNode(n);
     };
   });
   wrap.querySelectorAll('[data-fan-choice]').forEach(el => el.onclick = async e => {
@@ -15268,8 +15387,20 @@ async function showTree(key) {
       await open(n.key || key, 'compare:' + n.promptId);
     }
   });
-  // Land on the newest message of the active branch.
-  if (leaf) requestAnimationFrame(() => treeSetSel(leaf.id));
+  // Land on the newest message of the active branch (or keep the reader's
+  // selection when a snapshot re-drew the tree under them).
+  const landing = keepSel || (leaf && leaf.id);
+  if (landing) requestAnimationFrame(() => treeSetSel(landing, { scroll: !keepSel }));
+}
+// Read a box: this conversation at that moment, or the delegated
+// conversation itself when the box is one.
+function treeOpenNode(n) {
+  if (n.delegated) {
+    if (n.key) open(n.key);
+    else toast('that delegated conversation is not indexed yet');
+    return;
+  }
+  openAtTs(n.key || treeNav.key, n.jumpTs);
 }
 
 // ---- tree keyboard navigation ----
@@ -15298,12 +15429,25 @@ function treeSetSel(id, { scroll = true } = {}) {
 // The status bar: fixed at the bottom, painted by the selection. The verbs
 // keep one place and one order, so their positions become habit.
 function paintTreeBar() {
-  mountDelegationView('tree');
   const bar = $('treebar');
   if (!bar || !treeNav) return;
   const n = treeNav.byId.get(treeNav.sel);
   if (!n) { bar.innerHTML = ''; return; }
   const isPi = treeNav.source === 'pi' || treeNav.source === 'pi-remote';
+  if (n.delegated) {
+    // Another conversation: read it, or stop it. Branching belongs to it.
+    const task = n.task, live = DelegationUI.isLive(task);
+    const st = DelegationUI.stateOf(task);
+    const btnD = (act, k, label, title, disabled) => `<button data-act="${act}" title="${esc(title)}"${disabled ? ' disabled' : ''}><span class="k">${k}</span>${label}</button>`;
+    bar.innerHTML =
+      `<span class="tbsel" title="${esc(n.title)}">↳ delegated ${esc(n.tlabel || '')} · ${esc(n.title)} · ${esc(st.glyph + ' ' + st.word)}${DelegationUI.reviewWord(task) ? ' · ' + esc(DelegationUI.reviewWord(task)) : ''}</span>` +
+      btnD('read', 'r', 'open', n.key ? 'Open the delegated conversation (enter, or double click).' : 'The delegated conversation is not indexed yet.', !n.key) +
+      (live ? btnD('cancel', 'x', 'cancel…', 'Request cancellation of this delegated work and everything under it. Completed work stays saved.', false) : '');
+    bar.querySelector('[data-act=read]').onclick = () => treeOpenNode(n);
+    const cb = bar.querySelector('[data-act=cancel]');
+    if (cb) cb.onclick = () => delegationUI.control(task.id, 'cancel');
+    return;
+  }
   // Label by shape: at a leaf the path only goes on (continue); inside the
   // tree a new sibling path starts (branch). Same action underneath.
   const isLeaf = !(treeNav.children.get(n.id) || []).length;
@@ -15371,7 +15515,7 @@ function paintTreeBar() {
 }
 
 function treeKeydown(e) {
-  if (e.target.closest('.delegation-ui')) return true;
+  if (e.target.closest('.dg-card, .dg-origin')) return true;
   if (viewKind !== 'tree' || !treeNav) return false;
   const n = treeNav.byId.get(treeNav.sel);
   if (!n) return false;
@@ -15399,11 +15543,11 @@ function treeKeydown(e) {
   }
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault();
-    openAtTs(n.key || treeNav.key, n.jumpTs);
+    treeOpenNode(n);
     return true;
   }
   // Quick actions on the selected box — same verbs as the status bar.
-  const act = { r: 'read', a: 'agg', b: 'branch', e: 'edit', f: 'fork' }[e.key];
+  const act = { r: 'read', a: 'agg', b: 'branch', e: 'edit', f: 'fork', x: 'cancel' }[e.key];
   if (act) {
     e.preventDefault();
     const btn = document.querySelector(`.treebar [data-act=${act}]`);
@@ -17663,7 +17807,7 @@ document.addEventListener('keydown', e => {
   if (readOverlayOpen()) { readingKeydown(e); return; }
   if (!$('agentsPop').hidden) { agentsPopKeydown(e); return; }
   // Native task buttons and disclosures own Tab, Space, and Enter.
-  if (e.target.closest('.delegation-ui')) return;
+  if (e.target.closest('.dg-card, .dg-origin')) return;
   if (agentModalOpen()) {
     const ta = $('agentText');
     if (!inField && ta) ta.focus();
