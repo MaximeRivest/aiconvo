@@ -810,13 +810,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 :root[data-theme-mode="binary"] .fg-link { border-color: var(--text) !important; }
 /* Whole-file time comparison opened from one file-Gantt row. */
 .fg-label[data-fg-file] { border: 0; border-radius: 0; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
-.fg-label[data-fg-file]:hover, .fg-label[data-fg-file].on { background: var(--accent-strong); color: var(--accent-ink); }
-.fg-label[data-fg-file].on .n { color: var(--accent-ink); }
-.file-inspector { margin: var(--sp-3) 0 0; border: 1px solid var(--border-strong); background: var(--bg); }
-.fi-head { position: sticky; top: 0; z-index: 12; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
-.fi-head b { flex: 1; min-width: 220px; }
-.fi-head select { max-width: min(38vw, 520px); }
-.fi-truth { width: 100%; color: var(--text-dim); font-size: var(--fs-micro); }
+.fg-label[data-fg-file]:hover { background: var(--accent-strong); color: var(--accent-ink); }
 .fi-columns { overflow: auto; max-height: 72vh; font: 11px/1.45 var(--font); position: relative; }
 /* Virtual window: only rows near the viewport (or the current page) exist.
    The spacer carries the full computed height; the window is translated
@@ -826,8 +820,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .fi-columns.paged .fi-spacer { height: auto !important; }
 .fi-columns.paged .fi-window { position: static; transform: none !important; }
 .fi-probe { position: absolute; left: 0; right: 0; top: 0; visibility: hidden; pointer-events: none; }
-.file-inspector .fi-columns.paged { height: 72vh; }
-body.file-full .file-inspector .fi-columns.paged { height: auto; }
 .fi-diff-row { display: flex; justify-content: center; }
 .fi-diff-row:not(.changed) .fi-cell { flex: 0 0 50%; width: 50%; max-width: 50%; }
 .fi-diff-row.changed { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -956,9 +948,6 @@ body.file-full .ff-layout { grid-template-columns: minmax(0, 1fr); }
 body.file-full .ff-tree { display: none !important; }
 body.file-full.file-full-tree .ff-tree { display: block !important; }
 body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); }
-body.file-full .file-inspector { margin: 0; border: 0; height: 100vh; display: flex; flex-direction: column; }
-body.file-full .file-inspector .fi-head, body.file-full .file-inspector .fi-truth { display: none; }
-body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .ff-loading { padding: 30px; color: var(--text-dim); }
 @media (max-width: 1100px) { .ff-layout { grid-template-columns: 230px minmax(0, 1fr); } }
 :root[data-theme-mode="binary"] .fi-cell.old-change, :root[data-theme-mode="binary"] .fi-cell.new-change { color: var(--text); background: var(--bg); }
@@ -1857,9 +1846,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
   .ff-dock { overflow-x: auto; gap: 5px; padding: 5px 6px; }
   .ff-dock button { min-width: 42px; height: 40px; flex: 0 0 auto; }
   .ff-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .fi-head { padding: 6px; }
-  .fi-head b { min-width: 0; flex-basis: 100%; }
-  .fi-head select { width: 100%; max-width: none; }
   .fi-columns { font-size: 11px; max-height: none; }
   .fi-diff-row.changed { grid-template-columns: minmax(0, 1fr); }
   .fi-diff-row.changed .fi-cell + .fi-cell { border-left: 0; border-top: 1px solid var(--border-strong); }
@@ -4624,7 +4610,6 @@ const FG_DAY = 86400000;
 let fileHistoryData = null;
 let fileGanttScale = 160;
 let fileGanttInitialScroll = true;
-let fileInspectorRowId = null;
 let focusedFileRow = null;
 let focusedFileCompare = null;
 let focusedFileWindow = null;
@@ -4732,7 +4717,7 @@ function renderFileGanttChart() {
       return `<button class="fg-mark git" data-fg-commit="${esc(commit.hash)}" data-fg-repo="${esc(row.repoId)}" style="left:${xFor(commit.ts)}px" title="${fgAttr(title)}"><span>◆</span></button>`;
     }).join('');
     const counts = `${ai.length} AI · ${commits.length} Git`;
-    return `<div class="fg-row"><button type="button" class="fg-label${fileInspectorRowId === row.id ? ' on' : ''}" data-fg-file="${fgAttr(row.id)}" title="Open the whole file and compare two times\n${fgAttr(row.path)}"><span class="path">${esc(row.relativePath)}</span><span class="n">${esc(counts)}</span></button><div class="fg-track">${links}${aiMarks}${commitMarks}${row.workingTree ? `<span class="fg-work" title="working tree: ${fgAttr(row.workingTree)}"></span>` : ''}</div></div>`;
+    return `<div class="fg-row"><button type="button" class="fg-label" data-fg-file="${fgAttr(row.id)}" title="Open the whole file and compare two times\n${fgAttr(row.path)}"><span class="path">${esc(row.relativePath)}</span><span class="n">${esc(counts)}</span></button><div class="fg-track">${links}${aiMarks}${commitMarks}${row.workingTree ? `<span class="fg-work" title="working tree: ${fgAttr(row.workingTree)}"></span>` : ''}</div></div>`;
   }).join('') || '<div class="fg-empty">no file history matches these filters.</div>';
   $('fgRows').querySelectorAll('[data-fg-file]').forEach(label => label.onclick = () => {
     const row = (data.rows || []).find(item => item.id === label.dataset.fgFile);
@@ -5094,7 +5079,7 @@ function fileChangeStarts(rows) {
 }
 function compareListOf(root) {
   if (!root) return null;
-  return root.__compareList || (root.closest && root.closest('.ff-compare, .file-inspector, .qf-body') || {}).__compareList || null;
+  return root.__compareList || (root.closest && root.closest('.ff-compare, .qf-body') || {}).__compareList || null;
 }
 
 function fileCompareDockHtml(identical) {
@@ -6083,80 +6068,6 @@ async function compareRowsFor(compare, row) {
   return rows;
 }
 
-let inspectorRenderSeq = 0;
-async function renderFileInspector(compare, row) {
-  const card = $('diffCard');
-  if (!card) return;
-  const seq = ++inspectorRenderSeq;
-  const rows = await compareRowsFor(compare, row);
-  if (seq !== inspectorRenderSeq || $('diffCard') !== card) return;
-  const options = (compare.points || []).map(point => `<option value="${fgAttr(point.id)}">${esc(pointLabel(point))}</option>`).join('');
-  const lang = fileHighlightLang(compare.relativePath || row.relativePath);
-  const oldHl = highlightFileLines(compare.old.content, lang);
-  const newHl = highlightFileLines(compare.new.content, lang);
-  const identical = !rows.some(line => line.changed);
-  card.className = 'file-inspector';
-  card.hidden = false;
-  card.innerHTML = `<div class="fi-head"><b>▤ ${esc(compare.relativePath)} · whole file</b>
-    <label>old <select id="fiOld">${options}</select></label><label>new <select id="fiNew">${options}</select></label>
-    <button id="fiRead" title="Toggle between the diff and a clean reading view of the new snapshot">${fileReadingMode ? 'diff' : 'read'}</button>
-    <button id="fiLines">${fileCompareLines ? 'hide lines' : 'show lines'}</button>
-    ${trustButtonsHtml()}
-    <button id="fiClose">close</button>
-    <div class="fi-truth">${fileReadingMode ? 'reading · new snapshot only' : identical ? 'one view · no line changes' : 'common is full width · changes split − / +'} · highlight ${esc(lang)} · left: ${esc(snapshotMetaText(compare.old))} · right: ${esc(snapshotMetaText(compare.new))}<br>${esc(compare.truth)}</div></div>
-    ${fileCompareDockHtml(identical)}`;
-  const list = createCompareList(card, {
-    rows, oldHl, newHl, reading: fileReadingMode, pages: fileComparePages,
-    onRender: list => fileInk.onListRender(list),
-    onLineClick: index => toggleLineHistory(list, compare, row, index),
-  });
-  card.__compareList = list;
-  $('fiOld').value = compare.from;
-  $('fiNew').value = compare.to;
-  const reload = () => showFileInspector(row, $('fiOld').value, $('fiNew').value, false);
-  $('fiOld').onchange = reload;
-  $('fiNew').onchange = reload;
-  $('fiLines').onclick = () => {
-    fileCompareLines = !fileCompareLines;
-    localStorage.setItem('aiconvo.fileLines', fileCompareLines ? '1' : '0');
-    renderFileInspector(compare, row);
-  };
-  $('fiRead').onclick = () => {
-    fileReadingMode = !fileReadingMode;
-    localStorage.setItem('aiconvo.fileRead', fileReadingMode ? '1' : '0');
-    renderFileInspector(compare, row);
-  };
-  fileInk.attach(compare, row, rows);
-  wireFileCompareDock(card, list);
-  wireCompareTrust(card, compare, rows);
-  $('fiClose').onclick = () => { card.hidden = true; fileInspectorRowId = null; if (document.body.classList.contains('file-full')) exitFileDiffFull(); renderFileGanttChart(); };
-}
-
-async function showFileInspector(row, from = '', to = '', scroll = true) {
-  if (!fileHistoryData || !row) return;
-  fileInspectorRowId = row.id;
-  renderFileGanttChart();
-  const card = $('diffCard');
-  if (!card) return;
-  card.hidden = false;
-  card.className = 'file-inspector';
-  card.innerHTML = '<div class="fg-empty">loading the whole file and its time points…</div>';
-  if (scroll) card.scrollIntoView({ block: 'start' });
-  let compare;
-  try {
-    const doc = await filePointsFor(row, !from && !to);
-    const picked = resolveFilePoints(doc.points, { from, to });
-    const [oldSnapshot, newSnapshot] = await Promise.all([fileSnapshotFor(row, doc, picked.from.id), fileSnapshotFor(row, doc, picked.to.id)]);
-    compare = {
-      scope: doc.scope, key: doc.key, project: doc.project, repoRoot: doc.repoRoot, path: doc.path, relativePath: doc.relativePath,
-      version: doc.version, points: doc.points, from: picked.from.id, to: picked.to.id,
-      old: { ...oldSnapshot, point: picked.from }, new: { ...newSnapshot, point: picked.to }, changes: null, truth: doc.truth,
-    };
-  } catch (error) { card.innerHTML = `<div class="fg-empty">${esc(error.message || 'could not load this file')}</div>`; return; }
-  if (fileInspectorRowId !== row.id) return;
-  renderFileInspector(compare, row);
-}
-
 function fileEventMs(event) {
   if (typeof event.ts === 'number') return event.ts;
   const ms = Date.parse(event.ts || '');
@@ -7098,7 +7009,6 @@ async function showGitCommit(repoId, hash) {
 async function showProjectFileHistory(name, reuse = false) {
   if (!name) return;
   projectOverviewName = name;
-  fileInspectorRowId = null;
   focusedFileRow = null;
   focusedFileWindow = null;
   setRoute('project-files', 'project=' + encodeURIComponent(name) + '&files',
@@ -7170,7 +7080,6 @@ async function renderReposTab(refresh = false) {
 
 async function showGitRepoHistory(root, reuse = false) {
   if (!root) return;
-  fileInspectorRowId = null;
   focusedFileRow = null;
   focusedFileWindow = null;
   setRoute('repo', 'git=' + encodeURIComponent(root),
