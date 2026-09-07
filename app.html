@@ -161,8 +161,8 @@ body.conv #convHeadExtra { display: inline-flex; flex-shrink: 0; }
 #settingsBtn:hover { background: var(--surface-2); color: var(--text); }
 #settingsBtn.on { color: var(--accent); }
 /* Away from home the header quiets down: reading and talking need no
-   search, count, or list filters. Keyboard paths remain. */
-body:not(.home) .count, body:not(.home) #filtersBtn { display: none !important; }
+   list count. */
+body:not(.home) .count { display: none !important; }
 #ticker { flex: 0 1 auto; min-width: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: transparent; color: var(--text-dim); font-size: var(--fs-micro); padding: 0 6px; height: 26px; }
 /* Mid-width windows: the bar wraps and the search takes its own row. */
 @media (min-width: 701px) and (max-width: 1150px) {
@@ -299,8 +299,6 @@ body.home #newLoose:hover { color: var(--accent); background: var(--surface-2); 
 body.home #view { display: none !important; }
 /* Home is the bare chart: no tabs bar, no filter bar. */
 body.home #tabs, body.home #ganttBar { display: none !important; }
-/* Home keeps the header quiet: no search field, windows button, or filters. */
-body.home #filtersBtn { display: none !important; }
 /* Floating mark details: one click shows them, a second click opens. */
 #markPop { position: fixed; z-index: 70; max-width: 340px; padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--border-strong); color: var(--text); font: 12px var(--font); box-shadow: 0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent); }
 #markPop h4 { margin: 0 0 4px; font-size: 12px; line-height: 1.35; }
@@ -1635,7 +1633,7 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
   /* One row: brand + compact buttons must fit 360 CSS px. */
   #brand { height: 44px; padding: 0 8px; font-size: 17px; }
   #ticker, header .count { display: none !important; }
-  #activeBtn, #filtersBtn, #settingsBtn, #barFold { width: 42px; min-width: 42px; height: 44px; padding: 0; }
+  #activeBtn, #settingsBtn, #barFold { width: 42px; min-width: 42px; height: 44px; padding: 0; }
   /* Conversation: one 52px row — home, +, title, agents, settings.
      The cwd breadcrumb and the fold button cost too much width; scroll
      already hides the chrome, and home reaches the project overview. */
@@ -1646,8 +1644,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
   body.conv #chTitle input { width: 100%; }
   body.conv #headSpace { flex: 0 1 0px; }
   body.bar-fold header { height: 16px !important; min-height: 16px !important; }
-  #filtersBtn { font-size: 0; }
-  #filtersBtn::after { content: "filter"; font: 10px var(--font); }
   #settingsBtn { font-size: 15px; }
   #activeBtn { margin-left: auto; font-size: 11px; }
 
@@ -1858,7 +1854,6 @@ window.aiconvoSyncTheme();
   <button id="ticker" hidden title="Open the latest active conversation"></button>
   <span class="count" id="count"></span>
   <button id="activeBtn" hidden title="Agents, replies, and notifications (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
-  <button id="filtersBtn" title="Source, directory, and view filters">filters</button>
   <button id="settingsBtn" title="Settings (,)">⚙</button>
   <button id="barFold" title="Fold the top bar — click the rail to bring it back (`)">▴</button>
 </header>
@@ -2306,18 +2301,6 @@ function openJobNotification(job) {
 }
 
 // ---- filters popover ----
-function filterCount() {
-  return ($('src').value ? 1 : 0) + ($('dir').value ? 1 : 0) +
-    ($('ganttProject').value ? 1 : 0) + ($('densityTools').checked ? 1 : 0);
-}
-function renderFiltersBtn() {
-  const n = filterCount();
-  $('filtersBtn').textContent = n ? `filters:${n}` : 'filters';
-}
-$('filtersBtn').onclick = e => {
-  e.stopPropagation();
-  $('filtersPop').hidden = !$('filtersPop').hidden;
-};
 // Theme: '' follows the OS, e-ink is the binary black/white theme.
 // ---- zen mode ----
 // One body class; the renderers never know about it. CSS hides the chrome,
@@ -15876,7 +15859,6 @@ $('brand').title = 'Go home — the whole-system timeline. Shift-click also clea
 $('brand').onclick = e => {
   if (e.shiftKey) {
     $('src').value = ''; $('dir').value = ''; $('ganttProject').value = ''; $('densityTools').checked = false;
-    renderFiltersBtn();
     activeRel = null; current = null;
     goHome();
     setTab('conv');
@@ -15992,15 +15974,15 @@ $('searchModalClose').onclick = searchModalClose;
 $('searchOverlay').addEventListener('click', e => { if (e.target.id === 'searchOverlay') searchModalClose(); });
 
 // ---- filter wiring ----
-$('dir').addEventListener('change', () => { renderFiltersBtn(); refreshCurrentTab(); });
-$('src').addEventListener('change', () => { renderFiltersBtn(); refreshCurrentTab(); });
-$('ganttProject').addEventListener('change', () => { renderFiltersBtn(); refreshCurrentTab(); });
+$('dir').addEventListener('change', refreshCurrentTab);
+$('src').addEventListener('change', refreshCurrentTab);
+$('ganttProject').addEventListener('change', refreshCurrentTab);
 
 function refreshCurrentTab() {
   if (tab !== 'conv') return renderTabList();
   applyFilter();
 }
-$('densityTools').addEventListener('change', () => { renderFiltersBtn(); render(); });
+$('densityTools').addEventListener('change', () => render());
 $('showBranches').checked = showBranchRows();
 $('showBranches').addEventListener('change', () => {
   try { localStorage.setItem('aiconvo.showBranchRows', $('showBranches').checked ? '1' : '0'); } catch {}
