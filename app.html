@@ -2052,6 +2052,17 @@ function dispatchHash(h) {
   if (!h) return goHome();
   if (h === 'settings' || h.startsWith('settings=')) return showSettings(settingsPaneOf(h));
   if (h === 'usage') return showUsageDashboard();
+  // Saved search links use the current dialog, not the removed list view.
+  if (h.startsWith('q=')) {
+    if (window.fileInk && fileInk.teardown) fileInk.teardown();
+    markSettingsClosed();
+    if (progressStream) { progressStream.close(); progressStream = null; }
+    setRouteKind('home');
+    currentHash = h;
+    let query = h.slice(2); try { query = decodeURIComponent(query); } catch {}
+    searchModalOpen(query);
+    return;
+  }
   if (h.startsWith('note=')) return openNoteFile(h.slice(5));
   if (h.startsWith('doc=')) {
     // doc=PATH[&PROJECT][&conv=KEY]. conv= names the conversation the
@@ -15872,12 +15883,13 @@ let modalSearchSeq = 0;
 let modalSearchTimer = null;
 let modalSearchData = null;
 
-function searchModalOpen() {
+function searchModalOpen(query = '') {
   $('searchOverlay').hidden = false;
   const input = $('searchModalInput');
-  input.value = '';
+  input.value = query;
   input.focus();
   input.select();
+  runModalSearch();
 }
 function searchModalClose() {
   $('searchOverlay').hidden = true;
