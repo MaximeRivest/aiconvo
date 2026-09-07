@@ -16371,21 +16371,6 @@ function helpNow() {
     ] });
     return sections;
   }
-  if (ae && ae.id === 'q') {
-    const keys = tab === 'conv' ? [
-      ['type', 'search as you type — words AND together'],
-      ['"…" · project: role: type: after: path:', 'phrases and filters'],
-      ['↑ ↓', 'select a result passage'],
-      ['enter', 'open the selected passage'],
-      ['alt+1…5', 'scope: all / convs / notes / epics / memory'],
-      ['esc', 'leave the field · esc again clears the search'],
-    ] : [
-      ['type', 'filter this tab by title'],
-      ['esc', 'leave the field · esc again clears'],
-    ];
-    sections.push({ label: 'search', keys });
-    return sections;
-  }
   if (ae && ae.closest && ae.closest('input, select, textarea, [contenteditable="true"]')) {
     const keys = [['esc', 'leave the field — then the other shortcuts are live']];
     if ($('modelPick')) keys.unshift(['alt+m', 'model'], ['alt+o', 'mode'], ['shift+tab', 'reasoning']);
@@ -16489,7 +16474,7 @@ function helpNow() {
 }
 
 const HELP_GLOBAL = [
-  ['/', 'search the home list'],
+  ['/', 'open search — keeps this page'],
   ['ctrl+f', 'search overlay — keeps this page'],
   ['x / X', 'fold / unfold everything on the screen'],
   ['`', 'fold / unfold the top bar'],
