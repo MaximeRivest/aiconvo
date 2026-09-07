@@ -10754,9 +10754,6 @@ const server = http.createServer(async (req, res) => {
           'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' });
         res.end(media.body);
       } catch (e) { json(res, 404, { error: e.message }); }
-    } else if (u.pathname === '/api/conversation/file' && req.method === 'GET') {
-      try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
-      catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/path/info' && req.method === 'GET') {
       try { json(res, 200, await pathInfoResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
       catch (e) { json(res, 404, { error: e.message }); }
