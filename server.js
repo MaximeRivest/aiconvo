@@ -3325,6 +3325,25 @@ fs.mkdirSync(TREES_DIR, { recursive: true });
 const treePathFor = key => path.join(TREES_DIR, key.replace(/[:\/\\]/g, '__') + '.json');
 const SETTINGS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'settings.json');
 const THEMES_DIR = themesLib.defaultThemeDir(os.homedir());
+// ---- captured system prompts ----
+// The prompt-capture extension (extensions/prompt-capture.ts, loaded from
+// ~/.pi/agent/extensions like any global extension) writes the system prompt
+// of each turn twice: "pending" as assembled before the turn, "wire" as found
+// in the real provider payload. The server only reads those files; it never
+// rebuilds the prompt itself, so what the UI shows is what the model saw.
+const SYSPROMPT_CACHE_DIR = path.join(process.env.PI_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent'), 'cache', 'sysprompt');
+async function capturedSystemPrompt(key, which) {
+  const entry = index[key];
+  if (!entry || !entry.sessionId) throw new Error('This conversation has no pi session id.');
+  if (!['wire', 'pending'].includes(which)) throw new Error('which must be wire or pending');
+  const file = path.join(SYSPROMPT_CACHE_DIR, entry.sessionId + '-' + which + '.md');
+  let raw;
+  try { raw = await fsp.readFile(file, 'utf8'); }
+  catch { return { which, captured: false, file, hint: 'No capture yet. The prompt-capture extension writes it on the next turn of this conversation.' }; }
+  const m = raw.match(/^<!-- (\w+) (\S+) ?(\S*) -->\n/);
+  return { which, captured: true, file, at: m ? m[2] : null, model: m && m[3] ? m[3] : null, text: m ? raw.slice(m[0].length) : raw };
+}
+
 const PI_SETTINGS_FILE = path.join(os.homedir(), '.pi', 'agent', 'settings.json');
 const PI_AUTH_FILE = path.join(os.homedir(), '.pi', 'agent', 'auth.json');
 const PI_MODELS_FILE = path.join(os.homedir(), '.pi', 'agent', 'models.json');
@@ -11280,6 +11299,13 @@ const server = http.createServer(async (req, res) => {
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
       try { json(res, 200, await conversationContextResponse(key, u.searchParams.get('leaf') || null)); }
       catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/sysprompt' && req.method === 'GET') {
+      const key = u.searchParams.get('id');
+      if (!key || !index[key]) return json(res, 404, { error: 'not found' });
+      try {
+        const [wire, pending] = await Promise.all([capturedSystemPrompt(key, 'wire'), capturedSystemPrompt(key, 'pending')]);
+        json(res, 200, { wire, pending });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/compare') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });

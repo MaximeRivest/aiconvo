@@ -1245,6 +1245,15 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
    e-ink keeps it readable; warn switches weight, never only color. */
 .ctxmeter { color: var(--text-faint); font-size: 10px; white-space: nowrap; }
 .ctxmeter.warn { color: var(--text); font-weight: 700; }
+.ctxmeter.click { cursor: pointer; }
+.ctxmeter.click:hover { color: var(--text); text-decoration: underline dotted; }
+#readBody > .sysprompt { max-width: var(--read-max); margin: 0 auto; }
+.sysprompt .sp-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; font-size: var(--fs-label); color: var(--text-dim); }
+.sysprompt .sp-bar button.on { font-weight: 700; color: var(--text); }
+.sysprompt pre { white-space: pre-wrap; word-break: break-word; font-size: 12.5px; line-height: 1.5; margin: 0; }
+.sysprompt .sp-old { background: rgba(220, 60, 60, 0.14); }
+.sysprompt .sp-new { background: rgba(60, 160, 80, 0.16); }
+.sysprompt .sp-empty { color: var(--text-dim); }
 .cmp-col .md { max-height: 280px; overflow: auto; }
 .cmp-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 .cmp-bar button { height: 24px; }
@@ -10443,8 +10452,10 @@ function paintCtxMeter(el, c) {
     parts.push('cost unknown');
   }
   const warn = c.usedTokens > 0 && c.pctLeft != null && c.pctLeft < 15;
-  el.className = 'ctxmeter' + (warn ? ' warn' : '');
+  el.className = 'ctxmeter click' + (warn ? ' warn' : '');
   el.textContent = (warn ? '⚠ ' : '') + parts.join(' · ');
+  el.title = 'Open the system prompt this conversation last sent to the model';
+  el.onclick = () => { if (current && current.key) openSystemPromptView(current.key, 'wire'); };
   el.title = `context window of ${c.model || 'the model'}: `
     + (c.usedTokens ? `${c.usedTokens.toLocaleString()} of ${c.ctxTokens.toLocaleString()} tokens used · ${left.toLocaleString()} left`
                     : `no reply counted yet · window ${c.ctxTokens.toLocaleString()} tokens`)
@@ -16234,6 +16245,48 @@ function openReadingView(msg) {
   const who = msg.classList.contains('assistant') ? 'assistant' : 'user';
   $('readTitle').textContent = (current && current.title ? current.title + ' · ' : '') + who;
   $('readBody').innerHTML = `<div class="md">${md.innerHTML}</div>`;
+  $('readOverlay').hidden = false;
+  $('readBody').scrollTop = 0;
+  $('readBody').focus();
+}
+
+// The system prompt as the prompt-capture extension recorded it: "wire" is
+// the text inside the real provider payload of the last request, "pending"
+// the assembly before the turn, "diff" what changed between the two. The
+// server reads the capture files only; nothing here rebuilds the prompt.
+async function openSystemPromptView(key, which) {
+  let data;
+  try {
+    const r = await fetch('/api/conversation/sysprompt?id=' + encodeURIComponent(key));
+    if (!r.ok) { const e = await r.json().catch(() => ({})); toast(e.error || 'system prompt unavailable'); return; }
+    data = await r.json();
+  } catch (e) { toast('system prompt unavailable: ' + e.message); return; }
+  const modes = ['wire', 'pending', 'diff'];
+  if (!modes.includes(which)) which = 'wire';
+  const cap = which === 'diff' ? null : data[which];
+  const head = c => c && c.captured ? `${c.model || 'unknown model'} · ${c.at ? new Date(c.at).toLocaleString() : ''} · ${c.text.length.toLocaleString()} chars` : 'not captured yet';
+  let body;
+  if (which === 'diff') {
+    if (!data.wire.captured || !data.pending.captured) body = '<p class="sp-empty">Both captures are needed for a diff. Run one more turn in this conversation.</p>';
+    else if (data.wire.text === data.pending.text) body = '<p class="sp-empty">pending and wire are identical.</p>';
+    else {
+      const oldLines = data.pending.text.split('\n'), newLines = data.wire.text.split('\n');
+      const rows = rowsFromScript(await diffLinesAsync(data.pending.text, data.wire.text), oldLines, newLines);
+      body = '<p class="sp-empty">− pending (before the turn) · + wire (sent to the model)</p><pre>' + rows.map(r => {
+        if (!r.changed) return '  ' + esc(r.oldText);
+        return (r.oldText != null ? `<span class="sp-old">− ${esc(r.oldText)}</span>` : '') + (r.oldText != null && r.newText != null ? '\n' : '') + (r.newText != null ? `<span class="sp-new">+ ${esc(r.newText)}</span>` : '');
+      }).join('\n') + '</pre>';
+    }
+  } else if (!cap.captured) {
+    body = `<p class="sp-empty">${esc(cap.hint || 'not captured')}<br>Expected file: <code>${esc(cap.file)}</code></p>`;
+  } else {
+    body = `<p class="sp-empty">${esc(head(cap))} · <code>${esc(cap.file)}</code></p><pre>${esc(cap.text)}</pre>`;
+  }
+  const bar = modes.map(m => `<button type="button" class="${m === which ? 'on' : ''}" data-sp="${m}">${m}</button>`).join('') +
+    `<span>wire = last request to the model · pending = assembled before the turn</span>`;
+  $('readTitle').textContent = (current && current.title ? current.title + ' · ' : '') + 'system prompt';
+  $('readBody').innerHTML = `<div class="sysprompt"><div class="sp-bar">${bar}</div>${body}</div>`;
+  for (const b of $('readBody').querySelectorAll('[data-sp]')) b.onclick = () => openSystemPromptView(key, b.dataset.sp);
   $('readOverlay').hidden = false;
   $('readBody').scrollTop = 0;
   $('readBody').focus();
