@@ -1998,7 +1998,7 @@ function unlockLandscape() {
   if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
 }
 
-function setRouteKind(kind, crumbs) {
+function setRouteKind(kind) {
   // Leaving a document flushes its pending autosave and destroys the editor.
   // The document surfaces ('doc', 'project-docs') flush themselves when they
   // swap one document for another.
@@ -2020,11 +2020,10 @@ function setRouteKind(kind, crumbs) {
   document.body.classList.remove('chrome-min'); // navigation always shows the chrome again
   chromeScrollLast = -1;
   chromeUpAcc = chromeDownAcc = 0;
-  routeSegs = crumbs || [];
 }
 
-function setRoute(kind, hash, crumbs) {
-  setRouteKind(kind, crumbs);
+function setRoute(kind, hash) {
+  setRouteKind(kind);
   currentHash = hash || '';
   let now = location.hash.replace(/^#/, '');
   let same = now === currentHash;
@@ -2049,7 +2048,7 @@ function goHome() {
   if (window.fileInk && fileInk.teardown) fileInk.teardown();
   markSettingsClosed();
   if (progressStream) { progressStream.close(); progressStream = null; }
-  setRoute('home', '', []);
+  setRoute('home', '');
   renderTabList();
 }
 
@@ -2103,34 +2102,6 @@ function dispatchHash(h) {
   if ((viewKind === 'file' || viewKind === 'doc') && conversationFileReturn && conversationFileReturn.key === h)
     return returnToConversationFile(h, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call);
   return open(h);
-}
-
-// ---- route segments ----
-// The breadcrumb bar is gone (header title + home cover navigation), but the
-// segment labels still name windows in the window switcher (winLabel).
-let routeSegs = [];
-
-const crumbHome = () => ({ label: '❯ home', title: 'The whole-system timeline', go: () => goHome() });
-const crumbProject = name => ({ label: name, title: name === LOOSE_PROJECT ? 'Conversations without a project' : 'Project overview · ' + name, go: () => showProjectOverview(name) });
-const crumbArea = (project, rel) => ({ label: rel, title: 'Area · ' + project + '/' + rel, go: () => showAreaView(project, rel) });
-
-function crumbConversation(key) {
-  const s = sessions.find(x => x.key === key);
-  const label = String((s && (s.title || s.timelineTitle)) || 'conversation').slice(0, 42);
-  return { label, title: 'Back to this conversation', go: () => open(key) };
-}
-
-// crumbs for the conversation family. tail: extra segments after the conversation.
-function convCrumbs(key, ...tail) {
-  const s = sessions.find(x => x.key === key);
-  const segs = [crumbHome()];
-  if (s) {
-    segs.push(crumbProject(projectOf(s)));
-    const areaRel = areaOfSession(s);
-    if (areaRel) segs.push(crumbArea(projectOf(s), areaRel));
-  }
-  segs.push(crumbConversation(key));
-  return segs.concat(tail);
 }
 
 const $ = id => document.getElementById(id);
@@ -4317,11 +4288,11 @@ async function openNoteFile(file) {
   const session = sessions.find(s => s.notePath && s.notePath.endsWith('/' + file));
   if (session) {
     activeRel = session.key;
-    setRoute('note', 'note=' + encodeURIComponent(file), convCrumbs(session.key, { label: 'note', title: n.file }));
+    setRoute('note', 'note=' + encodeURIComponent(file));
     const related = await relatedFor(session.key);
     noteViewer(n.text, '~/notes/aiconvo/' + n.file, { kind: 'note', key: session.key, related });
   } else {
-    setRoute('note', 'note=' + encodeURIComponent(file), [crumbHome(), { label: n.file, title: 'note' }]);
+    setRoute('note', 'note=' + encodeURIComponent(file));
     noteViewer(n.text, '~/notes/aiconvo/' + n.file);
   }
 }
@@ -6297,26 +6268,11 @@ function jumpToLatestConversationChanges() {
   loadFocusedFile(latest.row, { fromAt: startMs, to: `ai:${latest.event.id}` });
 }
 
-// Breadcrumb for the focused-file view, per scope.
-function focusedFileCrumbs(row) {
-  const data = fileHistoryData;
-  const fileSeg = { label: '▤ ' + String(row.relativePath).split('/').pop(), title: row.relativePath };
-  if (data.scope === 'conversation')
-    return convCrumbs(data.key, { label: 'diffs', title: 'Files this conversation changed', go: () => showConversationDiffs(data.key) }, fileSeg);
-  if (data.scope === 'git') {
-    if (data.backProject)
-      return [crumbHome(), crumbProject(data.backProject), { label: 'files', title: 'Project code', go: () => showProjectTree(data.backProject) }, fileSeg];
-    return [crumbHome(), { label: 'repos', title: 'All Git repositories', go: () => { goHome(); setTab('repos'); } },
-      { label: pathBase(data.cwd), title: data.cwd, go: () => showGitRepoHistory(data.cwd, true) }, fileSeg];
-  }
-  return [crumbHome(), crumbProject(data.project), { label: 'file gantt', title: 'Project file history', go: () => showProjectFileHistory(data.project, true) }, fileSeg];
-}
-
 function enterFocusedFile(row, selection = {}) {
   if (!fileHistoryData || !row) return;
   focusedFileRow = row;
   const projectCode = !!fileHistoryData.projectCode;
-  if (!projectCode) setRouteKind('file', focusedFileCrumbs(row));
+  if (!projectCode) setRouteKind('file');
   const conversationScope = fileHistoryData.scope === 'conversation';
   const gitScope = fileHistoryData.scope === 'git';
   const head = projectCode
@@ -6350,7 +6306,7 @@ function enterFocusedFile(row, selection = {}) {
 // keyframe history is an explicit opt-in button (it is allowed to be slow).
 async function openToolCallFile(key, pathValue, ts, anchor, callId) {
   const hash = 'filecall=' + [key, callId || '', pathValue || '', ts || '', anchor || ''].map(encodeURIComponent).join('&');
-  setRoute('file', hash, convCrumbs(key, { label: '▤ ' + String(pathValue || '').split('/').pop(), title: pathValue || '' }));
+  setRoute('file', hash);
   $('view').innerHTML = `<div class="quick-file-view"><div class="qf-head"><button id="qfBack">← conversation</button><b>${esc(shortFilePath(pathValue || ''))}</b></div><div class="qf-body"><div class="ff-loading">loading this change…</div></div></div>`;
   $('qfBack').onclick = () => returnToConversationFile(key, pathValue, anchor || ts, callId);
   lastQuickFile = { key, path: pathValue || '', ts: ts || '', anchor: anchor || '', call: callId || '' };
@@ -6681,7 +6637,7 @@ async function openConversationFileDiff(key, pathValue, ts, anchorTs) {
   const row = (data.rows || []).find(r => r.path === pathValue || r.relativePath === pathValue ||
     pathValue.endsWith('/' + r.relativePath) || r.path.endsWith('/' + pathValue));
   if (!row) return errToast('no in-repository edit recorded for this file in this conversation');
-  setRoute('file', 'diffs=' + encodeURIComponent(key), []);
+  setRoute('file', 'diffs=' + encodeURIComponent(key));
   fileHistoryData = data;
   focusedFileWindow = null;
   if (!reuse) invalidateFileCaches();
@@ -6732,8 +6688,7 @@ async function showProjectFileHistory(name, reuse = false) {
   projectOverviewName = name;
   focusedFileRow = null;
   focusedFileWindow = null;
-  setRoute('project-files', 'project=' + encodeURIComponent(name) + '&files',
-    [crumbHome(), crumbProject(name), { label: 'file gantt', title: 'AI edits and Git history over time' }]);
+  setRoute('project-files', 'project=' + encodeURIComponent(name) + '&files');
   let data = reuse && fileHistoryData && fileHistoryData.project === name && !fileHistoryData.light ? fileHistoryData : null;
   if (!data) {
     $('view').innerHTML = `<div class="file-gantt-view"><div class="phead"><h2>file history · ${esc(name)}</h2><div class="pmeta">mining AI edits and Git history…</div></div></div>`;
@@ -6799,8 +6754,7 @@ async function showGitRepoHistory(root, reuse = false) {
   if (!root) return;
   focusedFileRow = null;
   focusedFileWindow = null;
-  setRoute('repo', 'git=' + encodeURIComponent(root),
-    [crumbHome(), { label: 'repos', title: 'All Git repositories', go: () => { goHome(); setTab('repos'); } }, { label: pathBase(root), title: root }]);
+  setRoute('repo', 'git=' + encodeURIComponent(root));
   let data = reuse && fileHistoryData && fileHistoryData.scope === 'git' && fileHistoryData.cwd === root ? fileHistoryData : null;
   if (!data) {
     $('view').innerHTML = `<div class="file-gantt-view"><div class="phead"><h2>Git history · ${esc(root)}</h2><div class="pmeta">reading commits and worktrees…</div></div></div>`;
@@ -6992,7 +6946,7 @@ function renderDiffView(scope, rows, title, meta, related = null) {
 
 async function showConversationDiffs(key) {
   activeRel = key;
-  setRoute('diffs', 'diffs=' + encodeURIComponent(key), convCrumbs(key, { label: 'diffs', title: 'Files this conversation changed' }));
+  setRoute('diffs', 'diffs=' + encodeURIComponent(key));
   $('view').innerHTML = '<div class="empty">building the conversation file Gantt…</div>';
   const data = await (await fetch('/api/conversation/file-history?id=' + encodeURIComponent(key))).json();
   if (data.error) return errToast(data.error);
@@ -7030,13 +6984,7 @@ async function showFileBlame(pathValue, scope = null) {
     (project ? '&project=' + encodeURIComponent(project) : '') +
     (key ? '&key=' + encodeURIComponent(key) : ''))).json();
   if (d.error) { $('view').innerHTML = `<div class="empty">no blame for ${esc(pathValue)}.<div class="hint">${esc(d.error)}</div></div>`; return; }
-  const blameSeg = { label: 'blame · ' + pathBase(d.path), title: d.path };
-  setRoute('blame', 'blame=' + encodeURIComponent(d.path),
-    blameParent && blameParent.scope === 'conversation' && blameParent.key
-      ? convCrumbs(blameParent.key, { label: 'diffs', title: 'Files this conversation changed', go: () => showConversationDiffs(blameParent.key) }, blameSeg)
-      : blameParent && blameParent.scope === 'project' && blameParent.name
-        ? [crumbHome(), crumbProject(blameParent.name), { label: 'diffs', go: () => showProjectDiffs(blameParent.name) }, blameSeg]
-        : [crumbHome(), blameSeg]);
+  setRoute('blame', 'blame=' + encodeURIComponent(d.path));
   const disk = d.matchesDisk === false ? ` · <span class="warn">⚠ file changed outside recorded edits (disk: ${d.diskLines} lines)</span>` : '';
   $('view').innerHTML = `<div class="blame-view">
     <div class="blame-head"><h2>~ ${esc(d.path.split('/').pop())}</h2>
@@ -7079,8 +7027,7 @@ async function showFileBlame(pathValue, scope = null) {
 
 async function showProjectDiffs(name) {
   projectOverviewName = name;
-  setRoute('project-diffs', 'project=' + encodeURIComponent(name) + '&diffs',
-    [crumbHome(), crumbProject(name), { label: 'diffs', title: 'Agent file touches across recent conversations' }]);
+  setRoute('project-diffs', 'project=' + encodeURIComponent(name) + '&diffs');
   const d = await (await fetch('/api/project/diffs?name=' + encodeURIComponent(name))).json();
   if (d.error) return errToast(d.error);
   const rows = (d.files || []).map(row => ({ ...row, events: row.events.map(e => ({ ...e, path: row.path, relativePath: row.relativePath })) }));
@@ -7646,9 +7593,7 @@ async function openDocument(docPath, project = null, fromConversation = null) {
   const hash = 'doc=' + encodeURIComponent(docPath) +
     (project ? '&' + encodeURIComponent(project) : fromConversation ? '&' : '') +
     (fromConversation ? '&conv=' + encodeURIComponent(fromConversation) : '');
-  setRoute('doc', hash,
-    fromConversation ? convCrumbs(fromConversation, doc)
-      : project ? [crumbHome(), crumbProject(project), doc] : [crumbHome(), doc]);
+  setRoute('doc', hash);
   const back = fromConversation ? ['← conversation', 'Back to the conversation, at the link that opened this document']
     : project ? ['← documents', 'Every markdown document in ' + project] : null;
   $('view').innerHTML = `<div class="doc-view">${documentHeadHtml(docPath, back)}
@@ -7750,7 +7695,6 @@ async function mountDocumentEditor(docPath, project = null) {
 // editor on the right. The generated memory stays on the overview.
 let projectDocsSeq = 0;
 const projectDocsHash = (name, docPath) => 'project=' + encodeURIComponent(name) + '&docs' + (docPath ? '&doc=' + encodeURIComponent(docPath) : '');
-const projectDocsCrumbs = name => [crumbHome(), crumbProject(name), { label: 'documents', title: 'Every markdown document in ' + name }];
 
 async function showProjectDocuments(name, docPath = null) {
   if (!name) return;
@@ -7758,7 +7702,7 @@ async function showProjectDocuments(name, docPath = null) {
   flushAndCloseDocument();
   projectOverviewName = name;
   const seq = ++projectDocsSeq;
-  setRoute('project-docs', projectDocsHash(name, docPath), projectDocsCrumbs(name));
+  setRoute('project-docs', projectDocsHash(name, docPath));
   // Phone: the list first when nothing was asked for, the editor when a
   // document was (same show-tree switch as the code surface).
   const listFirst = phoneLayout() && !docPath;
@@ -7827,7 +7771,7 @@ async function openProjectDocument(state, docPath, { reveal = true } = {}) {
   if (!docPath || viewKind !== 'project-docs' || state.seq !== projectDocsSeq) return;
   flushAndCloseDocument();
   state.current = docPath;
-  setRoute('project-docs', projectDocsHash(state.name, docPath), projectDocsCrumbs(state.name));
+  setRoute('project-docs', projectDocsHash(state.name, docPath));
   const doc = state.docs.find(x => x.path === docPath);
   $('pdTitle').textContent = doc ? doc.rel : docPath;
   $('pdTitle').title = docPath;
@@ -7875,8 +7819,7 @@ async function showProjectTree(name) {
   if (!name) return;
   markSettingsClosed();
   projectOverviewName = name;
-  setRoute('project-tree', 'project=' + encodeURIComponent(name) + '&tree',
-    [crumbHome(), crumbProject(name), { label: 'code', title: 'All project files and whole-file changes' }]);
+  setRoute('project-tree', 'project=' + encodeURIComponent(name) + '&tree');
   $('view').innerHTML = `<div class="project-overview"><div class="phead"><h2>${esc(name)} · code</h2><div class="pmeta">indexing files and recent edits…</div>${projectSwitchHtml('code')}</div></div>`;
   wireProjectSwitch(name);
   let data = fileHistoryData && fileHistoryData.project === name && fileHistoryData.projectCode ? fileHistoryData : null;
@@ -8591,7 +8534,7 @@ function showLooseConversations() {
   markSettingsClosed();
   lastNavProject = LOOSE_PROJECT;
   projectOverviewName = LOOSE_PROJECT;
-  setRoute('project', 'project=' + encodeURIComponent(LOOSE_PROJECT), [crumbHome(), { label: LOOSE_PROJECT, title: 'Conversations without a project' }]);
+  setRoute('project', 'project=' + encodeURIComponent(LOOSE_PROJECT));
   const rows = sessions.filter(s => projectOf(s) === LOOSE_PROJECT)
     .sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || '')));
   const heroRows = rows.map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
@@ -8630,7 +8573,7 @@ async function showProjectOverview(name) {
   markSettingsClosed();
   lastNavProject = name;
   projectOverviewName = name;
-  setRoute('project', 'project=' + encodeURIComponent(name), [crumbHome(), { label: name, title: 'Project overview · ' + name }]);
+  setRoute('project', 'project=' + encodeURIComponent(name));
   $('view').innerHTML = `<div class="project-overview"><div class="ptitle"><h1>${esc(name)}</h1></div><div class="pmeta">loading project overview…</div></div>`;
   const d = await (await fetch('/api/project?name=' + encodeURIComponent(name))).json();
   if (d.error) {
@@ -8647,8 +8590,7 @@ async function showAreaView(project, rel) {
   markSettingsClosed();
   lastNavProject = project;
   projectOverviewName = null;
-  setRoute('project', 'project=' + encodeURIComponent(project) + '&area=' + encodeURIComponent(rel),
-    [crumbHome(), crumbProject(project), { label: rel, title: 'Area · ' + project + '/' + rel }]);
+  setRoute('project', 'project=' + encodeURIComponent(project) + '&area=' + encodeURIComponent(rel));
   $('view').innerHTML = `<div class="project-overview"><div class="ptitle"><h1>${esc(project)} / ${esc(rel)}</h1></div><div class="pmeta">loading area…</div></div>`;
   const d = await (await fetch('/api/area?project=' + encodeURIComponent(project) + '&rel=' + encodeURIComponent(rel))).json();
   if (d.error) {
@@ -10553,7 +10495,7 @@ async function startSiblingConversation() {
   const areaRel = areaOfSession(current);
   // The press answers instantly: leave the transcript and show the launch
   // progress full-screen, staged as it truly happens.
-  setRouteKind('launch', [crumbHome(), crumbProject(project), { label: 'new conversation' }]);
+  setRouteKind('launch');
   $('view').innerHTML = `<div class="dprog" style="margin-top:70px;text-align:center">
     <div style="font-size:15px"><span class="spin">░</span> new conversation · <b>${esc(project)}${areaRel ? '/' + esc(areaRel) : ''}</b></div>
     <div class="hint" id="launchStatus" style="margin-top:10px">composing the project map…</div>
@@ -13673,10 +13615,10 @@ async function open(rel, scroll) {
     window._agentContext = [];
     const hash = typeof scroll === 'string' && scroll.startsWith('entry:')
       ? 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })) : encodeURIComponent(rel);
-    setRoute('conversation', hash, convCrumbs(rel));
+    setRoute('conversation', hash);
     render();
   } else if (typeof scroll === 'string' && scroll.startsWith('entry:')) {
-    setRoute('conversation', 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })), convCrumbs(rel));
+    setRoute('conversation', 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })));
   }
   // A file-watch refresh is not navigation. setRouteKind() resets #view to
   // the top before this fetch. Calling it here made the old transcript flash
@@ -13722,7 +13664,7 @@ async function queueDistill(rel, force = false) {
 
 function streamDistill(rel, force) {
   if (progressStream) progressStream.close();
-  setRouteKind('distill', convCrumbs(rel, { label: 'distilling…', title: 'Distillation progress' }));
+  setRouteKind('distill');
   $('view').innerHTML =
     `<div class="convhead"><div class="ch-title">distilling…</div>
       <div class="ch-row"><span class="ch-meta" id="dstatus"></span>
@@ -13772,12 +13714,12 @@ function streamDistill(rel, force) {
 async function showNotePane(rel, text, savedPath) {
   if (savedPath) {
     activeRel = rel;
-    setRouteKind('note', convCrumbs(rel, { label: 'note', title: savedPath }));
+    setRouteKind('note');
     const related = await relatedFor(rel, true);
     noteViewer(text, savedPath, { kind: 'note', key: rel, related });
     return;
   }
-  setRouteKind('note', convCrumbs(rel, { label: 'note (draft)', title: 'Review before keeping' }));
+  setRouteKind('note');
   $('view').innerHTML =
     `<div class="convhead"><div class="ch-title">review the note</div>
       <div class="ch-row"><span class="ch-meta">nothing is saved until you press keep.</span>
@@ -14197,7 +14139,7 @@ function collapseFanoutTree(raw, typedGroups = []) {
 
 async function showTree(key, opts = {}) {
   activeRel = key;
-  setRoute('tree', 'tree=' + encodeURIComponent(key), convCrumbs(key, { label: 'tree', title: 'The conversation as a message tree' }));
+  setRoute('tree', 'tree=' + encodeURIComponent(key));
   let t;
   try { t = await (await fetch('/api/tree?id=' + encodeURIComponent(key))).json(); }
   catch { return errToast('could not load the conversation tree'); }
@@ -14670,8 +14612,7 @@ async function showEpic(id, focusKey = activeRel) {
   if (d.error) return errToast(d.error);
   const key = focusKey && d.sessions.some(s => s.key === focusKey) ? focusKey : (d.sessions[0] && d.sessions[0].key);
   if (key) activeRel = key;
-  setRoute('epic', 'epic=' + encodeURIComponent(id),
-    [crumbHome(), ...(d.project && d.project !== '?' ? [crumbProject(d.project)] : []), { label: '▸ ' + (d.title || 'epic'), title: 'Epic · ' + (d.title || id) }]);
+  setRoute('epic', 'epic=' + encodeURIComponent(id));
   const memory = d.memory || null;
   const o = (memory && memory.overview) || {};
   const leaves = d.leaves || {};
@@ -14770,7 +14711,7 @@ async function showConversationEvidence(key, supplied = null) {
   const d = supplied || await (await fetch('/api/evidence?id=' + encodeURIComponent(key))).json();
   if (d.error) return errToast(d.error);
   activeRel = key;
-  setRouteKind('evidence', convCrumbs(key, { label: 'evidence', title: 'The evidence card for this conversation' }));
+  setRouteKind('evidence');
   const related = await relatedFor(key);
   const label = evidenceLabel(d);
   const warn = d.outdated || d.source === 'outdated-note';
@@ -14796,7 +14737,7 @@ function evidenceLabel(input) {
 }
 
 async function showEpicEvidence(id, focusKey = activeRel) {
-  setRouteKind('evidence', [crumbHome(), { label: 'epic', title: 'Back to the epic', go: () => showEpic(id, focusKey) }, { label: 'evidence' }]);
+  setRouteKind('evidence');
   $('view').innerHTML = '<div class="empty">loading epic evidence…</div>';
   const d = await (await fetch('/api/epic/evidence?id=' + encodeURIComponent(id))).json();
   if (d.error) return errToast(d.error);
@@ -15048,7 +14989,7 @@ $('ganttGroup').onclick = () => {
 async function startLooseConversation() {
   if (window._looseStartBusy) return;
   window._looseStartBusy = true;
-  setRouteKind('launch', [crumbHome(), { label: LOOSE_PROJECT }, { label: 'new conversation' }]);
+  setRouteKind('launch');
   $('view').innerHTML = `<div class="dprog" style="margin-top:70px;text-align:center">
     <div style="font-size:15px"><span class="spin">░</span> new projectless conversation</div>
     <div class="hint" style="margin-top:10px">starting in your home directory…</div>
@@ -15546,7 +15487,7 @@ async function loadUsageDashboard() {
 async function showUsageDashboard() {
   markSettingsClosed();
   clearTimeout(usagePollTimer);
-  setRoute('usage', 'usage', [crumbHome(), { label: 'usage and cost', title: 'Usage and cost dashboard' }]);
+  setRoute('usage', 'usage');
   $('view').innerHTML = '<div class="empty">building usage analytics…<div class="hint">recent conversations load first</div></div>';
   await loadUsageDashboard();
 }
@@ -15887,7 +15828,7 @@ async function showSettings(pane) {
   const before = location.hash.replace(/^#/, '');
   settingsOpen = true;
   $('settingsBtn').classList.add('on');
-  setRoute('settings', 'settings=' + settingsPane, [crumbHome(), { label: 'settings', title: 'Settings', go: () => showSettings() }]);
+  setRoute('settings', 'settings=' + settingsPane);
   if (!wasOpen) settingsPushed = before !== 'settings=' + settingsPane && before !== 'settings';
   $('view').innerHTML = '<div id="settingsRoot"></div>';
   renderSettings();
@@ -15901,7 +15842,6 @@ function showSettingsPane(pane) {
   settingsPane = settingsPaneOf('settings=' + pane);
   currentHash = 'settings=' + settingsPane;
   try { history.replaceState(null, '', location.pathname + location.search + '#' + currentHash); } catch {}
-  routeSegs = [crumbHome(), { label: 'settings', title: 'Settings', go: () => showSettings() }];
   renderSettings();
   const pane_ = $('settingsRoot') && $('settingsRoot').querySelector('.settings-pane');
   if (pane_) pane_.scrollIntoView({ block: 'start' });

@@ -357,7 +357,7 @@ test('concurrent invalidations share a request and reconcile one more snapshot a
 test('dispatching an entry route again restores the exact launch target without fork or branch calls', () => {
   const html = fs.readFileSync(require.resolve('../app.html'), 'utf8');
   const start = html.indexOf('function dispatchHash(h) {');
-  const code = html.slice(start, html.indexOf('// ---- route segments ----', start));
+  const code = html.slice(start, html.indexOf('\nconst $ = id => document.getElementById', start));
   const opened = [];
   const context = vm.createContext({ open: (...args) => opened.push(args), viewKind: 'home', errToast: message => { throw new Error(message); } });
   new vm.Script(code).runInContext(context);

@@ -19,8 +19,8 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delegation-navigation-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const code = [
-    extract('function setRoute(kind, hash, crumbs)', '\nfunction goHome()'),
-    extract('function dispatchHash(h) {', '// ---- route segments ----'),
+    extract('function setRoute(kind, hash)', '\nfunction goHome()'),
+    extract('function dispatchHash(h) {', '\nconst $ = id => document.getElementById'),
     extract('async function open(rel, scroll) {', '// ---- distillation ----'),
     extract('async function renderConv(scroll) {', '// ---- trace machinery ----'),
     extract('function computeTrace(d) {', '\nfunction deepestUnder('),
@@ -54,7 +54,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   function setRouteKind(kind) { viewKind = kind; }
   const noop = () => {};
   const fileInk = null;
-  const markSettingsClosed=noop, markAgentRead=noop, render=noop, projectOf=()=>null, convCrumbs=()=>[];
+  const markSettingsClosed=noop, markAgentRead=noop, render=noop, projectOf=()=>null;
   const relatedFor=async()=>[], convHead=()=>'', agentComposerHtml=()=>'';
   const loadCompare=async()=>[];
   // A compare row would normally suppress its answer. The raw link must still show it.
