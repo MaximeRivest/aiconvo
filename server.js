@@ -7475,38 +7475,6 @@ async function pairEventToCommit(event, repo, commitsForFile) {
   };
 }
 
-// Full project file tree for the project tree mode: every repository under
-// the project with tracked / modified / untracked / ignored paths, branches,
-// and worktrees. Lists are capped so the endpoint stays cheap.
-async function projectTreeResponse(project) {
-  const meta = projectMetaFor(project);
-  if (!meta) throw new Error('project not found');
-  const roots = await projectGitRepositories(meta);
-  const repos = [];
-  for (const root of roots) {
-    let branch = null;
-    try { branch = (await gitText(root, ['branch', '--show-current'])).trim() || null; } catch {}
-    let refs = [];
-    try {
-      refs = String(await gitText(root, ['branch', '--format=%(refname:short)']))
-        .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 40);
-    } catch {}
-    const tracked = (await gitTrackedPaths(root).catch(() => [])).slice(0, 8000);
-    const untracked = String(await gitText(root, ['ls-files', '--others', '--exclude-standard']).catch(() => ''))
-      .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 2000);
-    const ignored = String(await gitText(root, ['ls-files', '--others', '-i', '--directory', '--exclude-standard']).catch(() => ''))
-      .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 800);
-    const modified = String(await gitText(root, ['status', '--porcelain']).catch(() => ''))
-      .split('\n').filter(Boolean)
-      .map(line => ({ status: line.slice(0, 2).trim(), path: line.slice(3).trim().replace(/^"|"$/g, '') }))
-      .filter(item => item.path).slice(0, 2000);
-    let worktrees = [];
-    try { worktrees = (await worktreeRoots(root)).filter(wt => wt !== root); } catch {}
-    repos.push({ root, name: path.basename(root), branch, refs, worktrees, tracked, untracked, ignored, modified });
-  }
-  return { project, cwd: meta.cwd, repos };
-}
-
 // Background diff-cache warmer. Gentle concurrency, one warm per project at
 // a time; conversationDiffs itself is mtime-cached, so repeats are cheap.
 const warmingProjects = new Set();
@@ -11032,9 +11000,6 @@ const server = http.createServer(async (req, res) => {
         }
         json(res, 200, data);
       }
-      catch (e) { json(res, e.message === 'project not found' ? 404 : 500, { error: e.message }); }
-    } else if (u.pathname === '/api/project/tree') {
-      try { json(res, 200, await projectTreeResponse(u.searchParams.get('name') || '')); }
       catch (e) { json(res, e.message === 'project not found' ? 404 : 500, { error: e.message }); }
     } else if (u.pathname === '/api/project/file-history/commit') {
       try { json(res, 200, await projectCommitResponse(
