@@ -42,8 +42,6 @@ try {
 :root[data-theme-mode="binary"] code, :root[data-theme-mode="binary"] a { color: var(--text); }
 :root[data-theme-mode="binary"] a { text-decoration: underline; }
 :root[data-theme-mode="binary"] #ganttDate { color-scheme: light; }
-:root[data-theme-mode="binary"] .agent-live-dock button { min-height: 44px; min-width: 44px; }
-:root[data-theme-mode="binary"] .agent-live-dock textarea { font-size: 16px; border-width: 2px; }
 /* Binary Gantt states use a hatch, a dashed frame, and solid live dots. */
 :root[data-theme-mode="binary"] .tmark.selected .violin { fill: url(#selHatch) !important; stroke: var(--text) !important; }
 .activeframe { display: none; }
@@ -1632,28 +1630,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .agent-mic.transcribing { border-style: double; }
 :root[data-theme-mode="binary"] .agent-mic.recording { color: var(--bg); background: var(--text); border-color: var(--text); }
 .agent-bar { flex-direction: row; align-items: center; }
-.overlay.agent-overlay {
-  z-index: 55; padding: 8px; align-items: stretch; justify-content: stretch;
-  top: var(--vvt, 0px); height: var(--vvh, 100dvh); bottom: auto; inset: auto 0 auto 0;
-  box-sizing: border-box;
-}
-.agent-dialog { width: 100%; max-width: none; height: 100%; max-height: none; display: flex; flex-direction: column; gap: var(--sp-2); box-sizing: border-box; }
-.agent-live-dock { flex: 0 0 auto; display: flex; flex-direction: column; gap: var(--sp-2); }
-.agent-live-dock textarea { width: 100%; min-height: 48px; font-size: 16px; resize: none; }
-.agent-dialog h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; flex: 0 0 auto; }
-.agent-dialog h3 span { color: var(--text-dim); font-weight: 400; font-size: var(--fs-meta); }
-.agent-pane { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; overflow: hidden; margin: 0; padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: 14px/1.05 var(--font); white-space: pre; word-break: normal; touch-action: none; overscroll-behavior: none; }
-.agent-pane .term-sel { background: var(--term-selection); color: var(--term-selection-ink); }
-.agent-pane .term-acc { color: var(--cyan); font-weight: 700; }
-.agent-pane .term-dim { color: var(--text-faint); }
-.agent-pane .term-rev { background: var(--text); color: var(--bg); }
-:root[data-theme-mode="binary"] .agent-pane .term-sel,
-:root[data-theme-mode="binary"] .agent-pane .term-rev { background: var(--text); color: var(--bg); }
-:root[data-theme-mode="binary"] .agent-pane .term-acc { color: var(--text); font-weight: 700; text-decoration: underline; }
-:root[data-theme-mode="binary"] .agent-pane .term-dim { color: var(--text); }
-.agent-choices { display: flex; flex-wrap: wrap; gap: var(--sp-2); flex: 0 0 auto; }
-.agent-choices:empty { display: none; }
-.agent-dialog textarea { flex: 0 0 auto; }
 .agent-compose-row { flex: 0 0 auto; }
 
 /* ---- background-job notifications ---- */
@@ -1731,7 +1707,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 .dialog table { border-collapse: collapse; width: 100%; font-size: var(--fs-label); }
 .dialog td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
 .dialog td:first-child { color: var(--accent); white-space: nowrap; }
-.dialog.agent-dialog { width: 100%; max-width: none; height: 100%; }
 
 /* ---- phone layout: a separate reading surface, not a scaled desktop ---- */
 .mobile-only { display: none; }
@@ -1927,8 +1902,6 @@ body.file-full .file-inspector .fi-columns { flex: 1; max-height: none; }
 
   .overlay { padding: 8px; align-items: center; }
   .dialog { width: 100%; max-height: 90dvh; overflow: auto; padding: 12px; }
-  .agent-live-dock .agent-compose-row { overflow-x: auto; }
-  .agent-live-dock button { min-width: 48px; }
 
   /* model picker becomes a bottom sheet */
   .mpick { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; max-height: 72dvh; box-shadow: 0 -6px 24px var(--shadow-soft); }
@@ -2066,23 +2039,6 @@ window.aiconvoSyncTheme();
   </div>
   <div id="view"><div class="empty">select a conversation to read it.<div class="hint">press / to search</div></div></div>
 </main>
-<div class="overlay agent-overlay" id="agentOverlay" hidden>
-  <div class="dialog agent-dialog" role="dialog" aria-modal="true" aria-labelledby="agentDlgTitle">
-    <h3 id="agentDlgTitle">terminal <span id="agentStateHint">closed</span></h3>
-    <pre class="agent-pane" id="agentPane"></pre>
-    <div class="agent-choices" id="agentChoices"></div>
-    <div class="agent-live-dock">
-      <textarea id="agentLiveInput" rows="2" enterkeyhint="send" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="type here — the keyboard stays under this box"></textarea>
-      <div class="agent-compose-row">
-        <button type="button" id="agentLiveEsc">esc</button>
-        <button type="button" id="agentLiveTab">tab</button>
-        <button type="button" id="agentLiveUp">↑</button>
-        <button type="button" id="agentLiveDown">↓</button>
-        <button type="button" class="ghost" id="agentClose">close</button>
-        <button type="button" class="primary" id="agentLiveEnter">enter</button>
-      </div>
-    </div>
-  </div>
 </div>
 <div class="overlay" id="epicOverlay" hidden>
   <div class="dialog">
@@ -12582,7 +12538,6 @@ async function sendToAlacritty(btn) {
     try { data = raw ? JSON.parse(raw) : {}; }
     catch { throw new Error(raw.slice(0, 160) || 'Could not send to Alacritty.'); }
     if (data.blocked) {
-      applyAgentPane(data);
       throw new Error(data.error || 'The terminal is waiting for a choice.');
     }
     if (!res.ok || data.error) throw new Error(data.error || 'Could not send to Alacritty.');
@@ -12591,118 +12546,9 @@ async function sendToAlacritty(btn) {
     window._agentImages = [];
     renderAgentThumbs();
     toast(data.created ? 'sent — watch the transcript' : 'sent — watch the transcript');
-    closeAgentModal();
     if (activeRel) open(activeRel, 'bottom');
   } catch (e) { errToast(e.message); }
   if (btn) { btn.disabled = false; btn.textContent = old || 'send'; }
-}
-
-function fitAgentPane() {
-  const pane = $('agentPane');
-  if (!pane || !agentModalOpen()) return;
-  const grid = window._agentGrid || { rows: 24, cols: 80 };
-  const rows = Math.max(1, grid.rows || 24);
-  const cols = Math.max(1, grid.cols || 80);
-  const padX = 20, padY = 16;
-  const w = Math.max(40, pane.clientWidth - padX);
-  const h = Math.max(40, pane.clientHeight - padY);
-  const size = Math.max(8, Math.min(w / (cols * 0.62), h / rows));
-  pane.style.fontSize = size.toFixed(2) + 'px';
-  pane.style.lineHeight = '1.05';
-  pane.style.letterSpacing = '0';
-}
-
-function applyAgentPane(data) {
-  const pane = $('agentPane');
-  const choices = $('agentChoices');
-  const hint = $('agentStateHint');
-  if (!pane) return;
-  const rows = Math.max(1, (data && data.rows) || 24);
-  const cols = Math.max(1, (data && data.cols) || 80);
-  window._agentGrid = { rows, cols };
-  if (data && data.html) {
-    const htmlLines = String(data.html).split('\n');
-    while (htmlLines.length < rows) htmlLines.push(' ');
-    pane.innerHTML = htmlLines.slice(0, rows).join('\n');
-  } else {
-    const lines = String(data && data.text ? data.text : '').split('\n').map(l => l.slice(0, cols));
-    while (lines.length < rows) lines.push('');
-    pane.textContent = lines.slice(0, rows).join('\n');
-  }
-  const label = {
-    ready: 'ready for a prompt',
-    picker: 'waiting for a choice',
-    permission: 'waiting for a permission answer',
-    booting: 'starting…',
-    offline: 'no live terminal — send will open one',
-  }[data && data.state] || (data && data.attached ? 'live' : 'no live terminal');
-  if (hint) hint.textContent = label + ' · ' + rows + '×' + cols;
-  if ($('agentBarHint')) $('agentBarHint').textContent = data && data.state === 'ready' ? 'type a prompt. / slash · @ project context' : label;
-  if (choices) {
-    choices.innerHTML = ((data && data.choices) || []).map(c =>
-      `<button type="button" data-choice="${esc(c.id)}">${esc(c.label)}</button>`
-    ).join('');
-    choices.querySelectorAll('[data-choice]').forEach(b => {
-      b.onclick = () => actOnAgent(b.dataset.choice);
-    });
-  }
-  requestAnimationFrame(fitAgentPane);
-}
-
-function agentModalOpen() {
-  return $('agentOverlay') && !$('agentOverlay').hidden;
-}
-
-function applyAgentViewport() {
-  const vv = window.visualViewport;
-  const h = vv ? vv.height : window.innerHeight;
-  const t = vv ? vv.offsetTop : 0;
-  document.documentElement.style.setProperty('--vvh', Math.round(h) + 'px');
-  document.documentElement.style.setProperty('--vvt', Math.round(t) + 'px');
-  fitAgentPane();
-}
-
-function openAgentModal() {
-  const ov = $('agentOverlay');
-  if (!ov) return;
-  ov.hidden = false;
-  window._agentModal = true;
-  wireAgentOverlayOnce();
-  applyAgentViewport();
-  const live = $('agentLiveInput');
-  if (live && window.matchMedia('(pointer: coarse)').matches) live.focus();
-  requestAnimationFrame(fitAgentPane);
-  refreshAgentPane();
-}
-
-function closeAgentModal() {
-  const ov = $('agentOverlay');
-  if (ov) ov.hidden = true;
-  window._agentModal = false;
-}
-
-async function refreshAgentPane() {
-  if (!activeRel || (!agentModalOpen() && !$('agentCompose'))) return;
-  try {
-    const res = await fetch('/api/conversation/pane?id=' + encodeURIComponent(activeRel));
-    const data = await res.json();
-    if (!res.ok || data.error) return;
-    applyAgentPane(data);
-  } catch {}
-}
-
-async function actOnAgent(choice) {
-  if (!activeRel) return;
-  try {
-    const res = await fetch('/api/conversation/act', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: activeRel, choice }),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Could not send that choice.');
-    applyAgentPane(data);
-    toast('sent choice ' + choice);
-  } catch (e) { errToast(e.message); }
 }
 
 function agentLiveQueue(fn) {
@@ -12725,135 +12571,6 @@ async function agentLiveKeys(data) {
   window._agentLiveOn = true;
 }
 
-function wireAgentOverlayOnce() {
-  if (window._agentOverlayWired) return;
-  window._agentOverlayWired = true;
-  const box = $('agentOverlay');
-  const closer = $('agentClose');
-  if (closer) closer.onclick = () => closeAgentModal();
-  if (box) box.addEventListener('click', e => {
-    if (e.target === box && !window.matchMedia('(pointer: coarse)').matches) closeAgentModal();
-  });
-  const vv = window.visualViewport;
-  if (vv && !window._agentVvBound) {
-    window._agentVvBound = true;
-    vv.addEventListener('resize', applyAgentViewport);
-    vv.addEventListener('scroll', applyAgentViewport);
-  }
-  const dock = $('agentLiveInput');
-  if (dock) {
-    window._agentDockText = window._agentDockText || '';
-    dock.oninput = () => {
-      const v = dock.value;
-      const prev = window._agentDockText || '';
-      if (v === prev) return;
-      let raw;
-      if (v.startsWith(prev)) raw = v.slice(prev.length);
-      else if (prev.startsWith(v)) raw = '\x7f'.repeat(prev.length - v.length);
-      else raw = '\x15' + v;
-      window._agentDockText = v;
-      window._agentLiveOn = v.startsWith('/') || window._agentLiveOn;
-      agentLiveQueue(() => agentLiveKeys(raw));
-    };
-    dock.onkeydown = e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        agentLiveQueue(async () => {
-          await agentLiveKeys('\r');
-          window._agentDockText = '';
-          dock.value = '';
-          setTimeout(refreshAgentPane, 200);
-        });
-      }
-    };
-    dock.onfocus = () => applyAgentViewport();
-  }
-  const bindKey = (id, data) => {
-    const el = $(id);
-    if (el) el.onclick = () => agentLiveQueue(() => agentLiveKeys(data));
-  };
-  bindKey('agentLiveEsc', '\x1b');
-  bindKey('agentLiveTab', '\t');
-  bindKey('agentLiveUp', '\x1b[A');
-  bindKey('agentLiveDown', '\x1b[B');
-  const enter = $('agentLiveEnter');
-  if (enter) enter.onclick = () => {
-    agentLiveQueue(async () => {
-      await agentLiveKeys('\r');
-      window._agentDockText = '';
-      if (dock) dock.value = '';
-      setTimeout(refreshAgentPane, 200);
-    });
-  };
-  const pane = $('agentPane');
-  if (pane) {
-    pane.addEventListener('wheel', e => {
-      e.preventDefault();
-      e.stopPropagation();
-      const grid = window._agentGrid || { rows: 24, cols: 80 };
-      const rect = pane.getBoundingClientRect();
-      const col = Math.min(grid.cols, Math.max(1, Math.floor((e.clientX - rect.left) / Math.max(1, rect.width / grid.cols)) + 1));
-      const row = Math.min(grid.rows, Math.max(1, Math.floor((e.clientY - rect.top) / Math.max(1, rect.height / grid.rows)) + 1));
-      const steps = Math.max(1, Math.min(8, Math.round(Math.abs(e.deltaY) / 40) || 1));
-      const up = e.deltaY < 0;
-      let keys = '';
-      for (let i = 0; i < steps; i++) {
-        keys += '\x1b[<' + (up ? 64 : 65) + ';' + col + ';' + row + 'M';
-      }
-      agentLiveQueue(() => agentLiveKeys(keys));
-    }, { passive: false });
-    const sendPaneScroll = (deltaY, clientX, clientY) => {
-      const grid = window._agentGrid || { rows: 24, cols: 80 };
-      const rect = pane.getBoundingClientRect();
-      const col = Math.min(grid.cols, Math.max(1, Math.floor((clientX - rect.left) / Math.max(1, rect.width / grid.cols)) + 1));
-      const row = Math.min(grid.rows, Math.max(1, Math.floor((clientY - rect.top) / Math.max(1, rect.height / grid.rows)) + 1));
-      const steps = Math.max(1, Math.min(8, Math.round(Math.abs(deltaY) / 28) || 1));
-      const up = deltaY < 0;
-      let keys = '';
-      for (let i = 0; i < steps; i++) keys += '\x1b[<' + (up ? 64 : 65) + ';' + col + ';' + row + 'M';
-      agentLiveQueue(() => agentLiveKeys(keys));
-    };
-    let drag = null;
-    pane.addEventListener('touchstart', e => {
-      if (e.touches.length !== 1) return;
-      const t = e.touches[0];
-      drag = { y: t.clientY, x: t.clientX, acc: 0, startY: t.clientY };
-    }, { passive: true });
-    pane.addEventListener('touchmove', e => {
-      if (!drag || e.touches.length !== 1) return;
-      e.preventDefault();
-      const t = e.touches[0];
-      drag.acc += t.clientY - drag.y;
-      drag.y = t.clientY;
-      drag.x = t.clientX;
-      const step = 28;
-      while (drag.acc <= -step) { sendPaneScroll(step, drag.x, drag.y); drag.acc += step; }
-      while (drag.acc >= step) { sendPaneScroll(-step, drag.x, drag.y); drag.acc -= step; }
-    }, { passive: false });
-    pane.addEventListener('touchend', e => {
-      if (!drag) return;
-      const t = e.changedTouches && e.changedTouches[0];
-      const y = t ? t.clientY : drag.y;
-      const x = t ? t.clientX : drag.x;
-      const total = y - drag.startY;
-      if (Math.abs(drag.acc) >= 12) sendPaneScroll(-drag.acc, x, y);
-      else if (Math.abs(total) >= 24 && Math.abs(drag.acc) < 12) sendPaneScroll(-total, x, y);
-      drag = null;
-    }, { passive: true });
-  }
-  if (!window._agentFitObs && $('agentPane') && typeof ResizeObserver === 'function') {
-    window._agentFitObs = new ResizeObserver(() => fitAgentPane());
-    window._agentFitObs.observe($('agentPane'));
-  }
-  window.addEventListener('resize', fitAgentPane);
-  const tick = async () => {
-    if (activeRel && (agentModalOpen() || $('agentCompose'))) await refreshAgentPane();
-    const fast = window._agentLiveOn || agentModalOpen() || (($('agentText') || {}).value || '').startsWith('/');
-    setTimeout(tick, fast ? 200 : 1500);
-  };
-  tick();
-}
-
 window.aiconvoAcceptImage = function (mime, b64) {
   try {
     if (!b64) return;
@@ -12872,7 +12589,7 @@ window.aiconvoAcceptImage = function (mime, b64) {
 
 function interceptAgentPaste(e) {
   const t = e.target;
-  if (!t || (t.id !== 'agentText' && t.id !== 'agentLiveInput')) return;
+  if (!t || t.id !== 'agentText') return;
   try {
     const cd = e.clipboardData;
     const fromFiles = [...(cd && cd.files || [])];
@@ -13218,7 +12935,6 @@ function wireComposeMin(ta) {
 }
 
 function wireAgentComposer() {
-  wireAgentOverlayOnce();
   if (!window._agentPasteBound) {
     window._agentPasteBound = true;
     document.addEventListener('paste', interceptAgentPaste, true);
@@ -13230,11 +12946,9 @@ function wireAgentComposer() {
   const files = $('agentFiles');
   const ta = $('agentText');
   const box = $('agentCompose');
-  const live = $('agentOpenLive');
   wireAgentSpeech(ta);
   wireComposeMin(ta);
   if (ta) { ta.addEventListener('input', autoGrowCompose); autoGrowCompose(); }
-  if (live) live.onclick = () => openAgentModal();
   const runBtn = $('agentRun');
   if (runBtn) runBtn.onclick = () => headlessSendFromComposer(runBtn);
   renderModelStrip();
@@ -13265,7 +12979,6 @@ function wireAgentComposer() {
         await agentLiveKeys('\r');
         window._agentLiveText = '';
         ta.value = '';
-        refreshAgentPane();
       });
       return;
     }
@@ -13363,7 +13076,6 @@ function wireAgentComposer() {
           window._agentLiveText = '';
           window._agentLiveOn = false;
           ta.value = '';
-          setTimeout(refreshAgentPane, 200);
         });
         return;
       }
@@ -13374,7 +13086,6 @@ function wireAgentComposer() {
           window._agentLiveText = '';
           window._agentLiveOn = false;
           ta.value = '';
-          refreshAgentPane();
         });
         return;
       }
@@ -17276,7 +16987,7 @@ function einkScroller(fromEl) {
 let einkTouch = null;
 document.addEventListener('touchstart', e => {
   if (!isEink()) return;
-  if (e.target.closest && e.target.closest('#agentPane, .mgantt[data-mg-open], canvas')) { einkTouch = null; return; }
+  if (e.target.closest && e.target.closest('.mgantt[data-mg-open], canvas')) { einkTouch = null; return; }
   if (e.touches.length === 1) {
     const t = e.touches[0];
     einkTouch = { mode: 'one', x: t.clientX, y: t.clientY, t: Date.now(), moved: 0, scroller: einkScroller(e.target) };
@@ -17477,15 +17188,6 @@ function helpNow() {
       ['space / pgup pgdn', 'page up / down'],
       ['home / end', 'start / end'],
       ['esc / r', 'close'],
-    ] });
-    return sections;
-  }
-  if (agentModalOpen()) {
-    sections.push({ label: 'live terminal', keys: [
-      ['type', 'keys go to the terminal'],
-      ['enter', 'send the line'],
-      ['tab / ↑ ↓', 'sent raw in slash mode'],
-      ['esc', 'close · in slash mode: send esc'],
     ] });
     return sections;
   }
@@ -17780,11 +17482,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (searchModalOpenNow()) { searchModalClose(); return; }
     if (document.body.classList.contains('file-full')) { exitFileDiffFull(); return; }
-    if (agentModalOpen()) {
-      if (window._agentLiveOn || (($('agentText') || {}).value || '').startsWith('/')) return;
-      closeAgentModal();
-      return;
-    }
     if (!$('epicOverlay').hidden) return closeEpicDialog();
     if (!$('helpOverlay').hidden) { $('helpOverlay').hidden = true; return; }
     if (readOverlayOpen()) { closeReadingView(); return; }
@@ -17813,11 +17510,6 @@ document.addEventListener('keydown', e => {
   if (!$('agentsPop').hidden) { agentsPopKeydown(e); return; }
   // Native task buttons and disclosures own Tab, Space, and Enter.
   if (e.target.closest('.dg-card, .dg-origin')) return;
-  if (agentModalOpen()) {
-    const ta = $('agentText');
-    if (!inField && ta) ta.focus();
-    return;
-  }
   // Composer controls stay one chord away, including while the user types.
   // Use code, not key, so keyboard layout and Alt characters do not matter.
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.repeat) {

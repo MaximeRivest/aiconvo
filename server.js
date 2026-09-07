@@ -11943,12 +11943,6 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       try { json(res, 200, await sendFileFeedback(JSON.parse(body || '{}'))); }
       catch (e) { json(res, 400, { error: e.message }); }
-    } else if (u.pathname === '/api/conversation/open' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      const parsed = JSON.parse(body || '{}');
-      try { json(res, 200, await openConversationInTerminal(parsed.id)); }
-      catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/send' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -11958,10 +11952,6 @@ const server = http.createServer(async (req, res) => {
         if (e.blocked) json(res, 409, { error: e.message, blocked: true, ...e.blocked });
         else json(res, 500, { error: e.message });
       }
-    } else if (u.pathname === '/api/conversation/pane' && req.method === 'GET') {
-      const key = u.searchParams.get('id');
-      try { json(res, 200, await captureConversation(key)); }
-      catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/act' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
