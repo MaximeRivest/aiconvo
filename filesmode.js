@@ -957,7 +957,11 @@ async function fileWsToggleAsk(forceOpen = false) {
   $('fwAskSend').onclick = () => fileWsSendAsk(ws);
   $('fwAskPreview').onclick = () => fileWsAskPreview(ws);
   fileWsAskSelectionLine(ws);
-  if (ws.editor && ws.editor.view) ws.editor.view.dom.addEventListener('mouseup', () => fileWsAskSelectionLine(ws));
+  if (ws.editor && ws.editor.view && !ws.askSelWired) {
+    ws.askSelWired = true;
+    ws.editor.view.dom.addEventListener('mouseup', () => fileWsAskSelectionLine(ws));
+    ws.editor.view.dom.addEventListener('keyup', () => fileWsAskSelectionLine(ws));
+  }
   let t;
   try { t = await (await fetch('/api/files/ask-target?path=' + encodeURIComponent(ws.path) + (ws.project ? '&project=' + encodeURIComponent(ws.project) : ''))).json(); } catch { t = { error: 'network failure' }; }
   if (fileWs !== ws || !$('fwAskTarget')) return;
@@ -1017,7 +1021,7 @@ async function fileWsSendAsk(ws) {
   $('fwAskSend').disabled = false;
   if (out.error) return errToast(out.error);
   ta.value = '';
-  ws.run = { jobId: out.job ? out.job.id : null, key: out.key, startedAt: Date.now(), preSha: ws.sha, preText: ws.editor ? ws.editor.getContent() : null, title: out.title, created: out.created, queued: out.queued };
+  ws.run = { jobId: out.job ? out.job.id : null, key: out.key, startedAt: Date.now(), preSha: ws.sha, preText: ws.editor ? ws.editor.getContent() : null, title: out.title || (out.created ? 'new conversation' : 'conversation'), created: out.created, queued: out.queued };
   fileWsLockEditor(ws, true);
   fileWsPaintRun(ws, { statusText: out.queued ? 'queued behind the running turn' : 'starting' });
   clearInterval(ws.runTick);
@@ -1089,6 +1093,7 @@ async function fileWsReloadAfterRun(ws, run) {
     const sel = ws.editor.selection();
     ws.editor.setContent(d.text);
     ws.baseText = d.text; ws.sha = d.sha; ws.dirty = false;
+    if ($('fwSave')) $('fwSave').disabled = true;
     try { ws.editor.gotoLine(sel.line); } catch {}
   }
   invalidateFileCaches(ws.row && ws.row.id);

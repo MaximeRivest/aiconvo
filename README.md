@@ -254,7 +254,7 @@ See [NOTICE](NOTICE) for attribution and scope. Third-party components keep thei
 
 ## Config
 
-- `PORT=8000 node server.js` changes the port (default 7433).
+- `PORT=8000 node server.js` changes the port (default 7433). `AICONVO_CACHE_DIR=/tmp/x` moves the derived caches (index, search, file ledger) — handy for running a second instance against the same transcripts.
 - `POST /api/rescan` forces a full rescan.
 - Open **settings** (key `,`) to pick the Pi model used for notes, evidence, epics, titles, and project memory. The list comes from `pi --list-models`. The choice is stored in `~/.config/aiconvo/settings.json`. The **claude-code** provider uses your local Claude Code login and the `claude-code-fable-5` Pi extension.
 - A memory-model call stops after two minutes without output. Three failed calls pause automatic work for 10, then 20, then at most 30 minutes. One manual action can test the model during a pause. Failed memory leaves retry after the same 10/20/30-minute delays. The jobs panel shows the pause, and `~/.cache/aiconvo/memory-model-health.json` keeps it across restarts. Set `AICONVO_MODEL_ACTIVITY_TIMEOUT_MS` to change the two-minute silence limit.

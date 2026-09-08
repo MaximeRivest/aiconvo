@@ -8001,7 +8001,10 @@ async function filesAskResponse(body) {
   const modelId = lead ? lead.modelId : inherited && inherited.modelId;
   const out = await startAgentRun(key, { node: null, provider, modelId, message: prompt, images: [], force: false, allowQueue: true, context });
   const job = out && out.job ? out.job : out;
-  return { ok: true, key, created, queued: !!(out && out.queued), job: job ? jobView(job) : null, title: index[key] ? (index[key].timelineTitle || index[key].title) : null };
+  const entry = index[key];
+  const rawTitle = entry ? (entry.timelineTitle || entry.title || '') : '';
+  const title = created || !rawTitle || /^\(no user message\)$/.test(rawTitle) ? null : rawTitle;
+  return { ok: true, key, created, queued: !!(out && out.queued), job: job ? jobView(job) : null, title };
 }
 
 // Boot: backfill every conversation, ingest Git for every active project's
