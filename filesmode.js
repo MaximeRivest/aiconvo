@@ -176,6 +176,8 @@ function renderFilesTimeline() {
     if (!filesData) return;
   }
   const data = filesData;
+  // Phones (portrait, and squat non-phone layouts) read cards, not a chart.
+  if (phoneLayout() && !(phoneDevice() && window.matchMedia('(orientation: landscape)').matches)) return renderMobileFiles(data);
   // First content paint in this tab scrolls to now; later paints keep the
   // position (an empty placeholder must not pin the chart at its start).
   if (!list.querySelector('.files-timeline')) delete list.dataset.initScroll;
@@ -245,7 +247,10 @@ function renderFilesTimeline() {
       marks.push(`<g class="tmark fcommit" data-fpath="${esc(row.path)}" data-fproject="${esc(row.project)}" data-fcommit="${esc(c.hash)}" data-frepo="${esc(row.repoRoot || '')}" tabindex="0"><title>${esc(row.rel)}\n◆ commit ${esc(String(c.hash).slice(0, 10))}${c.subject ? ' · ' + esc(c.subject) : ''}\n${fmtDate(c.ts)} · +${c.added} −${c.removed}\nclick: the commit patch</title><path d="M ${x},${cy - 4.5} L ${x + 4.5},${cy} L ${x},${cy + 4.5} L ${x - 4.5},${cy} Z"/></g>`);
     }
   }
-  const defs = `<defs><pattern id="aiHatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" fill="${color.fill}"/><line x1="0" y1="0" x2="0" y2="4" stroke="${color.stroke}" stroke-width="1.2"/></pattern></defs>`;
+  // Agent marks are hatched: on binary themes the ground is paper, so the
+  // hatch stays a hatch and not a solid block.
+  const ground = themeMode() === 'binary' ? 'var(--bg)' : color.fill;
+  const defs = `<defs><pattern id="aiHatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="4" height="4" fill="${ground}"/><line x1="0" y1="0" x2="0" y2="4" stroke="${color.stroke}" stroke-width="1.2"/></pattern></defs>`;
   list.innerHTML = `<div class="timeline files-timeline" style="width:${chartW}px;height:${chartH}px">${filesLabelsHtml(layout)}${svgTagFor(list, chartW, chartH)}${defs}${rowsBg}${ticks}${nowLine}${marks.join('')}</svg></div>`;
   timelineGeom = null; // rubber-band selection is a conversation tool
   $('projSort').hidden = false;
@@ -253,6 +258,34 @@ function renderFilesTimeline() {
   ensureProjectStats();
   applyProjectRowHl();
   scrollTimeline(list, st, sl);
+}
+
+// Phone home in files mode: recent projects, then the files with the
+// newest edits — the same shape as the conversation cards.
+function renderMobileFiles(data) {
+  const list = $('list');
+  const projects = (data.projects || []).filter(p => !projFilterActive() || projFuzzyMatch(p.project));
+  const files = [];
+  for (const p of projects) for (const row of p.rows) files.push({ ...row, project: p.project });
+  files.sort((a, b) => b.latest - a.latest);
+  $('count').textContent = `${files.length} files · ${projects.length} projects`;
+  const card = p => `<div class="item mobile-project" data-project="${esc(p.project)}"><div class="mobile-project-main">
+      <div class="title">${esc(p.project)}</div>
+      <div class="meta">${p.files} file${p.files === 1 ? '' : 's'} with edits · ${mobileDate(p.latest)}</div></div><span class="mobile-open">›</span></div>`;
+  const fileCard = row => {
+    const last = row.sessions[row.sessions.length - 1];
+    const who = last ? (last.actor === 'ai' ? '⚇ ' + esc(filesConvTitle(last.convKey) || 'agent') : last.actor === 'human' ? '✎ you' : '◇ external') : row.commits.length ? '◆ commit' : '';
+    return `<div class="item mobile-work" data-file-open="${esc(row.path)}" data-file-project="${esc(row.project)}"><div class="mobile-work-mark">${row.kind === 'docs' ? '☰' : '⌗'}</div>
+      <div class="mobile-work-body"><div class="title">${esc(row.rel)}</div>
+      <div class="meta">${esc(row.project)} · ${mobileDate(row.latest)}</div>
+      <div class="snip">${who}${last ? ` · +${last.added} −${last.removed}` : ''}</div></div></div>`;
+  };
+  list.innerHTML = `<div class="mobile-home">
+    <section><h2>projects</h2>${projects.slice(0, 4).map(card).join('') || '<div class="empty">no file edits on record.</div>'}${projects.length > 4 ? `<details class="mobile-more"><summary>all projects (${projects.length})</summary>${projects.slice(4).map(card).join('')}</details>` : ''}</section>
+    <section><h2>recent files</h2>${files.slice(0, 40).map(fileCard).join('') || '<div class="empty">nothing yet.</div>'}</section>
+  </div>`;
+  list.querySelectorAll('.mobile-project').forEach(el => el.onclick = () => showFilesProject(el.dataset.project));
+  timelineGeom = null;
 }
 
 const FILES_GUTTER = 236;
@@ -422,6 +455,7 @@ async function openFileWorkspace(pathValue, opts = {}) {
       <span class="fw-who" id="fwWho"></span>
       <span class="fw-spacer"></span>
       <nav class="fw-mode" role="tablist"><button data-fw-mode="write" role="tab" class="${ws.mode === 'write' ? 'on' : ''}" title="Edit the current file (n)">write</button><button data-fw-mode="history" role="tab" class="${ws.mode === 'history' ? 'on' : ''}" title="Compare two moments of this file (h)">history</button></nav>
+      ${ws.landing && ws.project ? `<button id="fwNewDoc" class="ghost" title="Create a markdown document in ${esc(ws.project)}/documents/">+ doc</button>` : ''}
       <button id="fwAskBtn" class="primary" title="Ask an agent for a change to this file — the file, your cursor, its recent edits, and the project map go along (Ctrl+K)">✎ ask for a change</button>
       ${ws.project ? `<button id="fwMemory" class="ghost" title="The project overview: generated memory, epics, areas">memory ▸</button>` : ''}
     </div>
@@ -436,6 +470,7 @@ async function openFileWorkspace(pathValue, opts = {}) {
   };
   $('view').querySelectorAll('[data-fw-mode]').forEach(b => b.onclick = () => b.dataset.fwMode === 'write' ? fileWsEnterWrite() : fileWsEnterHistory());
   $('fwAskBtn').onclick = () => fileWsToggleAsk();
+  if ($('fwNewDoc')) $('fwNewDoc').onclick = () => createProjectDocument(ws.project);
   if ($('fwMemory')) $('fwMemory').onclick = () => showProjectOverview(ws.project);
   renderWhoStrip(ws);
   if (ws.landing) renderProjectRidge(ws);

@@ -59,5 +59,11 @@ home (system timeline: conversations · notes · epics · repos lenses)
 ## Hash grammar
 
 `''` home · `<key>` conversation · `tree=` · `diffs=` · `note=` · `epic=` ·
-`project=` · `project=…&files` · `project=…&diffs` · `project=…&tree` ·
+`project=` · `project=…&files` · `project=…&diffs` ·
 `git` (repos lens) · `git=<root>` · `blame=` · `settings`.
+
+Files mode (`design/33`): `files` (home, files lens) · `files&project=<name>`
+(README landing) · `file&p=<project>[&from=&to=]&path=<abs>` and `file=<abs>`
+(the file workspace, lens-agnostic). `doc=`, `project=…&docs`, `project=…&tree`
+redirect there. The lens (`conv | files`) is persisted; `project=` opens the
+landing in the files lens.

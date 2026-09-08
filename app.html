@@ -2116,8 +2116,10 @@ function setRoute(kind, hash) {
   let same = now === currentHash;
   if (!same) { try { same = decodeURIComponent(now) === decodeURIComponent(currentHash); } catch {} }
   if (!same) {
-    suppressHashEvents++;
-    if (currentHash) location.hash = currentHash;
+    // Only a hash assignment fires hashchange; pushState (clearing the hash
+    // for home) fires nothing, so it must not arm the suppressor — a stale
+    // count would swallow the user's next real navigation.
+    if (currentHash) { suppressHashEvents++; location.hash = currentHash; }
     else history.pushState('', '', location.pathname + location.search);
   }
 }
@@ -16492,7 +16494,27 @@ function helpNow() {
       ['→', 'last conversation in this project'],
     ] });
   }
-  if (viewKind === 'home') {
+  if (viewKind === 'file' || viewKind === 'files-project') {
+    sections.push({ label: 'file workspace', keys: [
+      ['w / n', 'write: edit the current file'],
+      ['h', 'history: compare two moments (drag the keyframes)'],
+      ['e', 'focus the editor'],
+      ['c', 'open the newest conversation that touched this file'],
+      ['ctrl+k', 'ask an agent for a change to this file'],
+      ['ctrl+s', 'save (markdown: a Git revision; code: write to disk)'],
+    ] });
+  }
+  if (viewKind === 'home' && lens === 'files') {
+    sections.push({ label: 'files chart', keys: [
+      ['click a file name', 'open the file'],
+      ['click a mark', 'open the file at that change · shift+click: the conversation'],
+      ['double click a project', 'the project: README, tree, ridge'],
+      ['+ − 0', 'timeline zoom'],
+      ['n / b / t', 'timeline: now / beginning / date'],
+      ['4', 'repositories'],
+      ['F', 'back to conversations mode'],
+    ] });
+  } else if (viewKind === 'home') {
     const listKeys = [
       ['↑ ↓ / pgup pgdn', 'scroll'],
       ['← →', 'Gantt / last project'],
@@ -16512,6 +16534,7 @@ function helpNow() {
 
 const HELP_GLOBAL = [
   ['/', 'open search — keeps this page'],
+  ['F', 'conversations ⇄ files mode'],
   ['ctrl+f', 'search overlay — keeps this page'],
   ['x / X', 'fold / unfold everything on the screen'],
   ['`', 'fold / unfold the top bar'],
@@ -16721,9 +16744,14 @@ document.addEventListener('keydown', e => {
       render();
       break;
     }
-    case '1': goHome(); setTab('conv'); break;
-    case '2': goHome(); setTab('notes'); break;
-    case '3': goHome(); setTab('epics'); break;
+    case '1': case '2': case '3': {
+      if (lens === 'files') { // files · docs · code
+        goHome(); filesKind = ['all', 'docs', 'code'][Number(e.key) - 1];
+        try { localStorage.setItem('aiconvo.filesKind', filesKind); } catch {}
+        setTab('conv'); break;
+      }
+      goHome(); setTab(['conv', 'notes', 'epics'][Number(e.key) - 1]); break;
+    }
     case '4': goHome(); setTab('repos'); break;
     case 'f': {
       // Filters narrow the home list; away from home the key goes home first.

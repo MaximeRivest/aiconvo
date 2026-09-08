@@ -1,6 +1,7 @@
 # 33 — Files mode: the inverted funnel
 
-Status: design only. Nothing here is implemented. Date: 2026-09-08.
+Status: implemented 2026-09-08 (commit after `aec2240`); the notes at the
+end record where the build departed from this text. Date: 2026-09-08.
 
 ## 1. Purpose
 
@@ -482,3 +483,31 @@ Each phase ships on its own and is useful alone.
    mode or stay only as glyphs. Proposed: glyphs only, they have their own
    lens.
 4. Whether the multi-file ask (§5.1) ships in phase 3 or waits.
+
+## 11. As built (2026-09-08)
+
+- Files: `fileledger.js` (+ tests), `filesmode.js` (client), hooks in
+  `app.html` and `server.js`, vendored `mrmd-document` 0.10.0 with
+  `createCodeEditor`.
+- Home asks for the last 90 days (§4.3 said window-bounded; the default
+  is 90 days, cached per project on the project's own write counter).
+  Rows per project: 12, `+N more` unfolds; 80 with the project filter.
+- The project landing IS the file workspace opened on the README, with the
+  ridge above the layout (one frame, not two). The ridge is a static strip
+  (click a mark → that file); it does not expand like the conversation
+  masthead. Trade-off: less to maintain; the file's own track is one click
+  away.
+- Hash grammar as built: `files`, `files&project=<name>`,
+  `file&p=<project>[&landing][&from=&to=]&path=<abs>` (path last) and the
+  short `file=<abs>`; `doc=` and `project=…&docs|&tree` redirect.
+- The composer under the file is a dedicated box (§5.4 wanted the
+  conversation composer extracted). It sends through `/api/files/ask`
+  (target pick + `file` context item + `startAgentRun`), locks the editor
+  during the run, reloads and marks lines on settle. Snippets, `@`, and
+  dictation are not in it yet; the extraction is the next step.
+- Multi-file ask from the home selection (§5.1) is not built; rubber-band
+  selection is off in the files chart.
+- `notes` stay in the conversations lens (decision 3, proposed answer).
+- The textarea overlay editor, `showProjectDocuments`, `showProjectTree`
+  are gone; `openFocusedFileEditor` and the quick-file `edit file` route to
+  the workspace.
