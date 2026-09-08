@@ -42,7 +42,7 @@ const SOURCES = {
   pi: path.join(os.homedir(), '.pi', 'agent', 'sessions'),
   'pi-remote': path.join(os.homedir(), '.pi', 'remote', 'sessions'),
 };
-const CACHE_DIR = path.join(os.homedir(), '.cache', 'aiconvo');
+const CACHE_DIR = process.env.AICONVO_CACHE_DIR ? path.resolve(process.env.AICONVO_CACHE_DIR) : path.join(os.homedir(), '.cache', 'aiconvo');
 const NOTES_DIR = path.join(os.homedir(), 'notes', 'aiconvo');
 const SESS_DIR = path.join(CACHE_DIR, 'sessions');
 const INDEX_FILE = path.join(CACHE_DIR, 'index.json');
@@ -123,6 +123,11 @@ fs.mkdirSync(SESS_DIR, { recursive: true });
 // /api/search then falls back to the old scan.
 const searchIdx = openSearchIndex(path.join(CACHE_DIR, 'search.db'));
 const usageIdx = usageLib.openUsageIndex(USAGE_DB_FILE);
+// The file edit ledger (fileledger.js, design/33): every recorded change
+// to every file, from transcripts, Git, the editor, and the watcher. A
+// derived cache too; the boot backfill rebuilds it when it is missing.
+const fileLedgerLib = require('./fileledger.js');
+const fileLedger = fileLedgerLib.openFileLedger(path.join(CACHE_DIR, 'files.db'));
 let usagePricingCatalog = null;
 function pricingCatalog() {
   if (!usagePricingCatalog) usagePricingCatalog = usageLib.loadPricingCatalog();
@@ -627,6 +632,7 @@ async function indexFile(source, relPath, stat) {
     pruneLiveRunTail(key);
     maybeAutoRetitle(key, prev, entry);
     scheduleTimelineTitles();
+    scheduleLedgerConversation(key);
   } catch (e) {
     console.error('index error', key, e.message);
   }
@@ -678,6 +684,7 @@ function dropIndexed(key) {
   delete index[key];
   fsp.unlink(cachePathFor(key)).catch(() => {});
   if (searchIdx) try { searchIdx.removeConversation(key); } catch {}
+  if (fileLedger) try { fileLedger.dropConversation(key); } catch {}
   saveIndexSoon();
 }
 
@@ -2896,6 +2903,24 @@ function normalizeContextItems(raw) {
       out.push(row);
       continue;
     }
+    if (item && item.type === 'file') {
+      // A file the user is reading or editing (files mode): path, and the
+      // selected lines when there were some. Rendered by
+      // fileContextBlock — text, selection, recent edits, neighbourhood.
+      const p = String(item.path || '').trim();
+      if (!p || !path.isAbsolute(p)) continue;
+      const range = Array.isArray(item.range) && item.range.length === 2 && Number(item.range[0]) > 0
+        ? [Number(item.range[0]), Math.max(Number(item.range[0]), Number(item.range[1]))] : null;
+      const line = Number(item.line) > 0 ? Number(item.line) : null;
+      const id = 'file\0' + p;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const row = { type: 'file', path: p };
+      if (range) row.range = range;
+      if (line) row.line = line;
+      out.push(row);
+      continue;
+    }
     const project = String(item && item.project || '').trim();
     if (!project) continue;
     const kinds = [];
@@ -3025,6 +3050,7 @@ async function refreshProjectFolds() {
 // After any fold change: fix the baked project column in the search index,
 // drop caches that carry project names, and tell every client to refetch.
 function applyProjectFoldChange() {
+  ledgerRemapProjects();
   if (searchIdx) {
     for (const [key, entry] of Object.entries(index)) {
       try { searchIdx.setProject('conv:' + key, projectNameOf(entry.cwd, key)); } catch {}
@@ -5266,7 +5292,7 @@ function memoryModelHealthJobView(state = memoryModelHealth.snapshot()) {
 function allJobs() {
   const cutoff = Date.now() - JOB_KEEP_MS;
   const healthJob = memoryModelHealthJobView();
-  return [...distillJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...memoryExtractJobs.values(), ...memoryDocsJobs.values(), ...memoryBackfillJobs.values(), ...agentRunJobs.values()]
+  return [...distillJobs.values(), ...evidenceJobs.values(), ...epicJobs.values(), ...memoryExtractJobs.values(), ...memoryDocsJobs.values(), ...memoryBackfillJobs.values(), ...agentRunJobs.values(), ...(typeof ledgerJobs !== 'undefined' ? ledgerJobs.values() : [])]
     .map(jobView)
     .concat([...restoredRunJobs.values()].filter(j => (j.finishedAt || 0) > cutoff))
     .concat(healthJob ? [healthJob] : [])
@@ -7009,11 +7035,13 @@ async function loadGitRepository(root) {
   const cached = gitHistoryCache.get(root);
   if (cached && cached.histSig === histSig) {
     cached.value.workingTree = workingTree;
+    cached.value.histSig = histSig;
     return cached.value;
   }
   const disk = await readGitHistoryDisk(root, histSig);
   if (disk) {
     disk.workingTree = workingTree;
+    disk.histSig = histSig;
     gitHistoryCache.set(root, { histSig, value: disk });
     return disk;
   }
@@ -7030,7 +7058,7 @@ async function loadGitRepository(root) {
   try { head = (await gitText(root, ['rev-parse', 'HEAD'])).trim() || null; } catch {}
   const value = {
     id: crypto.createHash('sha256').update(root).digest('hex').slice(0, 12), root,
-    currentBranch, head, refs, commits, workingTree, truncated: commits.length >= 2000,
+    currentBranch, head, refs, commits, workingTree, truncated: commits.length >= 2000, histSig,
   };
   gitHistoryCache.set(root, { histSig, value });
   writeGitHistoryDisk(root, histSig, value);
@@ -7520,55 +7548,125 @@ function warmProjectDiffs(project) {
   }, 100);
 }
 
-// Recent file activity is a small durable index. Git seeds committed work,
-// the working tree seeds edits made before a watcher starts, and fs.watch
-// records later saves. The code view can therefore open recent folders
-// without scanning file contents on every request.
-const PROJECT_FILE_ACTIVITY_FILE = path.join(CACHE_DIR, 'project-file-activity.json');
+// ---- the file edit ledger: producers (design/33 §4.2) ----
+// Four producers feed fileledger.js, all incremental, none on request:
+// transcripts (as they are indexed), Git (when a repository's history
+// signature moves), the editor (its saves and commits), and fs.watch on
+// every active project's repositories (started at boot, not on first
+// visit). The code tree's 24 h badges read from the ledger.
 const PROJECT_FILE_DAY = 24 * 60 * 60 * 1000;
-let projectFileActivity = {};
-try { projectFileActivity = JSON.parse(fs.readFileSync(PROJECT_FILE_ACTIVITY_FILE, 'utf8')); } catch {}
-if (!projectFileActivity || typeof projectFileActivity !== 'object' || Array.isArray(projectFileActivity)) projectFileActivity = {};
-let projectFileActivitySaveTimer = null;
 const projectFileSnapshots = new Map();
 const projectFileWatchers = new Map();
 const projectFileWatchPending = new Map();
+const ledgerConvQueue = new Set();
+let ledgerConvTimer = null;
+let ledgerBroadcastPending = new Map();
 
-function saveProjectFileActivitySoon() {
-  clearTimeout(projectFileActivitySaveTimer);
-  projectFileActivitySaveTimer = setTimeout(() => writeFileAtomic(PROJECT_FILE_ACTIVITY_FILE, JSON.stringify(projectFileActivity)).catch(() => {}), 500);
+function ledgerVersionOf(entry) { return DIFF_CACHE_VERSION + String(entry.mtimeMs || 0) + ':' + String(entry.size || 0); }
+
+// Debounced per path: one SSE event per file per 250 ms, whatever the
+// producer. Consumers patch data in place; nobody navigates.
+function broadcastFileActivity(ev) {
+  if (!ev || !ev.path) return;
+  const key = ev.path;
+  const prev = ledgerBroadcastPending.get(key);
+  if (prev) clearTimeout(prev.timer);
+  const timer = setTimeout(() => {
+    ledgerBroadcastPending.delete(key);
+    broadcast({ type: 'file-activity', path: ev.path, project: ev.project || '', ts: ev.ts, actor: ev.actor, producer: ev.producer, convKey: ev.conv_key || null });
+  }, 250);
+  ledgerBroadcastPending.set(key, { timer });
 }
 
-function recordProjectFileActivity(file, event) {
-  const key = path.resolve(file);
-  const cutoff = Date.now() - PROJECT_FILE_DAY;
-  const current = projectFileActivity[key] && Array.isArray(projectFileActivity[key].events) ? projectFileActivity[key].events : [];
-  const events = current.filter(item => Number(item.ts) >= cutoff && item.id !== event.id);
-  events.push({ id: event.id, ts: Number(event.ts) || Date.now(), added: Number(event.added) || 0, removed: Number(event.removed) || 0, source: event.source || 'watch' });
-  projectFileActivity[key] = { events };
-  saveProjectFileActivitySoon();
+function scheduleLedgerConversation(key) {
+  if (!fileLedger) return;
+  ledgerConvQueue.add(key);
+  clearTimeout(ledgerConvTimer);
+  ledgerConvTimer = setTimeout(drainLedgerConversations, 400);
+}
+
+async function drainLedgerConversations() {
+  const keys = [...ledgerConvQueue];
+  ledgerConvQueue.clear();
+  for (const key of keys) {
+    try { await ledgerIngestConversation(key, { announce: true }); }
+    catch (e) { console.error('file ledger', key, e.message); }
+  }
+}
+
+async function ledgerIngestConversation(key, { announce = false } = {}) {
+  if (!fileLedger) return 0;
+  const entry = index[key];
+  if (!entry) { fileLedger.dropConversation(key); return 0; }
+  const version = ledgerVersionOf(entry);
+  if (fileLedger.conversationVersion(key) === version) return 0;
+  const before = announce ? new Set(fileLedger.conversationPaths(key).map(p => p + '\0' + fileLedger.recent(p, 0).length)) : null;
+  const events = await conversationDiffs(key);
+  const project = projectOfEntry(entry, key);
+  const rows = [];
+  for (const ev of events) {
+    const root = await gitRootForCwd(path.dirname(ev.path)).catch(() => null);
+    const row = fileLedgerLib.fromDiffEvent(ev, { repoRoot: root || '', project });
+    if (row) rows.push(row);
+  }
+  const n = fileLedger.putConversation(key, version, rows);
+  if (announce && rows.length) {
+    const last = rows[rows.length - 1];
+    // Announce the newest file only: one event per indexed transcript
+    // change is enough for a chart patch; the file view refetches.
+    broadcastFileActivity({ ...last, project });
+  }
+  return n;
+}
+
+// Git producer: all commits the history cache knows, once per signature.
+async function ledgerIngestRepo(root, repo, project = '') {
+  if (!fileLedger || !repo || repo.isGit === false) return;
+  const sig = repo.histSig || '';
+  const metaKey = 'git:' + root;
+  if (sig && fileLedger.meta(metaKey) === sig) return;
+  const rows = [];
+  for (const commit of repo.commits || []) {
+    const ts = Date.parse(commit.ts || '');
+    if (!Number.isFinite(ts)) continue;
+    for (const file of commit.files || []) {
+      rows.push({
+        id: `git:${commit.hash}:${file.path}`, ts, path: path.join(root, file.path), repo_root: root, project,
+        producer: 'git-commit', actor: 'git', outcome: 'applied', added: file.additions || 0, removed: file.deletions || 0,
+        commit_hash: commit.hash, src_version: sig,
+      });
+    }
+  }
+  fileLedger.put(rows);
+  if (sig) fileLedger.setMeta(metaKey, sig);
+}
+
+// Editor producer.
+function ledgerRecordEditorSave(abs, { added, removed, chars, sha, actor = 'human', input = 'keyboard', commitHash = null, project = '' }) {
+  if (!fileLedger) return;
+  const ts = Date.now();
+  const id = (commitHash ? 'commit:' : 'doc:') + ts + ':' + crypto.randomBytes(3).toString('hex');
+  gitRootForCwd(path.dirname(abs)).catch(() => null).then(root => {
+    const row = {
+      id, ts, path: abs, repo_root: root || '', project: project || projectNameOf(root || path.dirname(abs)),
+      producer: commitHash ? 'editor-commit' : 'editor-save', actor: actor === 'ai' ? 'ai' : 'human', outcome: 'applied',
+      added, removed, chars, sha_after: sha || null, input, commit_hash: commitHash,
+    };
+    fileLedger.put(row);
+    broadcastFileActivity(row);
+  });
 }
 
 function recentProjectFileActivity(file) {
-  const key = path.resolve(file);
-  const cutoff = Date.now() - PROJECT_FILE_DAY;
-  const entry = projectFileActivity[key];
-  if (!entry || !Array.isArray(entry.events)) return null;
-  entry.events = entry.events.filter(item => Number(item.ts) >= cutoff);
-  if (!entry.events.length) { delete projectFileActivity[key]; return null; }
-  return {
-    events: entry.events.length,
-    added: entry.events.reduce((sum, item) => sum + (Number(item.added) || 0), 0),
-    removed: entry.events.reduce((sum, item) => sum + (Number(item.removed) || 0), 0),
-    latestTs: Math.max(...entry.events.map(item => Number(item.ts) || 0)),
-  };
+  if (!fileLedger) return null;
+  return fileLedger.activitySince(file, Date.now() - PROJECT_FILE_DAY);
 }
 
 // A real line diff (shared with the browser) so the +/- counts in the code
 // tree match what the whole-file view shows, instead of prefix/suffix guesses.
 function watchedLineDelta(oldText, newText) {
   const stats = lineDiff.scriptStats(lineDiff.diffLines(oldText, newText));
-  return { removed: stats.removed, added: stats.added };
+  return { removed: stats.removed, added: stats.added, chars: lineDiff.diffLines(oldText, newText).reduce((s, op) => s + (op.type === 'equal' ? 0 : (op.text || '').length), 0) };
 }
 
 async function readProjectFileSnapshot(file) {
@@ -7581,38 +7679,47 @@ async function readProjectFileSnapshot(file) {
   } catch { return null; }
 }
 
-async function updateWatchedProjectFile(root, relativePath) {
+async function updateWatchedProjectFile(root, relativePath, project = '') {
   const file = path.resolve(root, relativePath);
   if (file !== root && !file.startsWith(root + path.sep)) return;
   const old = projectFileSnapshots.get(file) || null;
   const next = await readProjectFileSnapshot(file);
   if (!old && !next) return;
   let delta;
-  if (!old) delta = { added: String(next.text || '').split('\n').length, removed: 0 };
-  else if (!next) delta = { added: 0, removed: String(old.text || '').split('\n').length };
+  if (!old) delta = { added: String(next.text || '').split('\n').length, removed: 0, chars: String(next.text || '').length };
+  else if (!next) delta = { added: 0, removed: String(old.text || '').split('\n').length, chars: String(old.text || '').length };
   else if (old.text === next.text) return;
   else delta = watchedLineDelta(old.text, next.text);
   if (next) projectFileSnapshots.set(file, next); else projectFileSnapshots.delete(file);
-  recordProjectFileActivity(file, { id: `watch:${Date.now()}:${crypto.randomBytes(3).toString('hex')}`, ts: Date.now(), ...delta, source: 'watch' });
+  if (!fileLedger) return;
+  const row = {
+    id: `watch:${Date.now()}:${crypto.randomBytes(3).toString('hex')}`, ts: Date.now(), path: file, repo_root: root,
+    project: project || projectNameOf(root), producer: 'watch', actor: 'external', outcome: 'applied', ...delta, input: 'filesystem',
+  };
+  if (fileLedger.put(row)) broadcastFileActivity(row);
+  else broadcastFileActivity({ ...row, actor: 'unknown' }); // explained elsewhere; the open editor still wants to reload
 }
 
-async function ensureProjectFileWatch(roots, rows) {
-  await mapLimit(rows, 24, async row => {
+const NO_WATCH = process.env.AICONVO_NO_WATCH === '1';
+async function ensureProjectFileWatch(roots, rows, project = '') {
+  await mapLimit(rows || [], 24, async row => {
     if (projectFileSnapshots.has(row.path)) return;
     const snap = await readProjectFileSnapshot(row.path);
     if (snap) projectFileSnapshots.set(row.path, snap);
   });
+  if (NO_WATCH) return;
   for (const root of roots) {
     if (projectFileWatchers.has(root) || !fs.existsSync(root)) continue;
     try {
       const watcher = fs.watch(root, { recursive: true }, (event, filename) => {
         const rel = String(filename || '').replace(/\\/g, '/');
         if (!rel || rel === '.git' || rel.startsWith('.git/') || rel.includes('/.git/')) return;
+        if (/(^|\/)(node_modules|\.venv|venv|target|dist|build|__pycache__|\.cache)(\/|$)/.test(rel)) return;
         const key = root + '\0' + rel;
         clearTimeout(projectFileWatchPending.get(key));
         projectFileWatchPending.set(key, setTimeout(() => {
           projectFileWatchPending.delete(key);
-          updateWatchedProjectFile(root, rel).catch(() => {});
+          updateWatchedProjectFile(root, rel, project).catch(() => {});
         }, 220));
       });
       watcher.on('error', () => { try { watcher.close(); } catch {} projectFileWatchers.delete(root); });
@@ -7621,18 +7728,12 @@ async function ensureProjectFileWatch(roots, rows) {
   }
 }
 
-async function seedProjectFileActivity(repositories, rows) {
+// Files modified on disk before any watcher ran (uncommitted work): one
+// `working` row per file at its mtime, external actor, idempotent by mtime.
+async function seedProjectFileActivity(repositories, rows, project = '') {
+  if (!fileLedger) return;
   const cutoff = Date.now() - PROJECT_FILE_DAY;
-  for (const row of rows) {
-    const recentCommits = (row.commitEvents || []).filter(event => (Date.parse(event.ts || '') || 0) >= cutoff);
-    const latestCommit = recentCommits.reduce((max, event) => Math.max(max, Date.parse(event.ts || '') || 0), 0);
-    if (latestCommit && projectFileActivity[row.path] && Array.isArray(projectFileActivity[row.path].events)) {
-      projectFileActivity[row.path].events = projectFileActivity[row.path].events.filter(event => event.source === 'git' || Number(event.ts) > latestCommit);
-    }
-    for (const event of recentCommits) recordProjectFileActivity(row.path, {
-      id: `git:${event.hash}:${row.relativePath}`, ts: Date.parse(event.ts), added: event.additions, removed: event.deletions, source: 'git',
-    });
-  }
+  const out = [];
   for (const repo of repositories) {
     const numstat = String(await gitText(repo.root, ['diff', 'HEAD', '--numstat', '--']).catch(() => ''));
     for (const line of numstat.split('\n')) {
@@ -7643,11 +7744,9 @@ async function seedProjectFileActivity(repositories, rows) {
       if (!row) continue;
       let stat; try { stat = await fsp.stat(row.path); } catch { continue; }
       if (stat.mtimeMs < cutoff) continue;
-      if (projectFileActivity[row.path] && Array.isArray(projectFileActivity[row.path].events))
-        projectFileActivity[row.path].events = projectFileActivity[row.path].events.filter(event => event.source === 'git');
-      recordProjectFileActivity(row.path, {
-        id: `working:${repo.id}:${rel}:${Math.round(stat.mtimeMs)}`, ts: stat.mtimeMs,
-        added: Number(addedRaw) || 0, removed: Number(removedRaw) || 0, source: 'working',
+      out.push({
+        id: `working:${repo.id}:${rel}:${Math.round(stat.mtimeMs)}`, ts: stat.mtimeMs, path: row.path, repo_root: repo.root, project,
+        producer: 'working', actor: 'external', outcome: 'applied', added: Number(addedRaw) || 0, removed: Number(removedRaw) || 0, input: 'filesystem',
       });
     }
     for (const item of repo.workingTree.filter(item => item.status === '??')) {
@@ -7655,13 +7754,326 @@ async function seedProjectFileActivity(repositories, rows) {
       if (!row) continue;
       const snap = await readProjectFileSnapshot(row.path);
       if (!snap || snap.mtimeMs < cutoff) continue;
-      if (projectFileActivity[row.path] && Array.isArray(projectFileActivity[row.path].events))
-        projectFileActivity[row.path].events = projectFileActivity[row.path].events.filter(event => event.source === 'git');
-      recordProjectFileActivity(row.path, {
-        id: `new:${repo.id}:${item.path}:${Math.round(snap.mtimeMs)}`, ts: snap.mtimeMs,
-        added: String(snap.text || '').split('\n').length, removed: 0, source: 'working',
+      out.push({
+        id: `new:${repo.id}:${item.path}:${Math.round(snap.mtimeMs)}`, ts: snap.mtimeMs, path: row.path, repo_root: repo.root, project,
+        producer: 'working', actor: 'external', outcome: 'applied', added: String(snap.text || '').split('\n').length, removed: 0, chars: String(snap.text || '').length, input: 'filesystem',
       });
     }
+  }
+  if (out.length) fileLedger.put(out);
+}
+
+// ---- files mode API (design/33 §4.3) ----
+function ledgerSessionTitles(sessions) {
+  for (const s of sessions) {
+    if (!s.convKey) continue;
+    const entry = index[s.convKey];
+    s.title = entry ? (entry.timelineTitle || entry.title || s.convKey) : null;
+    s.source = entry ? entry.source : null;
+    s.live = entry ? isLiveKey(s.convKey) : false;
+  }
+  return sessions;
+}
+
+function isLiveKey(key) {
+  const entry = index[key];
+  return !!(entry && entry.mtimeMs && Date.now() - entry.mtimeMs < 5 * 60 * 1000);
+}
+
+// Home asks for the last 90 days by default: the rows are the files with
+// recent life; the project filter and the file workspace reach further
+// back. Responses cache on the ledger version (one minute of tolerance for
+// the "now" edge), so a busy chart costs one grouping pass, not one per
+// scroll.
+const FILES_TIMELINE_DEFAULT_DAYS = 90;
+const filesTimelineCache = new Map();
+function filesTimelineResponse(params) {
+  if (!fileLedger) throw new Error('the file ledger is unavailable (node:sqlite missing)');
+  const now = Date.now();
+  const to = Number(params.get('to')) || now;
+  const fromRaw = Number(params.get('from'));
+  const from = fromRaw > 1 ? fromRaw : to - FILES_TIMELINE_DEFAULT_DAYS * PROJECT_FILE_DAY;
+  const cacheKey = [Math.floor(from / 60000), Math.floor(to / 60000), params.get('project') || '', params.get('kind') || 'all', params.get('actor') || '', params.get('cap') || ''].join('\0');
+  const hit = filesTimelineCache.get(cacheKey);
+  if (hit && hit.version === fileLedger.version && hit.backfilling === ledgerBackfillRunning) return hit.out;
+  // Home rows are files of the project: inside its folder. A transcript
+  // that wrote /tmp/x.log from this project is real history for that file
+  // (still in the ledger, still in the file view) but not a project row.
+  const cwdCache = new Map();
+  const cwdOf = project => {
+    if (cwdCache.has(project)) return cwdCache.get(project);
+    const meta = projectMetaFor(project);
+    const cwd = meta && meta.cwd ? path.resolve(meta.cwd) : null;
+    cwdCache.set(project, cwd);
+    return cwd;
+  };
+  const out = fileLedger.timeline({
+    from, to, project: params.get('project') || '', kind: params.get('kind') || 'all', actor: params.get('actor') || '',
+    capPerProject: Math.max(1, Math.min(200, Number(params.get('cap')) || 40)),
+    keep: (p, project) => { const cwd = cwdOf(project); return !cwd || p === cwd || p.startsWith(cwd + path.sep); },
+  });
+  for (const p of out.projects) {
+    const cwd = cwdOf(p.project);
+    p.cwd = cwd;
+    for (const row of p.rows) if (cwd) row.rel = path.relative(cwd, row.path);
+  }
+  out.projects = out.projects.filter(p => p.rows.length);
+  out.live = out.convs.map(key => isLiveKey(key));
+  out.rows = fileLedger.count();
+  out.backfilling = ledgerBackfillRunning;
+  filesTimelineCache.set(cacheKey, { version: fileLedger.version, backfilling: ledgerBackfillRunning, out });
+  if (filesTimelineCache.size > 24) filesTimelineCache.delete(filesTimelineCache.keys().next().value);
+  return out;
+}
+
+async function filesTouchedResponse(pathValue) {
+  if (!fileLedger) throw new Error('the file ledger is unavailable');
+  const abs = path.resolve(expandHomePath(pathValue || ''));
+  if (!path.isAbsolute(abs)) throw new Error('missing path');
+  const out = fileLedger.touched(abs);
+  ledgerSessionTitles(out.sessions);
+  for (const s of out.sessions.slice(0, 40)) {
+    if (!s.convKey || !s.firstEventId) continue;
+    const row = fileLedger.db.prepare('SELECT call_id FROM file_events WHERE id = ?').get(s.firstEventId);
+    s.entryId = row && row.call_id ? await entryIdForCall(s.convKey, row.call_id) : null;
+  }
+  const root = await gitRootForCwd(path.dirname(abs)).catch(() => null);
+  out.repoRoot = root || '';
+  out.project = projectNameOf(root || path.dirname(abs));
+  for (const c of out.commits) {
+    if (!root) break;
+    const repo = gitHistoryCache.get(root);
+    const commit = repo && repo.value.commits.find(x => x.hash === c.hash);
+    if (commit) { c.subject = commit.subject; c.shortHash = commit.shortHash; c.author = commit.author; }
+  }
+  return out;
+}
+
+// The transcript entry that made a recorded change: call id → entry id, so
+// a click on a file mark lands on the exact tool call in the conversation.
+const entryByCallCache = new Map();
+async function entryIdForCall(key, callId) {
+  if (!key || !callId) return null;
+  const ck = key + '\0' + callId;
+  if (entryByCallCache.has(ck)) return entryByCallCache.get(ck);
+  let eid = null;
+  try {
+    const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+    const m = (data.messages || []).find(x => x.role === 'tool' && x.id === callId);
+    eid = m && m.eid ? m.eid : null;
+  } catch {}
+  entryByCallCache.set(ck, eid);
+  if (entryByCallCache.size > 2000) entryByCallCache.delete(entryByCallCache.keys().next().value);
+  return eid;
+}
+
+async function filesEntryResponse(params) {
+  if (!fileLedger) throw new Error('the file ledger is unavailable');
+  const key = params.get('key') || '';
+  let callId = params.get('call') || '';
+  const eventId = params.get('event') || '';
+  if (!callId && eventId) {
+    const row = fileLedger.db.prepare('SELECT call_id, conv_key FROM file_events WHERE id = ?').get(eventId);
+    if (row) callId = row.call_id || '';
+  }
+  return { key, callId, entryId: await entryIdForCall(key, callId) };
+}
+
+function filesRidgeResponse(project) {
+  if (!fileLedger) throw new Error('the file ledger is unavailable');
+  const out = fileLedger.projectRidge(project);
+  ledgerSessionTitles(out.items);
+  return out;
+}
+
+// The files-mode project landing: the README (path, text, sha) and the
+// repository roots. The tree itself comes from /api/project/file-history
+// light=1, which also seeds and watches.
+async function filesProjectResponse(project) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('project not found');
+  const cwd = meta.cwd ? path.resolve(meta.cwd) : null;
+  let readme = null;
+  if (cwd && fs.existsSync(cwd)) {
+    const names = ['README.md', 'readme.md', 'Readme.md', 'README.markdown', 'README'];
+    for (const name of names) {
+      const abs = path.join(cwd, name);
+      if (fs.existsSync(abs)) { readme = abs; break; }
+    }
+    if (!readme) {
+      let ents = [];
+      try { ents = await fsp.readdir(cwd); } catch {}
+      const md = ents.filter(name => /\.md$/i.test(name)).sort()[0];
+      if (md) readme = path.join(cwd, md);
+    }
+  }
+  let doc = null;
+  if (readme) {
+    try {
+      const text = await fsp.readFile(readme, 'utf8');
+      doc = { path: readme, text, sha: sha256Hex(text), rel: path.relative(cwd, readme) };
+    } catch {}
+  }
+  const latest = fileLedger ? fileLedger.latestByProject()[project] || 0 : 0;
+  return { project, cwd, readme: doc, conversations: meta.entries.length, latest, area: null, title: (projectTitles[project] && projectTitles[project].title) || null };
+}
+
+// Create the README at the project root (the landing page), not in
+// documents/: agents and humans both look for it there.
+async function filesCreateReadmeResponse(body) {
+  const project = String(body.project || '');
+  const meta = projectMetaFor(project);
+  if (!meta || !meta.cwd) throw new Error('project not found');
+  const abs = path.join(path.resolve(meta.cwd), 'README.md');
+  if (fs.existsSync(abs)) throw new Error('README.md already exists');
+  const text = `# ${project}\n\n`;
+  await writeFileAtomic(abs, text);
+  await recordDocEdit({ ts: Date.now(), path: abs, action: 'create', actor: 'human', input: 'keyboard', added: 2, removed: 0, sha: sha256Hex(text) });
+  ledgerRecordEditorSave(abs, { added: 2, removed: 0, chars: text.length, sha: sha256Hex(text), project });
+  return { ok: true, path: abs };
+}
+
+// ---- ask for a change (design/33 §5.4) ----
+// The target of a file prompt: the newest conversation of this project that
+// touched the file in the last six hours and is free (no terminal owner, no
+// delegation worker, pi), else a new conversation rooted at the project (or
+// its declared area). The client shows the pick as a chip and can flip it.
+const ASK_CONTINUE_WINDOW_MS = 6 * 60 * 60 * 1000;
+function isDelegatedKey(key) { return /(^|:)--delegated--[\\/]/.test(String(key || '')); }
+
+async function filesAskTargetResponse(pathValue, projectValue) {
+  const abs = path.resolve(expandHomePath(pathValue || ''));
+  const root = await gitRootForCwd(path.dirname(abs)).catch(() => null);
+  const project = projectValue || projectNameOf(root || path.dirname(abs));
+  const meta = projectMetaFor(project);
+  const candidates = [];
+  if (fileLedger) {
+    const touched = fileLedger.touched(abs, { limit: 20 });
+    for (const sn of touched.sessions) {
+      if (!sn.convKey || !index[sn.convKey]) continue;
+      const entry = index[sn.convKey];
+      if (entry.source !== 'pi' || isDelegatedKey(sn.convKey)) continue;
+      if (projectOfEntry(entry, sn.convKey) !== project) continue;
+      const lastMs = Date.parse(entry.lastTs || '') || 0;
+      if (Date.now() - lastMs > ASK_CONTINUE_WINDOW_MS) continue;
+      if (findRunningConversation(sn.convKey)) continue;
+      candidates.push({ key: sn.convKey, title: entry.timelineTitle || entry.title || sn.convKey, lastMs, busy: headlessRuns.has(absPathForKey(sn.convKey)) });
+    }
+  }
+  candidates.sort((a, b) => b.lastMs - a.lastMs);
+  const area = meta && meta.cwd ? areaOfCwdIn(project, path.dirname(abs)) : null;
+  return { path: abs, project, area, continue: candidates[0] || null, candidates: candidates.slice(0, 5), newAllowed: !!(meta && meta.cwd) };
+}
+
+async function filesAskResponse(body) {
+  const abs = path.resolve(expandHomePath(String(body.path || '')));
+  const prompt = String(body.prompt || '').trim();
+  if (!prompt) throw new Error('write what should change first');
+  const pick = await filesAskTargetResponse(abs, body.project || '');
+  const project = pick.project;
+  const item = { type: 'file', path: abs };
+  if (Array.isArray(body.range) && body.range.length === 2) item.range = body.range;
+  else if (Number(body.line) > 0) item.line = Number(body.line);
+  const models = normalizePickedModels(body.models);
+  let key = null;
+  let created = false;
+  const wanted = body.target === 'new' ? null : body.target && body.target !== 'auto' ? String(body.target) : pick.continue && pick.continue.key;
+  if (wanted && index[wanted]) key = wanted;
+  if (!key) {
+    if (!pick.newAllowed) throw new Error('no project folder to start a conversation in');
+    const started = await startProjectConversation({
+      project, agent: 'pi', surface: 'rpc', silent: true, models, include: { map: true },
+      area: pick.area || undefined, name: '',
+    });
+    key = started.key;
+    created = true;
+    if (!key) throw new Error('the new conversation did not start');
+  }
+  // The file joins the conversation's attached context and stays there, so
+  // later sends from the transcript keep it; the project map rides along
+  // for a brand-new conversation that has no memory in its system prompt.
+  const context = conversationContextOf(key).filter(c => !(c.type === 'file' && c.path === abs));
+  context.push(item);
+  if (created && !context.some(c => c.type !== 'file' && c.type !== 'chat' && c.project === project)) context.push({ project, kind: 'map' });
+  const lead = models[0] || (created ? null : null);
+  const inherited = !lead ? resolvedProjectDefaultModel(project) : null;
+  const provider = lead ? lead.provider : inherited && inherited.provider;
+  const modelId = lead ? lead.modelId : inherited && inherited.modelId;
+  const out = await startAgentRun(key, { node: null, provider, modelId, message: prompt, images: [], force: false, allowQueue: true, context });
+  const job = out && out.job ? out.job : out;
+  return { ok: true, key, created, queued: !!(out && out.queued), job: job ? jobView(job) : null, title: index[key] ? (index[key].timelineTitle || index[key].title) : null };
+}
+
+// Boot: backfill every conversation, ingest Git for every active project's
+// repositories, and start their watchers. Yields between conversations so
+// requests never wait; progress shows as a job.
+const ledgerJobs = new Map();
+let ledgerBackfillRunning = false;
+async function backfillFileLedger() {
+  if (!fileLedger || ledgerBackfillRunning) return;
+  ledgerBackfillRunning = true;
+  const t0 = Date.now();
+  const job = { id: 'ledger:' + t0, type: 'file-ledger', title: 'file edit ledger', status: 'running', statusText: 'reading transcripts', startedAt: t0, done: 0, total: Object.keys(index).length };
+  let conversations = 0, repos = 0;
+  const announce = () => { ledgerJobs.set(job.id, job); jobChanged(job); };
+  try {
+    const pending = Object.keys(index).filter(key => fileLedger.conversationVersion(key) !== ledgerVersionOf(index[key]));
+    job.total = pending.length;
+    if (pending.length) announce();
+    for (const key of pending) {
+      try { if (await ledgerIngestConversation(key)) conversations++; } catch {}
+      job.done++;
+      if (job.done % 25 === 0) announce();
+      await new Promise(r => setImmediate(r));
+    }
+    job.statusText = 'reading repositories';
+    for (const project of activeProjectNames()) {
+      const meta = projectMetaFor(project);
+      if (!meta) continue;
+      let roots = [];
+      try { roots = await projectGitRepositories(meta); } catch { continue; }
+      if (!roots.length && meta.cwd && fs.existsSync(meta.cwd)) roots = [path.resolve(meta.cwd)];
+      for (const root of roots) {
+        const repo = await loadGitRepository(root).catch(() => null);
+        if (repo) { await ledgerIngestRepo(root, repo, project); repos++; }
+        ensureProjectFileWatch([root], [], project).catch(() => {});
+      }
+      await new Promise(r => setImmediate(r));
+    }
+    job.status = 'done';
+    job.statusText = `${conversations} conversations · ${repos} repositories`;
+  } catch (e) {
+    job.status = 'error'; job.statusText = e.message;
+  } finally {
+    job.finishedAt = Date.now();
+    if (job.total || repos) announce();
+    ledgerBackfillRunning = false;
+  }
+  console.log(`file ledger: ${conversations} conversations, ${repos} repositories, ${fileLedger.count()} rows in ${Date.now() - t0} ms`);
+}
+
+// Projects with a conversation in the last 30 days, plus every registered
+// project: the set whose repositories get boot watchers. Trade-off: one
+// recursive inotify watch per repository; AICONVO_NO_WATCH=1 turns them off.
+function activeProjectNames() {
+  const cutoff = Date.now() - 30 * PROJECT_FILE_DAY;
+  const names = new Set(Object.keys(createdProjects).map(name => projectNameOf(createdProjects[name] && createdProjects[name].cwd) || name));
+  for (const [key, entry] of Object.entries(index)) {
+    if (!entry || !entry.cwd) continue;
+    if ((Date.parse(entry.lastTs || '') || 0) < cutoff) continue;
+    const project = projectOfEntry(entry, key);
+    if (project && project !== LOOSE_PROJECT) names.add(project);
+  }
+  return [...names];
+}
+
+// Folds rename canonical projects; the ledger follows.
+function ledgerRemapProjects() {
+  if (!fileLedger) return;
+  for (const name of fileLedger.projects()) {
+    if (!name) continue;
+    const canonical = canonicalProjectName(name);
+    if (canonical && canonical !== name) fileLedger.remapProject(name, canonical);
   }
 }
 
@@ -7770,10 +8182,11 @@ async function projectFileHistoryResponse(project) {
   projectDiffEvents.set(Date.now(), { at: Date.now(), events: [...fullEvents.values()] });
   const outputRows = [...rows.values()].filter(row => row.current || fs.existsSync(row.path))
     .sort((a, b) => String(b.latestTs || '').localeCompare(String(a.latestTs || '')) || a.relativePath.localeCompare(b.relativePath));
-  await seedProjectFileActivity(repositories, outputRows);
+  await seedProjectFileActivity(repositories, outputRows, project);
+  for (const repo of repositories) await ledgerIngestRepo(repo.root, repo, project);
   for (const row of outputRows) row.recent24 = recentProjectFileActivity(row.path);
   outputRows.sort((a, b) => Number((b.recent24 && b.recent24.latestTs) || 0) - Number((a.recent24 && a.recent24.latestTs) || 0) || a.relativePath.localeCompare(b.relativePath));
-  ensureProjectFileWatch(repositories.map(repo => repo.root), outputRows).catch(() => {});
+  ensureProjectFileWatch(repositories.map(repo => repo.root), outputRows, project).catch(() => {});
   const repositoryEvents = allEvents.filter(event => event.repoId);
   const paired = repositoryEvents.filter(event => event.commitPair).length;
   return {
@@ -8475,7 +8888,13 @@ async function fileSaveResponse(body) {
     const current = await fsp.readFile(abs, 'utf8');
     if (sha256Hex(current) !== baseSha) throw new Error('the file changed on disk after you loaded it — reload and edit again');
   }
+  let oldText = '';
+  try { oldText = await fsp.readFile(abs, 'utf8'); } catch {}
   await writeFileAtomic(abs, text);
+  if (oldText !== text) {
+    const delta = docLineDelta(oldText, text);
+    ledgerRecordEditorSave(abs, { added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text), actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard' });
+  }
   return { ok: true, path: abs, sha: sha256Hex(text) };
 }
 
@@ -8494,6 +8913,18 @@ async function recordDocEdit(entry) {
     await fsp.mkdir(NOTES_DIR, { recursive: true });
     await fsp.appendFile(DOC_EDITS_FILE, JSON.stringify(entry) + '\n');
   } catch {}
+}
+
+// Characters touched by a save: the prefix/suffix-trimmed middle of both
+// texts (what left plus what arrived). Honest for one save; a session sums.
+function docCharDelta(oldText, newText) {
+  const a = String(oldText || ''), b = String(newText || '');
+  let start = 0;
+  const max = Math.min(a.length, b.length);
+  while (start < max && a[start] === b[start]) start++;
+  let endA = a.length, endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA--; endB--; }
+  return (endA - start) + (endB - start);
 }
 
 function docLineDelta(oldText, newText) {
@@ -8526,9 +8957,9 @@ async function docSaveResponse(body) {
     });
     // The 24h activity index (code tree badges) hears about editor saves
     // directly — no dependency on a watcher being attached yet.
-    recordProjectFileActivity(abs, {
-      id: `doc:${Date.now()}:${crypto.randomBytes(3).toString('hex')}`,
-      ts: Date.now(), added: delta.added, removed: delta.removed, source: 'doc',
+    ledgerRecordEditorSave(abs, {
+      added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text),
+      actor: DOC_ACTORS.has(body.actor) ? body.actor : 'human', input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
     });
   }
   return { ok: true, path: abs, sha: sha256Hex(text), changed: oldText !== text };
@@ -8578,6 +9009,7 @@ async function docCommitResponse(body) {
   await gitText(root, ['commit', '--no-verify', '-m', subject, '--', rel]);
   const hash = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
   await recordDocEdit({ ts: Date.now(), path: abs, action: 'commit', hash, subject });
+  ledgerRecordEditorSave(abs, { added: Number(addedRaw) || 0, removed: Number(removedRaw) || 0, chars: null, sha, commitHash: hash });
   scheduleDocCommitTitle(root, hash, diffText);
   return { ok: true, path: abs, hash, subject, sha };
 }
@@ -9765,10 +10197,64 @@ async function loadAttachedChat(item) {
   if (!picked.length) throw new Error('no user or assistant text in that conversation');
   return formatAttachedChat(entry, key, picked);
 }
+// One attached file, rendered for the model (design/33 §5.4): the text
+// with line numbers (whole when small, a window around the selection when
+// not), the selection, the recent edit sessions from the ledger, and the
+// other files those sessions touched. Trust labels ride along.
+const FILE_CONTEXT_WHOLE_MAX = 64 * 1024;
+const FILE_CONTEXT_WINDOW = 200;
+async function fileContextBlock(item) {
+  const abs = path.resolve(item.path);
+  let text;
+  try { text = await fsp.readFile(abs, 'utf8'); } catch (e) { return `### ${abs}\n\n(could not read: ${e.message})`; }
+  if (text.includes('\0')) return `### ${abs}\n\n(binary file, ${text.length} bytes — not inlined)`;
+  const lines = text.split('\n');
+  const focus = item.range ? item.range[0] : item.line || null;
+  const parts = [`### ${abs} ${trustLabel(abs)}`, ''];
+  const root = await gitRootForCwd(path.dirname(abs)).catch(() => null);
+  if (root) parts.push(`- repository: ${root} · path: ${path.relative(root, abs)}`);
+  parts.push(`- ${lines.length} lines · ${text.length} characters`);
+  if (item.range) parts.push(`- the user selected lines ${item.range[0]}–${item.range[1]}`);
+  else if (item.line) parts.push(`- the user's cursor is on line ${item.line}`);
+  const numbered = (from, to) => lines.slice(from - 1, to).map((l, i) => String(from + i).padStart(5, ' ') + ' │ ' + l).join('\n');
+  const fence = '`'.repeat(Math.max(3, ((text.match(/`+/g) || []).reduce((m, x) => Math.max(m, x.length), 0)) + 1));
+  if (text.length <= FILE_CONTEXT_WHOLE_MAX) {
+    parts.push('', '#### Whole file, with line numbers', '', fence, numbered(1, lines.length), fence);
+  } else {
+    const at = focus || 1;
+    const from = Math.max(1, at - FILE_CONTEXT_WINDOW), to = Math.min(lines.length, (item.range ? item.range[1] : at) + FILE_CONTEXT_WINDOW);
+    parts.push('', `#### Lines ${from}–${to} of ${lines.length} (the file is ${Math.round(text.length / 1024)} KB — read the rest with your tools when needed)`, '', fence, numbered(from, to), fence);
+  }
+  if (item.range) {
+    parts.push('', `#### Selected lines ${item.range[0]}–${item.range[1]}`, '', fence, numbered(item.range[0], Math.min(lines.length, item.range[1])), fence);
+  }
+  if (fileLedger) {
+    const touched = fileLedger.touched(abs, { limit: 5 });
+    ledgerSessionTitles(touched.sessions);
+    if (touched.sessions.length) {
+      parts.push('', '#### Recent changes to this file (the aiconvo file ledger)', '');
+      for (const sn of touched.sessions) {
+        const who = sn.actor === 'ai' ? `agent · conversation "${sn.title || sn.convKey}"` : sn.actor === 'human' ? 'the user, in the aiconvo editor' : 'an unexplained write on disk';
+        parts.push(`- ${new Date(sn.start).toISOString()}${sn.end !== sn.start ? ' → ' + new Date(sn.end).toISOString() : ''} · ${who} · +${sn.added} −${sn.removed} lines${sn.n > 1 ? ` · ${sn.n} edits` : ''}`);
+      }
+      const neighbours = new Map();
+      for (const sn of touched.sessions) {
+        if (!sn.convKey) continue;
+        for (const p of fileLedger.conversationPaths(sn.convKey)) if (p !== abs) neighbours.set(p, (neighbours.get(p) || 0) + 1);
+      }
+      const top = [...neighbours].sort((a, b) => b[1] - a[1]).slice(0, 5);
+      if (top.length) parts.push('', '#### Files changed in the same sessions', '', ...top.map(([p]) => `- ${p}`));
+    }
+    if (touched.commits.length) parts.push('', `- ${touched.commits.length} Git commit${touched.commits.length === 1 ? '' : 's'} touch this file; the newest is ${touched.commits[0].hash.slice(0, 10)}`);
+  }
+  return parts.join('\n');
+}
+
 async function writeAttachedContextFile(items) {
   const normalized = normalizeContextItems(items);
-  const maps = normalized.filter(i => i.type !== 'chat');
+  const maps = normalized.filter(i => i.type !== 'chat' && i.type !== 'file');
   const chats = normalized.filter(i => i.type === 'chat');
+  const files = normalized.filter(i => i.type === 'file');
   const chatByKey = new Map();
   for (const c of chats) {
     const prev = chatByKey.get(c.key);
@@ -9812,12 +10298,20 @@ async function writeAttachedContextFile(items) {
   if (chatBlocks.length) {
     parts.push('', '## Attached conversations (user and assistant only)', '', chatBlocks.join('\n\n---\n\n'));
   }
-  if (!docCount && !chatCount) throw new Error('none of those context items exist yet');
+  let fileCount = 0;
+  if (files.length) {
+    const blocks = [];
+    for (const item of files) { blocks.push(await fileContextBlock(item)); fileCount++; }
+    parts.push('', '## Attached files', '',
+      'The user is reading or editing these files in aiconvo and watches them live. When asked for a change, edit the file in place with your tools; do not rewrite unrelated parts; keep the author\'s formatting.', '',
+      blocks.join('\n\n---\n\n'));
+  }
+  if (!docCount && !chatCount && !fileCount) throw new Error('none of those context items exist yet');
   const text = parts.join('\n') + '\n';
   const file = path.join(BRIEFINGS_DIR,
     new Date().toISOString().replace(/[:.]/g, '-') + '-attached-context.md');
   await fsp.writeFile(file, text);
-  return { file, text, tokens: estimateInputTokens(text), docs: docCount, chats: chatCount };
+  return { file, text, tokens: estimateInputTokens(text), docs: docCount, chats: chatCount, files: fileCount };
 }
 
 // Wait for the session file the just-spawned agent creates. `existing` is a
@@ -10787,6 +11281,7 @@ const server = http.createServer(async (req, res) => {
       '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
@@ -10794,6 +11289,7 @@ const server = http.createServer(async (req, res) => {
       '/icon.svg': { file: 'icon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
       '/vendor/mermaid.min.js': { file: 'vendor/mermaid.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
     if (staticFile) {
@@ -11049,6 +11545,43 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/file-history/changes') {
       try { json(res, 200, await fileHistoryChangesResponse(Object.fromEntries(u.searchParams))); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/files/timeline') {
+      try { json(res, 200, filesTimelineResponse(u.searchParams)); }
+      catch (e) { json(res, 503, { error: e.message }); }
+    } else if (u.pathname === '/api/files/touched') {
+      try { json(res, 200, await filesTouchedResponse(u.searchParams.get('path') || '')); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/files/ask-target') {
+      try { json(res, 200, await filesAskTargetResponse(u.searchParams.get('path') || '', u.searchParams.get('project') || '')); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/files/ask-preview' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const items = normalizeContextItems([{ type: 'file', path: p.path, range: p.range, line: p.line }]);
+        if (!items.length) throw new Error('missing file path');
+        json(res, 200, { text: await fileContextBlock(items[0]) });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/files/ask' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 202, await filesAskResponse(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message }); }
+    } else if (u.pathname === '/api/files/entry') {
+      try { json(res, 200, await filesEntryResponse(u.searchParams)); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/files/ridge') {
+      try { json(res, 200, filesRidgeResponse(u.searchParams.get('name') || '')); }
+      catch (e) { json(res, 503, { error: e.message }); }
+    } else if (u.pathname === '/api/files/project') {
+      try { json(res, 200, await filesProjectResponse(u.searchParams.get('name') || '')); }
+      catch (e) { json(res, e.message === 'project not found' ? 404 : 500, { error: e.message }); }
+    } else if (u.pathname === '/api/files/readme' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { json(res, 200, await filesCreateReadmeResponse(JSON.parse(body || '{}'))); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/git/repos') {
       try { json(res, 200, { repos: await discoverGitRepos(u.searchParams.get('refresh') === '1') }); }
       catch (e) { json(res, 500, { error: e.message }); }
@@ -12365,7 +12898,8 @@ server.listen(PORT, HOST, () => {
     sweepOrphanFanouts();
     refreshProjectFolds().catch(() => {})
       .then(() => syncSearchIndex())
-      .then(() => scheduleSemanticSync(2000));
+      .then(() => scheduleSemanticSync(2000))
+      .then(() => backfillFileLedger().catch(e => console.error('file ledger backfill', e.message)));
     seedLeavesFromSnapshots().catch(() => {});
     setInterval(() => { sweepSettledLeaves().catch(() => {}); }, LEAF_SWEEP_MS);
   });

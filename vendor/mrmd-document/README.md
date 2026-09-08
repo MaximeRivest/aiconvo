@@ -11,7 +11,18 @@ Git commits, and provenance; MRMD owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.9.4 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.10.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.10.0: `createCodeEditor(target, {doc, filename, theme, readonly,
+  onChange, onSave, onMarkClick})` — whole-file code editing on the same
+  engine and theme object as the document editor: line numbers, a language
+  picked from the file name (`fileLanguage(name)`: js/ts, python, html,
+  css, json, sql, yaml, r, shell, rust, go, c/c++, java, xml, toml, lua,
+  ruby, dockerfile, diff, markdown), search, and a host-marked gutter
+  (`setLineMarks({line: {glyph, title, cls}})` for trust and provenance).
+  Both editors gain `selection()` (1-based lines, selected text) and
+  `gotoLine(n)`. Aiconvo's files mode uses this instead of its old textarea
+  overlay. The bundle grows from 1.3 MB to 1.6 MB (the compiled-language
+  grammars).
 - 0.9.4: notebook mechanics. `setCellOutput(cell, text)` writes an
   ```output fence under the cell (whitespace-only-gap ownership rule —
   a rerun replaces only the block it owns; empty output removes it;
@@ -33,10 +44,10 @@ Git commits, and provenance; MRMD owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Git commit: `124d914` ("document entry: host theming, selection
-  overlay, notebook cell API"; built by `e2807c4`)
-- SHA-256: `3dd51aae07455a1d773ca05a31bf0676053310451c7a9dbadd542f40330dd015`
-- License: MIT (see `0.9.4/LICENSE`)
+- Git commit: `1c03f74` ("document entry: createCodeEditor (whole-file code
+  editing), selection helpers, file language map")
+- SHA-256: `8c7dd180e56e2e2d8ecd858311d61a9056d3bacaf3d5c22e74fb94ab31cd127d`
+- License: MIT (see `0.10.0/LICENSE`)
 
 ## Features enabled in aiconvo
 

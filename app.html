@@ -509,15 +509,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .project-code .ff-tree .ff-file { padding-top: 2px; padding-bottom: 2px; font-size: inherit; }
 .project-code .ff-tree .ff-lines { font-size: 8.5px; }
 /* project documents: the complete markdown list beside the editor */
-.project-docs .doc-view { height: 100%; min-height: 0; margin: 0; }
-.project-docs .ff-tree { font-size: var(--fs-meta); }
-.project-docs .ff-tree .pdocs-list { margin: 4px 0 0; }
-.project-docs .ff-tree .pdocs-row { padding: 6px 8px; }
-.pdocs-tools { display: flex; gap: 5px; margin-bottom: 5px; }
-.pdocs-tools input[type=search] { flex: 1; min-width: 0; margin: 0; }
-.pdocs-row.on { background: var(--accent-strong); color: var(--accent-ink); }
-.pdocs-row.on .pd-dir, .pdocs-row.on .pd-delta, .pdocs-row.on .pd-when { color: var(--accent-ink); }
-:root[data-theme-mode="binary"] .pdocs-row.on { outline: 2px solid var(--text); outline-offset: -2px; }
 /* ---- document view: aiconvo chrome around the MRMD editing surface ---- */
 .doc-view { height: calc(100vh - 82px); min-height: 400px; display: flex; flex-direction: column; margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-6)); }
 .doc-head { flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
@@ -568,13 +559,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .doc-run-fix .doc-fix-pkg { width: 18ch; height: 22px; font: inherit; font-size: var(--fs-micro); background: var(--surface-1); color: var(--text); border: 1px solid var(--border); padding: 0 6px; }
 .doc-run-fix .doc-fix-go { height: 22px; padding: 0 8px; font-size: var(--fs-micro); }
 /* project documents list */
-.pdocs-list { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); margin: var(--sp-2) 0 var(--sp-3); }
-.pdocs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: baseline; padding: 8px 11px; background: var(--bg); cursor: pointer; border: 0; border-radius: 0; height: auto; text-align: left; font: inherit; color: var(--text); }
-.pdocs-row:hover { background: var(--surface-1); }
-.pdocs-row .pd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
-.pdocs-row .pd-name .pd-dir { color: var(--text-faint); font-weight: 400; }
-.pdocs-row .pd-delta { color: var(--accent); font-size: var(--fs-micro); white-space: nowrap; }
-.pdocs-row .pd-when { color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; }
 /* The project page reads like programming documentation: a sticky table of
    contents on the left, the document with big headings on the right. */
 .pdoclayout { display: flex; gap: var(--sp-4); align-items: flex-start; }
@@ -627,6 +611,93 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pmemline { font-size: var(--fs-micro); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pmemline button { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); }
 .pfoldbtn { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); margin-left: 6px; }
+/* ---- files mode (design/33): lens control, files chart, file workspace ---- */
+#lensBtn { display: inline-flex; flex-shrink: 0; border: 1px solid var(--border); height: 22px; margin-right: var(--sp-2); }
+#lensBtn button { border: 0; border-radius: 0; height: 20px; padding: 0 8px; font: 11px var(--font); color: var(--text-dim); background: transparent; }
+#lensBtn button + button { border-left: 1px solid var(--border); }
+#lensBtn button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
+#lensBtn button:hover:not(.on) { color: var(--text); background: var(--surface-2); }
+#ftabs { display: none; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#ftabs button { flex: 1; border: 0; border-right: 1px solid var(--border); height: 28px; color: var(--text-dim); border-radius: 0; }
+#ftabs button:last-child { border-right: 0; }
+#ftabs button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
+body.lens-files.home #ftabs { display: flex; }
+body.lens-files.home #tabs { display: none; }
+body.lens-files #ganttGroup, body.lens-files #densityTools { display: none; }
+/* the files chart */
+.files-labels, .files-labels::after, .files-labels .project-row-label { width: 236px; }
+.files-labels .project-row-label { padding: 0; }
+.files-labels .fpl-head { display: flex; align-items: baseline; gap: 6px; height: 20px; line-height: 20px; box-sizing: border-box; padding: 0 8px; border-bottom: 1px dashed var(--border); }
+.files-labels .fpl-head strong { font-size: 11px; }
+.files-labels .fpl-head span { color: var(--text-faint); font-size: 9px; margin: 0; }
+.files-labels .fpl-files { position: relative; }
+.file-row-label { position: absolute; left: 0; right: 0; height: 20px; line-height: 20px; padding: 0 8px 0 10px; display: flex; gap: 4px; align-items: center; font-size: 10.5px; white-space: nowrap; overflow: hidden; cursor: pointer; color: var(--text); }
+.file-row-label:hover { background: var(--surface-3); color: var(--accent); }
+.file-row-label .frl-kind { color: var(--text-faint); font-size: 9px; width: 10px; flex: none; }
+.file-row-label .frl-dir { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+.file-row-label .frl-name { font-weight: 600; flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.file-row-label.more { color: var(--text-dim); font-style: italic; }
+.files-labels .project-row-label.hl > span:first-of-type::after { content: none; }
+.files-labels .project-row-label.hl .fpl-head span { font-size: 9px; }
+.fmark .violin { stroke-width: 1; opacity: .95; }
+.fmark.a-ai .violin { fill: url(#aiHatch) !important; }
+.fmark.a-external .violin { fill: var(--surface-1) !important; stroke-dasharray: 2 2; }
+.fmark.failed .violin { fill: transparent !important; stroke: var(--danger) !important; stroke-dasharray: 2 2; }
+.fcommit path { fill: var(--text-dim); stroke: var(--surface-1); stroke-width: 1; cursor: pointer; }
+.fcommit:hover path { fill: var(--text); }
+:root[data-theme-mode="binary"] .fmark.a-human .violin { fill: var(--text) !important; }
+:root[data-theme-mode="binary"] .fmark.a-ai .violin { fill: url(#aiHatch) !important; }
+:root[data-theme-mode="binary"] .fmark.a-external .violin { fill: var(--bg) !important; stroke: var(--text) !important; }
+:root[data-theme-mode="binary"] .fcommit path { fill: var(--text); stroke: var(--bg); }
+/* the file workspace */
+.files-ws .fw-head { flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
+.files-ws .fw-project { margin: 0; font-size: var(--fs-title); font-weight: 700; }
+.files-ws .fw-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34vw; }
+.files-ws .fw-spacer { flex: 1; }
+.fw-who { display: inline-flex; gap: 4px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.fw-chip { display: inline-flex; gap: 4px; align-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--border); border-radius: 0; background: var(--surface-1); color: var(--text-dim); font: 10.5px var(--font); white-space: nowrap; max-width: 220px; overflow: hidden; }
+button.fw-chip { cursor: pointer; }
+button.fw-chip:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
+.fw-chip.a-ai { border-style: dashed; }
+.fw-chip.live { border-color: var(--live); }
+.fw-mode { display: inline-flex; border: 1px solid var(--border); }
+.fw-mode button { border: 0; border-radius: 0; height: 22px; padding: 0 9px; font: 11px var(--font); color: var(--text-dim); background: transparent; }
+.fw-mode button + button { border-left: 1px solid var(--border); }
+.fw-mode button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
+.fw-ridge { flex: 0 0 auto; border-bottom: 1px solid var(--border); background: var(--surface-1); line-height: 0; }
+.fw-ridge svg { display: block; width: 100%; }
+.fw-ridge .fmark { cursor: pointer; }
+.files-ws .doc-view { height: 100%; min-height: 0; margin: 0; }
+.files-ws .code-host > div { max-width: none; padding: 0; }
+.files-ws .code-host .cm-editor { height: 100%; }
+.files-ws .code-host .cm-scroller { overflow: auto; }
+.files-ws .doc-editor-host.code-host { overflow: hidden; display: flex; flex-direction: column; }
+.files-ws .doc-editor-host.code-host > div { flex: 1; min-height: 0; }
+.mrmd-line-mark.t-v { color: var(--success) !important; }
+.mrmd-line-mark.t-d { color: var(--danger) !important; }
+.mrmd-line-mark.fw-changed { color: var(--accent) !important; font-weight: 700; }
+.fw-banner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); font-size: var(--fs-micro); color: var(--text); }
+.fw-banner button { height: 22px; padding: 0 8px; font-size: 11px; }
+:root[data-theme-mode="binary"] .fw-banner { background: var(--bg); border: 2px solid var(--text); }
+.fw-ask { flex: 0 0 auto; border-top: 1px solid var(--border-strong); background: var(--surface-1); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+.fw-ask-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.fw-ask-head select { max-width: 48vw; font: 11px var(--font); height: 22px; }
+.fw-ask textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 58px; font: var(--fs-body) var(--font); padding: 6px 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); }
+.fw-ask-foot { display: flex; gap: 8px; align-items: center; }
+.fw-run { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--border); background: var(--bg); font-size: var(--fs-micro); }
+.fw-run .fw-run-dot { color: var(--live); animation: none; }
+.fw-run .fw-run-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.fw-run.settled { border-color: var(--border-strong); }
+.fw-preview { max-height: 40vh; overflow: auto; margin: 0; padding: 8px; border: 1px solid var(--border); background: var(--bg); font-size: 11px; white-space: pre-wrap; }
+.files-ws.history .ff-compare { display: flex; }
+.agent-ctx-chip.file { cursor: pointer; }
+.agent-ctx-chip.file:hover b { text-decoration: underline; }
+@media (max-width: 700px) {
+  .files-ws .fw-head { padding: 6px; }
+  .files-ws .fw-title { max-width: 100%; }
+  .fw-who { display: none; }
+}
+
 /* ---- settings page ----
    A section list on the left, one pane on the right. The pane is a short
    column: a title, one lead sentence, then controls. Three control shapes:
@@ -913,14 +984,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .ff-dock { flex: 0 0 auto; position: sticky; top: 0; z-index: 30; display: flex; gap: 6px; align-items: center; padding: 6px 8px; background: var(--bg); border-bottom: 1px solid var(--border-strong); }
 .ff-dock button { min-width: 36px; height: 28px; }
 .ff-compare .fi-columns { flex: 1; max-height: none; }
-.file-edit-text { flex: 1; min-height: 0; width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text); border: 0; border-top: 1px solid var(--border); padding: 10px 12px; font: 12.5px/1.5 var(--font); resize: none; }
-.file-edit-text:focus { outline: 0; }
-/* Highlighted code editor: a transparent textarea over a highlighted pre.
-   Both layers share one font, padding, and no-wrap policy so glyphs align. */
-.code-edit { position: relative; flex: 1; min-height: 0; border-top: 1px solid var(--border); }
-.code-edit-hl, .code-edit .file-edit-text { position: absolute; inset: 0; margin: 0; border: 0; padding: 10px 12px; font: 12.5px/1.5 var(--font); white-space: pre; box-sizing: border-box; tab-size: 4; }
-.code-edit-hl { color: var(--text); background: var(--bg); overflow: hidden; pointer-events: none; }
-.code-edit .file-edit-text { width: 100%; height: 100%; background: transparent; color: transparent; caret-color: var(--text); overflow: auto; }
 /* Quick file view: one tool call's change + a fast editor. */
 .quick-file-view { height: calc(100vh - 82px); min-height: 400px; display: flex; flex-direction: column; }
 .qf-head { flex: 0 0 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-bottom: var(--sp-2); }
@@ -1956,6 +2019,7 @@ window.aiconvoSyncTheme();
 </div>
 <script src="/linediff.js"></script>
 <script src="/delegation-ui.js"></script>
+<script src="/filesmode.js"></script>
 <script>
 // An older running service can serve the updated HTML before it knows the
 // new module route. Keep existing conversations usable until its restart.
@@ -2021,9 +2085,11 @@ function unlockLandscape() {
 
 function setRouteKind(kind) {
   // Leaving a document flushes its pending autosave and destroys the editor.
-  // The document surfaces ('doc', 'project-docs') flush themselves when they
-  // swap one document for another.
-  if (kind !== 'doc' && kind !== 'project-docs' && typeof docState !== 'undefined' && docState) flushAndCloseDocument();
+  // The file workspace flushes itself when it swaps one document for another.
+  if (kind !== 'file' && kind !== 'files-project' && typeof docState !== 'undefined' && docState) flushAndCloseDocument();
+  // The file workspace (files mode) owns an editor too: leaving it saves
+  // the draft and destroys the editor. Re-entering rebuilds from scratch.
+  if (kind !== 'file' && kind !== 'files-project' && typeof fileWs !== 'undefined' && fileWs) closeFileWorkspace();
   viewKind = kind;
   queueMicrotask(() => delegationUI.visibilityChanged());
   // Systematic: every navigation starts at the top. #view is the scroller;
@@ -2069,7 +2135,7 @@ function goHome() {
   if (window.fileInk && fileInk.teardown) fileInk.teardown();
   markSettingsClosed();
   if (progressStream) { progressStream.close(); progressStream = null; }
-  setRoute('home', '');
+  setRoute('home', lens === 'files' ? 'files' : '');
   renderTabList();
 }
 
@@ -2090,6 +2156,15 @@ function dispatchHash(h) {
     return;
   }
   if (h.startsWith('note=')) return openNoteFile(h.slice(5));
+  // Files mode (design/33): the lens home, the project landing, the file
+  // workspace. `doc=` stays as an alias for old links.
+  if (h === 'files') { setLens('files', { navigate: false }); return goHome(); }
+  if (h.startsWith('files&project=')) { setLens('files', { navigate: false }); return showFilesProject(h.slice(14)); }
+  if (h === 'file' || h.startsWith('file=') || h.startsWith('file&')) {
+    const f = parseFileHash(h);
+    if (!f.path) return goHome();
+    return openFileWorkspace(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, landing: !!f.landing, back: f.back || null });
+  }
   if (h.startsWith('doc=')) {
     // doc=PATH[&PROJECT][&conv=KEY]. conv= names the conversation the
     // document was opened from, so a reload or a switched window keeps
@@ -2113,15 +2188,17 @@ function dispatchHash(h) {
     if (areaAt >= 0) return showAreaView(project.slice(0, areaAt), project.slice(areaAt + 6));
     const docsAt = project.indexOf('&docs');
     if (docsAt >= 0) {
-      // `&doc=` is always last: a document path may itself contain `&`.
+      // The old documents surface: a document opens in the file workspace,
+      // the list is the files landing (design/33 §5.2).
       const rest = project.slice(docsAt + 5);
       const docAt = rest.indexOf('&doc=');
-      return showProjectDocuments(project.slice(0, docsAt), docAt >= 0 ? rest.slice(docAt + 5) : null);
+      const name = project.slice(0, docsAt);
+      return docAt >= 0 ? openFileWorkspace(rest.slice(docAt + 5), { project: name }) : showFilesProject(name);
     }
     if (project.endsWith('&files')) return showProjectFileHistory(project.slice(0, -6));
     if (project.endsWith('&diffs')) return showProjectDiffs(project.slice(0, -6));
-    if (project.endsWith('&tree')) return showProjectTree(project.slice(0, -5));
-    return showProjectOverview(project);
+    if (project.endsWith('&tree')) return showFilesProject(project.slice(0, -5));
+    return lens === 'files' ? showFilesProject(project) : showProjectOverview(project);
   }
   if (h.startsWith('diffs=')) return showConversationDiffs(h.slice(6));
   if (h.startsWith('filecall=')) {
@@ -2131,7 +2208,7 @@ function dispatchHash(h) {
   if (h.startsWith('blame=')) return showFileBlame(h.slice(6));
   // Browser Back from a file change or a document opened out of the
   // conversation lands on the control that opened it, not at the bottom.
-  if ((viewKind === 'file' || viewKind === 'doc') && conversationFileReturn && conversationFileReturn.key === h)
+  if (viewKind === 'file' && conversationFileReturn && conversationFileReturn.key === h)
     return returnToConversationFile(h, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call);
   return open(h);
 }
@@ -4145,6 +4222,7 @@ function render() {
 }
 function renderNow() {
   renderQueued = false;
+  if (lens === 'files' && tab !== 'repos') { if (viewKind === 'home') { updateActiveBtn(); renderFilesTimeline(); renderSelbar(); } return; }
   if (tab !== 'conv') return;
   updateActiveBtn();
   $('count').textContent = shown.length + ' conversations';
@@ -4165,6 +4243,7 @@ function renderSelbar() {
 $('list').addEventListener('click', e => {
   if (e.timeStamp < suppressClickUntil) return; // a rubber-band drag ended here
   if (!e.target.closest('.tmark')) hideMarkPop();
+  if (lens === 'files' && filesListClick(e)) return;
   const repoLink = e.target.closest('[data-git-repo]');
   if (repoLink) return showGitRepoHistory(repoLink.dataset.gitRepo);
   const foldChip = e.target.closest('[data-fold-from]');
@@ -4261,7 +4340,7 @@ function applyProjectRowHl() {
 $('list').addEventListener('dblclick', e => {
   if (e.timeStamp < suppressClickUntil) return; // a rubber-band drag ended here
   const label = e.target.closest('.project-row-label');
-  if (label) { rowHlProject = null; return showProjectOverview(label.dataset.project); }
+  if (label) { rowHlProject = null; return lens === 'files' ? showFilesProject(label.dataset.project) : showProjectOverview(label.dataset.project); }
   const mark = e.target.closest('.tmark');
   if (mark && viewKind === 'home' && mark.dataset.rel) { hideMarkPop(); return open(mark.dataset.rel); }
 });
@@ -4731,78 +4810,6 @@ function fileLineHtml(highlighted, n) {
   if (!n) return '';
   if (highlighted.ensure) highlighted.ensure(n);
   return highlighted[n - 1] || '';
-}
-
-// ---- highlighted code editor (overlay) ----
-// The textarea stays the single source of truth; the pre behind it only
-// paints colors. Only the lines near the viewport are highlighted, so
-// even multi-hundred-KB files open and repaint instantly. Text outside
-// the window renders as plain text nodes (same glyphs, no colors), which
-// keeps scroll geometry identical. Highlighter entry states are cached
-// per line and invalidated from the first edited line.
-function codeEditHtml(id, lang) {
-  return `<div class="code-edit"><pre id="${id}Hl" class="code-edit-hl" aria-hidden="true"></pre><textarea id="${id}Text" class="file-edit-text" spellcheck="false" wrap="off" data-lang="${esc(lang)}"></textarea></div>`;
-}
-
-function wireCodeEdit(id, lang) {
-  const ta = $(id + 'Text'), hl = $(id + 'Hl');
-  const plain = lang === 'txt';
-  const before = document.createTextNode('');
-  const win = document.createElement('span');
-  const after = document.createTextNode('');
-  hl.textContent = '';
-  hl.append(before, win, after);
-  const MARGIN = 120; // extra highlighted lines above and below the viewport
-  let lines = [''];
-  let states = ['\x1f\x00\x1f']; // states[i]: highlighter state entering line i
-  let winFrom = -1, winTo = -1, raf = 0, pendingForce = false;
-  const snap = st => st.block + '\x1f' + (st.fence === undefined ? '\x00' : st.fence) + '\x1f' + st.code.block;
-  const restore = key => { const p = key.split('\x1f'); return { block: p[0], fence: p[1] === '\x00' ? undefined : p[1], code: { block: p[2] } }; };
-  const advance = (text, st) => text.length > 4000 ? esc(text) : lang === 'md' ? highlightMdLine(text, st) : highlightCodeLine(text, lang, st);
-  const ensureStates = n => {
-    if (states.length > n) return;
-    const st = restore(states[states.length - 1]);
-    for (let i = states.length - 1; i < n; i++) { advance(lines[i], st); states.push(snap(st)); }
-  };
-  const syncScroll = () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; };
-  const lineH = () => { const v = parseFloat(getComputedStyle(ta).lineHeight); return v > 0 ? v : 19; };
-  const paint = force => {
-    if (plain) { before.nodeValue = ''; win.textContent = ''; after.nodeValue = ta.value + '\n'; syncScroll(); return; }
-    const lh = lineH();
-    const top = Math.floor(ta.scrollTop / lh), count = Math.ceil(ta.clientHeight / lh) + 1;
-    const from = Math.max(0, top - 20), to = Math.min(lines.length, top + count + 20);
-    if (!force && from >= winFrom && to <= winTo) { syncScroll(); return; } // still covered
-    winFrom = Math.max(0, top - MARGIN);
-    winTo = Math.min(lines.length, top + count + MARGIN);
-    ensureStates(winFrom);
-    const st = restore(states[winFrom]);
-    const html = [];
-    for (let i = winFrom; i < winTo; i++) html.push(advance(lines[i], st));
-    before.nodeValue = winFrom ? lines.slice(0, winFrom).join('\n') + '\n' : '';
-    win.innerHTML = html.join('\n');
-    after.nodeValue = (winTo < lines.length ? '\n' + lines.slice(winTo).join('\n') : '') + '\n';
-    syncScroll();
-  };
-  const schedule = force => {
-    pendingForce = pendingForce || force;
-    if (raf) return;
-    raf = requestAnimationFrame(() => { raf = 0; const f = pendingForce; pendingForce = false; paint(f); });
-  };
-  ta.oninput = () => {
-    const next = ta.value.split('\n');
-    let same = 0;
-    const max = Math.min(lines.length, next.length);
-    while (same < max && lines[same] === next[same]) same++;
-    if (states.length > same + 1) states.length = same + 1;
-    lines = next;
-    schedule(true);
-  };
-  ta.onscroll = () => { syncScroll(); schedule(false); };
-  return {
-    textarea: ta,
-    value: () => ta.value,
-    set(text) { ta.value = text; lines = text.split('\n'); states.length = 1; winFrom = winTo = -1; paint(true); },
-  };
 }
 
 function fileCompareCell(kind, n, html) {
@@ -5322,6 +5329,7 @@ function jumpFileChange(root, dir) {
   }
   jumpIntervalFile(dir);
 }
+
 
 // ---- trust: vouch / dispute ----
 // A vouch says: "a human checked this exact content at this time." Nothing is
@@ -6059,6 +6067,7 @@ let focusedRenderSeq = 0;
 async function renderFocusedComparison(compare, row) {
   const target = $('ffCompare');
   if (!target) return;
+  if (window.fileWsSuppressCompare && window.fileWsSuppressCompare()) return; // the file workspace keeps its editor
   const seq = ++focusedRenderSeq;
   const rows = await compareRowsFor(compare, row);
   if (seq !== focusedRenderSeq || $('ffCompare') !== target) return;
@@ -6095,49 +6104,13 @@ async function renderFocusedComparison(compare, row) {
 // Edits the CURRENT on-disk file, never a historical snapshot. The save is
 // optimistic: the server refuses it when the disk changed after the read.
 async function openFocusedFileEditor(compare, row) {
-  const target = $('ffCompare');
-  if (!target) return;
-  const lang = fileHighlightLang(compare.relativePath || row.relativePath);
-  // Open instantly with the snapshot already on screen. The disk read
-  // runs in the background and reconciles before save is enabled.
-  const seed = compare.new && typeof compare.new.content === 'string' ? compare.new.content : '';
-  target.innerHTML = `<div class="ff-status">editing the current on-disk file · <code>${esc(compare.relativePath)}</code> · save writes to disk (Git keeps history) · highlight ${esc(lang)}
-      <button id="ffEditSave" class="primary" disabled>save</button> <button id="ffEditCancel">cancel</button> <span id="ffEditState">reading the disk file…</span></div>
-    ${codeEditHtml('ffEdit', lang)}`;
-  const editor = wireCodeEdit('ffEdit', lang);
-  editor.set(seed);
-  editor.textarea.focus();
-  editor.textarea.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
-      e.preventDefault();
-      const b = $('ffEditSave');
-      if (b && !b.disabled) b.click();
-    }
-  });
-  $('ffEditCancel').onclick = () => renderFocusedComparison(compare, row);
-  let d;
-  try { d = await (await fetch('/api/file/read?path=' + encodeURIComponent(compare.path))).json(); }
-  catch { d = { error: 'could not read the file' }; }
-  if (!$('ffEditSave')) return; // the user already left the editor
-  if (d.error) { renderFocusedComparison(compare, row); return errToast(d.error); }
-  if (d.text !== seed) {
-    if (editor.value() !== seed) errToast('the disk file differed from this snapshot — it was reloaded and your first keystrokes were dropped');
-    editor.set(d.text);
-  }
-  $('ffEditState').textContent = '';
-  $('ffEditSave').disabled = false;
-  $('ffEditSave').onclick = async () => {
-    $('ffEditSave').disabled = true;
-    let out;
-    try {
-      out = await (await fetch('/api/file/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: d.path, baseSha: d.sha, text: editor.value() }) })).json();
-    } catch { out = { error: 'network failure' }; }
-    if (out.error) { $('ffEditSave').disabled = false; return errToast('save failed: ' + out.error); }
-    toast('saved · ' + compare.relativePath);
-    invalidateFileCaches(row.id);
-    loadFocusedFile(row);
-  };
+  // Editing happens in the file workspace (files mode): one editor engine,
+  // one save policy, provenance in the gutter. From inside the workspace
+  // this is the write mode; from any other compare it opens the workspace
+  // with a way back here.
+  if (typeof fileWs !== 'undefined' && fileWs) return fileWsEnterWrite();
+  const project = (fileHistoryData && fileHistoryData.project) || (fileHistoryData && fileHistoryData.backProject) || projectOverviewName || null;
+  return openFileWorkspace(compare.path, { project, back: currentHash });
 }
 
 // ---- file history: points once, snapshots by id, cached by content ----
@@ -6335,7 +6308,7 @@ function enterFocusedFile(row, selection = {}) {
   if (ffBack) ffBack.onclick = () => conversationScope
     ? returnToConversationFile(fileHistoryData.key, fileHistoryData.returnPath, fileHistoryData.returnTs, fileHistoryData.returnCall)
     : gitScope
-      ? (fileHistoryData.backProject ? showProjectTree(fileHistoryData.backProject) : showGitRepoHistory(fileHistoryData.cwd, true))
+      ? (fileHistoryData.backProject ? showFilesProject(fileHistoryData.backProject) : showGitRepoHistory(fileHistoryData.cwd, true))
       : showProjectFileHistory(fileHistoryData.project, true);
   if (phoneLayout() && ffBack) ffBack.textContent = '← back';
   if ($('ffLatest')) $('ffLatest').onclick = jumpToLatestConversationChanges;
@@ -6450,32 +6423,8 @@ function renderQuickFileView(data, ctx) {
 }
 
 function renderQuickFileEditor(data, ctx) {
-  const body = $('view').querySelector('.qf-body');
-  if (!body || !data.disk) return;
-  const lang = fileHighlightLang(data.relativePath || data.path);
-  body.classList.add('editing');
-  body.innerHTML = `<div class="ff-status">editing the current on-disk file · save writes to disk (Git keeps history) · highlight ${esc(lang)}
-      <button id="qfSave" class="primary" title="Ctrl+S">save</button> <button id="qfCancel">cancel</button></div>${codeEditHtml('qfEdit', lang)}`;
-  const editor = wireCodeEdit('qfEdit', lang);
-  editor.set(data.disk.text);
-  editor.textarea.focus();
-  editor.textarea.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); $('qfSave') && $('qfSave').click(); }
-  });
-  $('qfCancel').onclick = () => renderQuickFileView(data, ctx);
-  $('qfSave').onclick = async () => {
-    $('qfSave').disabled = true;
-    let out;
-    try {
-      out = await (await fetch('/api/file/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: data.disk.path, baseSha: data.disk.sha, text: editor.value() }) })).json();
-    } catch { out = { error: 'network failure' }; }
-    if (out.error) { $('qfSave').disabled = false; return errToast('save failed: ' + out.error); }
-    data.disk.text = editor.value();
-    data.disk.sha = out.sha;
-    toast('saved · ' + (data.relativePath || data.path));
-    renderQuickFileView(data, ctx);
-  };
+  // The file workspace edits; Back returns to this conversation.
+  openFileWorkspace(data.disk.path, { project: currentProjectName(), back: ctx.key });
 }
 
 // ---- keyboard flow: pick file changes, drive the quick file view ----
@@ -6767,7 +6716,7 @@ async function showProjectFileHistory(name, reuse = false) {
     <div class="fg-scroll" id="fgScroll"><div class="fg-axis"><div class="fg-corner">repository-relative file</div><div class="fg-time-axis" id="fgAxis"></div></div><div id="fgRows"></div></div>
     <div class="diff-card" id="diffCard" hidden></div>
   </div>`;
-  $('fgBack').onclick = () => showProjectTree(name);
+  $('fgBack').onclick = () => showFilesProject(name);
   $('fgSearch').oninput = renderFileGanttChart;
   $('fgBranch').onchange = renderFileGanttChart;
   $('fgMode').onchange = renderFileGanttChart;
@@ -7088,7 +7037,7 @@ async function showProjectDiffs(name) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal aiconvo startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -7622,41 +7571,11 @@ function unwrapHardLines(text) {
   return { text: out.join('\n'), joins };
 }
 
-// The standalone document view (a markdown link from a conversation, or a
-// #doc= hash). Project documents normally open inside the project's
-// documents page instead, where the complete list sits beside the editor.
-// fromConversation: the key of the conversation whose path link opened this
-// document. Then the back control returns to that conversation at the link
-// (rememberConversationFileReturn), and the route keeps the origin so a
-// reload or a window switch does not lose it. Without it, the document
-// belongs to the project's documents page.
+// `#doc=` links (older) open the file workspace; a conversation origin
+// becomes the way back.
 async function openDocument(docPath, project = null, fromConversation = null) {
   if (!docPath) return;
-  markSettingsClosed();
-  flushAndCloseDocument();
-  if (project) projectOverviewName = project;
-  const name = String(docPath).split('/').pop();
-  const doc = { label: '☰ ' + name, title: docPath };
-  // The project segment stays optional (old links keep working); it is
-  // only written empty when a conv= segment must follow it.
-  const hash = 'doc=' + encodeURIComponent(docPath) +
-    (project ? '&' + encodeURIComponent(project) : fromConversation ? '&' : '') +
-    (fromConversation ? '&conv=' + encodeURIComponent(fromConversation) : '');
-  setRoute('doc', hash);
-  const back = fromConversation ? ['← conversation', 'Back to the conversation, at the link that opened this document']
-    : project ? ['← documents', 'Every markdown document in ' + project] : null;
-  $('view').innerHTML = `<div class="doc-view">${documentHeadHtml(docPath, back)}
-    <div class="doc-editor-host"><div id="docEditor"></div></div>
-  </div>`;
-  if ($('docBack')) $('docBack').onclick = () => {
-    if (!fromConversation) return showProjectDocuments(project, docPath);
-    // After a reload the return point is gone: open the conversation plainly
-    // rather than guess at a control.
-    const saved = conversationFileReturn && conversationFileReturn.key === fromConversation ? conversationFileReturn : null;
-    if (saved) returnToConversationFile(fromConversation, saved.path, saved.ts, saved.call);
-    else open(fromConversation);
-  };
-  await mountDocumentEditor(docPath, project);
+  return openFileWorkspace(docPath, { project: project || null, back: fromConversation || null });
 }
 
 // The editor head bar. Ids are shared with the project documents page, so
@@ -7737,102 +7656,8 @@ async function mountDocumentEditor(docPath, project = null) {
   st.editor.focus();
 }
 
-// ---- project documents (home ▸ project ▸ documents) ----
-// Authored markdown is a primary project object, like code, so it gets its
-// own surface: the complete list of every .md file in the project's
-// repositories on the left (newest activity first, filterable), the MRMD
-// editor on the right. The generated memory stays on the overview.
-let projectDocsSeq = 0;
-const projectDocsHash = (name, docPath) => 'project=' + encodeURIComponent(name) + '&docs' + (docPath ? '&doc=' + encodeURIComponent(docPath) : '');
-
-async function showProjectDocuments(name, docPath = null) {
-  if (!name) return;
-  markSettingsClosed();
-  flushAndCloseDocument();
-  projectOverviewName = name;
-  const seq = ++projectDocsSeq;
-  setRoute('project-docs', projectDocsHash(name, docPath));
-  // Phone: the list first when nothing was asked for, the editor when a
-  // document was (same show-tree switch as the code surface).
-  const listFirst = phoneLayout() && !docPath;
-  $('view').innerHTML = `<div class="focused-file-view project-code project-docs${listFirst ? ' show-tree' : ''}">
-    <div class="project-code-bar"><b>${esc(name)}</b>${projectSwitchHtml('documents')}<button id="pdTreeToggle" class="mobile-only" type="button">${listFirst ? 'editor' : 'documents'}</button><span class="dim" id="pdTitle">reading project documents…</span></div>
-    <div class="ff-layout"><aside class="ff-tree" id="pdTree">
-      <div class="pdocs-tools"><input id="pdFilter" type="search" placeholder="filter documents"><button id="pDocNew" class="ghost" title="Create a markdown document in ${esc(name)}/documents/">+ new</button></div>
-      <div class="ff-tree-summary" id="pdSummary"></div><div id="pDocsList" class="dim">reading project documents…</div></aside>
-      <main class="ff-main" id="pdMain"></main></div></div>`;
-  wireProjectSwitch(name);
-  const state = { name, docs: [], current: docPath, seq };
-  $('pDocNew').onclick = () => createProjectDocument(name);
-  $('pdTreeToggle').onclick = () => setProjectDocsPane(!$('view').querySelector('.project-docs').classList.contains('show-tree'));
-  let d;
-  try { d = await (await fetch('/api/project/docs?name=' + encodeURIComponent(name))).json(); }
-  catch { d = { error: 'network failure' }; }
-  if (seq !== projectDocsSeq || viewKind !== 'project-docs') return;
-  if (d.error) { $('pDocsList').textContent = 'could not list documents: ' + d.error; return; }
-  state.docs = d.docs || [];
-  $('pdSummary').textContent = state.docs.length + ' markdown document' + (state.docs.length === 1 ? '' : 's') + ' · newest activity first';
-  $('pdFilter').oninput = () => renderProjectDocsList(state);
-  renderProjectDocsList(state);
-  // Like the code surface: land on the most recently active document.
-  // On the phone the auto-pick loads behind the list; only an explicit
-  // choice (or a document in the hash) reveals the editor pane.
-  const first = docPath || (state.docs[0] && state.docs[0].path);
-  if (first) openProjectDocument(state, first, { reveal: !listFirst });
-  else $('pdMain').innerHTML = '<div class="empty">no markdown documents yet.<div class="hint">+ new creates the first one in documents/.</div></div>';
-}
-
-// Phone only: show the list (true) or the editor (false).
-function setProjectDocsPane(list) {
-  const root = $('view').querySelector('.project-docs');
-  if (!root) return;
-  root.classList.toggle('show-tree', list);
-  const b = $('pdTreeToggle');
-  if (b) b.textContent = list ? 'editor' : 'documents';
-}
-
-// The complete list — never capped. The filter narrows by path.
-function renderProjectDocsList(state) {
-  const host = $('pDocsList');
-  if (!host) return;
-  const q = (($('pdFilter') && $('pdFilter').value) || '').trim().toLowerCase();
-  const docs = q ? state.docs.filter(doc => doc.rel.toLowerCase().includes(q)) : state.docs;
-  host.classList.remove('dim');
-  if (!state.docs.length) { host.innerHTML = '<span class="dim">no markdown documents yet — create the first one.</span>'; return; }
-  if (!docs.length) { host.innerHTML = '<span class="dim">no document matches the filter.</span>'; return; }
-  host.innerHTML = `<div class="pdocs-list">${docs.map(doc => {
-    const parts = doc.rel.split('/');
-    const base = parts.pop();
-    const delta = doc.recent24 && doc.recent24.events
-      ? `${doc.recent24.added ? '+' + doc.recent24.added : ''}${doc.recent24.added && doc.recent24.removed ? ' ' : ''}${doc.recent24.removed ? '−' + doc.recent24.removed : ''}`
-      : '';
-    const when = doc.recent24 && doc.recent24.latestTs ? ago(Date.now() - doc.recent24.latestTs) : ago(Date.now() - doc.mtimeMs);
-    return `<button type="button" class="pdocs-row${doc.path === state.current ? ' on' : ''}" data-p-doc="${esc(doc.path)}" title="${esc(doc.path)}">
-      <span class="pd-name">${parts.length ? `<span class="pd-dir">${esc(parts.join('/'))}/</span>` : ''}${esc(base)}</span>
-      <span class="pd-delta">${esc(delta)}</span><span class="pd-when">${esc(when)}</span></button>`;
-  }).join('')}</div>`;
-  host.querySelectorAll('[data-p-doc]').forEach(b => b.onclick = () => openProjectDocument(state, b.dataset.pDoc));
-}
-
-// Open one document in the right pane. The hash follows, so a reload or a
-// shared link lands on the same document.
-async function openProjectDocument(state, docPath, { reveal = true } = {}) {
-  if (!docPath || viewKind !== 'project-docs' || state.seq !== projectDocsSeq) return;
-  flushAndCloseDocument();
-  state.current = docPath;
-  setRoute('project-docs', projectDocsHash(state.name, docPath));
-  const doc = state.docs.find(x => x.path === docPath);
-  $('pdTitle').textContent = doc ? doc.rel : docPath;
-  $('pdTitle').title = docPath;
-  const list = $('pDocsList');
-  if (list) list.querySelectorAll('.pdocs-row').forEach(b => b.classList.toggle('on', b.dataset.pDoc === docPath));
-  $('pdMain').innerHTML = `<div class="doc-view">${documentHeadHtml(docPath, null)}<div class="doc-editor-host"><div id="docEditor"></div></div></div>`;
-  if (phoneLayout() && reveal) setProjectDocsPane(false);
-  await mountDocumentEditor(docPath, state.name);
-}
-
-// New document: ask for a name, create <project>/documents/<name>.md, open it
-// on the documents page (the list refreshes so the new file appears).
+// New document: ask for a name, create <project>/documents/<name>.md, open
+// it in the file workspace.
 async function createProjectDocument(project) {
   const name = prompt('Document name (a .md file in ' + project + '/documents/):');
   if (!name || !name.trim()) return;
@@ -7841,15 +7666,15 @@ async function createProjectDocument(project) {
   catch { out = { error: 'network failure' }; }
   if (out.error) return errToast(out.error);
   toast('✓ created ' + name.trim());
-  showProjectDocuments(project, out.path);
+  openFileWorkspace(out.path, { project });
 }
 
-// One stable switch joins the three project surfaces: the overview (vision,
-// epics, areas, generated memory), the authored documents, and the code.
-// File history and the whole-file diff live inside the code surface.
+// One switch joins the two project surfaces: the overview (vision, epics,
+// areas, generated memory) and the files landing (README, tree, ridge —
+// design/33). File history and the whole-file diff live in the workspace.
 function projectSwitchHtml(active) {
   const item = (key, label) => `<button type="button" role="tab" data-project-surface="${key}" class="${active === key ? 'on' : ''}" aria-selected="${active === key}">${label}</button>`;
-  return `<nav class="project-switch" role="tablist" aria-label="Project view">${item('overview', 'overview')}${item('documents', 'documents')}${item('code', 'code')}</nav>`;
+  return `<nav class="project-switch" role="tablist" aria-label="Project view">${item('overview', 'overview')}${item('files', 'files')}</nav>`;
 }
 
 function wireProjectSwitch(name, root = $('view')) {
@@ -7857,35 +7682,8 @@ function wireProjectSwitch(name, root = $('view')) {
   root.querySelectorAll('[data-project-surface]').forEach(button => button.onclick = () => {
     const key = button.dataset.projectSurface;
     if (key === 'overview') showProjectOverview(name);
-    else if (key === 'documents') showProjectDocuments(name);
-    else showProjectTree(name);
+    else showFilesProject(name);
   });
-}
-
-// ---- project code (home ▸ project ▸ code) ----
-// Opens the busiest file of the project in the whole-file view.
-async function showProjectTree(name) {
-  if (!name) return;
-  markSettingsClosed();
-  projectOverviewName = name;
-  setRoute('project-tree', 'project=' + encodeURIComponent(name) + '&tree');
-  $('view').innerHTML = `<div class="project-overview"><div class="phead"><h2>${esc(name)} · code</h2><div class="pmeta">indexing files and recent edits…</div>${projectSwitchHtml('code')}</div></div>`;
-  wireProjectSwitch(name);
-  let data = fileHistoryData && fileHistoryData.project === name && fileHistoryData.projectCode ? fileHistoryData : null;
-  if (!data) {
-    // light=1: the tree needs paths and 24 h activity, not every event (40 KB, not 3.7 MB).
-    data = await (await fetch('/api/project/file-history?name=' + encodeURIComponent(name) + '&light=1')).json();
-    invalidateFileCaches();
-  }
-  if (data.error) { $('view').innerHTML = `<div class="empty">could not read project code.<div class="hint">${esc(data.error)}</div></div>`; return; }
-  data.projectCode = true;
-  fileHistoryData = data;
-  diffScope = { scope: 'project' };
-  focusedFileWindow = null;
-  const rows = data.rows || [];
-  const row = rows.find(item => item.recent24 && item.recent24.events) || rows.find(item => item.workingTree) || rows[0];
-  if (!row) { $('view').innerHTML = `<div class="project-overview"><h2>${esc(name)} · code</h2>${projectSwitchHtml('code')}<div class="empty">no files found.</div></div>`; wireProjectSwitch(name); return; }
-  enterFocusedFile(row);
 }
 
 // ---- project overview (design/14-project-overview.md) ----
@@ -11225,6 +11023,7 @@ function attachedContext() {
 
 function contextId(c) {
   if (c && c.type === 'chat') return 'chat:' + c.key + ':' + (c.i == null ? '*' : c.i);
+  if (c && c.type === 'file') return 'file:' + c.path;
   return 'map:' + (c && c.project || '') + ':' + (c && c.kind || '');
 }
 function contextHasItem(item) {
@@ -11336,6 +11135,12 @@ function contextChipParts(c) {
     const short = String(title).replace(/\s+/g, ' ').trim().slice(0, 28);
     return ['chat', c.i == null ? short : short + ' · turn'];
   }
+  if (c.type === 'file') {
+    // A file attached from the file workspace (files mode): its name, and
+    // the lines when a selection went along.
+    const name = String(c.path || '').split('/').pop();
+    return ['file', name + (c.range ? ` · ${c.range[0]}–${c.range[1]}` : c.line ? ` · line ${c.line}` : '')];
+  }
   return [c.project || '?', c.kind || ''];
 }
 
@@ -11345,8 +11150,9 @@ function renderAgentContext() {
   const items = attachedContext();
   box.innerHTML = items.map((c, i) => {
     const [lead, rest] = contextChipParts(c);
-    return `<span class="agent-ctx-chip"><b>@${esc(lead)}</b> ${esc(rest)}<button type="button" data-rm="${i}" title="Remove this context">x</button></span>`;
+    return `<span class="agent-ctx-chip${c.type === 'file' ? ' file' : ''}"${c.type === 'file' ? ` data-ctx-file="${esc(c.path)}" title="${esc(c.path)} · click to open the file"` : ''}><b>@${esc(lead)}</b> ${esc(rest)}<button type="button" data-rm="${i}" title="Remove this context">x</button></span>`;
   }).join('');
+  box.querySelectorAll('[data-ctx-file]').forEach(el => el.onclick = e => { if (!e.target.closest('[data-rm]')) openFileWorkspace(el.dataset.ctxFile, { project: currentProjectName(), back: activeRel }); });
   box.querySelectorAll('[data-rm]').forEach(b => {
     b.onclick = () => {
       window._agentContext.splice(Number(b.dataset.rm), 1);
@@ -14818,6 +14624,7 @@ async function showEpicEvidence(id, focusKey = activeRel) {
 function setTab(t) {
   if (window.fileInk && fileInk.teardown) fileInk.teardown();
   tab = t;
+  if (typeof applyLensChrome === 'function') applyLensChrome();
   delete $('list').dataset.initScroll; // each tab scrolls to "now" on first paint
   document.querySelectorAll('#tabs button[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   $('selShown').hidden = t !== 'conv';
@@ -14933,6 +14740,7 @@ function renderEpicsTab() {
 }
 
 function renderTabList() {
+  if (lens === 'files' && tab !== 'repos') { tab = 'conv'; applyLensChrome(); return render(); }
   if (tab === 'notes') renderNotesTab();
   else if (tab === 'epics') renderEpicsTab();
   else if (tab === 'repos') renderReposTab();
@@ -16874,6 +16682,9 @@ document.addEventListener('keydown', e => {
   if (quickFileKeydown(e)) return;
   if (filePickKeydown(e)) return;
   if (treeKeydown(e)) return;
+  if (typeof fileWsKey === 'function' && fileWsKey(e)) { e.preventDefault(); return; }
+  // F flips the lens: conversations ⇄ files (design/33).
+  if (e.key === 'F' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); setLens(lens === 'files' ? 'conv' : 'files'); return; }
   // Brackets and PageUp/PageDown move the transcript by nearly one screen.
   if ($('conversationTranscript') && (e.key === '[' || e.key === ']' || e.key === 'PageUp' || e.key === 'PageDown')) {
     e.preventDefault();
@@ -17128,7 +16939,9 @@ live.onmessage = ev => {
     if (d.key) open(d.key, 'bottom').catch(() => {});
     return;
   }
+  if (d.type === 'file-activity') { fileWsFileActivity(d); return; }
   if (d.type === 'run-event') {
+    if (typeof fileWsRunEvent === 'function') fileWsRunEvent(d);
     if (d.final) {
       if (window._sendPendingKey === d.key || window._sendPendingKey === d.fanoutRootKey) window._sendPendingKey = null;
       markAgentFinished(d.fanoutRootKey || d.key, d.finishedAt);
