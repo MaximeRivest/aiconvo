@@ -127,7 +127,7 @@ const usageIdx = usageLib.openUsageIndex(USAGE_DB_FILE);
 // to every file, from transcripts, Git, the editor, and the watcher. A
 // derived cache too; the boot backfill rebuilds it when it is missing.
 const fileLedgerLib = require('./fileledger.js');
-const fileLedger = fileLedgerLib.openFileLedger(path.join(CACHE_DIR, 'files.db'));
+const fileLedger = process.env.AICONVO_NO_LEDGER === '1' ? null : fileLedgerLib.openFileLedger(path.join(CACHE_DIR, 'files.db'));
 let usagePricingCatalog = null;
 function pricingCatalog() {
   if (!usagePricingCatalog) usagePricingCatalog = usageLib.loadPricingCatalog();
@@ -7600,7 +7600,11 @@ async function ledgerIngestConversation(key, { announce = false } = {}) {
   if (!entry) { fileLedger.dropConversation(key); return 0; }
   const version = ledgerVersionOf(entry);
   if (fileLedger.conversationVersion(key) === version) return 0;
-  const before = announce ? new Set(fileLedger.conversationPaths(key).map(p => p + '\0' + fileLedger.recent(p, 0).length)) : null;
+  // The diff cache row (every old/new text of every edit) is loaded to
+  // mine the ledger; it must not stay resident for a thousand
+  // conversations. Rows the server already held stay; the rest go back
+  // to disk after the ingest.
+  const held = !!diffCache[key];
   const events = await conversationDiffs(key);
   const project = projectOfEntry(entry, key);
   const rows = [];
@@ -7610,6 +7614,7 @@ async function ledgerIngestConversation(key, { announce = false } = {}) {
     if (row) rows.push(row);
   }
   const n = fileLedger.putConversation(key, version, rows);
+  if (!held) { delete diffCache[key]; diffCacheDiskChecked.delete(key); }
   if (announce && rows.length) {
     const last = rows[rows.length - 1];
     // Announce the newest file only: one event per indexed transcript
@@ -7669,6 +7674,25 @@ function watchedLineDelta(oldText, newText) {
   return { removed: stats.removed, added: stats.added, chars: lineDiff.diffLines(oldText, newText).reduce((s, op) => s + (op.type === 'equal' ? 0 : (op.text || '').length), 0) };
 }
 
+// Watched snapshots are what the next watch event diffs against. Bounded:
+// the oldest go when the total passes 48 MB (a dropped one costs a
+// coarse first delta on its next change, not correctness).
+const PROJECT_FILE_SNAPSHOT_BUDGET = 48 * 1024 * 1024;
+let projectFileSnapshotBytes = 0;
+function rememberProjectFileSnapshot(file, snap) {
+  const prev = projectFileSnapshots.get(file);
+  if (prev) projectFileSnapshotBytes -= prev.text.length;
+  projectFileSnapshots.delete(file);
+  projectFileSnapshots.set(file, snap);
+  projectFileSnapshotBytes += snap.text.length;
+  while (projectFileSnapshotBytes > PROJECT_FILE_SNAPSHOT_BUDGET && projectFileSnapshots.size > 1) {
+    const oldest = projectFileSnapshots.keys().next().value;
+    if (oldest === file) break;
+    projectFileSnapshotBytes -= projectFileSnapshots.get(oldest).text.length;
+    projectFileSnapshots.delete(oldest);
+  }
+}
+
 async function readProjectFileSnapshot(file) {
   try {
     const stat = await fsp.stat(file);
@@ -7682,15 +7706,26 @@ async function readProjectFileSnapshot(file) {
 async function updateWatchedProjectFile(root, relativePath, project = '') {
   const file = path.resolve(root, relativePath);
   if (file !== root && !file.startsWith(root + path.sep)) return;
-  const old = projectFileSnapshots.get(file) || null;
+  let old = projectFileSnapshots.get(file) || null;
   const next = await readProjectFileSnapshot(file);
   if (!old && !next) return;
+  // No snapshot (never read, or evicted): the committed blob is the honest
+  // baseline for a tracked file. Without one, the delta is unknown — it
+  // is recorded as zero, never as "the whole file was added".
+  let unknown = false;
+  if (!old && next) {
+    const rel = path.relative(root, file).replace(/\\/g, '/');
+    const blob = await gitText(root, ['show', 'HEAD:' + rel]).catch(() => null);
+    if (blob !== null) old = { text: blob };
+    else unknown = true;
+  }
   let delta;
-  if (!old) delta = { added: String(next.text || '').split('\n').length, removed: 0, chars: String(next.text || '').length };
+  if (unknown) delta = { added: 0, removed: 0, chars: null };
+  else if (!old) delta = { added: String(next.text || '').split('\n').length, removed: 0, chars: String(next.text || '').length };
   else if (!next) delta = { added: 0, removed: String(old.text || '').split('\n').length, chars: String(old.text || '').length };
   else if (old.text === next.text) return;
   else delta = watchedLineDelta(old.text, next.text);
-  if (next) projectFileSnapshots.set(file, next); else projectFileSnapshots.delete(file);
+  if (next) rememberProjectFileSnapshot(file, next); else projectFileSnapshots.delete(file);
   if (!fileLedger) return;
   const row = {
     id: `watch:${Date.now()}:${crypto.randomBytes(3).toString('hex')}`, ts: Date.now(), path: file, repo_root: root,
@@ -7701,20 +7736,59 @@ async function updateWatchedProjectFile(root, relativePath, project = '') {
 }
 
 const NO_WATCH = process.env.AICONVO_NO_WATCH === '1';
+// Directories no edit of interest lives in. Node's recursive fs.watch on
+// Linux is a JS walk that keeps one watcher per directory — including
+// node_modules and build trees, hundreds of megabytes across forty
+// repositories. This walk skips them and caps the directory count.
+const WATCH_SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'target', 'dist', 'build', '__pycache__', '.cache', '.next', '.nuxt', '.turbo', '.gradle', '.idea', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'coverage', '.tox', '.svelte-kit', 'out', 'bower_components']);
+const WATCH_DIR_CAP = 2500;
+
+function watchRepoTree(root, onChange) {
+  const watchers = new Map();
+  let truncated = false;
+  const remove = dir => {
+    for (const [d, w] of watchers) if (d === dir || d.startsWith(dir + path.sep)) { try { w.close(); } catch {} watchers.delete(d); }
+  };
+  const add = dir => {
+    if (watchers.has(dir)) return;
+    if (watchers.size >= WATCH_DIR_CAP) { truncated = true; return; }
+    let w;
+    try {
+      w = fs.watch(dir, (event, name) => {
+        if (!name) return;
+        const abs = path.join(dir, name);
+        if (WATCH_SKIP_DIRS.has(name)) return;
+        onChange(path.relative(root, abs).replace(/\\/g, '/'));
+        if (event !== 'rename') return;
+        fs.stat(abs, (err, st) => {
+          if (err) { if (watchers.has(abs)) remove(abs); return; }
+          if (st.isDirectory()) add(abs);
+        });
+      });
+    } catch { return; }
+    w.on('error', () => remove(dir));
+    watchers.set(dir, w);
+    fs.readdir(dir, { withFileTypes: true }, (err, entries) => {
+      if (err) return;
+      for (const e of entries) if (e.isDirectory() && !WATCH_SKIP_DIRS.has(e.name)) add(path.join(dir, e.name));
+    });
+  };
+  add(root);
+  return { close: () => remove(root), count: () => watchers.size, truncated: () => truncated };
+}
+
 async function ensureProjectFileWatch(roots, rows, project = '') {
   await mapLimit(rows || [], 24, async row => {
     if (projectFileSnapshots.has(row.path)) return;
     const snap = await readProjectFileSnapshot(row.path);
-    if (snap) projectFileSnapshots.set(row.path, snap);
+    if (snap) rememberProjectFileSnapshot(row.path, snap);
   });
   if (NO_WATCH) return;
   for (const root of roots) {
     if (projectFileWatchers.has(root) || !fs.existsSync(root)) continue;
     try {
-      const watcher = fs.watch(root, { recursive: true }, (event, filename) => {
-        const rel = String(filename || '').replace(/\\/g, '/');
-        if (!rel || rel === '.git' || rel.startsWith('.git/') || rel.includes('/.git/')) return;
-        if (/(^|\/)(node_modules|\.venv|venv|target|dist|build|__pycache__|\.cache)(\/|$)/.test(rel)) return;
+      const watcher = watchRepoTree(root, rel => {
+        if (!rel || rel.split('/').some(part => WATCH_SKIP_DIRS.has(part))) return;
         const key = root + '\0' + rel;
         clearTimeout(projectFileWatchPending.get(key));
         projectFileWatchPending.set(key, setTimeout(() => {
@@ -7722,7 +7796,6 @@ async function ensureProjectFileWatch(roots, rows, project = '') {
           updateWatchedProjectFile(root, rel, project).catch(() => {});
         }, 220));
       });
-      watcher.on('error', () => { try { watcher.close(); } catch {} projectFileWatchers.delete(root); });
       projectFileWatchers.set(root, watcher);
     } catch (error) { console.error('project file watch failed:', root, error.message); }
   }
@@ -8030,6 +8103,7 @@ async function backfillFileLedger() {
       await new Promise(r => setImmediate(r));
     }
     job.statusText = 'reading repositories';
+    if (process.env.AICONVO_LEDGER_DEBUG) console.log('ledger debug: after conversations heapUsed', Math.round(process.memoryUsage().heapUsed / 1e6), 'MB');
     for (const project of activeProjectNames()) {
       const meta = projectMetaFor(project);
       if (!meta) continue;
@@ -8037,8 +8111,13 @@ async function backfillFileLedger() {
       try { roots = await projectGitRepositories(meta); } catch { continue; }
       if (!roots.length && meta.cwd && fs.existsSync(meta.cwd)) roots = [path.resolve(meta.cwd)];
       for (const root of roots) {
+        // Forty repositories' histories must not stay resident after the
+        // ingest (the disk copy makes the next load cheap); only histories
+        // the server already held stay.
+        const held = gitHistoryCache.has(root);
         const repo = await loadGitRepository(root).catch(() => null);
         if (repo) { await ledgerIngestRepo(root, repo, project); repos++; }
+        if (!held) gitHistoryCache.delete(root);
         ensureProjectFileWatch([root], [], project).catch(() => {});
       }
       await new Promise(r => setImmediate(r));
@@ -8052,6 +8131,7 @@ async function backfillFileLedger() {
     if (job.total || repos) announce();
     ledgerBackfillRunning = false;
   }
+  if (process.env.AICONVO_LEDGER_DEBUG) console.log('ledger debug: after repositories heapUsed', Math.round(process.memoryUsage().heapUsed / 1e6), 'MB');
   console.log(`file ledger: ${conversations} conversations, ${repos} repositories, ${fileLedger.count()} rows in ${Date.now() - t0} ms`);
 }
 
@@ -11551,6 +11631,10 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/files/timeline') {
       try { json(res, 200, filesTimelineResponse(u.searchParams)); }
       catch (e) { json(res, 503, { error: e.message }); }
+    } else if (u.pathname === '/api/files/stats') {
+      if (u.searchParams.get('heap') === '1' && isLocalRequest(req)) require('v8').writeHeapSnapshot('/tmp/aiconvo-heap.heapsnapshot');
+      const mem = process.memoryUsage();
+      json(res, 200, { rows: fileLedger ? fileLedger.count() : null, version: fileLedger ? fileLedger.version : null, backfilling: ledgerBackfillRunning, watchers: projectFileWatchers.size, watchedDirs: [...projectFileWatchers.values()].reduce((n, w) => n + (w.count ? w.count() : 1), 0), snapshots: projectFileSnapshots.size, snapshotBytes: projectFileSnapshotBytes, diffCacheRows: Object.keys(diffCache).length, gitHistories: gitHistoryCache.size, memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external, arrayBuffers: mem.arrayBuffers } });
     } else if (u.pathname === '/api/files/touched') {
       try { json(res, 200, await filesTouchedResponse(u.searchParams.get('path') || '')); }
       catch (e) { json(res, 400, { error: e.message }); }

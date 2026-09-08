@@ -511,3 +511,14 @@ Each phase ships on its own and is useful alone.
 - The textarea overlay editor, `showProjectDocuments`, `showProjectTree`
   are gone; `openFocusedFileEditor` and the quick-file `edit file` route to
   the workspace.
+- Memory: the boot ingest evicts the diff-cache rows and Git histories it
+  loaded (they live on disk); watched snapshots are bounded at 48 MB, and a
+  watcher whose baseline is gone diffs against the committed blob or
+  records an unknown (zero) delta — never "the whole file was added".
+  Repository watchers walk directories themselves, skipping node_modules,
+  build trees, and the like, capped at 2500 directories per repository
+  (partial watching beyond that). Measured on this machine: 42 repositories,
+  17k directories, ~130 MB RSS after boot (was 1.1 GB with Node's recursive
+  watch). `GET /api/files/stats` reports rows, watchers, and memory.
+- `AICONVO_NO_LEDGER=1` disables the ledger and files mode data paths;
+  `AICONVO_CACHE_DIR` relocates every derived cache.
