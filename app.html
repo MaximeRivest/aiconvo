@@ -1401,6 +1401,30 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 .msg-media img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .msg-path { border: 0; border-bottom: 1px dotted var(--border-strong); background: transparent; color: var(--cyan); padding: 0; height: auto; font: inherit; text-align: left; }
 .msg-path:hover { background: transparent; color: var(--text); }
+#contextPanel { width: min(1100px, 94vw); max-height: 90vh; overflow: auto; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 20px; }
+#contextPanel::backdrop { background: var(--overlay); }
+#contextPanel header { display: flex; justify-content: space-between; align-items: center; }
+#contextPanel h2, #contextPanel h3 { margin: 8px 0; }
+#contextPanel button, #contextPanel input, #contextPanel select { font: inherit; padding: 6px 9px; }
+.context-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.context-controls input[type=search] { flex: 1; min-width: 150px; }
+.context-columns { display: grid; grid-template-columns: 35% 1fr; gap: 18px; }
+.context-columns section { min-width: 0; }
+#contextPanel [data-results] { max-height: 48vh; overflow: auto; }
+#contextPanel .context-source { display: block; width: 100%; text-align: left; margin-bottom: 8px; white-space: normal; }
+.context-source small { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+#contextPanel pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; font: inherit; font-size: 13px; padding: 12px; border: 1px solid var(--border); }
+#contextPanel [data-scopes] { display: flex; flex-wrap: wrap; gap: 4px; }
+#contextPanel [aria-pressed=true], #contextPanel [aria-current=true] { outline: 2px solid currentColor; }
+#contextPanel button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+#contextPanel footer { border-top: 1px solid var(--border); margin-top: 18px; }
+#contextPanel [data-attached] > div { display: flex; gap: 8px; margin: 5px 0; }
+@media(max-width: 650px) { .context-columns { grid-template-columns: 1fr; } #contextPanel [data-results] { max-height: 22vh; } }
+.file-completion { position: fixed; z-index: 10000; width: min(380px, calc(100vw - 16px)); max-height: 240px; overflow-y: auto; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); box-shadow: 0 3px 12px var(--shadow-soft); font: 14px/1.4 monospace; }
+.file-completion [role=option], .file-completion-status { padding: 6px 10px; }
+.file-completion [role=option] { cursor: pointer; }
+.file-completion [aria-selected=true] { background: var(--surface-3); outline: 1px solid currentColor; outline-offset: -1px; }
+.file-completion small { display: block; overflow-wrap: anywhere; opacity: .7; }
 /* A confirmed file mention inside inline code: same dotted cue as a path button. */
 .md code[data-transcript-path] { cursor: pointer; color: var(--cyan); border-bottom: 1px dotted var(--border-strong); }
 .md code[data-transcript-path]:hover { color: var(--text); }
@@ -2017,6 +2041,8 @@ window.aiconvoSyncTheme();
   </div>
   <div id="readBody" tabindex="0"></div>
 </div>
+<script src="/context-panel.js"></script>
+<script src="/file-completion-ui.js"></script>
 <script src="/linediff.js"></script>
 <script src="/delegation-ui.js"></script>
 <script src="/filesmode.js"></script>
@@ -10588,7 +10614,7 @@ function agentComposerHtml(d) {
     <div class="agent-compose-row">
       ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
-      <button id="agentAt" type="button" title="Add project map sections or conversation chat (@). They ride in the system prompt.">@</button>
+      <button id="agentAt" type="button" title="Inspect and attach background knowledge to this conversation">Context</button>
       <button id="agentSnip" type="button" title="Insert a snippet at the cursor (alt+;). Or type the trigger while writing.">;;</button>
       <button id="agentTree" type="button" title="Open the conversation tree (shift+T): branches, forks, parallel replies">tree</button>
       <button id="agentAttach" type="button">attach image</button>
@@ -11152,7 +11178,7 @@ function renderAgentContext() {
   const items = attachedContext();
   box.innerHTML = items.map((c, i) => {
     const [lead, rest] = contextChipParts(c);
-    return `<span class="agent-ctx-chip${c.type === 'file' ? ' file' : ''}"${c.type === 'file' ? ` data-ctx-file="${esc(c.path)}" title="${esc(c.path)} · click to open the file"` : ''}><b>@${esc(lead)}</b> ${esc(rest)}<button type="button" data-rm="${i}" title="Remove this context">x</button></span>`;
+    return `<span class="agent-ctx-chip${c.type === 'file' ? ' file' : ''}"${c.type === 'file' ? ` data-ctx-file="${esc(c.path)}" title="${esc(c.path)} · click to open the file"` : ''}><b>${esc(lead)}</b> ${esc(rest)}<button type="button" data-rm="${i}" title="Remove this context">x</button></span>`;
   }).join('');
   box.querySelectorAll('[data-ctx-file]').forEach(el => el.onclick = e => { if (!e.target.closest('[data-rm]')) openFileWorkspace(el.dataset.ctxFile, { project: currentProjectName(), back: activeRel }); });
   box.querySelectorAll('[data-rm]').forEach(b => {
@@ -11164,7 +11190,7 @@ function renderAgentContext() {
     };
   });
   const btn = $('agentAt');
-  if (btn) btn.classList.toggle('on', items.length > 0);
+  if (btn) { btn.classList.toggle('on', items.length > 0); btn.textContent = 'Context' + (items.length ? ' · ' + items.length : ''); }
   updateComposeMin();
 }
 
@@ -11181,6 +11207,22 @@ async function persistConversationContext() {
 }
 
 function openAtPalette(seed) {
+  hideAtPop({ silent: true }); hideSlashPop(); hideSnipPop({ silent: true });
+  const key = activeRel;
+  const save = items => {
+    if (activeRel !== key) return;
+    window._agentContext = items;
+    window._ctxTouched = true;
+    renderAgentContext(); persistConversationContext();
+  };
+  return window.openContextPanel({
+    key, project: currentProjectName(), projects: ensureAtIndex,
+    items: attachedContext, has: contextHasItem,
+    add: item => save([...attachedContext(), item]),
+    remove: item => save(attachedContext().filter(c => contextId(c) !== contextId(item))),
+  });
+}
+function openLegacyAtPalette(seed) {
   const pop = $('slashPop');
   if (!pop) return;
   if (window._atDetached && !pop.hidden) return hideAtPop();
@@ -12211,14 +12253,6 @@ function wireAgentComposer() {
         // pi: the palette autocompletes pi's real commands over RPC. No
         // hidden terminal, no keystroke streaming — the TUI adapter is
         // pi's own get_commands + prompt.
-        if (v === '@' || (v.startsWith('@') && !v.includes('\n') && !/\s/.test(v))) {
-          const q = v.slice(1);
-          ta.value = '';
-          autoGrowCompose();
-          updateComposeMin();
-          openAtPalette(q);
-          return;
-        }
         if (v.startsWith('/')) updateSlashPop(ta);
         else if (!window._slashDetached) hideSlashPop();
         return;
@@ -12246,6 +12280,7 @@ function wireAgentComposer() {
         }
       }
     };
+    if (isPi) window.installFileCompletion(ta, activeRel);
     ta.onkeydown = e => {
       // Shift+tab cycles the reasoning level, TUI-style, even while typing.
       if (isPi && e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleThinking(); return; }

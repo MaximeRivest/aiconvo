@@ -709,6 +709,6 @@ return {
 
 // These utilities do not instantiate sessions or load extensions in the host.
 const utilities = createRuntimeEngine();
-module.exports = { createRuntimeEngine, loadSdk, sdkInfo,
+module.exports = { createRuntimeEngine, loadSdk, sdkInfo, piPackageDir,
   piForkAt: utilities.piForkAt, piForkBefore: utilities.piForkBefore };
 

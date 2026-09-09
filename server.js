@@ -1518,6 +1518,7 @@ const appliedContextBySession = new Map();
 function contextSig(items) {
   return normalizeContextItems(items).map(i => i.type === 'chat'
     ? 'chat/' + i.key + (i.i == null ? '' : '/' + i.i)
+    : i.type === 'file' ? 'file/' + i.path + '/' + JSON.stringify([i.range, i.line])
     : i.project + '/' + i.kind).sort().join('|');
 }
 function stopAnyWarmSession(sessionPath) {
@@ -2146,6 +2147,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     // (followUp) instead of failing — the same behavior as typing in the TUI
     // while the model streams. Branch-targeted sends still refuse.
     if (allowQueue && !node) {
+      if (ctxChanged) throw new Error('Context changed while this reply is running. Wait for it to finish before sending with the new context.');
       const record = headlessRuns.get(sessionPath);
       const requested = provider && modelId ? provider + '/' + modelId : null;
       if (requested && record.model && requested !== record.model) {
@@ -5036,6 +5038,11 @@ function projectMemoryIndex() {
       cwd: (meta && meta.cwd) || null,
       conversations: meta && meta.entries ? meta.entries.length : 0,
       docs,
+      documents: Object.fromEntries(MEMORY_DOC_KINDS.filter(kind => docs[kind]).map(kind => {
+        let updatedAt = null;
+        try { updatedAt = fs.statSync(paths[kind]).mtime.toISOString(); } catch {}
+        return [kind, { updatedAt, trust: trustLabel(paths[kind]) }];
+      })),
     });
   }
   out.sort((a, b) => (b.conversations - a.conversations) || a.name.localeCompare(b.name));
@@ -10265,8 +10272,9 @@ async function loadAttachedChat(item) {
   if (!entry) throw new Error('conversation not found');
   const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
   const messages = data.messages || [];
-  let picked;
+  let picked, scope;
   if (Number.isInteger(item.i)) {
+    scope = 'Selected exchange (user and assistant text only).';
     picked = exchangeAround(messages, item.i).filter(m =>
       (m.role === 'user' || m.role === 'assistant') && String(m.text || '').trim());
   } else {
@@ -10276,9 +10284,12 @@ async function loadAttachedChat(item) {
       !m.off &&
       !(m.role === 'user' && (isBootstrapMessage(m.text) || isNoise(m.text))));
     picked = newestChatWithinBudget(chat, ATTACH_CHAT_TOKEN_BUDGET);
+    scope = `Recent history: ${picked.length} of ${chat.length} messages included (approximate ${ATTACH_CHAT_TOKEN_BUDGET}-token budget).` + (picked.length < chat.length ? ' Earlier messages omitted.' : ' All eligible messages fit.');
   }
   if (!picked.length) throw new Error('no user or assistant text in that conversation');
-  return formatAttachedChat(entry, key, picked);
+  const block = formatAttachedChat(entry, key, picked);
+  block.text = scope + '\n\n' + block.text;
+  return block;
 }
 // One attached file, rendered for the model (design/33 §5.4): the text
 // with line numbers (whole when small, a window around the selection when
@@ -10333,15 +10344,15 @@ async function fileContextBlock(item) {
   return parts.join('\n');
 }
 
-async function writeAttachedContextFile(items) {
+async function writeAttachedContextFile(items, { preview = false } = {}) {
   const normalized = normalizeContextItems(items);
   const maps = normalized.filter(i => i.type !== 'chat' && i.type !== 'file');
   const chats = normalized.filter(i => i.type === 'chat');
   const files = normalized.filter(i => i.type === 'file');
   const chatByKey = new Map();
   for (const c of chats) {
-    const prev = chatByKey.get(c.key);
-    if (!prev || c.i == null) chatByKey.set(c.key, c);
+    if (chats.some(other => other.key === c.key && other.i == null) && c.i != null) continue;
+    chatByKey.set(c.key + '\0' + (c.i == null ? '*' : c.i), c);
   }
   const parts = [];
   parts.push('# aiconvo attached context');
@@ -10363,7 +10374,7 @@ async function writeAttachedContextFile(items) {
         if (!byProject.has(item.project)) byProject.set(item.project, []);
         byProject.get(item.project).push('### ' + item.project + ' · ' + kind + ' · ' + doc.path + ' ' + trustLabel(doc.path) + '\n\n' + doc.text.trim());
         docCount++;
-      } catch {}
+      } catch (e) { if (preview && item.kind !== 'map') throw new Error('Could not preview ' + item.project + '/' + kind + ': ' + e.message); }
     }
   }
   for (const [project, docs] of byProject) {
@@ -10376,7 +10387,7 @@ async function writeAttachedContextFile(items) {
       const block = await loadAttachedChat(item);
       chatBlocks.push(block.text);
       chatCount++;
-    } catch {}
+    } catch (e) { if (preview) throw new Error('Could not preview conversation: ' + e.message); }
   }
   if (chatBlocks.length) {
     parts.push('', '## Attached conversations (user and assistant only)', '', chatBlocks.join('\n\n---\n\n'));
@@ -10393,8 +10404,8 @@ async function writeAttachedContextFile(items) {
   const text = parts.join('\n') + '\n';
   const file = path.join(BRIEFINGS_DIR,
     new Date().toISOString().replace(/[:.]/g, '-') + '-attached-context.md');
-  await fsp.writeFile(file, text);
-  return { file, text, tokens: estimateInputTokens(text), docs: docCount, chats: chatCount, files: fileCount };
+  if (!preview) await fsp.writeFile(file, text);
+  return { file: preview ? null : file, text, tokens: estimateInputTokens(text), docs: docCount, chats: chatCount, files: fileCount };
 }
 
 // Wait for the session file the just-spawned agent creates. `existing` is a
@@ -11362,6 +11373,8 @@ const server = http.createServer(async (req, res) => {
     // Images and the APK are not text: no gzip.
     const staticFile = {
       '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/context-panel.js': { file: 'context-panel.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/file-completion-ui.js': { file: 'file-completion-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
@@ -11628,6 +11641,22 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/file-history/changes') {
       try { json(res, 200, await fileHistoryChangesResponse(Object.fromEntries(u.searchParams))); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/files/complete' && req.method === 'GET') {
+      const key = u.searchParams.get('id') || '';
+      if (!index[key]) return json(res, 404, { error: 'conversation not found' });
+      const query = u.searchParams.get('q') || '';
+      if (query.length > 1000) return json(res, 400, { error: 'query too long' });
+      const { cwd } = sessionPathsFor(key);
+      const root = projectMetaFor(projectOfEntry(index[key], key))?.cwd || cwd;
+      const ctl = new AbortController();
+      const abort = () => ctl.abort();
+      res.on('close', abort);
+      const timeout = setTimeout(abort, 5000);
+      try {
+        const dir = require('./pisdk-runtime.js').piPackageDir();
+        const items = await require('./file-completion.js').completeFiles({ piDir: dir, root, cwd, query, signal: ctl.signal });
+        if (!res.destroyed) json(res, 200, { items });
+      } finally { clearTimeout(timeout); res.removeListener('close', abort); }
     } else if (u.pathname === '/api/files/timeline') {
       try { json(res, 200, filesTimelineResponse(u.searchParams)); }
       catch (e) { json(res, 503, { error: e.message }); }
@@ -12086,6 +12115,15 @@ const server = http.createServer(async (req, res) => {
       try {
         const p = JSON.parse(body || '{}');
         json(res, 200, { ok: true, models: saveConversationModels(p.id, p.models) });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/context-preview' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 64000) return json(res, 413, { error: 'Selection too large' }); }
+      try {
+        const p = JSON.parse(body || '{}');
+        if (!index[p.id]) throw new Error('conversation not found');
+        const items = normalizeContextItems(p.context);
+        json(res, 200, items.length ? await writeAttachedContextFile(items, { preview: true }) : { text: '', tokens: 0 });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/attached-context' && req.method === 'PUT') {
       let body = '';
