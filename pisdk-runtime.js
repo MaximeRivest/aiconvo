@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const { execFileSync } = require('child_process');
 const { installCustomPromptPreparation, waitForCustomTurns } = require('./pisdk-custom.js');
+const { forkPiSnapshot } = require('./session-snapshot.js');
 
 const PI_TESTED_VERSION = '0.84.1';
 const WARM_IDLE_MS = 5 * 60 * 1000;
@@ -545,40 +546,16 @@ async function piQueuePrompt(target, message, behavior, images) {
   });
 }
 
-// pi defers writing a branched session that has no assistant message yet;
-// aiconvo indexes fork files immediately, so materialize it now. After
-// createBranchedSession the manager IS the fork (its header and entries).
-function materializeFork(sm, file) {
-  if (fs.existsSync(file)) return;
-  const lines = [JSON.stringify(sm.getHeader()), ...sm.getEntries().map(e => JSON.stringify(e))];
-  fs.writeFileSync(file, lines.join('\n') + '\n');
-}
-
-// Fork THROUGH a node (the fork keeps the node): pi's own
-// SessionManager.createBranchedSession — a file operation, no process.
+// Independent native file forks. Even SDK migration happens on a private
+// snapshot, never on the source owned by a running agent.
 async function piForkAt(target, nodeId) {
-  const { SDK } = await loadSdk();
-  const sm = SDK.SessionManager.open(path.resolve(target.sessionPath));
-  if (!sm.getEntry(nodeId)) throw new Error('branch point not found in the session file');
-  const file = sm.createBranchedSession(nodeId);
-  if (!file) throw new Error('The fork did not complete.');
-  materializeFork(sm, file);
-  return { file, sessionId: SDK.SessionManager.open(file).getSessionId() };
+  const { SDK } = await getSdk();
+  return forkPiSnapshot(SDK.SessionManager, target, nodeId);
 }
 
-// Fork BEFORE a user message: the new session stops before that message;
-// its text comes back so the composer can prefill for edit-and-resubmit.
 async function piForkBefore(target, nodeId) {
-  const { SDK } = await loadSdk();
-  const sm = SDK.SessionManager.open(path.resolve(target.sessionPath));
-  const entry = sm.getEntry(nodeId);
-  if (!entry) throw new Error('branch point not found in the session file');
-  const text = entry.message ? textOfContent(entry.message.content) : '';
-  if (!entry.parentId) throw new Error('cannot fork before the first message — start a new conversation instead');
-  const file = sm.createBranchedSession(entry.parentId);
-  if (!file) throw new Error('The fork did not complete.');
-  materializeFork(sm, file);
-  return { file, sessionId: SDK.SessionManager.open(file).getSessionId(), text };
+  const { SDK } = await getSdk();
+  return forkPiSnapshot(SDK.SessionManager, target, nodeId, { before: true });
 }
 
 // Set the session's reasoning (thinking) level through pi's own runtime

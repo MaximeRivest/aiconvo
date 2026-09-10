@@ -17,6 +17,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const { execFile, execFileSync, spawn } = require('child_process');
 const zlib = require('zlib');
 const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
+const { readSessionSnapshot, publishSession } = require('./session-snapshot.js');
 const settingsLib = require('./settings.js');
 const snippetsLib = require('./snippets.js');
 const memoryFingerprint = require('./memory-fingerprint.js');
@@ -1548,8 +1549,9 @@ function sessionPathsFor(key) {
   return { entry, relPath, sessionPath, cwd };
 }
 
-// Per-session-file operation queue: fork and branch surgery on one file never
-// interleaves. Live ownership (a running pi/claude process) is checked separately.
+// Per-session mutation queue: branch changes and live turns on one file never
+// interleave. Read-only snapshot forks stay outside it. Terminal/delegation
+// ownership is checked separately.
 const sessionFileOps = new Map();
 function withSessionOp(absPath, fn) {
   const prev = sessionFileOps.get(absPath) || Promise.resolve();
@@ -1578,7 +1580,7 @@ async function indexNewSessionFile(newAbs) {
 }
 
 // Fork: continue from a node in a NEW session; the original does not change.
-//  - pi: pi's own runtime forks through the node (bridge, position "at").
+//  - pi: a detached SessionManager extracts the path from a private snapshot.
 //  - Claude: no native arbitrary-node fork exists (verified empirically), so
 //    copy the root→node chain (sessionfork.js) with a temp file + atomic
 //    rename, then resume with `claude --resume <uuid>`.
@@ -1594,27 +1596,24 @@ async function markForkTitle(newKey, srcEntry) {
 
 async function forkSession(key, nodeId) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
-  return withSessionOp(sessionPath, async () => {
-    stopAnyWarmSession(sessionPath);
-    if (entry.source !== 'claude') {
-      const forked = await piEng().piForkAt({ sessionPath, cwd, env: agentEnv() }, nodeId);
-      const newKey = await indexNewSessionFile(forked.file);
-      await markForkTitle(newKey, entry);
-      return { key: newKey, path: forked.file, sessionId: forked.sessionId };
-    }
-    const raw = await fsp.readFile(sessionPath, 'utf8');
-    const newId = crypto.randomUUID();
-    const content = claudeForkContent(raw, nodeId, newId);
-    const newAbs = path.join(path.dirname(sessionPath), `${newId}.jsonl`);
-    const tmp = newAbs + '.tmp-' + process.pid;
-    await fsp.writeFile(tmp, content);
-    await fsp.rename(tmp, newAbs);
-    const relPath = path.relative(SOURCES[entry.source], newAbs);
-    await indexFile(entry.source, relPath, await fsp.stat(newAbs));
-    const newKey = entry.source + ':' + relPath;
+  await assertDelegationOwnership(sessionPath);
+  // Copying immutable saved history is not a mutation of the source. Never
+  // wait behind its live turn or stop its warm runtime. This native utility
+  // is file-only even when the chosen agent engine is RPC.
+  if (entry.source !== 'claude') {
+    const forked = await pisdk.piForkAt({ sessionPath, cwd }, nodeId);
+    const newKey = await indexNewSessionFile(forked.file);
     await markForkTitle(newKey, entry);
-    return { key: newKey, path: newAbs, sessionId: newId };
-  });
+    return { key: newKey, path: forked.file, sessionId: forked.sessionId };
+  }
+  const raw = await readSessionSnapshot(sessionPath);
+  const newId = crypto.randomUUID();
+  const content = claudeForkContent(raw, nodeId, newId);
+  const newAbs = path.join(path.dirname(sessionPath), `${newId}.jsonl`);
+  await publishSession(newAbs, content);
+  const newKey = await indexNewSessionFile(newAbs);
+  await markForkTitle(newKey, entry);
+  return { key: newKey, path: newAbs, sessionId: newId };
 }
 
 // Fork-edit (pi only): fork BEFORE a user message and return its text so the
@@ -1622,12 +1621,11 @@ async function forkSession(key, nodeId) {
 async function forkSessionForEdit(key, nodeId) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (entry.source === 'claude') throw new Error('Editing a past message needs pi. Claude conversations can only fork.');
-  return withSessionOp(sessionPath, async () => {
-    const forked = await piEng().piForkBefore({ sessionPath, cwd, env: agentEnv() }, nodeId);
-    const newKey = await indexNewSessionFile(forked.file);
-    await markForkTitle(newKey, entry);
-    return { key: newKey, path: forked.file, sessionId: forked.sessionId, text: forked.text };
-  });
+  await assertDelegationOwnership(sessionPath);
+  const forked = await pisdk.piForkBefore({ sessionPath, cwd }, nodeId);
+  const newKey = await indexNewSessionFile(forked.file);
+  await markForkTitle(newKey, entry);
+  return { key: newKey, path: forked.file, sessionId: forked.sessionId, text: forked.text };
 }
 
 // In-file branch (pi only). pi's session manager picks its leaf as the LAST
@@ -2507,7 +2505,7 @@ async function startFanOut(key, { node, models, message, images, force, context 
   const contextItems = context !== undefined ? normalizeContextItems(context) : conversationContextOf(key);
   for (let index = 0; index < models.length; index++) {
     const m = models[index];
-    const forked = await forkSession(key, node); // sequential: each fork locks the source briefly
+    const forked = await forkSession(key, node); // sequential publication; the source runtime is untouched
     saveConversationModels(forked.key, [m]);
     if (contextItems.length) saveConversationContext(forked.key, contextItems);
     const fanout = { id: fanoutId, rootKey: key, node: node || null, index, count: models.length };

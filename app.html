@@ -14047,19 +14047,27 @@ async function openAtTs(key, ts) {
 }
 
 async function forkFrom(key, n, btn) {
+  const previous = btn._forkResult;
+  let forkKey = previous?.source === key && previous?.node === n.id ? previous.key : null;
   btn.disabled = true;
-  btn.textContent = 'forking…';
   try {
-    const res = await fetch('/api/fork', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
-    const d = await res.json();
-    if (d.error) throw new Error(d.error);
-    toast('forked — opening the new conversation');
-    await load();
-    open(d.key);
+    if (!forkKey) {
+      btn.textContent = 'copying history…';
+      const res = await fetch('/api/fork', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
+      const d = await res.json();
+      if (!res.ok || d.error || !d.key) throw new Error(d.error || 'The fork could not be confirmed. Refresh the conversation list before retrying.');
+      forkKey = d.key;
+      btn._forkResult = { source: key, node: n.id, key: forkKey };
+    }
+    btn.textContent = 'opening fork…';
+    toast('fork created — its conversation is independent; project files are shared');
+    // Opening the new session must not wait for a refresh of the entire list.
+    await open(forkKey);
+    void load().catch(() => {});
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = 'fork';
-    errToast(e.message || 'the fork failed');
+    btn.textContent = forkKey ? 'open fork' : 'fork';
+    errToast(forkKey ? 'The fork was created, but could not be opened. Click open fork to retry.' : e.message || 'The fork could not be confirmed. Refresh before retrying.');
   }
 }
 
