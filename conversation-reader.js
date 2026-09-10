@@ -183,7 +183,7 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
       if (call) { call._result = m; calls.delete(m.tid); }
     }
   }
-  const out = [], toolEids = new Set(msgs.filter(m => m.role === 'tool').map(m => m.eid));
+  const out = [];
   const hl = text => q ? esc(text).replace(termRegex(q), match => `<mark>${match}</mark>`) : esc(text);
   let work = [], barModel = null;
   const flush = () => {
@@ -214,8 +214,9 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
     if (replacements.has(m.eid) && m.eid !== exact) {
       flush(); if (first) out.push(replacements.get(m.eid));
     } else if ((!skip.has(m.eid) && !ConversationFlow.transport(m)) || m.eid === exact) {
-      const reasoning = m.role === 'assistant' && toolEids.has(m.eid);
-      if (reasoning || ['tool', 'toolresult', 'thinking'].includes(m.role)) work.push(m);
+      // Assistant commentary is addressed to the reader even when the same
+      // source entry also contains tool calls. Preserve its position.
+      if (['tool', 'toolresult', 'thinking'].includes(m.role)) work.push(m);
       else {
         flush();
         if (m.role === 'assistant' && m.model && m.model !== barModel) {
@@ -558,7 +559,7 @@ function liveReplyUnits(L) {
   return units;
 }
 
-function renderLiveReplyLedger(host, jobId, L, saved = new Map()) {
+function renderLiveReplyLedger(host, jobId, L, saved = new Map(), { expandedWork = false } = {}) {
   const selection = window.getSelection();
   let previous = null;
   const place = el => {
@@ -567,7 +568,11 @@ function renderLiveReplyLedger(host, jobId, L, saved = new Map()) {
     previous = el;
   };
   const workKeys = new Set();
+  const savedThrough = L.order.reduce((last, id, i) => saved.has(id) ? i : last, -1);
   for (const unit of liveReplyUnits(L)) {
+    // Work before an already-saved reply is already in the transcript too.
+    // Reopening mid-run must not append a second copy of that work.
+    if (unit.kind === 'work' && unit.order.every(id => L.order.indexOf(id) <= savedThrough)) continue;
     const id = unit.id, b = unit.block;
     const token = jobId + ':' + id;
     if (unit.kind === 'work') {
@@ -580,6 +585,7 @@ function renderLiveReplyLedger(host, jobId, L, saved = new Map()) {
         work._ledger = { order: [], blocks: new Map() };
       }
       place(work);
+      if (expandedWork) work.open = true;
       const blocks = [...unit.blocks.values()];
       const names = [...new Set(blocks.map(b => b.kind === 'tool' ? b.name || 'tool' : 'thinking'))];
       const working = blocks.some(b => b.kind === 'tool' ? b.phase !== 'done' : !b.done);
@@ -609,12 +615,35 @@ function renderLiveReplyLedger(host, jobId, L, saved = new Map()) {
   for (const work of host.querySelectorAll('[data-live-work]')) if (!workKeys.has(work.dataset.liveWork)) work.remove();
 }
 
+function selectedLiveStream() {
+  const runs = [...activeRuns.values()].filter(r => r.key === activeRel);
+  const running = runs.at(-1);
+  if (running) return [running.jobId, runLedgers.get(running.jobId)];
+  return [...runLedgers].filter(([, L]) => L.key === activeRel && L.done).at(-1) || [];
+}
+
+function renderOpenLiveStream(L, jobId) {
+  const host = $('lsBlocks');
+  if (!host || !L || !jobId || current?.key !== activeRel || L.key !== activeRel) return;
+  if (host._replyLedger !== L) {
+    host.replaceChildren(); host._replyLedger = L;
+    host.dataset.conversationKey = L.key;
+    host.scrollTop = 0;
+  }
+  const pin = host.scrollHeight - host.scrollTop - host.clientHeight < 40;
+  renderLiveReplyLedger(host, jobId, L, new Map(), { expandedWork: true });
+  if (pin) host.scrollTop = host.scrollHeight;
+}
+
 function renderLiveReplies() {
   const host = $('liveReplies');
-  if (!host || !current) return;
-  host.dataset.conversationKey = activeRel;
+  if (!host || !current || current.key !== activeRel || host.dataset.conversationKey !== activeRel) return;
   host.hidden = readerIsBrowsing(current);
   if (host.hidden) return;
+  for (const run of [...host.children]) {
+    const owner = runLedgers.get(run.dataset.replyRun);
+    if (!owner || owner.key !== activeRel) run.remove();
+  }
   for (const [jobId, L] of runLedgers) {
     if (L.key !== activeRel || (L.fanoutId && L.fanoutRootKey === activeRel)) continue;
     let run = host.querySelector(`[data-reply-run="${CSS.escape(jobId)}"]`);
@@ -625,7 +654,10 @@ function renderLiveReplies() {
     const saved = savedLiveReplies(L, current.messages);
     const texts = L.order.filter(id => L.blocks.get(id).text);
     if (L.done && texts.length && texts.every(id => saved.has(id))) { run.remove(); continue; }
-    renderLiveReplyLedger(run, jobId, L, saved);
+    // Live text belongs to one visible surface: the open stream or the
+    // transcript. Both are projections of this conversation's same ledger.
+    run.hidden = liveOpen && selectedLiveStream()[1] === L;
+    if (!run.hidden) renderLiveReplyLedger(run, jobId, L, saved);
   }
 }
 

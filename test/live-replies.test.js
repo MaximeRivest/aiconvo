@@ -30,6 +30,16 @@ test('work is grouped between replies, without merging separate messages', () =>
   assert.equal(units[2].order.length, 2);
   assert.equal(units[3].block.text, 'answer');
 });
+test('the actual final-event shape must not erase the run start or replay saved replies', () => {
+  const app = fs.readFileSync(require('node:path').join(__dirname, '../app.html'), 'utf8');
+  const ctx = vm.createContext({ current: null, activeRel: 'A', activeRuns: new Map(), readerLiveMessages: new Map(), savedLiveReplies: savedReplies });
+  vm.runInContext(app.slice(app.indexOf('const runLedgers = new Map();'), app.indexOf('\nfunction setLiveText(', app.indexOf('function ledgerAbsorb('))), ctx);
+  vm.runInContext(`ledgerAbsorb({jobId:'job-A',key:'A',startedAt:1000,tail:[{id:1,kind:'text',text:'hello',done:true}]});
+    ledgerAbsorb({jobId:'job-A',key:'A',status:'done',final:true,finishedAt:1500});`, ctx);
+  const L = vm.runInContext(`runLedgers.get('job-A')`, ctx);
+  assert.equal(L.startedAt, 1000);
+  assert.equal(savedReplies(L, [message('hello', 1200, 'a')]).size, 1);
+});
 test('long replies are matched without losing their beginning', () => {
   const text = 'start' + 'x'.repeat(60000);
   const L = ledger([{ text, done: true }]);

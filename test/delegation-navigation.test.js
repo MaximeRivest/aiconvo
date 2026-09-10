@@ -32,7 +32,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   const $ = id => document.getElementById(id);
   let current = null, activeRel = null, viewKind = 'home', conversationLoadSeq = 0;
   let progressStream = null, currentHash = '', suppressHashEvents = 0, lastNavProject = null, matchIdx = -1;
-  const lastNavConversation = new Map(), modelTouchAt = new Map(), traceLeaves = new Map(), fanoutFocus = new Map(), toolGroupOpen = new Map(), compareCache = new Map();
+  const lastNavConversation = new Map(), modelTouchAt = new Map(), traceLeaves = new Map(), fanoutFocus = new Map(), toolGroupOpen = new Map(), compareCache = new Map(), runLedgers = new Map();
   const sessions = [], calls = [], errors = [];
   let transcriptQuery = '';
   const parent = {key:'parent', source:'pi', entryParents:[['root',null],['launch','root'],['result','launch'],['abort','result'],['other','root'],['new-result','other'],['last','new-result']], messages:[

@@ -12427,7 +12427,7 @@ async function renderConv(scroll) {
   $('view').innerHTML = head + '<div id="conversationDelegations"></div>' +
     (msgs.length ? `<div class="transcript" id="conversationTranscript">` + blocks.join('') + `</div>`
                  : '<div class="empty" id="conversationTranscript">nothing to show in this view.</div>') +
-    `<div id="liveReplies" class="transcript"></div><div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
+    `<div id="liveReplies" class="transcript" data-conversation-key="${esc(d.key)}"></div><div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
     readerDestinationHtml(d) + agentComposerHtml(d);
   restoreLiveReplyHandoff(liveHandoff);
   if ($('readerDestination') && $('composerDock')) $('composerDock').prepend($('readerDestination'));
@@ -12652,10 +12652,14 @@ function ledgerAbsorb(r) {
       }
     }
   }
-  L.statusText = r.statusText; L.model = r.model; L.startedAt = r.startedAt;
-  L.fanoutId = r.fanoutId; L.fanoutRootKey = r.fanoutRootKey; L.fanoutNode = r.fanoutNode;
-  L.fanoutIndex = r.fanoutIndex; L.fanoutCount = r.fanoutCount;
-  L.status = r.status; L.error = r.error;
+  // Events are patches, not complete run snapshots. In particular the final
+  // event carries neither startedAt nor tail. Never erase known ownership.
+  if (r.key && r.key !== L.key) return;
+  for (const field of ['statusText', 'model', 'startedAt', 'fanoutId', 'fanoutRootKey',
+    'fanoutNode', 'fanoutIndex', 'fanoutCount', 'status', 'error', 'finishedAt']) {
+    if (r[field] !== undefined) L[field] = r[field];
+  }
+  if (r.final) L.done = true;
   if (!Array.isArray(r.tail)) return;
   for (const b of r.tail) {
     const id = String(b.id);
@@ -13016,6 +13020,7 @@ function parallelLedgersFor(key) {
 }
 
 function renderParallelStage() {
+  if (!current || current.key !== activeRel || $('liveReplies')?.dataset.conversationKey !== activeRel) return;
   renderReaderParallel($('parallelStage'), parallelLedgersFor(activeRel));
 }
 
@@ -13025,6 +13030,9 @@ function hasRunCardContent(r) {
 }
 
 function renderRunCards() {
+  // Navigation sets activeRel before the asynchronous session fetch finishes.
+  // Until the matching screen exists, no run may paint into the previous one.
+  if (!current || current.key !== activeRel || $('liveReplies')?.dataset.conversationKey !== activeRel) return;
   const host = $('runCards');
   const v = $('view');
   const selection = window.getSelection();
@@ -13127,11 +13135,12 @@ function updateLiveStrip(runs) {
   line.title = liveOpen ? 'Close the full stream' : 'Open the full live stream of this run';
   line.onclick = () => {
     liveOpen = !liveOpen;
+    window._lsLast = 0; // Surface switches are immediate, including on e-ink.
     renderRunCards();
     if (liveOpen) { const h = $('lsBlocks'); if (h) h.scrollTop = h.scrollHeight; }
   };
   if (liveOpen) {
-    renderLsBlocks(L);
+    renderOpenLiveStream(L, r?.jobId || [...runLedgers].find(([, ledger]) => ledger === L)?.[0]);
     const host = $('lsBlocks');
     const chip = $('lsChip');
     host.onscroll = () => { chip.hidden = host.scrollHeight - host.scrollTop - host.clientHeight < 40; };

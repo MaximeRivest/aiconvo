@@ -31,7 +31,7 @@ function fixture() {
   return `<!doctype html><html data-theme="light"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${tokens}\n${css}</style><body><div id="view" style="overflow:auto;flex:1"></div><script>
   const $=id=>document.getElementById(id), noop=()=>{};
   let current=null, activeRel=null, viewKind='home', conversationLoadSeq=0, transcriptQuery='', matchIdx=-1, currentHash='', suppressHashEvents=0;
-  let progressStream=null,lastNavProject=null;
+  let progressStream=null,lastNavProject=null,liveOpen=false;
   const lastNavConversation=new Map(), modelTouchAt=new Map(),traceLeaves=new Map(),fanoutFocus=new Map(),toolGroupOpen=new Map(),compareCache=new Map(),runLedgers=new Map(),activeRuns=new Map();
   const sessions=[], writes=[], errors=[], copied=[];
   const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
@@ -196,10 +196,16 @@ function fixture() {
     check(second.textContent.includes('updated'),'stream destroyed selected text');getSelection().removeAllRanges();renderLiveReplies();
     check(second.textContent.includes('Final second reply'),'paused text did not catch up');
     L.done=true;renderLiveReplies();check(host.contains(first),'finished reply vanished before save');
-    store.chat.messages.push({eid:'stream-a',role:'assistant',text:'First reply',ts:new Date(1100).toISOString()},{eid:'stream-b',role:'assistant',text:'Final second reply',ts:new Date(1200).toISOString()});
+    const oldKey=activeRel;activeRel='other-conversation';
+    runLedgers.set('foreign-stream',{key:activeRel,startedAt:1000,order:['x'],blocks:new Map([['x',{kind:'text',text:'FOREIGN LIVE REPLY'}]])});
+    renderLiveReplies();
+    check(!host.textContent.includes('FOREIGN LIVE REPLY')&&host.dataset.conversationKey===oldKey,'navigation race mixed conversation ledgers');
+    activeRel=oldKey;runLedgers.delete('foreign-stream');
+    store.chat.messages.push({eid:'stream-a',role:'assistant',text:'First reply',ts:new Date(1100).toISOString()},{eid:'stream-a',role:'tool',id:'call-a',name:'bash',text:'printf done',ts:new Date(1100).toISOString()},{eid:'stream-b',role:'assistant',text:'Final second reply',ts:new Date(1200).toISOString()});
     store.chat.entryParents.push(['stream-a','merged'],['stream-b','stream-a']);
     compareCache.delete('chat');resetConversationReading('chat');await open('chat','preserve');renderLiveReplies();
-    check($('conversationTranscript').querySelector('[data-eid="stream-a"]')===first,'save replaced the live message node');
+    check($('conversationTranscript').querySelector('.msg.assistant[data-eid="stream-a"]')===first,'save replaced the live message node');
+    check(!first.closest('.toolgroup'),'saved commentary disappeared into the tools');
     check(!$('liveReplies').textContent.includes('First reply'),'save duplicated reply');
     runLedgers.clear();return {passed:true};
   };
@@ -212,21 +218,29 @@ test('real browser: path fidelity, nested branches, full answers, safe actions, 
   const probe = spawnSync('chromium', ['--version'], { encoding: 'utf8' });
   if (probe.error?.code === 'ENOENT') return t.skip('chromium is not installed');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'conversation-reader-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let server, browser, ws;
+  t.after(async () => {
+    ws?.close();
+    if (browser && browser.exitCode === null && browser.signalCode === null) {
+      const exited = new Promise(resolve => browser.once('exit', resolve));
+      browser.kill('SIGTERM');
+      const timeout = setTimeout(() => browser.kill('SIGKILL'), 3000);
+      try { await exited; } finally { clearTimeout(timeout); }
+    }
+    if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
   const html = fixture();
-  const server = http.createServer((req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
+  server = http.createServer((req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => server.close());
-  const browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--disable-extensions', '--no-first-run', '--user-data-dir=' + dir, '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
-  t.after(() => browser.kill());
+  browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--disable-extensions', '--no-first-run', '--user-data-dir=' + dir, '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const endpoint = await new Promise((resolve, reject) => {
     let stderr = ''; const timer = setTimeout(() => reject(Error(stderr)), 10000);
     browser.stderr.on('data', b => { stderr += b; const m = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });
     browser.on('error', reject);
   });
-  const ws = new WebSocket(endpoint);
+  ws = new WebSocket(endpoint);
   await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
-  t.after(() => ws.close());
   let id = 0; const pending = new Map();
   ws.onmessage = event => { const msg = JSON.parse(event.data); if (pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); } };
   const send = (method, params = {}, sessionId) => new Promise(resolve => { pending.set(++id, resolve); ws.send(JSON.stringify({ id, method, params, sessionId })); });

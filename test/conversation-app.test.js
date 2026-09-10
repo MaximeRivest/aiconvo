@@ -10,7 +10,19 @@ const { spawn, spawnSync } = require('node:child_process');
 test('complete app and server: assets, path switching, merge dialog, and mobile reading', { timeout: 60000 }, async t => {
   if (spawnSync('chromium', ['--version']).error) return t.skip('chromium is not installed');
   const root = path.join(__dirname, '..'), home = fs.mkdtempSync(path.join(os.tmpdir(), 'conversation-app-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let server, browser, ws;
+  const stop = async child => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise(resolve => child.once('exit', resolve));
+    child.kill('SIGTERM');
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 3000);
+    try { await exited; } finally { clearTimeout(timeout); }
+  };
+  t.after(async () => {
+    ws?.close();
+    await stop(browser); await stop(server);
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
   const agent = path.join(home, '.pi/agent'), sessionDir = path.join(agent, 'sessions/fixture');
   fs.mkdirSync(sessionDir, { recursive: true }); fs.mkdirSync(path.join(home, 'work'), { recursive: true });
   const msg = (id, parentId, role, text) => ({ type: 'message', id, parentId, timestamp: '2026-09-01T12:00:00Z', message: { role, content: [{ type: 'text', text }], model: 'fixture' } });
@@ -26,9 +38,8 @@ test('complete app and server: assets, path switching, merge dialog, and mobile 
   const socket = net.createServer(); await new Promise(r => socket.listen(0, '127.0.0.1', r));
   const port = socket.address().port; await new Promise(r => socket.close(r));
   let serverLog = '';
-  const server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_HOST: '127.0.0.1', AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_HOST: '127.0.0.1', AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', b => serverLog += b); server.stderr.on('data', b => serverLog += b);
-  t.after(async () => { server.kill('SIGTERM'); await new Promise(r => server.exitCode != null ? r() : server.once('exit', r)); });
   const base = 'http://127.0.0.1:' + port, key = 'pi:fixture/chat.jsonl';
   let indexed = false;
   for (let i = 0; i < 150; i++) {
@@ -38,14 +49,13 @@ test('complete app and server: assets, path switching, merge dialog, and mobile 
   }
   assert.ok(indexed, serverLog);
   for (const asset of ['conversation-flow.js', 'conversation-reader.js', 'conversation-reader.css']) assert.equal((await fetch(base + '/' + asset)).status, 200, asset);
-  const browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
-  t.after(() => browser.kill());
+  browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const endpoint = await new Promise((resolve, reject) => {
     let log = ''; const timer = setTimeout(() => reject(Error(log)), 10000);
     browser.stderr.on('data', b => { log += b; const m = log.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });
     browser.on('error', reject);
   });
-  const ws = new WebSocket(endpoint); await new Promise(r => ws.onopen = r); t.after(() => ws.close());
+  ws = new WebSocket(endpoint); await new Promise(r => ws.onopen = r);
   let id = 0; const pending = new Map(), exceptions = [];
   ws.onmessage = event => {
     const msg = JSON.parse(event.data);
@@ -94,7 +104,11 @@ test('complete app and server: assets, path switching, merge dialog, and mobile 
   assert.equal(await evaluate(`!!document.querySelector('#liveReplies .md table')`), true, 'streaming Markdown table was not rendered');
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, 'streamed answer overflows phone');
   await evaluate(`liveOpen=true;renderRunCards()`);
-  assert.equal(await evaluate(`document.querySelector('#lsBlocks').textContent.includes('Readable streaming text')`), false, 'reply duplicated in toolbox');
+  assert.equal(await evaluate(`!!document.querySelector('#lsBlocks .md table')`), true, 'open tool stream lost rendered Markdown');
+  assert.equal(await evaluate(`document.querySelector('#liveReplies [data-reply-run]').hidden`), true, 'live reply appeared in both surfaces');
+  assert.equal(await evaluate(`(()=>{const host=document.querySelector('#lsBlocks'),text=host.textContent;return text.indexOf('Checking the details.')<text.indexOf('bash')&&text.indexOf('bash')<text.indexOf('Readable streaming text')})()`), true, 'open stream changed message/tool order');
+  await evaluate(`liveOpen=false;renderRunCards()`);
+  assert.equal(await evaluate(`!document.querySelector('#liveReplies [data-reply-run]').hidden&&!!document.querySelector('#liveReplies .md table')`), true, 'closing stream did not restore transcript replies');
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }, sid);
   await evaluate(`document.querySelector('#view').scrollTop=40;window.liveScrollTop=document.querySelector('#view').scrollTop;testLiveRun.tail[2].text+=' More content.'.repeat(200);testLiveRun.tail[2].done=true;ledgerAbsorb(testLiveRun);renderRunCards()`);
   assert.equal(await evaluate(`document.querySelector('#view').scrollTop===liveScrollTop`), true, 'stream pulled reader to bottom');
