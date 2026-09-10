@@ -2082,6 +2082,9 @@ function unlockLandscape() {
 }
 
 function setRouteKind(kind) {
+  // Capture before the route resets scroll or replaces the conversation DOM.
+  rememberConversationPosition();
+  stopReaderLanding();
   // Leaving a document flushes its pending autosave and destroys the editor.
   // The file workspace flushes itself when it swaps one document for another.
   if (kind !== 'file' && kind !== 'files-project' && typeof docState !== 'undefined' && docState) flushAndCloseDocument();
@@ -2125,7 +2128,7 @@ function setRoute(kind, hash) {
 
 window.addEventListener('hashchange', () => {
   if (suppressHashEvents > 0) { suppressHashEvents--; return; }
-  dispatchHash(decodeURIComponent(location.hash.slice(1)));
+  dispatchHash(decodeURIComponent(location.hash.slice(1)), { restore: true });
 });
 window.addEventListener('popstate', () => {
   // pushState('' ) landings (hash cleared = home) do not fire hashchange.
@@ -2141,7 +2144,7 @@ function goHome() {
 }
 
 // The route dispatcher: one hash grammar for every view.
-function dispatchHash(h) {
+function dispatchHash(h, { restore = false } = {}) {
   if (!h) return goHome();
   if (h === 'settings' || h.startsWith('settings=')) return showSettings(settingsPaneOf(h));
   if (h === 'usage') return showUsageDashboard();
@@ -2179,7 +2182,9 @@ function dispatchHash(h) {
       if (typeof route.key !== 'string' || (route.leaf != null && typeof route.leaf !== 'string')) throw Error();
       readerState(route.key).leaf = route.leaf || null;
       saveReaderState(route.key);
-      return open(route.key, route.anchor ? 'flow:' + route.anchor : 'restore', h);
+      if (viewKind === 'file' && conversationFileReturn?.key === route.key)
+        return returnToConversationFile(route.key, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call, h);
+      return open(route.key, restore ? 'restore' : route.anchor ? 'flow:' + route.anchor : 'restore', h);
     } catch { return errToast('Invalid conversation path link.'); }
   }
   if (h.startsWith('read=')) {
@@ -2221,7 +2226,7 @@ function dispatchHash(h) {
   if (viewKind === 'file' && conversationFileReturn && conversationFileReturn.key === h)
     return returnToConversationFile(h, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call);
   readerState(h).leaf = null;
-  return open(h);
+  return restore ? open(h, 'restore') : open(h);
 }
 
 const $ = id => document.getElementById(id);
@@ -6483,14 +6488,16 @@ function rememberConversationFileReturn(button) {
   };
 }
 
-async function returnToConversationFile(key, pathValue, ts, callId) {
+async function returnToConversationFile(key, pathValue, ts, callId, routeHash = null) {
   const saved = conversationFileReturn && conversationFileReturn.key === key &&
     (!pathValue || conversationFileReturn.path === pathValue) &&
     (!callId || conversationFileReturn.call === callId) ? conversationFileReturn : null;
-  await open(key, 'top');
+  const opening = open(key, 'top', routeHash);
+  const seq = conversationLoadSeq;
+  await opening;
   requestAnimationFrame(() => {
     const view = $('view');
-    if (!view) return;
+    if (!view || current?.key !== key || activeRel !== key || viewKind !== 'conversation' || conversationLoadSeq !== seq) return;
     const attr = saved && !saved.change ? 'transcriptPath' : 'fileDiff';
     const selector = attr === 'fileDiff' ? '[data-file-diff]' : '[data-transcript-path]';
     let buttons = [...view.querySelectorAll(selector)].filter(button =>
@@ -12394,6 +12401,7 @@ function wireAgentComposer() {
 }
 
 async function renderConv(scroll) {
+  stopReaderLanding();
   const d = current;
   if (!d) return;
   const seq = conversationLoadSeq;
@@ -12430,6 +12438,7 @@ async function renderConv(scroll) {
     `<div id="liveReplies" class="transcript" data-conversation-key="${esc(d.key)}"></div><div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
     readerDestinationHtml(d) + agentComposerHtml(d);
   restoreLiveReplyHandoff(liveHandoff);
+  $('liveReplies').dataset.readingLeaf = readerState(d.key).leaf || 'live';
   if ($('readerDestination') && $('composerDock')) $('composerDock').prepend($('readerDestination'));
   mountDelegationView();
   delegationUI.attachCards($('conversationTranscript'));
@@ -12474,7 +12483,7 @@ async function renderConv(scroll) {
     if (keepCompose) try { newTa.setSelectionRange(keepCompose.start, keepCompose.end); } catch {}
     autoGrowCompose(); updateComposeMin();
   }
-  if (keepCompose && newTa && keepCompose.focused) newTa.focus();
+  if (keepCompose && newTa && keepCompose.focused) newTa.focus({ preventScroll: true });
   $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
   $('view').querySelectorAll('[data-media-src]').forEach(b => b.onclick = e => {
     e.stopPropagation(); e.preventDefault();
@@ -12496,8 +12505,10 @@ async function renderConv(scroll) {
     else if (scroll === 'top') $('view').scrollTop = 0;
     else if (scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
     else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
-    else if (scroll === 'preserve') restoreReaderAnchor(readingAnchor);
-    else if (scroll === 'restore') restoreReaderAnchor(readerState(d.key).positions[readerState(d.key).leaf || 'live']);
+    else if (scroll === 'preserve' || scroll === 'restore') {
+      const anchor = scroll === 'preserve' ? readingAnchor : readerState(d.key).positions[readerState(d.key).leaf || 'live'];
+      if (!restoreReaderAnchor(anchor)) $('view').scrollTop = $('view').scrollHeight;
+    }
     else if (scroll === 'compare' || (typeof scroll === 'string' && /^(compare|flow):/.test(scroll))) {
       const wanted = scroll.includes(':') ? scroll.slice(scroll.indexOf(':') + 1) : '';
       const target = wanted ? $('view').querySelector(`[data-flow-anchor="${CSS.escape(wanted)}"], [data-eid="${CSS.escape(wanted)}"]`) : [...$('view').querySelectorAll('.flow-turn')].at(-1);
@@ -12506,35 +12517,16 @@ async function renderConv(scroll) {
     else if (mk) mk.scrollIntoView({ block: 'center' });
     else $('view').scrollTop = $('view').scrollHeight;
   }
-  // Screenshots load after layout: for a short window, every image load
-  // re-pins a bottom-bound view — but only while the reader is still near
-  // the bottom, so nobody who scrolled up gets grabbed.
   if (scroll == null || scroll === 'bottom') {
-    const until = Date.now() + 2500;
-    for (const im of $('view').querySelectorAll('img')) {
-      if (im.complete) continue;
-      im.addEventListener('load', () => {
-        const v = $('view');
-        if (Date.now() < until && v.scrollHeight - v.scrollTop - v.clientHeight < v.clientHeight) v.scrollTop = v.scrollHeight;
-      }, { once: true });
-    }
-  }
-  // A reply landing must survive late image loads above it. Re-anchor for a
-  // short window — but only while the reader has not scrolled away, so this
-  // never captures a scroll the user started.
-  if (scroll === 'reply') {
-    const until = Date.now() + 2500;
-    let lastSet = $('view').scrollTop;
-    for (const im of $('view').querySelectorAll('img')) {
-      if (im.complete) continue;
-      im.addEventListener('load', () => {
-        const v = $('view');
-        if (Date.now() > until) return;
-        if (Math.abs(v.scrollTop - lastSet) > 4) return; // the reader moved
-        const t = replyAnchorTop();
-        if (t != null) { v.scrollTop = t; lastSet = t; }
-      }, { once: true });
-    }
+    maintainReaderLanding(() => { $('view').scrollTop = $('view').scrollHeight; });
+  } else if (scroll === 'reply') {
+    maintainReaderLanding(() => {
+      const top = replyAnchorTop();
+      $('view').scrollTop = top == null ? $('view').scrollHeight : top;
+    });
+  } else if (scroll === 'restore' || scroll === 'preserve') {
+    const anchor = scroll === 'preserve' ? readingAnchor : readerState(d.key).positions[readerState(d.key).leaf || 'live'];
+    maintainReaderLanding(() => { if (!restoreReaderAnchor(anchor)) $('view').scrollTop = $('view').scrollHeight; });
   }
   if (hitEl) {
     hitEl.classList.add('hit-flash');
@@ -13159,6 +13151,7 @@ let progressStream = null;
 let conversationLoadSeq = 0;
 
 async function open(rel, scroll, routeHash = null) {
+  if (scroll == null && viewKind === 'file' && current?.key === rel) scroll = 'restore';
   const seq = ++conversationLoadSeq;
   const navigating = viewKind !== 'conversation' || activeRel !== rel || !current || current.key !== rel;
   if (navigating) {
@@ -13209,10 +13202,8 @@ async function open(rel, scroll, routeHash = null) {
   if (!(window._ctxTouched && current && current.key === rel)) {
     window._agentContext = Array.isArray(next.attachedContext) ? next.attachedContext.slice() : [];
   }
-  if (scroll == null && navigating) {
-    const state = readerState(rel);
-    if (state.positions[state.leaf || 'live'] && (state.leaf || state.revision === next.mtimeMs)) scroll = 'restore';
-  }
+  // Ordinary switches land at the tail. Restoring a reading position is an
+  // explicit file/history return, never inferred from an unchanged mtime.
   await renderConv(scroll);
 }
 

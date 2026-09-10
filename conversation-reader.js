@@ -57,7 +57,8 @@ async function loadConversationFlow(key) {
 
 function rememberReaderAnchor() {
   const view = $('view');
-  if (!view || !current || viewKind !== 'conversation') return null;
+  if (!view || !current || viewKind !== 'conversation' || $('liveReplies')?.dataset.conversationKey !== current.key) return null;
+  if (view.scrollHeight - view.scrollTop - view.clientHeight < 4) return { bottom: true };
   const top = view.getBoundingClientRect().top;
   const candidates = [...view.querySelectorAll('#conversationTranscript [data-flow-anchor], #conversationTranscript .msg[data-eid]')];
   const el = candidates.find(e => e.getBoundingClientRect().bottom > top + 8 && e.getClientRects().length);
@@ -65,10 +66,59 @@ function rememberReaderAnchor() {
   return { id: el.dataset.flowAnchor || el.dataset.eid, flow: !!el.dataset.flowAnchor, offset: el.getBoundingClientRect().top - top };
 }
 function restoreReaderAnchor(anchor) {
-  if (!anchor) return;
   const view = $('view');
-  const el = view?.querySelector(`[${anchor.flow ? 'data-flow-anchor' : 'data-eid'}="${CSS.escape(anchor.id)}"]`);
-  if (el) view.scrollTop += el.getBoundingClientRect().top - view.getBoundingClientRect().top - anchor.offset;
+  if (!view || !anchor) return false;
+  if (anchor.bottom) { view.scrollTop = view.scrollHeight; return true; }
+  if (typeof anchor.id !== 'string') return false;
+  const el = [...view.querySelectorAll(`#conversationTranscript [${anchor.flow ? 'data-flow-anchor' : 'data-eid'}="${CSS.escape(anchor.id)}"]`)].find(e => e.getClientRects().length);
+  if (!el) return false;
+  view.scrollTop += el.getBoundingClientRect().top - view.getBoundingClientRect().top - (Number(anchor.offset) || 0);
+  return true;
+}
+
+function rememberConversationPosition() {
+  const anchor = rememberReaderAnchor();
+  if (!anchor) return;
+  const state = readerState(current.key);
+  // A history route may already have selected another leaf while the old
+  // DOM is still on screen. Save under the path that was actually rendered.
+  state.positions[$('liveReplies').dataset.readingLeaf || 'live'] = anchor;
+  state.revision = current.mtimeMs;
+  saveReaderState(current.key);
+}
+
+let readerLandingCleanup = null;
+function stopReaderLanding() {
+  readerLandingCleanup?.(); readerLandingCleanup = null;
+}
+// Layout can grow after landing (images, fonts, run cards, composer). Follow
+// that growth, not a timer or an after-growth distance guess. Real scrolling
+// or a new screen immediately hands control back to the reader.
+function maintainReaderLanding(apply) {
+  stopReaderLanding();
+  const view = $('view'), transcript = $('conversationTranscript');
+  if (!view || !transcript || typeof ResizeObserver === 'undefined') return;
+  const key = current.key, seq = conversationLoadSeq;
+  let observer;
+  let lastTop = view.scrollTop, lastHeight = view.scrollHeight, lastClient = view.clientHeight;
+  const movedWithoutResize = () => view.scrollHeight === lastHeight && view.clientHeight === lastClient && Math.abs(view.scrollTop - lastTop) > 4;
+  const events = new AbortController();
+  const cleanup = () => { observer?.disconnect(); events.abort(); };
+  readerLandingCleanup = cleanup;
+  const cancel = () => { if (readerLandingCleanup === cleanup) stopReaderLanding(); else cleanup(); };
+  for (const event of ['wheel', 'touchstart', 'pointerdown']) view.addEventListener(event, cancel, { passive: true, signal: events.signal });
+  view.addEventListener('scroll', () => { if (movedWithoutResize()) cancel(); }, { passive: true, signal: events.signal });
+  view.addEventListener('keydown', e => {
+    if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(e.key)) cancel();
+  }, { signal: events.signal });
+  observer = new ResizeObserver(() => {
+    if (!transcript.isConnected || current?.key !== key || activeRel !== key || viewKind !== 'conversation' || conversationLoadSeq !== seq) return cancel();
+    if (movedWithoutResize()) return cancel();
+    apply();
+    lastTop = view.scrollTop; lastHeight = view.scrollHeight; lastClient = view.clientHeight;
+  });
+  observer.observe(view);
+  for (const child of view.children) observer.observe(child);
 }
 function readerRoute(key, leaf, anchor, replace = false) {
   const hash = 'path=' + encodeURIComponent(JSON.stringify({ key, leaf: leaf || null, anchor: anchor || null }));
@@ -460,12 +510,10 @@ function wireConversationReader() {
     let timer;
     view.addEventListener('scroll', () => {
       clearTimeout(timer);
+      const transcript = $('conversationTranscript'), key = current?.key;
       timer = setTimeout(() => {
-        if (viewKind !== 'conversation' || !current) return;
-        const anchor = rememberReaderAnchor();
-        if (!anchor) return;
-        const state = readerState(current.key);
-        state.positions[state.leaf || 'live'] = anchor; state.revision = current.mtimeMs; saveReaderState(current.key);
+        if (viewKind !== 'conversation' || current?.key !== key || $('conversationTranscript') !== transcript) return;
+        rememberConversationPosition();
       }, 180);
     }, { passive: true });
   }

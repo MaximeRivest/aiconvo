@@ -195,7 +195,7 @@ built-in runtime source.
 - Reading another path does not move Send. The composer offers **Continue from here** or **Return to current**. New parallel answers require a context choice before sending a follow-up. Forking/branching preserves chat history, not a snapshot of project files. Reading routes, comparison choices, merge drafts, and scroll landmarks survive refreshes. See [the conversation-reading design](design/34-conversation-reading.md) for the flow, safeguards, and tests.
 - The header ticker shows the latest session update. Click it to open that conversation.
 - **"● N"** in the header lists running, writing, and recent agents (key **a**), each with its working directory. Running means a live `pi` or `claude` process. Writing means the session file changed in the last 5 minutes. Click a row to open the conversation.
-- Opening a conversation lands at the bottom, at the newest messages.
+- Ordinary conversation switches land at the bottom, at the newest messages. Browser Back and returning from a file restore the reading position; explicit message links retain their target. Late-loading images and layout changes keep that landing stable until you scroll or interact with the page.
 - **"Jobs"** shows running and recent distillation and epic jobs.
 - **"settings"** opens the memory-model panel. Pick any model from your Pi catalog. Signed-in providers are listed first. **use pi default** follows `~/.pi/agent/settings.json`.
 - Background jobs continue when you open another conversation. You can start multiple jobs in parallel.

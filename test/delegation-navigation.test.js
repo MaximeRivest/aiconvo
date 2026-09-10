@@ -22,7 +22,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
     fs.readFileSync(path.join(__dirname, '../conversation-flow.js'), 'utf8'),
     fs.readFileSync(path.join(__dirname, '../conversation-reader.js'), 'utf8'),
     extract('function setRoute(kind, hash)', '\nfunction goHome()'),
-    extract('function dispatchHash(h) {', '\nconst $ = id => document.getElementById'),
+    extract('function dispatchHash(h, { restore = false } = {}) {', '\nconst $ = id => document.getElementById'),
     extract('async function open(rel, scroll,', '// ---- distillation ----'),
     extract('async function renderConv(scroll) {', '// ---- trace machinery ----'),
     extract('function computeTrace(d) {', '\nconst compareCache'),

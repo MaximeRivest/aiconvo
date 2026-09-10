@@ -18,7 +18,7 @@ function fixture() {
     fs.readFileSync(path.join(root, 'conversation-flow.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'conversation-reader.js'), 'utf8'),
     extract('function setRoute(kind, hash)', '\nfunction goHome()'),
-    extract('function dispatchHash(h) {', '\nconst $ = id => document.getElementById'),
+    extract('function dispatchHash(h, { restore = false } = {}) {', '\nconst $ = id => document.getElementById'),
     extract('async function open(rel, scroll,', '// ---- distillation ----'),
     extract('async function renderConv(scroll) {', '// ---- trace machinery ----'),
     extract('function computeTrace(d) {', '\nconst compareCache'),
@@ -79,7 +79,7 @@ function fixture() {
     if(url==='/api/node/send')return {ok:true,job:{model:'test'}};
     throw Error('unexpected write '+url);
   }
-  function setRouteKind(kind){viewKind=kind;}
+  function setRouteKind(kind){rememberConversationPosition();stopReaderLanding();viewKind=kind;$('view').scrollTop=0;}
   ${code.replace(/<\/script/gi, '<\\/script')}
   function check(ok,message){if(!ok)throw Error(message);}
   const pause=()=>new Promise(r=>setTimeout(r,30));
@@ -209,6 +209,35 @@ function fixture() {
     check(!$('liveReplies').textContent.includes('First reply'),'save duplicated reply');
     runLedgers.clear();return {passed:true};
   };
+  window.runScrollAudit=async()=>{
+    const priorFlow=flow, priorKey=current.key;
+    flow={groups:[],branches:[]};
+    for(const key of ['scroll-a','scroll-b']) store[key]={key,source:'pi',mtimeMs:1,entryParents:[['q',null],['a','q']],messages:[{eid:'q',role:'user',text:'Question'},{eid:'a',role:'assistant',text:long}]};
+    const gap=()=>$('view').scrollHeight-$('view').clientHeight-$('view').scrollTop;
+    await open('scroll-a');$('view').scrollTop=400;await new Promise(r=>setTimeout(r,220));
+    await open('scroll-b');await open('scroll-a');
+    check(gap()<3,'ordinary conversation switch restored an old middle position instead of bottom');
+    $('view').scrollTop=320;await open('scroll-b');await pause();history.back();
+    for(let i=0;i<100;i++){await pause();if(current?.key==='scroll-a'&&$('liveReplies')?.dataset.conversationKey==='scroll-a')break;}
+    check(current.key==='scroll-a'&&Math.abs($('view').scrollTop-320)<3,'browser Back lost its saved reading position');
+    await open('scroll-a','entry:q');check($('view').scrollTop<300,'explicit entry landing was overridden');
+    $('view').scrollTop=500;setRouteKind('file');await open('scroll-a');
+    check(Math.abs($('view').scrollTop-500)<3,'returning from file lost the reading position');
+    readerState('scroll-a').leaf='q';rememberConversationPosition();
+    check(!readerState('scroll-a').positions.q,'departure saved the old screen under the newly selected path');
+    readerState('scroll-a').leaf=null;
+    readerState('scroll-a').positions.live={id:'deleted-entry',flow:false,offset:0};
+    await open('scroll-a','restore');check(gap()<3,'missing saved anchor left conversation at the top');
+    await open('scroll-a','bottom');
+    const space=document.createElement('div');space.style.height='2000px';$('conversationTranscript').prepend(space);
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    check(gap()<3,'late layout growth lost bottom landing');
+    $('view').dispatchEvent(new WheelEvent('wheel'));$('view').scrollTop=200;
+    const more=document.createElement('div');more.style.height='500px';$('conversationTranscript').append(more);
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    check(Math.abs($('view').scrollTop-200)<3,'late layout pulled a reader back after scrolling away');
+    flow=priorFlow;await open(priorKey,'top');return {passed:true};
+  };
   const renderParallelStage=noop;
   window.prepareScreenshot=async()=>{readerGroup('chat','p').compare=false;await renderConv('top');$('view').scrollTop=0;};
   </script></body></html>`;
@@ -259,6 +288,7 @@ test('real browser: path fidelity, nested branches, full answers, safe actions, 
   assert.equal(result.passed, true);
   assert.equal((await evaluate('runExtraAudit()')).passed, true);
   assert.equal((await evaluate('runLiveReplyAudit()')).passed, true);
+  assert.equal((await evaluate('runScrollAudit()')).passed, true);
   await evaluate('prepareScreenshot()');
   for (const [name, width, height] of [['desktop', 1440, 1000], ['phone', 390, 844]]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }, sid);

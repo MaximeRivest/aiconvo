@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '../app.html'), 'utf8');
 
 test('saved search links open the current dialog without requesting a conversation', () => {
-  const start = html.indexOf('function dispatchHash(h) {');
+  const start = html.indexOf('function dispatchHash(h, { restore = false } = {}) {');
   const end = html.indexOf('\nconst $ = id => document.getElementById', start);
   assert.ok(start >= 0 && end > start);
   const queries = [], kinds = [];
