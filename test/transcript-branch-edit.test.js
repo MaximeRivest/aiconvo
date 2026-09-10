@@ -11,7 +11,7 @@ function fixture(role = 'assistant', active = false) {
   let appended;
   const ctx = vm.createContext({
     sessionPathsFor: () => ({ entry: { source: 'pi' }, sessionPath: '/session' }),
-    withSessionOp: async (_, work) => work(), headlessRuns: new Map(active ? [['/session', {}]] : []),
+    withSessionOp: async (_, work) => work(), headlessRuns: new Map(active ? [['/session', {}]] : []), agentRunJobs: new Map(),
     findRunningConversation: () => null, stopAnyWarmSession() {}, transcriptTarget: async () => target,
     sha256Hex: x => x, crypto: { randomBytes: () => ({ toString: () => 'new' }) },
     fsp: { appendFile: async (_, text) => { appended = JSON.parse(text); } }, reindexIfChanged: async () => {},
@@ -26,6 +26,8 @@ for (const role of ['assistant', 'user']) test(`${role} correction appends a sib
   assert.equal(f.appended.parentId, 'parent');
   assert.equal(f.appended.id, 'new');
   assert.equal(f.appended.message.content[0].text, 'corrected');
+  assert.equal(f.appended.aiconvo.kind, 'edit');
+  assert.equal(f.appended.aiconvo.sourceEntryId, 'old');
   assert.equal(f.original.message.content[0].text, 'old');
 });
 test('stale identity and content cannot create branches', async () => {

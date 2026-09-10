@@ -19,22 +19,23 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delegation-navigation-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const code = [
+    fs.readFileSync(path.join(__dirname, '../conversation-flow.js'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '../conversation-reader.js'), 'utf8'),
     extract('function setRoute(kind, hash)', '\nfunction goHome()'),
     extract('function dispatchHash(h) {', '\nconst $ = id => document.getElementById'),
-    extract('async function open(rel, scroll) {', '// ---- distillation ----'),
+    extract('async function open(rel, scroll,', '// ---- distillation ----'),
     extract('async function renderConv(scroll) {', '// ---- trace machinery ----'),
-    extract('function computeTrace(d) {', '\nfunction deepestUnder('),
-    extract('function isMergeBridgeText(text) {', '\nconst compareCache ='),
+    extract('function computeTrace(d) {', '\nconst compareCache'),
     extract('function msgBlock(m, hl, keepOpen', '// Every bash fence'),
   ].join('\n');
   const fixture = `<!doctype html><meta charset="utf-8"><div id="view"></div><pre id="result">PENDING</pre><script>
   const $ = id => document.getElementById(id);
   let current = null, activeRel = null, viewKind = 'home', conversationLoadSeq = 0;
   let progressStream = null, currentHash = '', suppressHashEvents = 0, lastNavProject = null, matchIdx = -1;
-  const lastNavConversation = new Map(), modelTouchAt = new Map(), traceLeaves = new Map(), fanoutFocus = new Map(), toolGroupOpen = new Map();
+  const lastNavConversation = new Map(), modelTouchAt = new Map(), traceLeaves = new Map(), fanoutFocus = new Map(), toolGroupOpen = new Map(), compareCache = new Map();
   const sessions = [], calls = [], errors = [];
   let transcriptQuery = '';
-  const parent = {key:'parent', source:'pi', entryParents:[['root',null],['launch','root'],['result','launch'],['abort','result'],['other','root']], messages:[
+  const parent = {key:'parent', source:'pi', entryParents:[['root',null],['launch','root'],['result','launch'],['abort','result'],['other','root'],['new-result','other'],['last','new-result']], messages:[
     {eid:'root',role:'user',text:'start'},
     {eid:'launch',role:'thinking',text:'launch reasoning',off:true},
     {eid:'launch',role:'tool',id:'call',name:'delegate',text:'launch child',off:true},
@@ -47,18 +48,17 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   async function fetch(url, opts) {
     calls.push([url, opts]);
     if (opts?.method && opts.method !== 'GET') throw Error('Mutation: '+url);
+    if (url.startsWith('/api/compare?id=')) return {ok:true,json:async()=>({groups:[],branches:[]})};
     if (!url.startsWith('/api/session?id=')) throw Error('Unexpected API: '+url);
     const key = decodeURIComponent(url.split('=')[1]);
-    return {json:async()=> key === 'parent' ? JSON.parse(saved) : {key,source:'pi',messages:[{eid:'child',role:'user',text:key}]}};
+    return {ok:true,json:async()=> key === 'parent' ? JSON.parse(saved) : {key,source:'pi',messages:[{eid:'child',role:'user',text:key}]}};
   }
   function setRouteKind(kind) { viewKind = kind; }
   const noop = () => {};
   const fileInk = null;
   const markSettingsClosed=noop, markAgentRead=noop, render=noop, projectOf=()=>null;
   const relatedFor=async()=>[], convHead=()=>'', agentComposerHtml=()=>'';
-  const loadCompare=async()=>[];
-  // A compare row would normally suppress its answer. The raw link must still show it.
-  const compareAnchors=()=>({rows:new Map(),skip:new Set(['launch'])});
+  const fanModels=()=>[];
   const mountDelegationView=noop, wireCompareRow=noop, renderRunCards=noop, foldLongMessages=noop;
   const delegationUI = { attachCards: noop, index: () => ({ tasks: [] }) };
   const DelegationUI = { taskIdInResult: () => null, eventSummary: type => '↩ ' + type };
@@ -79,10 +79,11 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
     check(!computeTrace(parent).onPath.has('launch'), 'fixture must use abandoned branch');
     await open('different-child');
     await dispatchHash('read='+JSON.stringify({key:'parent',entryId:'launch'}));
-    landed(1);
+    check(document.querySelector('.dg-card[data-dg-eid="launch"]')?.classList.contains('hit-flash'), 'launch did not land on its readable card');
     check(document.querySelector('[data-i="2"]')?.textContent.includes('launch child'), 'shared raw-entry tool was hidden');
-    check(document.querySelector('.branchblock').open, 'off-branch block stays closed');
-    await open('parent','entry:launch'); landed(1);
+    check(computeTrace(parent).onPath.has('launch'), 'read did not project the containing path');
+    await open('parent','entry:launch');
+    check(document.querySelector('.dg-card[data-dg-eid="launch"]')?.classList.contains('hit-flash'), 'same-parent card link failed');
     await open('parent','entry:result');
     check(landed(3).textContent.includes('child created'), 'merged result not revealed');
     await open('parent','entry:abort'); landed(4);
@@ -98,10 +99,10 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
     }
     landed(5);
     check(location.hash.includes('other'), 'history did not restore entry route');
-    check(traceLeaves.size===0, 'read changed trace selection');
+    check(computeSendTrace(parent).leaf==='last', 'read changed continuation');
     check(JSON.stringify(parent)===saved, 'read changed fixture continuation');
     check(errors.length===0, errors.join('; '));
-    check(calls.length>=8 && calls.every(([url,opts])=>url.startsWith('/api/session?id=')&&!opts), 'read made a write or branch call');
+    check(calls.length>=8 && calls.every(([url,opts])=>['/api/session?id=','/api/compare?id='].some(prefix=>url.startsWith(prefix))&&!opts), 'read made a write or branch call');
     $('result').textContent='PASS: cross-child, same-parent, abandoned branch, merged result, abort, tool package, browser back, GET-only';
   }
   setTimeout(() => run().catch(e=>{$('result').textContent='FAIL: '+e.stack+'; hash='+location.hash+'; calls='+calls.length;}), 100);

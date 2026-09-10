@@ -1,0 +1,104 @@
+/* A path is a document. Controls describe the divergence, never contain the prose. */
+.flow-turn, .flow-paths, .flow-origin, .flow-included, .reader-destination { color: var(--text); }
+.flow-turn { margin: 12px 0; border-top: 1px solid var(--border-strong); }
+.flow-turn-bar, .flow-answer-head, .flow-compare-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; }
+.flow-turn-bar > label { display: flex; flex: 1 1 280px; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.flow-turn-bar > label > span { font-size: 13px; color: var(--text-dim); }
+.flow-turn select, .flow-answer-head select { max-width: 100%; min-width: 0; height: auto; min-height: 36px; font-size: 14px; }
+.flow-turn-bar select { flex: 1 1 200px; width: 200px; }
+.flow-turn button, .flow-paths button, .flow-origin button, .reader-destination button, .flow-live button { min-height: 36px; font-size: 13px; }
+.flow-turn :focus-visible, .flow-paths :focus-visible, .reader-destination :focus-visible, .flow-merge-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.flow-paths { margin: 10px 14px; border-left: 2px solid var(--border-strong); padding-left: 12px; }
+.flow-paths > summary { cursor: pointer; font-size: 14px; padding: 12px 0; min-height: 44px; }
+.flow-paths > div { display: grid; gap: 8px; padding: 4px 0 12px; }
+.flow-path { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; padding: 10px 12px; }
+.flow-path[aria-current] { border-left: 3px solid var(--accent); }
+.flow-path b { font-size: 13px; }
+.flow-path small { color: var(--text-dim); font-size: 12px; }
+.flow-origin { padding: 10px 14px; font-size: 13px; border-top: 1px solid var(--border); line-height: 1.7; }
+.flow-origin button { padding: 3px 7px; background: transparent; }
+.flow-fork { margin-bottom: 18px; }
+.flow-included > .flow-answer + .flow-answer { border-top: 1px solid var(--border-strong); }
+.flow-answer { min-width: 0; }
+.flow-answer-head { border-bottom: 1px solid var(--border); font-size: 14px; background: var(--surface-1); }
+.flow-answer-head label { display: flex; flex: 1; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.flow-answer-head label select { flex: 1; }
+.flow-comparison { border: 1px solid var(--border-strong); margin-bottom: 14px; }
+.flow-compare-options { font-size: 13px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+.flow-compare-options > span { flex: 1; }
+.flow-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.flow-pair > .flow-answer + .flow-answer { border-left: 1px solid var(--border-strong); }
+.flow-answer .msg.assistant { font-size: inherit; }
+.flow-answer .msg .md { max-height: none; overflow: visible; }
+.flow-answer .msg { padding: 16px; }
+.transcript .msg-actions, .flow-live .msg-actions { flex-wrap: nowrap; }
+.msg-more-actions { position: relative; white-space: normal; }
+.msg-more-actions > summary { cursor: pointer; list-style: none; padding: 4px 8px; font-size: 12px; min-height: 30px; display: flex; align-items: center; }
+.msg-more-actions > summary::-webkit-details-marker { display: none; }
+.msg-more-actions > div { position: absolute; bottom: 100%; right: 0; z-index: 50; min-width: 190px; padding: 6px; display: flex; flex-direction: column; border: 1px solid var(--border-strong); background: var(--bg); box-shadow: 0 4px 12px var(--shadow-color); }
+.msg-more-actions > div > button { width: 100%; text-align: left; min-height: 36px; font-size: 13px; }
+.flow-compare-title { flex: 1; font-size: 14px; }
+.flow-answer-foot { padding: 8px 14px 14px; }
+.flow-answer-info { margin-top: 10px; font-size: 13px; }
+.flow-answer-info > summary { cursor: pointer; padding: 8px 0; }
+.flow-answer-info dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; }
+.flow-answer-info dd { margin: 0; overflow-wrap: anywhere; }
+.flow-answer-head > select { flex: 1; width: 100%; }
+.flow-mobile-switch [aria-pressed="true"] { border: 2px solid var(--accent); font-weight: 700; }
+.flow-mobile-switch { display: none; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
+.flow-answer .msg-actions button { min-height: 32px; font-size: 12px; }
+.reader-destination { width: 100%; max-width: var(--read-max); margin: 16px auto 0; padding: 12px 14px; border: 1px solid var(--accent); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; background: var(--surface-1); font-size: 14px; }
+.reader-destination > span { flex: 1 1 280px; }
+.composer-dock > .reader-destination { margin: 0; border-bottom: 0; }
+.flow-load-error { padding: 12px 14px; border: 1px solid var(--border-strong); font-size: 14px; }
+.flow-live.parallel-stage { width: 100%; max-width: var(--read-max); padding: 0; margin: 12px auto; }
+.flow-live .flow-live-answers { display: grid; grid-template-columns: minmax(0, 1fr); }
+.flow-live.comparing .flow-live-answers { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.flow-live-answers > section { min-width: 0; }
+.flow-live-answers .flow-live-status { flex: 1; font-size: 13px; }
+.flow-live .flow-live-work { margin: 8px 14px; }
+.flow-live-work > summary { font-size: 13px; cursor: pointer; min-height: 36px; padding: 8px 0; }
+.flow-live-work .flow-live-ledger { padding: 12px; overflow-wrap: anywhere; }
+.flow-live .flow-live-ledger pre { white-space: pre-wrap; word-break: break-word; }
+.flow-live .flow-live-note { padding: 12px 14px; font-size: 13px; color: var(--text-dim); }
+.flow-merge-dialog { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; box-sizing: border-box; padding: 24px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); }
+.flow-merge-dialog::backdrop { background: var(--overlay); }
+.flow-merge-dialog h2 { font-size: 20px; margin: 0 0 12px; }
+.flow-merge-dialog p { font-size: 14px; line-height: 1.6; }
+.flow-merge-dialog fieldset { border: 1px solid var(--border-strong); margin: 16px 0; padding: 8px 12px; }
+.flow-merge-dialog legend { font-size: 14px; }
+.flow-source { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; padding: 12px 0; cursor: pointer; }
+.flow-source + .flow-source { border-top: 1px solid var(--border); }
+.flow-source input { margin-top: 4px; flex: 0 0 auto; }
+.flow-source > span { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.flow-source > span > span { color: var(--text-dim); font-size: 13px; }
+.flow-instruction { display: block; font-size: 14px; margin-bottom: 12px; }
+.flow-instruction > span { color: var(--text-dim); }
+.flow-instruction textarea { display: block; width: 100%; box-sizing: border-box; resize: vertical; margin-top: 8px; padding: 10px; font: inherit; background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); }
+.flow-merge-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 12px; }
+.flow-merge-dialog button { min-height: 40px; font-size: 14px; }
+.flow-merge-error { color: var(--danger); }
+.flow-merge-error:empty { display: none; }
+@media (max-width: 900px) {
+  .flow-pair, .flow-live.comparing .flow-live-answers { grid-template-columns: minmax(0, 1fr); }
+  .flow-mobile-switch { display: flex; flex-wrap: wrap; }
+  .flow-comparison[data-mobile-side="0"] [data-compare-side="1"], .flow-comparison[data-mobile-side="1"] [data-compare-side="0"] { display: none; }
+  .flow-live [data-live-compare], .flow-live .flow-answer:not([data-live-selected]) { display: none; }
+  .flow-pair > .flow-answer + .flow-answer { border-left: 0; border-top: 2px solid var(--border-strong); }
+}
+@media (max-width: 700px), (pointer: coarse) {
+  .flow-turn button, .flow-turn select, .reader-destination button, .flow-live button, .flow-origin button { min-height: 44px; }
+  .flow-turn-bar { padding: 12px 8px; gap: 6px; }
+  .flow-turn-bar > label { flex-basis: 100%; }
+  .flow-turn-bar select { font-size: 16px; }
+  .flow-answer .msg-actions button, .msg-more-actions > summary, .msg-more-actions > div > button { min-height: 44px; }
+  .flow-merge-dialog { padding: 16px; }
+  .flow-instruction textarea { font-size: 16px; }
+}
+:root[data-theme-mode="binary"] .flow-turn, :root[data-theme-mode="binary"] .flow-paths, :root[data-theme-mode="binary"] .reader-destination { border-color: var(--text); }
+:root[data-theme-mode="binary"] .flow-pair { grid-template-columns: minmax(0, 1fr); }
+:root[data-theme-mode="binary"] .flow-mobile-switch { display: flex; flex-wrap: wrap; }
+:root[data-theme-mode="binary"] .flow-comparison[data-mobile-side="0"] [data-compare-side="1"],
+:root[data-theme-mode="binary"] .flow-comparison[data-mobile-side="1"] [data-compare-side="0"],
+:root[data-theme-mode="binary"] .flow-live [data-live-compare],
+:root[data-theme-mode="binary"] .flow-live .flow-answer:not([data-live-selected]) { display: none; }

@@ -30,7 +30,6 @@ try {
 :root[data-theme-mode="binary"] .tmark.note .violin, :root[data-theme-mode="binary"] .item.active .meta,
 :root[data-theme-mode="binary"] .item.active .snip { opacity: 1; }
 :root[data-theme-mode="binary"] button:disabled { opacity: 1; border-style: dashed; color: var(--text); }
-:root[data-theme-mode="binary"] .branchblock .msg { opacity: 1; }
 /* A binary theme uses shape and decoration instead of surface tints. */
 :root[data-theme-mode="binary"] button:hover, :root[data-theme-mode="binary"] #brand:hover,
 :root[data-theme-mode="binary"] #ticker:hover { background: transparent; color: var(--text); text-decoration: underline; }
@@ -1077,14 +1076,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 /* Abort/interrupt marker: same quiet bar shape, dashed to read as a cut. */
 .abortbar { display: flex; align-items: center; gap: 10px; margin: 4px 0; padding: 0 14px; color: var(--text-faint); font-size: var(--fs-micro); }
 .abortbar::before, .abortbar::after { content: ""; flex: 1; border-top: 1px dashed var(--border-strong); }
-/* Other-branch fold: dashed frame + glyph carry the meaning (no color-only state). */
-.branchblock { border-bottom: 1px solid var(--border); }
-.branchblock > summary { cursor: pointer; padding: 7px 14px; font-size: var(--fs-micro); color: var(--text-faint); border-left: 3px dashed var(--border-strong); list-style: none; user-select: none; }
-.branchblock > summary::-webkit-details-marker { display: none; }
-.branchblock > summary:hover { color: var(--text-dim); background: var(--surface-1); }
-.branchblock[open] > summary { border-bottom: 1px dashed var(--border-strong); }
-.branchblock .msg { border-left: 3px dashed var(--border-strong); opacity: .75; }
-.branchblock .msg:last-child { border-bottom: 0; }
 .msg .role { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-micro); margin-bottom: 4px; color: var(--text-faint); }
 .msg .role > span { min-width: 0; }
 .msg-actions { display: flex; justify-content: flex-end; align-items: center; gap: 2px; min-height: 22px; margin-top: 8px; opacity: 0; visibility: hidden; transition: opacity .12s ease; }
@@ -1094,11 +1085,12 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 /* Touch has no stable hover. Keep the actions visible after a message tap. */
 @media (hover: none) { .msg-actions { transition: none; } }
 :root[data-theme-mode="binary"] .msg-actions { transition: none; }
-/* branch switcher pill (the transcript is a trace through the tree) */
 /* live headless run card */
 /* The live run is an assistant message that is still coming into being:
    same column, same frame, same skin as the transcript — the one ephemeral
    cue is the dashed accent edge on the left. */
+#liveReplies:empty { display: none; }
+#liveReplies { border: 0; }
 #runCards:not(:empty) { width: 100%; max-width: var(--read-max); margin: 0 auto; border: 1px solid var(--border); border-top: 0; }
 .runcard { border: 0 !important; border-left: 3px dashed var(--accent) !important; }
 .rc-status { color: var(--text-dim); font-size: var(--fs-micro); margin-bottom: 4px; }
@@ -1304,21 +1296,25 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 .ls-b-head { font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }
 .ls-think { color: var(--text-faint); font-style: italic; }
 .ls-args { color: var(--text-dim); border-left: 2px solid var(--border-strong); padding-left: 8px; }
+.st-title { font-weight: 600; overflow-wrap: anywhere; }
+.st-label, .st-new-label, .st-limit, .st-preview summary { color: var(--text-dim); font-size: .85em; margin-top: 8px; }
+.st-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
+.st-preview pre[hidden] { display: none; }
+.st-parts section { margin: 12px 0; }
+.st-old { border-inline-start: 2px dashed var(--border-strong); padding-inline-start: 8px; }
+.st-new { border-inline-start: 2px solid var(--border-strong); padding-inline-start: 8px; }
+.st-preview summary { cursor: pointer; }
+.st-shell .st-old { border: 1px solid var(--border-strong); background: var(--surface-1); padding: 10px 12px; border-radius: var(--r); }
+.st-shell .st-label { margin-bottom: 6px; }
+.st-shell .st-new-label:empty { display: none; }
+.st-output-label { margin: 12px 0 6px; color: var(--text-dim); font-size: .85em; }
+.ls-shell .ls-out { border-left: 2px solid var(--border-strong); padding-left: 12px; }
+.ls-shell .ls-out:empty { display: none; }
 .ls-out { color: var(--text-faint); }
 .ls-text { color: var(--text); }
 .ls-livechip { position: absolute; right: 10px; bottom: 8px; height: 24px; padding: 0 10px; font-size: 11px; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text-dim); }
 .ls-livechip:hover { color: var(--text); }
 
-.cmp-row { margin: 8px 0 14px; max-width: none; }
-.cmp-row.both-on { outline: 2px solid var(--accent); outline-offset: 2px; }
-.cmp-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
-/* The visible reply is the branch: solid frame = active, dashed = the alternatives. */
-.cmp-col { border: 1px dashed var(--border-strong); padding: 8px 10px; min-width: 0; background: var(--surface-1); cursor: pointer; }
-.cmp-col.on { border: 2px solid var(--accent); padding: 7px 9px; }
-.cmp-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-micro); color: var(--text-dim); margin-bottom: 6px; }
-.cmp-head .cmp-pick { display: inline-flex; align-items: center; cursor: pointer; }
-.cmp-head .cmp-pick input { margin: 0; accent-color: var(--accent); }
-.cmp-badges { margin-left: auto; color: var(--text-faint); font-size: 10px; white-space: nowrap; }
 /* context meter: window used / window size · % left · cost. Text only, so
    e-ink keeps it readable; warn switches weight, never only color. */
 .ctxmeter { color: var(--text-faint); font-size: 10px; white-space: nowrap; }
@@ -1332,32 +1328,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 .sysprompt .sp-old { background: rgba(220, 60, 60, 0.14); }
 .sysprompt .sp-new { background: rgba(60, 160, 80, 0.16); }
 .sysprompt .sp-empty { color: var(--text-dim); }
-.cmp-col .md { max-height: 280px; overflow: auto; }
-.cmp-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
-.cmp-bar button { height: 24px; }
-/* Live fan-out uses the same column grammar as settled replies. Each ledger
-   owns one scrollable column; finishing a model does not move the others. */
-.parallel-stage { width: 100%; max-width: none; margin: 8px auto 14px; padding: 8px 10px; box-sizing: border-box; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-.parallel-stage[hidden] { display: none; }
-.parallel-stage .cmp-col { cursor: default; display: flex; flex-direction: column; min-height: 180px; }
-.parallel-stage .cmp-col.done { border-style: solid; }
-.parallel-stage .cmp-col.failed { border-color: var(--danger); }
-.parallel-stage .ps-body { min-height: 120px; max-height: 52vh; overflow: auto; font-size: 12px; line-height: 1.5; }
-.parallel-stage .ps-body .ls-b { padding: 5px 0; border-top: 1px solid var(--border); }
-.parallel-stage .ps-body .ls-b:first-child { border-top: 0; }
-.parallel-stage .ps-abort { margin-left: auto; min-height: 20px; height: 20px; padding: 0 6px; font-size: 10px; }
-.parallel-stage .cmp-bar { justify-content: center; }
-/* Past comparisons fold into one chip once the conversation continues. */
-.cmpblock { border-bottom: 1px solid var(--border); }
-.cmpblock > summary { cursor: pointer; padding: 7px 14px; font-size: var(--fs-micro); color: var(--text-faint); border-left: 3px dashed var(--border-strong); list-style: none; user-select: none; }
-.cmpblock > summary::-webkit-details-marker { display: none; }
-.cmpblock > summary:hover { color: var(--text-dim); background: var(--surface-1); }
-.cmpblock > .cmp-row { padding: 8px 10px; margin: 0 0 6px; }
-/* Phone: the columns become swipe pages. */
-@media (max-width: 700px) {
-  .cmp-cols { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
-  .cmp-col { flex: 0 0 86%; scroll-snap-align: center; }
-}
 .msg .msg-edit:hover { background: transparent; color: var(--text); text-decoration: underline; }
 .msg-editor textarea { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 8px 10px; font: 12.5px/1.5 var(--font); resize: vertical; }
 .msg-editor textarea:focus { outline: 0; border-color: var(--accent); }
@@ -1904,7 +1874,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
   /* the model control sized for touch */
   .model-pick { height: 40px; }
   .mpick .mp-prov { height: 30px; min-height: 30px; border-radius: 15px; }
-  .cmp-col .md { max-height: 40dvh; }
   /* the open live strip: readable streaming text on the phone */
   .ls-blocks { max-height: 55dvh; font-size: 14px; }
 }
@@ -1919,7 +1888,6 @@ body.zen:not(.home) #left,
 body.zen:not(.home) .convhead,
 body.zen:not(.home) #cornerStack,
 body.zen:not(.home) .msg .role,
-body.zen:not(.home) .cmp-badges,
 body.zen:not(.home) .model-strip,
 body.zen:not(.home) .think-pick,
 body.zen:not(.home) .agent-compose .ctxmeter { display: none !important; }
@@ -2041,9 +2009,13 @@ window.aiconvoSyncTheme();
   </div>
   <div id="readBody" tabindex="0"></div>
 </div>
+<link rel="stylesheet" href="/conversation-reader.css">
+<script src="/conversation-flow.js"></script>
+<script src="/conversation-reader.js"></script>
 <script src="/context-panel.js"></script>
 <script src="/file-completion-ui.js"></script>
 <script src="/linediff.js"></script>
+<script src="/streaming-tool.js"></script>
 <script src="/delegation-ui.js"></script>
 <script src="/filesmode.js"></script>
 <script>
@@ -2136,6 +2108,7 @@ function setRouteKind(kind) {
 }
 
 function setRoute(kind, hash) {
+  rememberConversationDraft();
   setRouteKind(kind);
   currentHash = hash || '';
   let now = location.hash.replace(/^#/, '');
@@ -2200,6 +2173,15 @@ function dispatchHash(h) {
     const [docPath, project, origin] = h.slice(4).split('&').map(s => { try { return decodeURIComponent(s); } catch { return s; } });
     return openDocument(docPath, project || null, origin && origin.startsWith('conv=') ? origin.slice(5) : null);
   }
+  if (h.startsWith('path=')) {
+    try {
+      const route = JSON.parse(h.slice(5));
+      if (typeof route.key !== 'string' || (route.leaf != null && typeof route.leaf !== 'string')) throw Error();
+      readerState(route.key).leaf = route.leaf || null;
+      saveReaderState(route.key);
+      return open(route.key, route.anchor ? 'flow:' + route.anchor : 'restore', h);
+    } catch { return errToast('Invalid conversation path link.'); }
+  }
   if (h.startsWith('read=')) {
     try {
       const target = JSON.parse(h.slice(5));
@@ -2238,6 +2220,7 @@ function dispatchHash(h) {
   // conversation lands on the control that opened it, not at the bottom.
   if (viewKind === 'file' && conversationFileReturn && conversationFileReturn.key === h)
     return returnToConversationFile(h, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call);
+  readerState(h).leaf = null;
   return open(h);
 }
 
@@ -3542,7 +3525,10 @@ function reconcileTranscript(entry, { force = false } = {}) {
   // A hosted run patches the live pane in place; the settled transcript
   // lands once, on the final run event (which passes force).
   if (hasLiveRun(activeRel) && !force) return false;
-  if (readerAtTail()) refreshTranscript(); else showTranscriptReloadButton();
+  const selection = window.getSelection();
+  const editing = $('view')?.querySelector('.msg-editor');
+  const selecting = selection && !selection.isCollapsed && ($('conversationTranscript')?.contains(selection.anchorNode) || $('liveReplies')?.contains(selection.anchorNode) || $('parallelStage')?.contains(selection.anchorNode));
+  if (readerAtTail() && !editing && !selecting) refreshTranscript(); else showTranscriptReloadButton();
   return true;
 }
 const isWorking = s => !!(s && s.key) && (hasLiveRun(s.key) ||
@@ -9039,12 +9025,12 @@ function delegateCallOf(m) {
   const res = m._result || null;
   return { eid: m.eid || '', call: m.id || '', title, taskId: res ? DelegationUI.taskIdInResult(res.text) : null };
 }
-const transcriptMediaUrl = image => '/api/conversation/media?id=' + encodeURIComponent(activeRel || '') +
+const transcriptMediaUrl = (image, key = activeRel) => '/api/conversation/media?id=' + encodeURIComponent(key || '') +
   '&entry=' + encodeURIComponent(image.entry || '') + '&path=' + encodeURIComponent(image.path || '');
-function messageMediaHtml(images) {
+function messageMediaHtml(images, key = activeRel) {
   if (!images || !images.length) return '';
   return `<div class="msg-media">${images.map((image, i) => {
-    const src = transcriptMediaUrl(image);
+    const src = transcriptMediaUrl(image, key);
     return `<button type="button" data-media-src="${esc(src)}" title="Open image ${i + 1} of ${images.length}"><img src="${esc(src)}" loading="lazy" decoding="async" alt="Attached image ${i + 1}"></button>`;
   }).join('')}</div>`;
 }
@@ -9063,25 +9049,27 @@ function linkPathCandidate(el, hit) {
 }
 async function wireTranscriptPathCandidates(root, key) {
   if (!root || !key) return;
-  const pending = new Map();
+  const sources = new Map();
   for (const el of root.querySelectorAll('code[data-path-candidate]')) {
-    const cand = el.dataset.pathCandidate;
-    const cacheKey = key + '|' + cand;
+    const source = el.closest('[data-msg-key]')?.dataset.msgKey || key;
+    const cand = el.dataset.pathCandidate, cacheKey = source + '|' + cand;
     if (pathCandidateCache.has(cacheKey)) { linkPathCandidate(el, pathCandidateCache.get(cacheKey)); continue; }
+    if (!sources.has(source)) sources.set(source, new Map());
+    const pending = sources.get(source);
     if (!pending.has(cand)) pending.set(cand, []);
     pending.get(cand).push(el);
   }
-  if (!pending.size) return;
-  let out;
-  try { out = await postJson('/api/path/exists', { id: key, paths: [...pending.keys()] }); }
-  catch { out = {}; }
-  const found = out && out.found ? out.found : {};
-  for (const [cand, els] of pending) {
-    const hit = found[cand] || null;
-    if (cand in found) pathCandidateCache.set(key + '|' + cand, hit);
-    if (activeRel !== key) continue;
-    for (const el of els) if (el.isConnected) linkPathCandidate(el, hit);
-  }
+  await Promise.all([...sources].map(async ([source, pending]) => {
+    let out;
+    try { out = await postJson('/api/path/exists', { id: source, paths: [...pending.keys()] }); }
+    catch { return; }
+    const found = out?.found || {};
+    for (const [cand, els] of pending) {
+      const hit = found[cand] || null;
+      if (cand in found) pathCandidateCache.set(source + '|' + cand, hit);
+      for (const el of els) if (el.isConnected) linkPathCandidate(el, hit);
+    }
+  }));
 }
 
 function transcriptPathButton(pathValue, label = '') {
@@ -9122,7 +9110,7 @@ let fileClickSuppressedUntil = 0;
 function fileControlContext(button) {
   const pathValue = button.dataset.fileDiff || button.dataset.transcriptPath || '';
   return {
-    button, path: pathValue, key: activeRel || '', change: !!button.dataset.fileDiff,
+    button, path: pathValue, key: button.closest('[data-msg-key]')?.dataset.msgKey || activeRel || '', change: !!button.dataset.fileDiff,
     ts: button.dataset.fileTs || '', anchor: button.dataset.fileAnchor || '', call: button.dataset.fileCall || '',
   };
 }
@@ -9335,10 +9323,10 @@ document.addEventListener('pointerover', e => {
   b.dataset.fileHinted = '1';
 });
 
-function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
+function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1, messageKey = activeRel) {
   // data-i: the message's index in the cached array — the anchor a search
   // hit lands on (renderConv scroll 'hit:N').
-  const idxAttr = copyIndex >= 0 ? ` data-i="${copyIndex}"` : '';
+  const idxAttr = (copyIndex >= 0 ? ` data-i="${copyIndex}"` : '') + ` data-msg-key="${esc(messageKey || '')}"` + (m.eid ? ` data-eid="${esc(m.eid)}"` : '');
   if (m.role === 'abort') {
     // Marker row: the turn stopped here (browser abort, TUI escape, ^C).
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
@@ -9370,7 +9358,7 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
     if (m._merged) return '';           // rides inside its call's fold
     const lines = m.text ? m.text.split('\n').length : 0;
     const imageLabel = m.images && m.images.length ? ` · ${m.images.length} image${m.images.length > 1 ? 's' : ''}` : '';
-    return `<details class="msg toolresult"${idxAttr}${keepOpen ? ' open' : ''}><summary>↳ result${lines ? ` · ${lines} line${lines > 1 ? 's' : ''}` : ''}${imageLabel}</summary><div class="tool-out">${toolTextHtml(m.text, m.paths, hl)}${messageMediaHtml(m.images)}</div></details>`;
+    return `<details class="msg toolresult"${idxAttr}${keepOpen ? ' open' : ''}><summary>↳ result${lines ? ` · ${lines} line${lines > 1 ? 's' : ''}` : ''}${imageLabel}</summary><div class="tool-out">${toolTextHtml(m.text, m.paths, hl)}${messageMediaHtml(m.images, messageKey)}</div></details>`;
   }
   if (m.role === 'tool') {
     const toolAnchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
@@ -9384,7 +9372,7 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
     const resLines = res && res.text ? String(res.text).split('\n').length : 0;
     const resImages = res && res.images ? res.images.length : 0;
     const resFold = res
-      ? `<details class="resfold"><summary>↳ result${resLines ? ` · ${resLines} line${resLines > 1 ? 's' : ''}` : ''}${resImages ? ` · ${resImages} image${resImages > 1 ? 's' : ''}` : ''}</summary><div class="tool-out">${toolTextHtml(res.text, res.paths, hl)}${messageMediaHtml(res.images)}</div></details>`
+      ? `<details class="resfold"><summary>↳ result${resLines ? ` · ${resLines} line${resLines > 1 ? 's' : ''}` : ''}${resImages ? ` · ${resImages} image${resImages > 1 ? 's' : ''}` : ''}</summary><div class="tool-out">${toolTextHtml(res.text, res.paths, hl)}${messageMediaHtml(res.images, messageKey)}</div></details>`
       : '';
     const structuredPath = m.path && !isFileWriteTool(m) ? ` · ${transcriptPathButton(m.path, shortFilePath(m.path))}` : '';
     // Bash-created files (redirects, tee, heredocs) link into the same
@@ -9395,14 +9383,16 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1) {
   if (m.role === 'user' || m.role === 'assistant') {
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
     const full = (m.origin === 'delegation' ? '<div class="role" title="The parent conversation wrote this brief. No person typed it."><span>↰ brief from the parent conversation</span></div>' : '') +
-      `<div class="md">${mdRender(m.text, q)}</div>${messageMediaHtml(m.images)}`;
+      `<div class="md">${mdRender(m.text, q)}</div>${messageMediaHtml(m.images, messageKey)}`;
     const actions = `<div class="msg-actions" aria-label="Message actions">` +
       `<button type="button" class="msg-copy" data-msg-index="${copyIndex}" title="Copy the message Markdown">copy</button>` +
       `<button type="button" class="msg-read" data-msg-index="${copyIndex}" title="Read this message aloud">read</button>` +
-      `<button type="button" class="msg-edit" data-msg-index="${copyIndex}" title="Edit this message in the session file">edit</button>` +
-      (m.role === 'assistant' ? `<button type="button" class="msg-regenerate" data-msg-index="${copyIndex}" title="Create another answer from the node before this reply">regenerate</button>` : '') +
-      (m.role === 'user' ? `<button type="button" class="msg-snippet" data-msg-index="${copyIndex}" title="Save this message as a snippet you can insert later">snippet</button>` : '') +
-      `</div>`;
+      (copyIndex >= 0 && !ConversationFlow.transport(m) ? `<details class="msg-more-actions"><summary aria-label="More message actions">more…</summary><div>` : '') +
+      (copyIndex >= 0 && !ConversationFlow.transport(m) ? `<button type="button" class="msg-edit" data-msg-index="${copyIndex}" title="${['pi', 'pi-remote'].includes((messageKey === current?.key ? current : readerSessions.get(messageKey))?.source) ? 'Edit this message on a new path' : 'Edit the original message'}">edit</button>` : '') +
+      (copyIndex >= 0 && !ConversationFlow.transport(m) && m.role === 'assistant' ? `<button type="button" class="msg-regenerate" data-msg-index="${copyIndex}" title="Create another answer from the node before this reply">regenerate</button>` : '') +
+      (copyIndex >= 0 && !ConversationFlow.transport(m) && m.eid ? `<button type="button" data-reader-continue-at="${esc(JSON.stringify({ key: messageKey, id: m.eid }))}" title="Use this conversation context. Files on disk are not rewound.">continue here</button><button type="button" data-reader-fork-at="${esc(JSON.stringify({ key: messageKey, id: m.eid }))}" title="Copy the conversation through this message into a separate conversation">fork</button>` : '') +
+      (copyIndex >= 0 && m.role === 'user' ? `<button type="button" class="msg-snippet" data-msg-index="${copyIndex}" title="Save this message as a snippet you can insert later">snippet</button>` : '') +
+      (copyIndex >= 0 && !ConversationFlow.transport(m) ? `</div></details>` : '') + `</div>`;
     const words = m.text.split(/\s+/).length;
     return `<div class="msg ${m.role}${keepOpen ? '' : ' can-fold'}" tabindex="0" data-words="${words}"${anchor}${idxAttr}>${role}${full}${actions}</div>`;
   }
@@ -9419,7 +9409,9 @@ function wireRunButtons() {
     const btn = document.createElement('button');
     btn.className = 'md-run';
     btn.textContent = '▶ run';
-    btn.title = 'Run this block in bash · cwd: ' + ((current && current.cwd) || '~');
+    const sourceKey = pre.closest('[data-msg-key]')?.dataset.msgKey;
+    const source = sourceKey && sourceKey !== current?.key ? readerSessions.get(sourceKey) : current;
+    btn.title = 'Run this block in bash · cwd: ' + (source?.cwd || '~');
     btn.onclick = async () => {
       const code = pre.querySelector('code');
       const cmd = code ? code.textContent : '';
@@ -9435,7 +9427,7 @@ function wireRunButtons() {
       try {
         const r = await (await fetch('/api/exec', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cmd, cwd: current && current.cwd }),
+          body: JSON.stringify({ cmd, cwd: source && source.cwd }),
         })).json();
         if (r.error) throw new Error(r.error);
         box.textContent = (r.out || '(no output)') + '\n— exit ' + r.code + ' · ' + (Math.round(r.ms / 100) / 10) + 's';
@@ -9643,7 +9635,7 @@ function bindTtsPlayer(player) {
 }
 
 async function readAloudMessage(btn) {
-  const message = current && current.messages[Number(btn.dataset.msgIndex)];
+  const message = readerMessage(btn);
   if (!message || !message.text) return;
   const msg = btn.closest('.msg');
   let player = msg && msg.querySelector(':scope > .tts-player');
@@ -9719,26 +9711,26 @@ $('view').addEventListener('click', async e => {
   const editBtn = e.target.closest('.msg-edit');
   if (editBtn) {
     e.stopPropagation();
-    openTranscriptEditor(editBtn);
+    readerMessageAction(editBtn, openTranscriptEditor);
     return;
   }
   const regenBtn = e.target.closest('.msg-regenerate');
   if (regenBtn) {
     e.stopPropagation();
-    regenerateMessage(regenBtn);
+    readerMessageAction(regenBtn, regenerateMessage);
     return;
   }
   const snipBtn = e.target.closest('.msg-snippet');
   if (snipBtn) {
     e.stopPropagation();
-    const message = current && current.messages[Number(snipBtn.dataset.msgIndex)];
+    const message = readerMessage(snipBtn);
     if (message) openSnippetForm({ body: message.text || '' });
     return;
   }
   const copy = e.target.closest('.msg-copy');
   if (copy) {
     e.stopPropagation();
-    const message = current && current.messages[Number(copy.dataset.msgIndex)];
+    const message = readerMessage(copy);
     if (!message) return;
     try {
       // Copy the stored source, not rendered or collapsed HTML. This keeps
@@ -9794,7 +9786,7 @@ async function regenerateMessage(btn) {
   btn.textContent = 'starting…';
   // The marker lets the transcript distinguish this transport turn from a
   // real user message. Markdown does not show the comment if it ever renders.
-  const payload = { id: activeRel, node, prompt: 'Continue.\n<!-- aiconvo:regenerate -->', models: fanModels().slice(0, 1), images: [] };
+  const payload = { id: activeRel, node, prompt: `Continue.\n<!-- aiconvo:regenerate -->\n<!-- aiconvo:operation ${JSON.stringify({ kind: 'regenerate', sourceEntryId: message.eid })} -->`, models: fanModels().slice(0, 1), images: [] };
   let out = await postJson('/api/node/send', payload);
   if (out && out.needsForce) {
     if (confirm('A terminal owns this conversation. Stop the terminal and regenerate?')) out = await postJson('/api/node/send', { ...payload, force: true });
@@ -9804,7 +9796,9 @@ async function regenerateMessage(btn) {
   btn.textContent = old;
   if (!out) return;
   if (out.error) return errToast('regenerate failed: ' + out.error);
-  toast('regenerating — use the arrows below the reply to move between versions');
+  resetConversationReading(activeRel);
+  compareCache.delete(activeRel);
+  toast('Creating another answer. The original stays saved.');
 }
 
 async function openTranscriptEditor(btn) {
@@ -9846,7 +9840,7 @@ async function openTranscriptEditor(btn) {
     if (out.branched) {
       close();
       if (out.role === 'user') {
-        const run = await postJson('/api/node/send', { id: key, node: out.node, prompt: 'Continue.\n<!-- aiconvo:regenerate -->', models: pickedModels, images: [] });
+        const run = await postJson('/api/node/send', { id: key, node: out.node, prompt: `Continue.\n<!-- aiconvo:regenerate -->\n<!-- aiconvo:operation ${JSON.stringify({ kind: 'regenerate', sourceEntryId: out.node })} -->`, models: pickedModels, images: [] });
         if (run.error) errToast('Your edited branch is saved, but the answer could not start: ' + run.error);
         else toast('Prompt saved on a new branch. Generating an answer.');
       } else toast('Correction saved on a new branch. Write below to continue.');
@@ -10119,7 +10113,7 @@ const thinkVersions = new Map(); // local reasoning changes invalidate older con
 async function refreshCtxMeter(d) {
   const el = $('ctxMeter');
   if (!el || !d) return;
-  const leaf = traceLeaves.get(d.key) || '';
+  const leaf = computeSendTrace(d)?.leaf || '';
   const sig = leaf + '|' + (d.lastTs || '') + '|' + ((d.messages || []).length);
   const hit = ctxMeterCache.get(d.key);
   if (hit && hit.sig === sig) {
@@ -10598,7 +10592,7 @@ async function aiEpicRetitle(id) {
 
 function agentComposerHtml(d) {
   if (!['claude', 'pi', 'pi-remote'].includes(d.source)) return '';
-  return `<div class="composer-dock" id="composerDock">
+  return `<div class="composer-dock" id="composerDock" data-conversation-key="${esc(d.key)}">
     <div class="live-strip" id="liveStrip" hidden>
       <div class="ls-full" id="lsFull" hidden><div class="ls-blocks" id="lsBlocks"></div><button type="button" class="ls-livechip" id="lsChip" hidden>⤓ live</button></div>
       <div class="ls-row">
@@ -10658,6 +10652,7 @@ function echoUserPrompt(prompt) {
 // its draft, and its images stay untouched — the detached slash palette and
 // the mode picker run commands through here.
 async function headlessSendFromComposer(btn, promptOverride) {
+  if (!readerSendAllowed()) return;
   const ta = $('agentText');
   const fromBox = promptOverride == null;
   const prompt = (fromBox ? (ta && ta.value || '') : String(promptOverride)).trim();
@@ -10679,7 +10674,7 @@ async function headlessSendFromComposer(btn, promptOverride) {
     hideSlashPop();
   }
   const models = fanModels();
-  const trace = current && computeTrace(current);
+  const trace = current && computeSendTrace(current);
   const node = models.length >= 2
     ? (trace && trace.leaf) || null
     : (trace && trace.leaf !== trace.fileLeaf ? trace.leaf : null);
@@ -10691,7 +10686,7 @@ async function headlessSendFromComposer(btn, promptOverride) {
   if ($('liveStrip')) $('liveStrip').hidden = false;
   const images = [];
   if (fromBox) for (const img of (window._agentImages || [])) images.push(await shrinkAgentImage(img));
-  const payload = { id: key, prompt, node, models, images, context: attachedContext() };
+  const payload = { id: key, prompt, node, models, images, context: attachedContext(), expectedLeaf: trace?.fileLeaf || null };
   let out = await postJson('/api/node/send', payload);
   if (out && out.needsForce) {
     if (confirm('A terminal owns this conversation. Stop the terminal and send from the web?'))
@@ -10705,6 +10700,7 @@ async function headlessSendFromComposer(btn, promptOverride) {
   if (key === activeRel && viewKind === 'conversation') echoUserPrompt(prompt);
   if (fromBox && ta) {
     ta.value = '';
+    readerDrafts.delete(key);
     autoGrowCompose();
     window._agentImages = [];
     renderAgentThumbs();
@@ -10713,8 +10709,7 @@ async function headlessSendFromComposer(btn, promptOverride) {
     ta.blur();
     updateComposeMin();
   }
-  traceLeaves.delete(key);
-  fanoutFocus.delete(key);
+  resetConversationReading(key);
   compareCache.delete(key);
   if (out.queued) { toast('queued into the running turn — pi picks it up as a follow-up (session model)'); return true; }
   // Seed the shared stage before the first SSE delta. Every later event carries
@@ -11773,6 +11768,7 @@ function shrinkAgentImage(img) {
 }
 
 async function sendToAlacritty(btn) {
+  if (!readerSendAllowed()) return;
   if (!activeRel) return;
   // One terminal runs ONE model. With two or more model chips the meaning of
   // a terminal runs one model — refuse a multi-model set and point at the web run.
@@ -12409,156 +12405,32 @@ async function renderConv(scroll) {
   const dgFocus = document.activeElement && document.activeElement.closest('.dg-card, .dg-origin');
   const keepDelegationFocus = dgFocus && $('conversationDelegations')?.dataset.delegationKey === d.key
     ? { eid: dgFocus.dataset.dgEid ?? null, cls: document.activeElement.className } : null;
-  const keepCompose = oldTa ? {
+  const keepCompose = oldTa && oldTa.closest('[data-conversation-key]')?.dataset.conversationKey === d.key ? {
     value: oldTa.value, start: oldTa.selectionStart, end: oldTa.selectionEnd,
     focused: document.activeElement === oldTa,
   } : null;
   const entryId = typeof scroll === 'string' && scroll.startsWith('entry:') ? scroll.slice(6) : null;
   const entryIndex = entryId == null ? -1 : d.messages.findIndex(m => m.eid === entryId);
   const readEntry = entryIndex < 0 ? null : d.messages[entryIndex];
-  const isReadEntry = m => readEntry && m.eid === entryId;
   const q = typeof scroll === 'string' && scroll.startsWith('hit:') ? transcriptQuery : '';
-  // Multi-word queries AND their terms: mark each term, not the whole string.
-  const qrx = q ? termRegex(q) : null;
-  const hl = t => qrx ? esc(t).replace(qrx, m => `<mark>${m}</mark>`) : esc(t);
   const entry = sessions.find(s => s.key === activeRel) || {};
   const related = await relatedFor(activeRel);
   if (d !== current || seq !== conversationLoadSeq) return;
   const head = convHead(d, entry, related);
   const qtest = q ? termRegex(q, 'i') : null; // non-global: .test() stays stateless
-  let msgs = d.messages.slice();
-  // Pair tool calls with their results: the transcript shows one line per
-  // tool; the result rides inside the call's fold.
-  {
-    const openCalls = [];
-    for (const m of msgs) {
-      if (m.role === 'tool') { m._result = null; openCalls.push(m); }
-      else if (m.role === 'toolresult') {
-        m._merged = false;
-        const call = (m.tid ? openCalls.find(c => c.id === m.tid) : openCalls[0]) || null;
-        if (call) { call._result = m; m._merged = !isReadEntry(m); openCalls.splice(openCalls.indexOf(call), 1); }
-      }
-    }
-  }
-  const msgIndexes = new Map(d.messages.map((m, i) => [m, i]));
-  // Merge transport is a real user turn for pi, but not for the reader.
-  msgs = msgs.filter(m => isReadEntry(m) || !isFanoutBridgeMessage(m));
-  // Settled fan-out still needs the compare row: without it the live
-  // columns vanish and only one branch stays.
-  const groups = d.source !== 'claude' ? await loadCompare(d.key) : [];
-  if (d !== current || seq !== conversationLoadSeq) return;
-  const groupByNode = new Map(groups.map(g => [g.node, g]));
-  const cmp = compareAnchors(d, msgs, groups, computeTrace(d), fanoutFocus.get(d.key) || null);
-  const compares = cmp.rows;
-  const skipAns = cmp.skip;
-  // Branch-aware transcript: a branch is a deliberate strategy (a side
-  // exploration, a context reset), not abandonment. Messages off the CURRENT
-  // path — the one a resume continues — fold into one block per run, at
-  // their chronological position. A search hit inside a folded branch opens
-  // that block.
-  const blocks = [];
-  if (compares.has('')) blocks.push(compares.get(''));
-  let barModel = null; // the model bar marks changes, not every reply
-  // The newest on-path message always shows in full — no fold to click.
-  let lastMain = -1;
-  for (let k = msgs.length - 1; k >= 0; k--) if (!msgs[k].off) { lastMain = k; break; }
-  // Some providers (notably OpenRouter kimi-k3) emit their private work
-  // plan as ordinary assistant text before a tool call, not as `thinking`.
-  // Shared entry id is the reliable signal: text + tool in one assistant
-  // turn is intermediate work, never the final answer.
-  const toolTurnEids = new Set(msgs.filter(m => m.role === 'tool' && m.eid).map(m => m.eid));
-  // Consecutive tool/reasoning steps accumulate into ONE quiet line.
-  // The group keeps its open/closed choice across re-renders, so new
-  // messages below never make it jump or disappear.
-  let toolBuf = [];
-  const flushTools = () => {
-    if (!toolBuf.length) return;
-    // Even one thinking/tool unit folds: reasoning must never become the
-    // visible answer just because a provider labels it as text.
-    const names = new Map();
-    for (const t of toolBuf) names.set(t.name, (names.get(t.name) || 0) + 1);
-    const label = [...names.entries()].map(([n, c]) => c > 1 ? `${n} ×${c}` : n).join(' · ');
-    const gkey = toolBuf[0].gkey;
-    const open = toolGroupOpen.get(activeRel + '|' + gkey) ? ' open' : '';
-    // File edits ride the group line: up to three links inline; more fold
-    // into their own ▤ details right under the line.
-    const files = [];
-    const seenFiles = new Set();
-    for (const t of toolBuf) {
-      for (const f of t.files || []) {
-        if (!seenFiles.has(f.path)) { seenFiles.add(f.path); files.push(f); }
-      }
-    }
-    const fileBtn = f => `<button class="tg-file" data-file-diff="${esc(f.path)}" data-file-ts="${esc(f.ts || '')}" data-file-anchor="${esc(f.ts || '')}" data-file-call="${esc(f.call || '')}" title="Open this file change\n${esc(f.path)}">▤ ${esc(f.path.split('/').pop())}</button>`;
-    const inline = files.length && files.length <= 3 ? ' · ' + files.map(fileBtn).join(' ') : '';
-    blocks.push(`<details class="toolgroup" data-gkey="${esc(gkey)}"${open}><summary>${toolBuf.length} steps · ${esc(label.slice(0, 90))}${inline}</summary>` +
-      toolBuf.map(t => t.html).join('') + `</details>`);
-    if (files.length > 3) {
-      blocks.push(`<details class="tg-files"><summary>▤ ${files.length} files changed</summary><div class="tg-files-list">` +
-        files.map(fileBtn).join(' ') + `</div></details>`);
-    }
-    // Delegated work is a first-class object of the transcript, not a step:
-    // each `delegate` call gets a card under the group line. The raw call
-    // stays inside the fold. The card is painted from the task snapshot.
-    const launches = toolBuf.filter(t => t.delegate);
-    if (launches.length) {
-      const ordinal = new Map();
-      blocks.push(`<div class="dg-cards">` + launches.map(t => {
-        const dg = t.delegate, o = ordinal.get(dg.eid) || 0;
-        ordinal.set(dg.eid, o + 1);
-        return `<div class="dg-card" data-dg-key="${esc(d.key)}" data-dg-eid="${esc(dg.eid || '')}" data-dg-call="${esc(dg.call || '')}" data-dg-id="${esc(dg.taskId || '')}" data-dg-title="${esc(dg.title)}" data-dg-ordinal="${o}"></div>`;
-      }).join('') + `</div>`);
-    }
-    toolBuf = [];
-  };
-  for (let i = 0; i < msgs.length;) {
-    const isHit = m => !!qtest && qtest.test(m.text || '');
-    if (!msgs[i].off) {
-      const m = msgs[i];
-      if (isReadEntry(m) || !skipAns.has(m.eid)) {
-        const plainReasoning = m.role === 'assistant' && m.eid && toolTurnEids.has(m.eid);
-        if (plainReasoning || ['tool', 'toolresult', 'thinking'].includes(m.role)) {
-          const html = msgBlock(m, hl, isHit(m), q, msgIndexes.get(m));
-          const name = plainReasoning || m.role === 'thinking' ? 'thinking' : (m.name || 'tool');
-          if (html) toolBuf.push({
-            html, name, gkey: m.ts || 'i' + i,
-            files: isFileWriteTool(m) ? [{ path: m.path, ts: m.ts, call: m.id }]
-              : (m.writes || []).map(p => ({ path: p, ts: m.ts, call: m.id })),
-            delegate: m.role === 'tool' && m.name === 'delegate' ? delegateCallOf(m) : null,
-          });
-        } else {
-          flushTools();
-          if (m.role === 'assistant' && m.model && m.model !== barModel) {
-            if (barModel) blocks.push(`<div class="modelbar" title="${esc((m.provider ? m.provider + ' · ' : '') + m.model)}">model → ${esc(m.model)}</div>`);
-            barModel = m.model;
-          }
-          blocks.push(msgBlock(m, hl, isHit(m) || i === lastMain, q, msgIndexes.get(m)));
-        }
-      }
-      const nextEid = msgs[i + 1] && msgs[i + 1].eid;
-      if (m.eid && nextEid !== m.eid) {
-        if (compares.has(m.eid)) { flushTools(); blocks.push(compares.get(m.eid)); }
-      }
-      i++;
-      continue;
-    }
-    flushTools();
-    let j = i;
-    while (j < msgs.length && msgs[j].off) j++;
-    const group = msgs.slice(i, j).filter(m => isReadEntry(m) || !skipAns.has(m.eid));
-    if (!group.length) { i = j; continue; }
-    const chat = group.filter(m => m.role === 'user' || m.role === 'assistant').length;
-    blocks.push(`<details class="branchblock"${group.some(isHit) ? ' open' : ''}>` +
-      `<summary>⑂ other branch · ${chat || group.length} message${(chat || group.length) > 1 ? 's' : ''} · not on the current path</summary>` +
-      group.map(m => msgBlock(m, hl, isHit(m), q, msgIndexes.get(m))).join('') + `</details>`);
-    i = j;
-  }
-  flushTools();
+  const readingAnchor = scroll === 'preserve' ? rememberReaderAnchor() : null;
+  const reading = await prepareConversationReading(d, scroll);
+  if (!reading || d !== current || seq !== conversationLoadSeq) return;
+  const msgs = d.messages;
+  const blocks = [reading.html];
+  const liveHandoff = captureLiveReplyHandoff(d);
   $('view').innerHTML = head + '<div id="conversationDelegations"></div>' +
     (msgs.length ? `<div class="transcript" id="conversationTranscript">` + blocks.join('') + `</div>`
                  : '<div class="empty" id="conversationTranscript">nothing to show in this view.</div>') +
-    `<div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
-    agentComposerHtml(d);
+    `<div id="liveReplies" class="transcript"></div><div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
+    readerDestinationHtml(d) + agentComposerHtml(d);
+  restoreLiveReplyHandoff(liveHandoff);
+  if ($('readerDestination') && $('composerDock')) $('composerDock').prepend($('readerDestination'));
   mountDelegationView();
   delegationUI.attachCards($('conversationTranscript'));
   if (keepDelegationFocus) {
@@ -12578,7 +12450,7 @@ async function renderConv(scroll) {
   // 'reply' lands on the START of the newest assistant answer, so an unread
   // result is read from its first line instead of its tail.
   const replyAnchorTop = () => {
-    const list = $('view').querySelectorAll('#conversationTranscript .msg.assistant');
+    const list = [...$('view').querySelectorAll('#conversationTranscript .msg.assistant')].filter(el => el.getClientRects().length);
     const el = list.length ? list[list.length - 1] : null;
     if (!el) return null;
     const v = $('view');
@@ -12589,7 +12461,7 @@ async function renderConv(scroll) {
   if (scroll == null || scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
   else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
   try {
-  wireCompareRow();
+  wireConversationReader();
   renderRunCards();
   foldLongMessages();
   wireRunButtons();
@@ -12597,9 +12469,10 @@ async function renderConv(scroll) {
   wireHead();
   wireAgentComposer();
   const newTa = $('agentText');
-  if (keepCompose && newTa && keepCompose.value && !newTa.value) {
-    newTa.value = keepCompose.value;
-    try { newTa.setSelectionRange(keepCompose.start, keepCompose.end); } catch {}
+  if (newTa && !newTa.value) {
+    newTa.value = keepCompose ? keepCompose.value : readerDrafts.get(d.key) || '';
+    if (keepCompose) try { newTa.setSelectionRange(keepCompose.start, keepCompose.end); } catch {}
+    autoGrowCompose(); updateComposeMin();
   }
   if (keepCompose && newTa && keepCompose.focused) newTa.focus();
   $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
@@ -12623,14 +12496,12 @@ async function renderConv(scroll) {
     else if (scroll === 'top') $('view').scrollTop = 0;
     else if (scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
     else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
-    else if (scroll === 'compare' || (typeof scroll === 'string' && scroll.startsWith('compare:'))) {
-      const wanted = typeof scroll === 'string' && scroll.startsWith('compare:') ? scroll.slice(8) : '';
-      const row = wanted ? $('view').querySelector(`.cmp-row[data-cmp-node="${CSS.escape(wanted)}"]`) : null;
-      const comparisons = [...$('view').querySelectorAll('.cmpblock')];
-      const cmp = wanted ? (row && row.closest('.cmpblock')) : comparisons[comparisons.length - 1];
-      if (cmp) { cmp.open = true; cmp.scrollIntoView({ block: 'center' }); }
-      else if (wanted) errToast('that parallel reply group is not available — reload the tree');
-      else $('view').scrollTop = $('view').scrollHeight;
+    else if (scroll === 'preserve') restoreReaderAnchor(readingAnchor);
+    else if (scroll === 'restore') restoreReaderAnchor(readerState(d.key).positions[readerState(d.key).leaf || 'live']);
+    else if (scroll === 'compare' || (typeof scroll === 'string' && /^(compare|flow):/.test(scroll))) {
+      const wanted = scroll.includes(':') ? scroll.slice(scroll.indexOf(':') + 1) : '';
+      const target = wanted ? $('view').querySelector(`[data-flow-anchor="${CSS.escape(wanted)}"], [data-eid="${CSS.escape(wanted)}"]`) : [...$('view').querySelectorAll('.flow-turn')].at(-1);
+      if (target) target.scrollIntoView({ block: 'start' });
     }
     else if (mk) mk.scrollIntoView({ block: 'center' });
     else $('view').scrollTop = $('view').scrollHeight;
@@ -12682,12 +12553,11 @@ async function renderConv(scroll) {
   } else updateMatchHud(0);
 }
 
-// Read links use the complete transcript, including its folded off-path
-// blocks. Reuse hit navigation and open only DOM disclosures. All branches
-// already exist here, so reading needs no trace or continuation change.
+// Exact links first project the containing path, then open the entry's work
+// disclosures. This changes reading only, never the continuation.
 function revealTranscriptHit(view, scroll) {
   const hit = typeof scroll === 'string' && scroll.startsWith('hit:')
-    ? view.querySelector(`#conversationTranscript [data-i="${CSS.escape(scroll.slice(4))}"]`)
+    ? view.querySelector(`#conversationTranscript [data-msg-key="${CSS.escape(current.key)}"][data-i="${CSS.escape(scroll.slice(4))}"]`)
     : typeof scroll === 'string' && scroll.startsWith('card:')
     ? view.querySelector(`#conversationTranscript .dg-card[data-dg-eid="${CSS.escape(scroll.slice(5))}"]`) : null;
   if (!hit) return null;
@@ -12698,214 +12568,17 @@ function revealTranscriptHit(view, scroll) {
 }
 
 // ---- trace machinery ----
-// The transcript is one path through the entry tree. The selected leaf per
-// conversation lives here; default is the file's own leaf (the active path).
-const traceLeaves = new Map();
-// The tree can focus one fan-out choice. This is view state, separate from
-// the session file leaf. It keeps the exact comparison open across refreshes.
-const fanoutFocus = new Map(); // conversation key → { node, choice, id }
+// Reading and sending share ancestry, not selection. Only an explicit server
+// operation changes the file's continuation; browsing never supplies a send leaf.
 
 function computeTrace(d) {
-  const raw = d && d.entryParents;
-  if (!raw) return null;
-  // Ordered [id, parent] pairs (older caches used an object; accept both).
-  const pairs = Array.isArray(raw) ? raw : Object.entries(raw);
-  if (!pairs.length) return null;
-  const ids = pairs.map(p => p[0]);
-  const parents = new Map(pairs);
-  const order = new Map(ids.map((id, i) => [id, i]));
-  const children = new Map();
-  for (const [id, p] of pairs) {
-    if (p == null || !order.has(p)) continue;
-    if (!children.has(p)) children.set(p, []);
-    children.get(p).push(id);
-  }
-  const hasMsg = new Set(d.messages.map(m => m.eid).filter(Boolean));
-  // Which subtrees carry a real message? Walk newest → oldest once.
-  const carries = new Set();
-  for (let i = ids.length - 1; i >= 0; i--) {
-    const id = ids[i];
-    if (hasMsg.has(id) || (children.get(id) || []).some(c => carries.has(c))) carries.add(id);
-  }
-  const fileLeaf = ids[ids.length - 1];
-  let leaf = traceLeaves.get(d.key);
-  if (!leaf || !order.has(leaf)) leaf = fileLeaf;
-  const onPath = new Set();
-  for (let cur = leaf; cur != null && order.has(cur) && !onPath.has(cur); cur = parents.get(cur)) onPath.add(cur);
-  return { parents, children, order, carries, hasMsg, onPath, leaf, fileLeaf };
+  return ConversationFlow.trace(d, d && readerState(d.key).leaf);
 }
-
-function deepestUnder(trace, id) {
-  let best = id;
-  const stack = [id];
-  while (stack.length) {
-    const cur = stack.pop();
-    if (trace.order.get(cur) > trace.order.get(best)) best = cur;
-    for (const c of trace.children.get(cur) || []) stack.push(c);
-  }
-  return best;
-}
-
-function isMergeBridgeText(text) {
-  const t = String(text || '');
-  if (/<!--\s*aiconvo:merge\s*-->/.test(t)) return true;
-  return /^\d+ models answered my last message in parallel\./i.test(t.trim());
-}
-function isBothBridgeText(text) {
-  return /<!--\s*aiconvo:both\s*-->/.test(String(text || ''));
-}
-function isMergeBridgeMessage(m) {
-  return !!(m && m.role === 'user' && isMergeBridgeText(m.text));
-}
-function isBothBridgeMessage(m) {
-  return !!(m && isBothBridgeText(m.text));
-}
-function isFanoutBridgeMessage(m) {
-  return isMergeBridgeMessage(m) || isBothBridgeMessage(m);
-}
-function isRegenerateBridgeMessage(m) {
-  if (!m || m.role !== 'user' || !m.eid) return false;
-  const text = String(m.text || '').trim();
-  return /^continue\.?$/i.test(text) || /<!--\s*aiconvo:regenerate\s*-->/.test(text);
+function computeSendTrace(d) {
+  return ConversationFlow.trace(d);
 }
 
 const compareCache = new Map();
-async function loadCompare(key) {
-  if (compareCache.has(key)) return compareCache.get(key);
-  const pending = fetch('/api/compare?id=' + encodeURIComponent(key))
-    .then(r => r.json()).then(d => d.groups || []).catch(() => []);
-  compareCache.set(key, pending);
-  return pending;
-}
-
-function cmpBadges(a) {
-  const parts = [];
-  if (a.tok) parts.push(a.tok >= 1000 ? (a.tok / 1000).toFixed(1) + 'k tok' : a.tok + ' tok');
-  if (a.cost) parts.push('$' + (a.cost >= 0.1 ? a.cost.toFixed(2) : a.cost.toFixed(4)));
-  if (a.secs) parts.push(a.secs + 's');
-  return parts.length ? `<span class="cmp-badges" title="tokens · cost · time to reply">${parts.join(' · ')}</span>` : '';
-}
-
-// One fan-out turn. expanded: the replies are the live end of the conversation
-// (full columns, side by side). Folded: the conversation moved on — one chip.
-function compareRowHtml(g, trace, expanded) {
-  const cols = g.answers.map(a =>
-    `<div class="cmp-col${trace && a.key === current.key && trace.onPath.has(a.id) ? ' on' : ''}" data-cmp-key="${esc(a.key)}" data-cmp-id="${esc(a.id)}" data-cmp-ts="${esc(a.jumpTs || '')}" title="Continue on this reply">` +
-    `<div class="cmp-head"><label class="cmp-pick" title="Use this reply in the merge"><input type="checkbox" data-cmp-pick checked></label>` +
-    `<b>${esc(a.model || 'model')}</b>${a.fork ? '<span class="fk">fork</span>' : ''}${cmpBadges(a)}</div>` +
-    `<div class="md">${mdRender(a.text)}</div></div>`).join('');
-  const models = fanModels();
-  const mergeModel = models[0] ? models[0].modelId : 'session model';
-  const focus = current && fanoutFocus.get(current.key);
-  const bothOn = !!(focus && focus.node === g.node && focus.choice === 'both')
-    || !!(trace && g.both && trace.onPath.has(g.both.id));
-  const row = `<div class="cmp-row${bothOn ? ' both-on' : ''}" data-cmp-node="${esc(g.node)}"><div class="cmp-cols">${cols}</div>
-    <div class="cmp-bar">${bothOn ? '<b>both selected · your next message continues with both replies in context</b>' : ''}
-    <button class="primary" data-cmp-merge>merge ${g.answers.length} of ${g.answers.length}</button>
-    <button data-cmp-mmodel title="The model that writes the merged reply">◇ ${esc(mergeModel)} ▾</button>
-    <span class="dim">the merge model reads the whole conversation and the picked replies, then writes one better reply — you continue from it</span></div></div>`;
-  const names = g.answers.map(a => String(a.model || 'model').split('/').pop()).join(' · ');
-  return `<details class="cmpblock"${expanded ? ' open' : ''}><summary>⤑ ${g.answers.length} parallel replies · ${esc(names)}</summary>${row}</details>`;
-}
-
-// Returns { rows: Map(anchorEid → html), skip: Set(package eids) }.
-// Hide each answer package from its branch root through its final reply.
-// Do not hide descendants after the answer: they are later conversation.
-function compareHideIds(trace, nodeId, ansIds) {
-  const hide = new Set(ansIds);
-  if (!trace) return hide;
-  for (const answer of ansIds) {
-    const seen = new Set();
-    for (let cur = answer; cur && cur !== nodeId && !seen.has(cur); cur = trace.parents.get(cur)) {
-      seen.add(cur);
-      hide.add(cur);
-    }
-  }
-  return hide;
-}
-function compareAnchors(d, msgs, groups, trace, focus = null) {
-  const rows = new Map();
-  const skip = new Set();
-  if (!groups.length) return { rows, skip };
-  const displayedIds = msgs.map(m => m.eid).filter(Boolean);
-  const displayed = new Set(displayedIds);
-  for (const g of groups) {
-    const hide = compareHideIds(trace, g.node, g.answers.map(a => a.id));
-    for (const id of hide) skip.add(id);
-    let lastOther = '';
-    for (const id of displayedIds) if (!hide.has(id)) lastOther = id;
-    let anchor = g.node;
-    if (trace) while (anchor && !displayed.has(anchor)) anchor = trace.parents.get(anchor);
-    else if (!displayed.has(anchor)) anchor = '';
-    const expanded = !!(focus && focus.node === g.node) || (!!anchor && anchor === lastOther);
-    const a = anchor || '';
-    rows.set(a, (rows.get(a) || '') + compareRowHtml(g, trace, expanded));
-  }
-  return { rows, skip };
-}
-
-function wireCompareRow() {
-  $('view').querySelectorAll('[data-cmp-id]').forEach(col => col.onclick = e => {
-    if (e.target.closest('.cmp-pick')) return; // the checkbox picks for the merge, not the branch
-    const key = col.dataset.cmpKey, id = col.dataset.cmpId, ts = col.dataset.cmpTs;
-    if (key && key !== activeRel) return openAtTs(key, ts);
-    const trace = current && computeTrace(current);
-    if (trace && id) { traceLeaves.set(current.key, deepestUnder(trace, id)); renderConv('bottom'); }
-  });
-  $('view').querySelectorAll('.cmp-row').forEach(row => {
-    const btn = row.querySelector('[data-cmp-merge]');
-    const total = row.querySelectorAll('[data-cmp-pick]').length;
-    const update = () => {
-      const n = row.querySelectorAll('[data-cmp-pick]:checked').length;
-      if (btn) { btn.textContent = `merge ${n} of ${total}`; btn.disabled = n < 2; }
-    };
-    row.querySelectorAll('[data-cmp-pick]').forEach(cb => cb.onchange = update);
-    const mBtn = row.querySelector('[data-cmp-mmodel]');
-    if (mBtn) mBtn.onclick = e => {
-      e.stopPropagation();
-      const selected = row.dataset.mergeProvider && row.dataset.mergeModel
-        ? row.dataset.mergeProvider + '/' + row.dataset.mergeModel
-        : (fanModels()[0] ? fanModels()[0].provider + '/' + fanModels()[0].modelId : '');
-      openModelPicker(mBtn, { multi: false, selected: new Set(selected ? [selected] : []) }, picked => {
-        const m = picked && picked[0];
-        if (!m) return;
-        row.dataset.mergeProvider = m.provider;
-        row.dataset.mergeModel = m.modelId;
-        mBtn.textContent = `◇ ${m.modelId} ▾`;
-      });
-    };
-    if (btn) btn.onclick = () => mergeCompareGroup(row, btn);
-  });
-}
-
-async function mergeCompareGroup(row, btn) {
-  const node = row.dataset.cmpNode;
-  const answers = [...row.querySelectorAll('[data-cmp-pick]:checked')]
-    .map(cb => cb.closest('.cmp-col')).filter(Boolean).map(col => col.dataset.cmpId);
-  if (answers.length < 2) return errToast('pick at least two replies to merge');
-  const models = fanModels();
-  const payload = {
-    id: activeRel, node, answers,
-    provider: row.dataset.mergeProvider || (models[0] && models[0].provider),
-    modelId: row.dataset.mergeModel || (models[0] && models[0].modelId),
-  };
-  const old = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = 'merging…'; }
-  let out = await postJson('/api/node/aggregate', payload);
-  if (out && out.needsForce) {
-    if (confirm('A terminal owns this conversation. Stop it and merge from the web?'))
-      out = await postJson('/api/node/aggregate', { ...payload, force: true });
-    else out = null;
-  }
-  if (btn) { btn.disabled = false; btn.textContent = old; }
-  if (!out) return;
-  if (out.error) return errToast('merge failed: ' + out.error);
-  compareCache.delete(activeRel);
-  traceLeaves.delete(activeRel); // the merged reply becomes the active branch
-  fanoutFocus.delete(activeRel);
-  toast('merging ' + out.answers + ' replies — the merged reply lands here and becomes the active branch');
-}
-
 // ---- run cards: live progress of headless runs on this conversation ----
 // Streaming discipline: the card is patched in place (text nodes only), never
 // rebuilt per token. That keeps <details> fold state, text selection, focus,
@@ -12934,7 +12607,13 @@ function wireToolGroups(view) {
   toolGroupStick.disconnect(); // the previous render's lines are gone
   for (const g of view.querySelectorAll('.toolgroup')) {
     const summary = g.querySelector(':scope > summary');
-    g.addEventListener('toggle', () => toolGroupOpen.set(activeRel + '|' + g.dataset.gkey, g.open));
+    g.addEventListener('toggle', () => {
+      const key = g.dataset.msgKey || activeRel;
+      toolGroupOpen.set(key + '|' + g.dataset.gkey, g.open);
+      readerState(key).work = readerState(key).work || {};
+      readerState(key).work[g.dataset.gkey] = g.open;
+      saveReaderState(key);
+    });
     if (!summary) continue;
     summary.title = 'Fold or show these steps · the line stays at the top while you read them';
     summary.addEventListener('click', e => {
@@ -12964,7 +12643,12 @@ function ledgerAbsorb(r) {
     if (runLedgers.size > 8) {
       for (const [id, old] of runLedgers) {
         if (runLedgers.size <= 8) break;
-        if (id !== r.jobId && !activeRuns.has(id)) runLedgers.delete(id);
+        const saved = old.done && current?.key === old.key ? savedLiveReplies(old, current.messages) : null;
+        const settled = saved && old.order.filter(id => old.blocks.get(id).text).every(id => saved.has(id));
+        if (id !== r.jobId && !activeRuns.has(id) && (old.key !== activeRel || settled)) {
+          runLedgers.delete(id);
+          for (const key of readerLiveMessages.keys()) if (key.startsWith('live:' + id + ':')) readerLiveMessages.delete(key);
+        }
       }
     }
   }
@@ -13266,21 +12950,35 @@ function lsSummary(r, L) {
   return (steps ? steps + ' step' + (steps > 1 ? 's' : '') + ' · ' : '') + now + (water ? ' — ' + water : '');
 }
 
-// The glass wall: every block of the run, in full, append-only, patched in
-// place (text nodes only — selection and scroll survive every delta).
+// The glass wall: append-only within one run, patched in place so selection
+// and scroll survive deltas. Block numbers are only unique within that run.
 function renderLsBlocks(L, target = null) {
   const host = target || $('lsBlocks');
-  if (!host || !L) return;
+  if (!host) return;
+  // ledgerAbsorb retains the same ledger object for the lifetime of a run.
+  // Scope ownership to each host (including parallel panels), not globally.
+  if (host._lsLedger !== L) {
+    host.replaceChildren();
+    host._lsLedger = L;
+    host.scrollTop = 0;
+    if (!target && $('lsChip')) $('lsChip').hidden = true;
+  }
+  if (!L) return;
   const pin = host.scrollHeight - host.scrollTop - host.clientHeight < 40;
+  for (const row of [...host.children]) {
+    const b = L.blocks.get(row.dataset.blk);
+    if (!b || (b.kind !== 'tool' && !b.think)) row.remove();
+  }
   for (const id of L.order) {
     const b = L.blocks.get(id);
+    if (b.kind !== 'tool' && !b.think) continue;
     let el = host.querySelector(`[data-blk="${CSS.escape(id)}"]`);
     if (!el) {
       el = document.createElement('div');
       el.className = 'ls-b';
       el.dataset.blk = id;
       el.innerHTML = b.kind === 'tool'
-        ? '<div class="ls-b-head"></div><pre class="ls-args"></pre><pre class="ls-out"></pre>'
+        ? '<div class="ls-b-head"></div><div class="st-preview"></div><div class="st-output-label" hidden>Output</div><pre class="ls-out"></pre>'
         : '<div class="ls-b-head"></div><pre class="ls-think"></pre><pre class="ls-text"></pre>';
       host.appendChild(el);
     }
@@ -13290,12 +12988,15 @@ function renderLsBlocks(L, target = null) {
         : b.phase === 'running' ? '● running' + (b.t0 ? ' · ' + fmtElapsed(Date.now() - b.t0) : '')
         : b.phase === 'ready' ? '◌ queued' : '◌ call streaming in';
       setLiveText(head, '⚙ ' + (b.name || 'tool') + ' · ' + phase);
-      setLiveText(el.querySelector('.ls-args'), b.args || '');
-      setLiveText(el.querySelector('.ls-out'), b.out || '');
+      StreamingTool.render(el.querySelector('.st-preview'), b, setLiveText, diffLinesAsync);
+      const shell = el.querySelector('.st-preview').classList.contains('st-shell');
+      el.classList.toggle('ls-shell', shell);
+      el.querySelector('.st-output-label').hidden = !shell || !b.out;
+      setLiveText(el.querySelector('.ls-out'), shell ? StreamingTool.cleanOutput(b.out || '') : b.out || '');
     } else {
-      setLiveText(head, b.done ? '❯ reply' : b.text ? '█ writing…' : b.think ? '◌ thinking…' : '◌ …');
+      setLiveText(head, b.done ? 'Thinking' : '◌ thinking…');
       setLiveText(el.querySelector('.ls-think'), b.think || '');
-      setLiveText(el.querySelector('.ls-text'), b.text || '');
+      setLiveText(el.querySelector('.ls-text'), '');
     }
   }
   if (pin) host.scrollTop = host.scrollHeight;
@@ -13315,47 +13016,7 @@ function parallelLedgersFor(key) {
 }
 
 function renderParallelStage() {
-  const stage = $('parallelStage');
-  if (!stage) return;
-  // Settled compare owns the turn. Do not stack a second live copy under it.
-  if ($('view') && $('view').querySelector('.cmpblock')) {
-    stage.hidden = true; stage.innerHTML = ''; delete stage.dataset.fanout; return;
-  }
-  const entries = parallelLedgersFor(activeRel);
-  // The columns hold their ground until the settled comparison replaces
-  // them: 'fanout-settled' clears these ledgers AFTER the reintegrated
-  // transcript (columns + merge bar) is on screen. No gap, no vanishing.
-  if (!entries.length) { stage.hidden = true; stage.innerHTML = ''; delete stage.dataset.fanout; return; }
-  stage.hidden = false;
-  const fanoutId = entries[0][1].fanoutId;
-  if (stage.dataset.fanout !== fanoutId) {
-    stage.dataset.fanout = fanoutId;
-    stage.innerHTML = `<div class="cmp-cols"></div><div class="cmp-bar"><button disabled>merge when replies finish</button><span class="dim">each model works in its own fork; finished replies stay in their columns</span></div>`;
-  }
-  const cols = stage.querySelector('.cmp-cols');
-  for (const [jobId, L] of entries) {
-    let col = cols.querySelector(`[data-ps-job="${CSS.escape(jobId)}"]`);
-    if (!col) {
-      col = document.createElement('div');
-      col.className = 'cmp-col';
-      col.dataset.psJob = jobId;
-      col.innerHTML = `<div class="cmp-head"><label class="cmp-pick"><input type="checkbox" checked></label><b></b><span class="ps-status"></span><button class="ps-abort">abort</button></div><div class="ps-body"></div>`;
-      cols.appendChild(col);
-      col.querySelector('.ps-abort').onclick = async e => {
-        const b = e.currentTarget; b.disabled = true; b.textContent = 'aborting…';
-        await postJson('/api/run/abort', { jobId });
-      };
-    }
-    col.classList.toggle('done', !!L.done);
-    col.classList.toggle('failed', L.status === 'error');
-    setLiveText(col.querySelector('b'), L.model || 'model');
-    setLiveText(col.querySelector('.ps-status'), L.done ? (L.status === 'error' ? '✗ failed' : '✓ replied') : '● ' + (L.statusText || 'working…'));
-    col.querySelector('.ps-abort').hidden = !!L.done;
-    renderLsBlocks(L, col.querySelector('.ps-body'));
-  }
-  const bar = stage.querySelector('.cmp-bar button');
-  if (bar) setLiveText(bar, entries.every(([, L]) => L.done)
-    ? 'folding the branches into this conversation…' : 'merge when replies finish');
+  renderReaderParallel($('parallelStage'), parallelLedgersFor(activeRel));
 }
 
 function hasRunCardContent(r) {
@@ -13366,7 +13027,9 @@ function hasRunCardContent(r) {
 function renderRunCards() {
   const host = $('runCards');
   const v = $('view');
-  const pinned = v && v.scrollHeight - v.scrollTop - v.clientHeight < 200;
+  const selection = window.getSelection();
+  const pinned = v && v.scrollHeight - v.scrollTop - v.clientHeight < TAIL_PIN_PX
+    && !(selection && !selection.isCollapsed && v.contains(selection.anchorNode));
   const runs = [...activeRuns.values()].filter(r => r.key === activeRel);
   // The everyday run has NO card: the dock's steps ledger and the live
   // pane carry it. The card survives only for the rare interactive
@@ -13386,6 +13049,7 @@ function renderRunCards() {
       updateRunCustoms(card, r);
     }
   }
+  renderLiveReplies();
   updateLiveStrip(runs);
   renderParallelStage();
   if ((cards.length || runs.length || parallelLedgersFor(activeRel).length) && pinned) v.scrollTop = v.scrollHeight;
@@ -13417,7 +13081,8 @@ function updateLiveStrip(runs) {
   const delegated = !live && !pending && !frozenL ? delegatedLiveFor(activeRel) : [];
   if (!live && !pending && !frozenL && !delegated.length) {
     strip.hidden = true;
-    for (const [id, L] of runLedgers) if (L.key === activeRel) runLedgers.delete(id);
+    // Keep reply text until the saved transcript represents it, even when
+    // the reader has closed the work monitor or is reading farther up.
     return;
   }
   strip.hidden = false;
@@ -13484,7 +13149,7 @@ function flashCopied(btn) {
 let progressStream = null;
 let conversationLoadSeq = 0;
 
-async function open(rel, scroll) {
+async function open(rel, scroll, routeHash = null) {
   const seq = ++conversationLoadSeq;
   const navigating = viewKind !== 'conversation' || activeRel !== rel || !current || current.key !== rel;
   if (navigating) {
@@ -13507,10 +13172,12 @@ async function open(rel, scroll) {
     window._agentLiveText = '';
     window._ctxTouched = false;
     window._agentContext = [];
-    const hash = typeof scroll === 'string' && scroll.startsWith('entry:')
-      ? 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })) : encodeURIComponent(rel);
+    const hash = routeHash || (typeof scroll === 'string' && scroll.startsWith('entry:')
+      ? 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })) : encodeURIComponent(rel));
     setRoute('conversation', hash);
     render();
+  } else if (routeHash) {
+    setRoute('conversation', routeHash);
   } else if (typeof scroll === 'string' && scroll.startsWith('entry:')) {
     setRoute('conversation', 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })));
   }
@@ -13532,6 +13199,10 @@ async function open(rel, scroll) {
   current = next;
   if (!(window._ctxTouched && current && current.key === rel)) {
     window._agentContext = Array.isArray(next.attachedContext) ? next.attachedContext.slice() : [];
+  }
+  if (scroll == null && navigating) {
+    const state = readerState(rel);
+    if (state.positions[state.leaf || 'live'] && (state.leaf || state.revision === next.mtimeMs)) scroll = 'restore';
   }
   await renderConv(scroll);
 }
@@ -13952,47 +13623,11 @@ const TREE_COLW = 300, TREE_ROWH = 96;
 function shortModelName(m) {
   return String(m || 'model').split('/').pop();
 }
-function treeFirstAssistant(start, children) {
-  const queue = [start];
-  const seen = new Set();
-  while (queue.length) {
-    const c = queue.shift();
-    if (!c || seen.has(c.id)) continue;
-    seen.add(c.id);
-    if (c.role === 'assistant') return c;
-    for (const k of children.get(c.id) || []) queue.push(k);
-  }
-  return null;
-}
-// Parallel replies become ONE box. The server supplies typed groups. The
-// legacy inference is only a compatibility path for a tab on an old server.
+// The server's typed groups own answer identity in both the tree and reader.
+// Unknown older history remains ordinary paths rather than guessed fan-out.
 function collapseFanoutTree(raw, typedGroups = []) {
   const byId = new Map(raw.map(n => [n.id, n]));
-  const children = new Map();
-  for (const n of raw) {
-    if (!n.parent || !byId.has(n.parent)) continue;
-    if (!children.has(n.parent)) children.set(n.parent, []);
-    children.get(n.parent).push(n);
-  }
-  let groups = Array.isArray(typedGroups) ? typedGroups : [];
-  if (!groups.length) {
-    groups = [];
-    for (const n of raw) {
-      const answers = [], seen = new Set();
-      let both = null, merge = null;
-      for (const child of children.get(n.id) || []) {
-        if (child.bridge === 'both') { both = child.id; continue; }
-        if (child.bridge === 'merge' || isMergeBridgeText(child.title)) {
-          const answer = treeFirstAssistant(child, children);
-          if (answer) merge = { bridge: child.id, answer: answer.id };
-          continue;
-        }
-        const answer = child.role === 'assistant' ? child : treeFirstAssistant(child, children);
-        if (answer && answer.bridge !== 'both' && !seen.has(answer.id)) { seen.add(answer.id); answers.push(answer.id); }
-      }
-      if (answers.length >= 2) groups.push({ node: n.id, answers, both, merge });
-    }
-  }
+  const groups = Array.isArray(typedGroups) ? typedGroups : [];
   const hidden = new Set();
   const boxes = [];
   const memberToBox = new Map();
@@ -14009,7 +13644,9 @@ function collapseFanoutTree(raw, typedGroups = []) {
     }));
     picks.push({ kind: 'both', id: both ? both.id : null, model: 'both', title: 'both replies in context', key: n.key, active: !!(both && both.active) });
     if (mergeAsst) picks.push({ kind: 'merge', id: mergeAsst.id, model: mergeAsst.model || 'merge', title: mergeAsst.title, ts: mergeAsst.jumpTs || mergeAsst.ts, key: mergeAsst.key, active: !!mergeAsst.active });
-    const members = [...models, both, mergeUser, mergeAsst].filter(Boolean);
+    const packageIds = new Set((group.packages || []).flatMap(p => p.entryIds || []));
+    const work = raw.filter(candidate => (candidate.entryRefs || []).some(ref => packageIds.has(ref.id)) && !models.includes(candidate));
+    const members = [...new Set([...models, ...work, both, mergeUser, mergeAsst].filter(Boolean))];
     const box = {
       id: 'fanbox:' + n.id, parent: n.id, role: 'fanout',
       title: models.length + ' replies · ' + models.map(a => shortModelName(a.model)).join(' · '),
@@ -14052,15 +13689,6 @@ async function showTree(key, opts = {}) {
     children.get(n.parent).push(n);
   }
   const roots = nodes.filter(n => !n.parent || !byId.has(n.parent));
-  for (const n of nodes) n.aKids = (children.get(n.id) || []).filter(child => {
-    const queue = [child];
-    while (queue.length) {
-      const c = queue.shift();
-      if (c.role === 'assistant') return true;
-      for (const k of children.get(c.id) || []) queue.push(k);
-    }
-    return false;
-  }).length;
   // Rows follow time; columns follow branches like a git graph: the first
   // child continues the parent's column, later children open a new column.
   const rows = [...nodes].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
@@ -14110,7 +13738,7 @@ async function showTree(key, opts = {}) {
   const hereNode = [...rows].reverse().find(n => n.active && !n.delegated) || null;
   const fanChoicesHtml = n => (n.picks || []).map(p => {
     const label = p.kind === 'both' ? 'both · all replies' : p.kind === 'merge' ? 'merge · ' + (p.title || shortModelName(p.model)) : shortModelName(p.model) + ' · ' + (p.title || 'reply');
-    const tip = p.kind === 'both' ? 'Continue with every reply in context' : p.kind === 'merge' ? 'Continue from the merged reply: ' + (p.title || '') : `Continue from ${p.model || 'this model'} only: ${p.title || ''}`;
+    const tip = p.kind === 'both' ? 'Read the included answers; continuation does not change' : p.kind === 'merge' ? 'Read the merged answer: ' + (p.title || '') : `Read ${p.model || 'this model'}: ${p.title || ''}`;
     return `<button class="tfanchoice${p.active ? ' current on' : ''}" data-fan-choice="${esc(p.id || '')}" data-fan-kind="${esc(p.kind)}" title="${esc(tip)}">${esc(label)}</button>`;
   }).join('');
   const delegatedBox = n => {
@@ -14121,7 +13749,7 @@ async function showTree(key, opts = {}) {
   };
   const boxes = nodes.map(n => n.delegated ? delegatedBox(n) :
     `<div class="tnode ${n.role}${n.active ? '' : ' inactive'}${n.fork ? ' fork' : ''}${n === hereNode ? ' here' : ''}" data-tn="${esc(n.id)}" style="left:${px(n)}px;top:${py(n)}px;width:${bw}px" title="${esc(n.fork ? 'in fork: ' + forkTitle(n) : n.title)}">
-      <div class="tm"><b>${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : n.role === 'fanout' ? 'parallel' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role !== 'user' && n.role !== 'fanout' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} ${n.role === 'work' ? 'steps' : 'msgs'}</span>` : ''}${n.tools && n.role !== 'work' ? `<span class="ttools" title="this box carries ${n.tools} tool call${n.tools > 1 ? 's' : ''} — continue and fork keep them">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
+      <div class="tm"><b>${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : n.role === 'fanout' ? 'answers' : 'asst'}</b><span>${esc(n.tlabel)}</span>${n.role !== 'user' && n.role !== 'fanout' && n.model ? `<span class="tmodel" title="${esc(n.model)}">${esc(n.model)}</span>` : ''}${n.count > 1 ? `<span>×${n.count} ${n.role === 'work' ? 'steps' : 'msgs'}</span>` : ''}${n.tools && n.role !== 'work' ? `<span class="ttools" title="this box carries ${n.tools} tool call${n.tools > 1 ? 's' : ''} — continue and fork keep them">⚙ ${n.tools}</span>` : ''}${n.fork ? '<span class="fk">↳ fork</span>' : n.active ? '' : '<span>branch</span>'}${n === hereNode ? '<span class="herechip" title="The conversation continues from this box">● here</span>' : ''}</div>
       <div class="tt">${esc(n.title)}</div>${n.role === 'fanout' ? `<div class="tfanchoices">${fanChoicesHtml(n)}</div>` : ''}</div>`).join('');
   $('view').innerHTML = `<div class="nwrap" style="max-width:none">
     <div class="treescroll"><div class="treewrap" id="treewrap" style="width:${W}px;height:${H}px">
@@ -14130,7 +13758,9 @@ async function showTree(key, opts = {}) {
     <div class="treebar" id="treebar"></div></div>`;
   const wrap = $('treewrap');
   // Keyboard navigation state: T opens the tree, arrows walk it.
-  const leaf = hereNode || rows[rows.length - 1] || null;
+  const readingLeaf = readerState(key).leaf;
+  const readingNode = readingLeaf && rows.find(n => (n.entryRefs || []).some(ref => ref.key === key && ref.id === readingLeaf));
+  const leaf = readingNode || hereNode || rows[rows.length - 1] || null;
   const keepSel = opts.keepSel && byId.has(opts.keepSel) ? opts.keepSel : null;
   treeNav = { key, byId, children, roots, wrap, hostNodes, source: t.source, familyKeys, sel: keepSel || (leaf ? leaf.id : null) };
   // Click = select (the status bar shows the verbs) · double click = read.
@@ -14147,38 +13777,13 @@ async function showTree(key, opts = {}) {
   });
   wrap.querySelectorAll('[data-fan-choice]').forEach(el => el.onclick = async e => {
     e.stopPropagation();
-    const box = el.closest('.tnode');
-    if (!box) return;
-    treeSetSel(box.dataset.tn, { scroll: false });
-    const n = byId.get(box.dataset.tn);
-    let pickId = el.dataset.fanChoice || null;
-    if (!pickId && el.dataset.fanKind === 'both' && n) {
-      el.disabled = true;
-      const old = el.textContent;
-      el.textContent = 'building both…';
-      const out = await postJson('/api/node/both', { id: n.key || key, node: n.promptId });
-      el.disabled = false;
-      el.textContent = old;
-      if (!out || out.error) {
-        const stale = out && out.error === 'not found';
-        return errToast(stale ? 'server update pending — try both again after aiconvo restarts' : ((out && out.error) || 'could not build both'));
-      }
-      pickId = out.id;
-      el.dataset.fanChoice = pickId;
-      const pick = (n.picks || []).find(p => p.kind === 'both');
-      if (pick) pick.id = pickId;
-    }
-    treeNav.fanPick = pickId;
-    treeNav.fanPickKind = el.dataset.fanKind;
-    box.querySelectorAll('[data-fan-choice]').forEach(b => b.classList.toggle('on', b === el));
-    if (treeNav.fanPick) traceLeaves.set(key, treeNav.fanPick);
-    if (n) fanoutFocus.set(n.key || key, { node: n.promptId, choice: el.dataset.fanKind, id: treeNav.fanPick });
-    paintTreeBar();
-    // "Both" is a context target, not a chat bubble. Open its exact typed
-    // fan-out group: both replies, pick boxes, merge model, and merge button.
-    if (el.dataset.fanKind === 'both' && treeNav.fanPick && n) {
-      await open(n.key || key, 'compare:' + n.promptId);
-    }
+    const n = byId.get(el.closest('.tnode')?.dataset.tn);
+    if (!n) return;
+    const pick = n.picks.find(p => p.id === el.dataset.fanChoice && p.kind === el.dataset.fanKind)
+      || n.picks.find(p => p.kind === el.dataset.fanKind);
+    const targetKey = pick?.key || n.key || key;
+    if (!pick?.id) readerGroup(targetKey, n.promptId).compare = true;
+    await browseConversationPath(targetKey, pick?.id || n.promptId, n.promptId, { exact: true });
   });
   // Land on the newest message of the active branch (or keep the reader's
   // selection when a snapshot re-drew the tree under them).
@@ -14257,11 +13862,11 @@ function paintTreeBar() {
     el.classList.toggle('on', picked);
   });
   bar.innerHTML =
-    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : n.role === 'fanout' ? 'parallel' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${n.role === 'work' ? n.count + ' step' + (n.count > 1 ? 's' : '') : n.role === 'fanout' ? fanPicks.length + ' continues' : Math.round(n.chars / 100) / 10 + 'k'}${n.tools && n.role !== 'work' ? ` · ⚙ ${n.tools}` : ''}</span>` +
+    `<span class="tbsel" title="${esc(n.title)}">${n.role === 'user' ? 'user' : n.role === 'work' ? '⚙ work' : n.role === 'fanout' ? 'answers' : 'asst'} ${esc(n.tlabel || '')} · ${esc(n.title)} · ${n.role === 'work' ? n.count + ' step' + (n.count > 1 ? 's' : '') : n.role === 'fanout' ? fanPicks.length + ' continues' : Math.round(n.chars / 100) / 10 + 'k'}${n.tools && n.role !== 'work' ? ` · ⚙ ${n.tools}` : ''}</span>` +
     btn('read', 'r', 'read', 'Open the transcript at this box (enter, or double click). The ● here marker does not move.') +
     (isPi ? btn('branch', 'b', isLeaf ? 'continue' : 'branch', (isLeaf ? 'Move the ● here marker to this box and continue the path from it.' : 'Start a new branch after this box: the ● here marker moves to it, no copy is made.') + ' Then send from the composer as usual.') : '') +
-    (isPi && n.role === 'user' ? btn('edit', 'e', 'edit', 'Fork into a NEW session that stops just before this message. Open the new conversation to edit and resend it. The original does not change.') : '') +
-    (isPi && (n.aKids >= 2 || n.role === 'fanout') ? btn('agg', 'a', 'merge…', 'Synthesize a new reply from the parallel answers. That merge becomes another continue target.') : '') +
+    (isPi && n.role === 'user' ? btn('edit', 'e', 'edit', 'Open this question in the transcript editor. Saving creates another path and preserves the original.') : '') +
+    (isPi && n.role === 'fanout' ? btn('agg', 'a', 'merge…', 'Synthesize a new reply from the parallel answers. That merge becomes another continue target.') : '') +
     btn('fork', 'f', 'fork', 'Copy the path from the start to this message into a NEW session file and continue there. The original does not change. For Claude this is the only option: its CLI always continues at the file end.');
   // A box can live in a forked session: actions target that session.
   const key = n.key || treeNav.key;
@@ -14283,9 +13888,10 @@ function paintTreeBar() {
     if (!pick || !pick.id) return n;
     return { id: pick.id, key: pick.key || key, jumpTs: pick.ts || n.jumpTs, title: pick.title };
   };
-  bar.querySelector('[data-act=read]').onclick = async () => {
-    const t = await fanTarget();
-    if (t) openAtTs(t.key || key, t.jumpTs);
+  bar.querySelector('[data-act=read]').onclick = () => {
+    const pick = fanPicks.find(p => p.id && p.id === treeNav.fanPick);
+    if (n.role === 'fanout') return browseConversationPath(pick?.key || key, pick?.id || n.promptId, n.promptId, { exact: true });
+    openAtTs(key, n.jumpTs);
   };
   const bb = bar.querySelector('[data-act=branch]');
   if (bb) bb.onclick = async ev => {
@@ -14352,49 +13958,8 @@ function treeKeydown(e) {
 }
 
 // ---- node dialog: aggregate ----
-function nodeDialog(titleHtml, bodyHtml) {
-  document.querySelectorAll('.node-dialog-overlay').forEach(el => el.remove());
-  const overlay = document.createElement('div');
-  overlay.className = 'overlay node-dialog-overlay';
-  overlay.innerHTML = `<div class="dialog" style="width:520px;max-width:92vw"><h3>${titleHtml}</h3>${bodyHtml}</div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.onclick = e => { if (e.target === overlay) close(); };
-  overlay.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
-  return { overlay, close };
-}
-
 function openAggregateDialog(key, n) {
-  // The first conversation model is the default aggregator.
-  let models = fanModels().slice(0, 1);
-  const { overlay, close } = nodeDialog('aggregate the replies',
-    `<div class="dim" style="margin-bottom:8px">quotes every answer branch under “${esc(n.title)}” with its model name, then asks one model to synthesize.</div>
-     <textarea id="agInstr" rows="4" style="width:100%;box-sizing:border-box;font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--border-strong);padding:8px">Synthesize the single best approach from these answers. Name real disagreements and pick a side with reasons.</textarea>
-     <div style="margin:10px 0"><button id="agModel" type="button">aggregator model…</button> <span id="agChips">${models[0] ? `<code>${esc(models[0].modelId)}</code>` : '<span class="dim">session model</span>'}</span></div>
-     <div><button class="primary" id="agSend">aggregate</button> <button id="agCancel">cancel</button></div>`);
-  overlay.querySelector('#agCancel').onclick = close;
-  overlay.querySelector('#agModel').onclick = e => openModelPicker(e.target, {
-    selected: new Set(models[0] ? [models[0].provider + '/' + models[0].modelId] : [])
-  }, picked => {
-    models = picked;
-    overlay.querySelector('#agChips').innerHTML = `<code>${esc(picked[0].modelId)}</code>`;
-  });
-  overlay.querySelector('#agSend').onclick = async () => {
-    const btn = overlay.querySelector('#agSend');
-    btn.disabled = true;
-    btn.textContent = 'starting…';
-    const payload = { id: key, node: n.id, instruction: overlay.querySelector('#agInstr').value, provider: models[0] && models[0].provider, modelId: models[0] && models[0].modelId };
-    let out = await postJson('/api/node/aggregate', payload);
-    if (out && out.needsForce) {
-      if (confirm('A terminal owns this conversation. Stop the terminal and aggregate from the web?'))
-        out = await postJson('/api/node/aggregate', { ...payload, force: true });
-      else out = null;
-    }
-    if (!out) { btn.disabled = false; btn.textContent = 'aggregate'; return; }
-    if (out.error) { btn.disabled = false; btn.textContent = 'aggregate'; return errToast('aggregate failed: ' + out.error); }
-    close();
-    toast('aggregating ' + out.answers + ' answers — the synthesis lands as a new branch');
-  };
+  return openConversationMerge(key, n.id);
 }
 
 async function branchFrom(key, n, btn) {
@@ -14408,6 +13973,8 @@ async function branchFrom(key, n, btn) {
     // Land IN the conversation: the branch point wears a standing orange
     // ring, the composer sits right below it — the path ends here. The old
     // continuation is one folded ⤓ other-branch line.
+    resetConversationReading(key);
+    compareCache.delete(key);
     await openAfterBranch(key);
     toast('branched — the conversation ends here now; write to continue');
   } catch (e) {
@@ -14417,32 +13984,30 @@ async function branchFrom(key, n, btn) {
   }
 }
 
-// Fork BEFORE a user message (pi native) and prefill the composer with its
-// text: the edit-and-resubmit flow. The original conversation does not change.
+// The tree opens the same branch-preserving editor as the transcript.
+// Reading the original and preparing a draft do not write a session.
 async function editFrom(key, n, btn) {
   btn.disabled = true;
-  btn.textContent = 'preparing…';
+  btn.textContent = 'opening editor…';
   try {
-    const res = await fetch('/api/fork-edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
-    const d = await res.json();
-    if (d.error) throw new Error(d.error);
-    if (d.text) {
-      try { await navigator.clipboard.writeText(d.text); } catch {}
-    }
-    toast('forked before this message — the old text is on the clipboard. Continue in Alacritty to edit and resend');
-    await load();
-    await open(d.key);
-  } catch (e) {
-    btn.disabled = false;
-    btn.textContent = 'edit';
-    errToast(e.message || 'the edit fork failed');
-  }
+    await open(key, 'top');
+    if (current?.key !== key) return;
+    const ids = new Set([n.id, ...(n.entryIds || []), ...(n.entryRefs || []).filter(r => r.key === key).map(r => r.id)]);
+    const message = current.messages.find(m => m.role === 'user' && (ids.has(m.eid) || m.ts === n.jumpTs));
+    if (!message) throw Error('The original question is unavailable. Reload the tree.');
+    await open(key, 'entry:' + message.eid);
+    const edit = $('view').querySelector(`[data-eid="${CSS.escape(message.eid)}"] .msg-edit`);
+    if (edit) await openTranscriptEditor(edit);
+  } catch (error) { errToast(error.message); }
+  finally { if (btn.isConnected) { btn.disabled = false; btn.textContent = 'edit'; } }
 }
 
 // After a branch: open at the bottom, ring the last on-path message (the
 // box just branched after — folded other-branch details do not count), and
 // put the caret in the composer.
 async function openAfterBranch(key) {
+  resetConversationReading(key);
+  compareCache.delete(key);
   await open(key, 'bottom');
   requestAnimationFrame(() => {
     const t = $('conversationTranscript');
@@ -14468,14 +14033,8 @@ async function openAfterBranch(key) {
 
 async function openAtTs(key, ts) {
   await open(key, 'top');
-  if (!ts) return;
-  requestAnimationFrame(() => {
-    const el = document.querySelector(`.msg[data-ts="${CSS.escape(ts)}"]`);
-    if (!el) return;
-    el.scrollIntoView({ block: 'center' });
-    el.classList.add('jump');
-    setTimeout(() => el.classList.remove('jump'), 2500);
-  });
+  const message = current?.key === key && current.messages.find(m => m.ts === ts);
+  if (message?.eid) await open(key, 'entry:' + message.eid);
 }
 
 async function forkFrom(key, n, btn) {
@@ -16241,7 +15800,7 @@ function readOverlayOpen() { return $('readOverlay') && !$('readOverlay').hidden
 function lastReadableMsg() {
   const t = $('conversationTranscript');
   if (!t) return null;
-  const msgs = [...t.querySelectorAll('.msg.assistant, .msg.user')];
+  const msgs = [...t.querySelectorAll('.msg.assistant, .msg.user')].filter(el => el.getClientRects().length);
   return msgs.length ? msgs[msgs.length - 1] : null;
 }
 
@@ -16721,7 +16280,7 @@ document.addEventListener('keydown', e => {
   }
   // Shift+tab cycles the reasoning level without composer focus (the focused
   // composer handles its own shift+tab).
-  if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && $('agentThink')) {
+  if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && $('agentThink') && !e.target.closest('button, summary, select, [tabindex]')) {
     e.preventDefault();
     cycleThinking();
     return;
@@ -16970,6 +16529,13 @@ live.onmessage = ev => {
     }
     return;
   }
+  if (d.type === 'fanout-retained') {
+    readerGroup(d.key, 'run:' + d.fanoutId).retained = true;
+    saveReaderState(d.key);
+    compareCache.delete(d.key);
+    if (activeRel === d.key && current) renderParallelStage();
+    return;
+  }
   if (d.type === 'fanout-settled') {
     // The parallel opinions now live INSIDE the parent conversation as real
     // sibling branches; the fork files are gone. Land on the comparison,
@@ -16977,16 +16543,14 @@ live.onmessage = ev => {
     compareCache.delete(d.key);
     relatedCache.delete(d.key);
     ctxMeterCache.delete(d.key);
-    if (d.bothId) traceLeaves.set(d.key, d.bothId);
+    // Settlement adds history; it never changes a reader's selected path.
     const clearLedgers = () => {
       for (const [id, L] of [...runLedgers]) if (L.fanoutId === d.fanoutId) runLedgers.delete(id);
       if (viewKind === 'conversation') renderRunCards();
     };
     if (activeRel === d.key && current) {
-      open(d.key, 'compare').then(() => {
-        // Keep the live columns if the settled row failed to appear.
-        if ($('view') && $('view').querySelector('.cmpblock')) clearLedgers();
-      }, clearLedgers);
+      const follow = readerAtTail() && !readerState(d.key).leaf;
+      open(d.key, follow ? 'compare' : 'preserve').then(clearLedgers, () => {});
     } else clearLedgers();
     return;
   }

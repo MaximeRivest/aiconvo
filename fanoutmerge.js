@@ -145,7 +145,7 @@ function answerOfTail(tail) {
   if (!model) {
     for (const d of tail) if (d.type === 'model_change' && d.modelId) model = d.modelId;
   }
-  return { model: model || 'model', text: textOf(answer.message.content) };
+  return { id: answer.id, model: model || 'model', text: textOf(answer.message.content) };
 }
 
 function makeBothEntry(parentId, answers, opts) {
@@ -157,6 +157,7 @@ function makeBothEntry(parentId, answers, opts) {
     parentId,
     timestamp: (opts && opts.now) || new Date().toISOString(),
     message: { role: 'assistant', content: [{ type: 'text', text: body }] },
+    aiconvo: { kind: 'both', sources: answers.map(a => ({ id: a.id || null, key: a.key || null, model: a.model || 'model', entryIds: a.entryIds || (a.id ? [a.id] : []) })), unresolved: true },
   };
 }
 
@@ -185,7 +186,11 @@ function computeFanoutMerge(rootRaw, forkRaws, opts = {}) {
   }
 
   // Per-fork tails, restructured deterministically.
-  let canonical = null;
+  // After a successful merge the first fork can be entirely shared history
+  // (especially when it needed no model-setting entries). Its durable run
+  // identity still fixes the canonical prompt for every retry.
+  const savedPrompt = opts.fanoutId && [...rootById.values()].find(d => d.aiconvo?.kind === 'parallel' && d.aiconvo.runId === opts.fanoutId && isPromptMessage(d));
+  let canonical = savedPrompt ? { id: savedPrompt.id, text: textOf(savedPrompt.message.content) } : null;
   const droppedIds = new Set();
   const computed = new Map(); // id -> entry (first fork wins)
   const answers = [];
@@ -202,6 +207,10 @@ function computeFanoutMerge(rootRaw, forkRaws, opts = {}) {
     const a = answerOfTail(dedup);
     if (a) answers.push(a);
     for (const d of dedup) if (!computed.has(d.id)) computed.set(d.id, d);
+  }
+
+  if (canonical && opts.fanoutId && computed.has(canonical.id)) {
+    computed.get(canonical.id).aiconvo = { kind: 'parallel', runId: opts.fanoutId };
   }
 
   // Assemble: root order first, computed entries rewrite their root copies in
@@ -221,7 +230,7 @@ function computeFanoutMerge(rootRaw, forkRaws, opts = {}) {
     emitted.add(id);
     if (canonical && isBothEntry(it.d) && parentOf(it.d) === canonical.id) hasBoth = true;
     const c = computed.get(id);
-    if (c && parentOf(c) !== parentOf(it.d)) { out.push(JSON.stringify(c)); changed = true; }
+    if (c && (parentOf(c) !== parentOf(it.d) || (c.aiconvo && JSON.stringify(c.aiconvo) !== JSON.stringify(it.d.aiconvo)))) { out.push(JSON.stringify(c)); changed = true; }
     else out.push(it.line);
   }
   for (const [id, d] of computed) {

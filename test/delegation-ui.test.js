@@ -359,7 +359,10 @@ test('dispatching an entry route again restores the exact launch target without 
   const start = html.indexOf('function dispatchHash(h) {');
   const code = html.slice(start, html.indexOf('\nconst $ = id => document.getElementById', start));
   const opened = [];
-  const context = vm.createContext({ open: (...args) => opened.push(args), viewKind: 'home', errToast: message => { throw new Error(message); } });
+  const reading = new Map();
+  const context = vm.createContext({ open: (...args) => opened.push(args), viewKind: 'home',
+    readerState: key => { if (!reading.has(key)) reading.set(key, { leaf: 'previously-read' }); return reading.get(key); },
+    errToast: message => { throw new Error(message); } });
   new vm.Script(code).runInContext(context);
   const target = { key: 'saved/path & 100%.jsonl', entryId: 'raw-entry-<42>' };
   const hash = 'read=' + encodeURIComponent(JSON.stringify(target));
@@ -367,6 +370,7 @@ test('dispatching an entry route again restores the exact launch target without 
   context.dispatchHash('child-conversation');
   context.dispatchHash(decodeURIComponent(hash));
   assert.deepEqual(opened, [[target.key, 'entry:' + target.entryId], ['child-conversation'], [target.key, 'entry:' + target.entryId]]);
+  assert.equal(reading.get('child-conversation').leaf, null);
 });
 
 test('resumed web activity and surviving workers keep cancellation live and say so', async t => {
@@ -422,7 +426,10 @@ test('app scripts parse and integration uses separate task hosts and read-only n
   assert.ok(!html.includes("mountDelegationView('tree')"));
   assert.ok(html.includes("delegationUI.attachCards($('conversationTranscript'))"));
   assert.ok(html.includes("DelegationUI.treeNodes(delegationUI.index(), familyKeys, hostNodes)"));
-  assert.ok(html.includes('class="dg-card" data-dg-key='));
+  const reader = fs.readFileSync(require.resolve('../conversation-reader.js'), 'utf8');
+  new vm.Script(reader, { filename: 'conversation-reader.js' });
+  assert.ok(reader.includes('class="dg-card" data-dg-key='));
+  assert.ok(html.includes('<script src="/conversation-reader.js"></script>'));
   assert.ok(html.includes("origin(key) || shortDir"));
   assert.ok(html.includes("d.messages.findIndex(m => m.eid === entryId)"));
   assert.ok(html.includes("if (h.startsWith('read='))"));

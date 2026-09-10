@@ -19,6 +19,7 @@ const zlib = require('zlib');
 const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const settingsLib = require('./settings.js');
 const snippetsLib = require('./snippets.js');
+const memoryFingerprint = require('./memory-fingerprint.js');
 const { openSearchIndex, SearchIndex } = require('./searchindex.js');
 const foldsLib = require('./projectfolds.js');
 const areasLib = require('./areas.js');
@@ -27,6 +28,7 @@ const lineDiff = require('./linediff.js');
 const { agentPath } = require('./agentpath.js');
 const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
+const conversationFlow = require('./conversation-flow.js');
 const fanoutMerge = require('./fanoutmerge.js');
 const usageLib = require('./usageanalytics.js');
 const agentReadLib = require('./agentread.js');
@@ -232,7 +234,7 @@ function cachePathFor(key) {
 }
 
 // Bump when the cached message format changes; forces a re-index.
-const CACHE_VERSION = 13; // v13: bash tool calls carry their mined file writes
+const CACHE_VERSION = 14; // v14: explicit conversation operation provenance
 
 // A memory-briefing bootstrap prompt is the same for every launched session; it says
 // nothing about the actual work. Titles must come from the first real request instead.
@@ -484,7 +486,8 @@ async function parseFile(absPath) {
       continue;
     }
     if ((text.trim() || turnImages.length) && !(role === 'user' && isNoise(text))) {
-      const msg = { role, text, images: turnImages, ts: d.timestamp || null, _eid: eid };
+      const msg = { role, text, images: turnImages, ts: d.timestamp || null, _eid: eid,
+        operation: d.aiconvo || conversationFlow.operation({ text, role }) || undefined };
       // Both formats store the generating model on the assistant entry
       // (pi also stores the provider). Kept per message: models can change
       // mid-conversation and per branch.
@@ -570,10 +573,7 @@ async function indexFile(source, relPath, stat) {
     const firstUser = titleSourceMessage(messages);
     const fullTitle = delegated ? delegated.title : firstUser ? firstUser.text.slice(0, 200).replace(/\s+/g, ' ').trim() : '(no user message)';
     const titleHash = crypto.createHash('sha256').update('v2\x00' + fullTitle).digest('hex').slice(0, 16);
-    const memoryHash = crypto.createHash('sha256').update('v1\x00' + JSON.stringify(
-      messages.filter(m => m.role === 'user' || m.role === 'assistant')
-        .map(m => [m.role, m.text || '', m.ts || null, !!m.off, m.origin || null])
-    )).digest('hex').slice(0, 24);
+    const memoryHash = memoryFingerprint.fingerprint(messages);
     const savedTimelineTitle = timelineTitles[key];
     // A manual (or user-requested AI) title override wins over anything re-derived here.
     const manualTitle = savedTimelineTitle && savedTimelineTitle.manual ? savedTimelineTitle : null;
@@ -1188,7 +1188,8 @@ function parseTreeEntries(kind, raw) {
       if (d.type === 'message' && d.message && (d.message.role === 'user' || d.message.role === 'assistant')) {
         node.role = d.message.role;
         node.text = textOf(d.message.content);
-        node.bridge = bridgeKindOf(node.text);
+        node.operation = d.aiconvo || conversationFlow.operation({ text: node.text, role: node.role });
+        node.bridge = ['both', 'merge', 'regenerate'].includes(node.operation?.kind) ? node.operation.kind : undefined;
         if (Array.isArray(d.message.content)) {
           node.names = d.message.content.filter(b => b && (b.type === 'toolCall' || b.type === 'toolUse' || b.type === 'tool_use')).map(b => b.name || '?');
           node.calls = node.names.length || undefined;
@@ -1352,9 +1353,10 @@ async function sessionTreeFor(key, opts = {}) {
   const groups = [];
   for (const b of boxes) {
     const p = b.bparent;
-    const linear = p && childCount.get(p.id) === 1 && p.keys.size === b.keys.size;
+    const linear = p && childCount.get(p.id) === 1 && p.keys.size === b.keys.size && [...p.keys].every(k => b.keys.has(k));
     const g = linear && (b.work ? p.work
-      : !p.work && b.role === 'assistant' && p.role === 'assistant') ? groupOf.get(p.id) : null;
+      : !p.work && b.role === 'assistant' && p.role === 'assistant' && !b.bridge && !p.bridge
+        && b.operation?.kind === p.operation?.kind) ? groupOf.get(p.id) : null;
     if (g) { g.members.push(b); groupOf.set(b.id, g); }
     else { const ng = { members: [b] }; groups.push(ng); groupOf.set(b.id, ng); }
   }
@@ -1406,6 +1408,7 @@ async function sessionTreeFor(key, opts = {}) {
     const tools = (isWork ? g.members.reduce((s, m) => s + (m.calls || 0), 0) : 0) + tailCalls;
     return {
       id: tail.id,                       // fork point: the whole turn package is kept
+      messageId: last.id,                 // stable identity, independent of trailing settings/labels
       entryIds: [...new Set([...g.members.map(m => m.id), tail.id])],
       entryRefs: [...new Map([...g.members, tail].flatMap(m => [...m.keys].map(k => [k + '\n' + m.id, { key: k, id: m.id }]))).values()],
       parent: up ? up.members[up.members.length - 1].id : null,
@@ -1425,6 +1428,7 @@ async function sessionTreeFor(key, opts = {}) {
       key: owner,                        // the conversation to read or fork from
       fork: owner !== key || undefined,  // lives in a forked/linked session
       bridge: first.bridge || last.bridge || undefined,
+      operation: first.operation || last.operation || undefined,
     };
   });
   return {
@@ -1633,11 +1637,21 @@ async function forkSessionForEdit(key, nodeId) {
 // the SAME conversation; nothing is rewritten or copied.
 // Claude Code cannot do this: verified empirically, its CLI ignores appended
 // anchors and always continues at the last real message. Claude gets forks.
-async function branchSession(key, nodeId) {
+async function conversationSnapshotMatches(sessionPath, expectedLeaf) {
+  const raw = await fsp.readFile(sessionPath, 'utf8');
+  const entries = raw.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+  return conversationFlow.sameContext(entries, expectedLeaf);
+}
+
+async function branchSession(key, nodeId, expectedLeaf = null) {
   const entry = index[key];
   if (!entry) throw new Error('not found');
   if (entry.source === 'claude')
     throw new Error('Claude cannot branch in place — its CLI always continues at the file end. Use fork instead.');
+  const sessionPath = absPathForKey(key);
+  if (headlessRuns.has(sessionPath) || [...agentRunJobs.values()].some(j => j.fanoutRootKey === key && j.status === 'running')) {
+    throw new Error('Wait for the active answers to finish, or stop them, before changing continuation.');
+  }
   // A running pi keeps its own leaf in memory and would ignore the new anchor.
   // Refuse if a process still holds this session. Do not kill a native TUI.
   const running = findRunningConversation(key);
@@ -1649,10 +1663,16 @@ async function branchSession(key, nodeId) {
     stopAnyWarmSession(absPath);
     const raw = await fsp.readFile(absPath, 'utf8');
     let found = false;
+    const entries = [];
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
-      try { if (JSON.parse(line).id === nodeId) { found = true; break; } } catch {}
+      try {
+        const entry = JSON.parse(line);
+        entries.push(entry);
+        if (entry.id === nodeId) found = true;
+      } catch {}
     }
+    if (expectedLeaf && !conversationFlow.sameContext(entries, expectedLeaf)) throw new Error('The conversation advanced on another screen. Reload before changing continuation.');
     if (!found) throw new Error('message not found in the session file');
     const anchor = {
       type: 'label',
@@ -1946,9 +1966,9 @@ function runEventForwarder(job) {
   const state = { keyOf: () => job.key, blocks, timer: null, push: null };
   liveRunTails.set(job.id, state);
   const slim = b => b.kind === 'tool'
-    ? { id: b.id, kind: 'tool', name: b.name, args: (b.args || '').slice(0, 2000),
+    ? { id: b.id, kind: 'tool', name: b.name, args: (b.args || '').slice(0, 262144), rawArgs: b.rawArgs, argsTruncated: b.argsTruncated || undefined,
         out: (b.out || '').slice(-4000), phase: b.phase, error: b.error || undefined, t0: b.t0 || undefined }
-    : { id: b.id, kind: 'text', text: (b.text || '').slice(-48000),
+    : { id: b.id, kind: 'text', text: b.text || '',
         think: (b.think || '').slice(-8000), done: b.done || undefined };
   const push = force => {
     if (!liveRunTails.has(job.id)) return;
@@ -1996,12 +2016,20 @@ function runEventForwarder(job) {
           cur.tools.set(ev.contentIndex, t);
         } else if (ev.type === 'toolcall_delta') {
           const t = cur.tools.get(ev.contentIndex);
-          if (t && t.phase === 'args') t.args = (t.args + (ev.delta || '')).slice(0, 4000);
+          if (t && t.phase === 'args') {
+            const incoming = t.args + (ev.delta || '');
+            t.argsTruncated = t.argsTruncated || incoming.length > 262144;
+            t.args = incoming.slice(0, 262144);
+            t.rawArgs = t.args;
+          }
         } else if (ev.type === 'toolcall_end' && ev.toolCall) {
           const t = cur.tools.get(ev.contentIndex);
           if (t) {
             t.callId = ev.toolCall.id;
             t.name = ev.toolCall.name || t.name;
+            const raw = JSON.stringify(ev.toolCall.arguments);
+            t.rawArgs = raw.slice(0, 262144);
+            t.argsTruncated = raw.length > 262144;
             try { t.args = toolInputText(t.name, ev.toolCall.arguments) || t.args; } catch {}
             t.phase = 'ready';
           }
@@ -2015,6 +2043,11 @@ function runEventForwarder(job) {
         let t = toolBlock(event.toolCallId);
         if (!t) { t = { id: ++blockSeq, kind: 'tool', callId: event.toolCallId, name: event.toolName || '?', args: '', out: '' }; blocks.push(t); }
         t.name = event.toolName || t.name;
+        if (event.args) {
+          const raw = JSON.stringify(event.args);
+          t.rawArgs = raw.slice(0, 262144);
+          t.argsTruncated = raw.length > 262144;
+        }
         try { if (event.args) t.args = toolInputText(t.name, event.args) || t.args; } catch {}
         t.phase = 'running';
         t.t0 = Date.now(); // true execution start — the browser ticks elapsed from this
@@ -2115,7 +2148,7 @@ function runEventForwarder(job) {
 
 // Start one headless run on a conversation. node (optional): continue from
 // that entry — an in-file pi branch anchor moves the leaf there first.
-async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage }) {
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
   if (!customMessage && !String(message || '').trim()) throw new Error('empty prompt');
@@ -2201,6 +2234,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
   record.completion = withSessionOp(sessionPath, async () => {
     try {
       if (record.yielded) return await finish('done', 'stopped — ' + record.yielded);
+      if (expectedLeaf && !node && !await conversationSnapshotMatches(sessionPath, expectedLeaf)) throw new Error('The conversation advanced on another screen. Reload before sending.');
       if (customMessage?.customType === 'delegation-complete') {
         // Recheck under the mutation lock: the branch can change between
         // the coordinator's inspection and this queued operation.
@@ -2515,7 +2549,10 @@ async function reintegrateFanout(rootKey, fanoutId) {
   // existing indexed fork family. These files are no longer disposable.
   const forkPaths = new Set(forks.map(([k]) => path.resolve(absPathForKey(k))));
   const assignments = await delegationLib.listDelegations({ root: DELEGATION_ROOT, all: true });
-  if (assignments.some(t => forkPaths.has(path.resolve(t.parentSessionPath)))) return false;
+  if (assignments.some(t => forkPaths.has(path.resolve(t.parentSessionPath)))) {
+    broadcast({ type: 'fanout-retained', key: rootKey, fanoutId });
+    return false;
+  }
   return withSessionOp(rootPath, async () => {
     stopAnyWarmSession(rootPath);
     const rootRaw = await fsp.readFile(rootPath, 'utf8');
@@ -2527,7 +2564,7 @@ async function reintegrateFanout(rootKey, fanoutId) {
     }
     // Pure and deterministic; throws before anything is written when the
     // result would carry a parent cycle.
-    const merged = fanoutMerge.computeFanoutMerge(rootRaw, forkRaws);
+    const merged = fanoutMerge.computeFanoutMerge(rootRaw, forkRaws, { fanoutId });
     if (merged.healed) console.error('fan-out merge healed', merged.healed, 'torn line(s) in', rootKey);
     if (merged.changed) {
       const tmp = rootPath + '.tmp-' + process.pid;
@@ -2615,20 +2652,35 @@ async function compareGroupsResponse(key) {
   };
   const answerView = a => ({
     id: a.id, key: a.key, model: a.model || null,
-    text: String(a.fullText || '').slice(0, 16000),
+    text: String(a.fullText || ''),
+    entryIds: a.entryIds || [a.id], branchRoot: a.branchRoot || a.id,
+    operation: a.operation || null,
     jumpTs: a.jumpTs, fork: !!a.fork,
     tok: a.tok || null, cost: a.cost || null, secs: secsFor(a),
   });
   const groups = fanoutLib.classifyFanoutGroups(tree).map(g => ({
-    node: g.node,
+    node: g.node, kind: g.kind, runId: g.runId || null,
     answers: g.answers.map(answerView),
-    both: g.both ? { id: g.both.id, key: g.both.key, jumpTs: g.both.jumpTs } : null,
+    both: g.both ? { id: g.both.messageId || g.both.id, key: g.both.key, jumpTs: g.both.jumpTs, entryIds: g.both.entryIds } : null,
     merge: g.merge ? {
       bridgeId: g.merge.bridge.id,
       answer: answerView(g.merge.answer),
     } : null,
+    merges: g.merges.map(m => ({ bridgeId: m.bridge.id, answer: answerView(m.answer), sources: m.bridge.operation?.sources || [] })),
   }));
-  return { key, groups };
+  // Non-answer divergences and separate conversations are still navigable.
+  const ix = fanoutLib.treeIndex(tree);
+  const branches = tree.nodes.flatMap(n => {
+    const children = ix.children.get(n.id) || [];
+    if (children.length < 2 || groups.some(g => g.node === n.id)) return [];
+    return [{ node: n.id, choices: children.map(c => ({ id: c.id, key: c.key, text: c.title,
+      kind: c.fork ? 'Separate conversation' : c.operation?.kind === 'edit' ? (c.role === 'user' ? 'Edited question' : 'Your correction') : 'Another path',
+      count: c.count || 1 })) }];
+  });
+  const parentKey = index[key]?.parentSession && keyForSessionPath(index[key].parentSession);
+  const originNode = parentKey && tree.nodes.filter(n => (n.entryRefs || []).some(r => r.key === parentKey) && (n.entryRefs || []).some(r => r.key === key)).at(-1);
+  const origin = parentKey ? { key: parentKey, title: index[parentKey]?.title || 'Original conversation', entryId: originNode?.id || null } : null;
+  return { key, groups, branches, origin };
 }
 
 // Aggregate: collect the answers that branch off a node, quote each with
@@ -2645,7 +2697,7 @@ async function startAggregate(key, { node, provider, modelId, instruction, answe
   // Branch ids stay in the labels: the merge keeps its provenance in the transcript.
   const parts = children.map((c, i) =>
     `=== reply ${i + 1} of ${children.length} · ${c.model || 'unknown model'} · branch ${c.id} ===\n${c.fullText.trim()}`);
-  const message = `${children.length} models answered my last message in parallel. Their replies:\n\n${parts.join('\n\n')}\n\n${String(instruction || '').trim() || 'You have the full conversation context. Write the single best reply to my last message. Take the strongest parts of these replies, fix their mistakes, and resolve their disagreements. Your reply replaces them: answer me directly, and do not describe the replies or this merge.'}\n\n<!-- aiconvo:merge -->`;
+  const message = `${children.length} models answered my last message in parallel. Their replies:\n\n${parts.join('\n\n')}\n\n${String(instruction || '').trim() || 'You have the full conversation context. Write the single best reply to my last message. Take the strongest parts of these replies, fix their mistakes, and resolve their disagreements. Your reply replaces them: answer me directly, and do not describe the replies or this merge.'}\n\n<!-- aiconvo:merge -->\n<!-- aiconvo:operation ${JSON.stringify({ kind: 'merge', sources: children.map(c => ({ id: c.id, key: c.key, model: c.model || null, entryIds: c.entryIds || [c.id] })) })} -->`;
   const job = await startAgentRun(key, { node, provider, modelId, message, force });
   return { job, answers: children.length };
 }
@@ -2654,14 +2706,18 @@ async function startAggregate(key, { node, provider, modelId, instruction, answe
 // from it to keep every opinion in context without synthesizing a merge.
 async function ensureBothBridge(key, node) {
   const { sessionPath } = sessionPathsFor(key);
+  if (headlessRuns.has(sessionPath) || findRunningConversation(key)) throw new Error('Stop the active run or close its terminal before including answers.');
   return withSessionOp(sessionPath, async () => {
     // Recheck inside the file lock. Two fast clicks must not add two bridges.
     const tree = await sessionTreeFor(key, { withTexts: true });
-    const existing = tree.nodes.find(n => n.bridge === 'both' && n.parent === node);
-    if (existing) return { id: existing.id, existed: true };
     const answers = answerBranchesUnder(tree, node);
     if (answers.length < 2) throw new Error('need two replies to keep both in context');
-    const both = fanoutMerge.makeBothEntry(node, answers.map(a => ({ model: a.model, text: a.fullText })));
+    const both = fanoutMerge.makeBothEntry(node, answers.map(a => ({ id: a.id, key: a.key, model: a.model, entryIds: a.entryIds, text: a.fullText })));
+    const ids = answers.map(a => a.id).sort().join('|');
+    const existing = tree.nodes.find(n => n.bridge === 'both' && n.parent === node
+      && (n.operation?.sources || []).map(a => a.id).sort().join('|') === ids
+      && n.fullText === both.message.content[0].text);
+    if (existing) return { id: existing.messageId || existing.id, existed: true };
     stopAnyWarmSession(sessionPath);
     const raw = await fsp.readFile(sessionPath, 'utf8');
     const nl = !raw || raw.endsWith('\n') ? '' : '\n';
@@ -4412,7 +4468,13 @@ async function readLeaf(key) {
   const hit = memoryLeafCache.get(key);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.leaf;
   try {
-    const leaf = JSON.parse(await fsp.readFile(p, 'utf8'));
+    let leaf = JSON.parse(await fsp.readFile(p, 'utf8'));
+    if (leaf.memoryHash && index[key] && leaf.memoryHash !== index[key].memoryHash) {
+      try {
+        const cached = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+        leaf = memoryFingerprint.upgradeLeaf(leaf, index[key], cached);
+      } catch {} // Missing or invalid evidence leaves the stale warning intact.
+    }
     memoryLeafCache.set(key, { mtimeMs: st.mtimeMs, size: st.size, leaf });
     if (memoryLeafCache.size > 4000) memoryLeafCache.delete(memoryLeafCache.keys().next().value);
     return leaf;
@@ -9373,7 +9435,7 @@ async function transcriptEditResponse(body) {
     const { entry, sessionPath } = sessionPathsFor(key);
     if (entry.source !== 'pi' && entry.source !== 'pi-remote') throw new Error('Branch edits need a Pi conversation.');
     return withSessionOp(sessionPath, async () => {
-      if (headlessRuns.has(sessionPath) || findRunningConversation(key)) throw new Error('Stop the active run or close its terminal before editing a branch.');
+      if (headlessRuns.has(sessionPath) || findRunningConversation(key) || [...agentRunJobs.values()].some(j => j.fanoutRootKey === key && j.status === 'running')) throw new Error('Stop the active run or close its terminal before editing a branch.');
       stopAnyWarmSession(sessionPath);
       const target = await transcriptTarget(key, Number(i));
       if (!body.eid || target.m.eid !== body.eid || !baseSha || sha256Hex(target.raw) !== baseSha) throw new Error('The message changed. Reload it before editing.');
@@ -9382,6 +9444,7 @@ async function transcriptEditResponse(body) {
       target.apply(text);
       const node = crypto.randomBytes(8).toString('hex');
       target.d.id = node;
+      target.d.aiconvo = { kind: 'edit', sourceEntryId: body.eid, author: 'user' };
       target.d.timestamp = new Date().toISOString();
       // Append a sibling. All existing descendants keep their original parent.
       await fsp.appendFile(sessionPath, (target.lines.at(-1) === '' ? '' : '\n') + JSON.stringify(target.d) + '\n');
@@ -11378,6 +11441,10 @@ const server = http.createServer(async (req, res) => {
       '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/conversation-flow.js': { file: 'conversation-flow.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/streaming-tool.js': { file: 'streaming-tool.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/conversation-reader.js': { file: 'conversation-reader.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/conversation-reader.css': { file: 'conversation-reader.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
@@ -12030,7 +12097,8 @@ const server = http.createServer(async (req, res) => {
       // must not infer fan-out again from ancestry or message text.
       tree.fanouts = fanoutLib.classifyFanoutGroups(tree).map(g => ({
         node: g.node,
-        answers: g.answers.map(a => a.id),
+        answers: g.answers.map(a => a.tipId || a.id),
+        packages: g.answers.map(a => ({ id: a.tipId || a.id, entryIds: a.entryIds || [a.id] })),
         both: g.both ? g.both.id : null,
         merge: g.merge ? { bridge: g.merge.bridge.id, answer: g.merge.answer.id } : null,
       }));
@@ -12137,6 +12205,10 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       try {
         const p = JSON.parse(body || '{}');
+        if (p.expectedLeaf) {
+          const { sessionPath } = sessionPathsFor(p.id);
+          if (!headlessRuns.has(sessionPath) && !await conversationSnapshotMatches(sessionPath, p.expectedLeaf)) throw new Error('The conversation advanced on another screen. Reload before sending.');
+        }
         const models = normalizePickedModels(p.models);
         if (models.length) saveConversationModels(p.id, models);
         const images = rpcImagesOf(p.images);
@@ -12145,7 +12217,7 @@ const server = http.createServer(async (req, res) => {
         } else {
           const out = await startAgentRun(p.id, {
             node: p.node || null, provider: models[0] && models[0].provider, modelId: models[0] && models[0].modelId,
-            message: p.prompt, images, force: !!p.force, allowQueue: true, context: p.context,
+            message: p.prompt, images, force: !!p.force, allowQueue: true, context: p.context, expectedLeaf: p.expectedLeaf,
           });
           if (out && out.queued) json(res, 202, { ok: true, queued: true, job: out.job ? jobView(out.job) : null });
           else json(res, 202, { ok: true, job: jobView(out) });
@@ -12220,7 +12292,7 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body);
       if (!parsed.id || !index[parsed.id]) return json(res, 404, { error: 'not found' });
-      try { json(res, 200, await branchSession(parsed.id, parsed.node)); }
+      try { json(res, 200, await branchSession(parsed.id, parsed.node, parsed.expectedLeaf)); }
       catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/fork' && req.method === 'POST') {
       let body = '';
