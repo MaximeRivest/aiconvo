@@ -236,6 +236,17 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
   const out = [];
   const hl = text => q ? esc(text).replace(termRegex(q), match => `<mark>${match}</mark>`) : esc(text);
   let work = [], barModel = null;
+  // A turn is everything the assistant did in reply to one user message. When
+  // that work is split into several tool groups by commentary, the reader can
+  // review the whole turn at once instead of one group at a time.
+  let turn = { calls: [], files: new Set(), groups: 0, steps: 0 };
+  const endTurn = () => {
+    if (turn.groups > 1) {
+      const files = turn.files.size;
+      out.push(`<button class="tg-review tg-review-turn" data-step-review="${esc(JSON.stringify({ key: d.key, calls: turn.calls })).replace(/"/g, '&quot;')}">Review whole turn · ${turn.steps} steps${files ? ` · ${files} files touched` : ''}</button>`);
+    }
+    turn = { calls: [], files: new Set(), groups: 0, steps: 0 };
+  };
   const flush = () => {
     if (!work.length) return;
     const key = work[0].eid || work[0].ts;
@@ -250,6 +261,11 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
     const opened = toolGroupOpen.get(d.key + '|' + key) ?? readerState(d.key).work?.[key];
     out.push(`<details class="toolgroup" data-msg-key="${esc(d.key)}" data-gkey="${esc(key)}"${opened ? ' open' : ''}><summary>${[...names.values()].reduce((a, b) => a + b, 0)} steps · ${esc(tally)}${files.size <= 3 ? ' ' + links : ''}</summary>${work.map(m => msgBlock(m, hl, m.eid === exact, q, indexes.get(m._source), d.key)).join('')}</details>`);
     const reviewCalls = [...new Set(work.filter(m => m.role === 'tool' && m.id).map(m => m.id))];
+    if (reviewCalls.length) {
+      turn.groups++; turn.steps += reviewCalls.length;
+      for (const id of reviewCalls) if (!turn.calls.includes(id)) turn.calls.push(id);
+      for (const path of files.keys()) turn.files.add(path);
+    }
     if (reviewCalls.length) out.push(`<button class="tg-review" data-step-review="${esc(JSON.stringify({ key: d.key, calls: reviewCalls })).replace(/"/g, '&quot;')}">${files.size ? `${files.size} files touched · ` : ''}Review changes</button>`);
     const launches = work.filter(m => m.role === 'tool' && m.name === 'delegate');
     if (launches.length) out.push('<div class="dg-cards">' + launches.map((m, ordinal) => {
@@ -261,6 +277,7 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
   if (after.has('')) out.push(after.get(''));
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i], first = i === 0 || msgs[i - 1].eid !== m.eid;
+    if (first && m.role === 'user') { flush(); endTurn(); }
     if (first && before.has(m.eid)) { flush(); out.push(before.get(m.eid)); }
     if (replacements.has(m.eid) && m.eid !== exact) {
       flush(); if (first) out.push(replacements.get(m.eid));
@@ -282,6 +299,7 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
     if (msgs[i + 1]?.eid !== m.eid && after.has(m.eid)) { flush(); out.push(after.get(m.eid)); }
   }
   flush();
+  endTurn();
   return out.join('');
 }
 
