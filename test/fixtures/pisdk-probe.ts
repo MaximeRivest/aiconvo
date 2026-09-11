@@ -22,8 +22,8 @@ export default function (pi: any) {
         const input = typeof last?.content === 'string' ? last.content : (last?.content || []).map((b: any) => b.text || '').join('');
         const call = last?.role === 'user' && input.includes('capture environment');
         const content = call ? [{ type: 'toolCall', id: 'env-probe', name: 'bash', arguments: {
-          command: `node -e 'console.log(JSON.stringify({session:process.env.PI_SESSION_ID,fixture:process.env.FIXTURE_SESSION,mode:process.env.PI_EFFECTIVE_PROMPT_MODE}))'`,
-        } }] : [{ type: 'text', text: 'Fixture reply.' }];
+          command: `node -e 'if(process.env.FIXTURE_CHECKPOINT_WRITE) require("fs").writeFileSync("probe.txt","checkpointed"); console.log(JSON.stringify({session:process.env.PI_SESSION_ID,fixture:process.env.FIXTURE_SESSION,mode:process.env.PI_EFFECTIVE_PROMPT_MODE}))'`,
+        } }, ...(process.env.FIXTURE_CHECKPOINT_WRITE ? [{ type: 'toolCall', id: 'target-probe', name: 'write', arguments: { path: 'scratch/probe.txt', content: 'target checkpoint' } }] : [])] : [{ type: 'text', text: 'Fixture reply.' }];
         const result = { role: 'assistant', api: model.api, provider: model.provider, model: model.id, content,
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
           stopReason: call ? 'toolUse' : 'stop', timestamp: Date.now() };

@@ -249,7 +249,8 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
     const links = [...files].map(([path, m]) => `<button class="tg-file" data-file-diff="${esc(path)}" data-file-ts="${esc(m.ts || '')}" data-file-anchor="${esc(m.ts || '')}" data-file-call="${esc(m.id || '')}">${esc(path.split('/').pop())}</button>`).join(' ');
     const opened = toolGroupOpen.get(d.key + '|' + key) ?? readerState(d.key).work?.[key];
     out.push(`<details class="toolgroup" data-msg-key="${esc(d.key)}" data-gkey="${esc(key)}"${opened ? ' open' : ''}><summary>${[...names.values()].reduce((a, b) => a + b, 0)} steps · ${esc(tally)}${files.size <= 3 ? ' ' + links : ''}</summary>${work.map(m => msgBlock(m, hl, m.eid === exact, q, indexes.get(m._source), d.key)).join('')}</details>`);
-    if (files.size > 3) out.push(`<details class="tg-files" data-msg-key="${esc(d.key)}"><summary>${files.size} files changed</summary>${links}</details>`);
+    const reviewCalls = [...new Set(work.filter(m => m.role === 'tool' && m.id).map(m => m.id))];
+    if (reviewCalls.length) out.push(`<button class="tg-review" data-step-review="${esc(JSON.stringify({ key: d.key, calls: reviewCalls })).replace(/"/g, '&quot;')}">${files.size ? `${files.size} files touched · ` : ''}Review changes</button>`);
     const launches = work.filter(m => m.role === 'tool' && m.name === 'delegate');
     if (launches.length) out.push('<div class="dg-cards">' + launches.map((m, ordinal) => {
       const dg = delegateCallOf(m);
@@ -430,6 +431,7 @@ async function prepareConversationReading(d, scroll) {
 
 function wireConversationReader() {
   const view = $('view'), key = current.key;
+  view.querySelectorAll('[data-step-review]').forEach(b => b.onclick = () => openStepReview(JSON.parse(b.dataset.stepReview)));
   const blocked = readerIsBrowsing(current) || !!readerPendingChoice(current);
   for (const id of ['agentRun', 'agentSend']) if ($(id)) $(id).disabled = blocked;
   const group = node => readerFlow.groups.find(g => g.node === node);

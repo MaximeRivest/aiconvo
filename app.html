@@ -611,11 +611,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pmemline button { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); }
 .pfoldbtn { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); margin-left: 6px; }
 /* ---- files mode (design/33): lens control, files chart, file workspace ---- */
-#lensBtn { display: inline-flex; flex-shrink: 0; border: 1px solid var(--border); height: 22px; margin-right: var(--sp-2); }
-#lensBtn button { border: 0; border-radius: 0; height: 20px; padding: 0 8px; font: 11px var(--font); color: var(--text-dim); background: transparent; }
-#lensBtn button + button { border-left: 1px solid var(--border); }
-#lensBtn button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
-#lensBtn button:hover:not(.on) { color: var(--text); background: var(--surface-2); }
 #ftabs { display: none; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 #ftabs button { flex: 1; border: 0; border-right: 1px solid var(--border); height: 28px; color: var(--text-dim); border-radius: 0; }
 #ftabs button:last-child { border-right: 0; }
@@ -1929,6 +1924,7 @@ window.aiconvoSyncTheme();
   <button id="chNew" title="New conversation in this project — same model and thinking level, the project map in the system prompt, an empty composer">+</button>
   <div id="chTitle"></div>
   <span id="convHeadExtra"></span>
+  <nav id="conversationFilesSwitch" aria-label="Conversation view"><button class="on" aria-current="page">Conversation</button><button id="conversationFiles">Files</button></nav>
   <span id="headSpace"></span>
   <button id="ticker" hidden title="Open the latest active conversation"></button>
   <span class="count" id="count"></span>
@@ -2018,6 +2014,14 @@ window.aiconvoSyncTheme();
 <script src="/streaming-tool.js"></script>
 <script src="/delegation-ui.js"></script>
 <script src="/filesmode.js"></script>
+<script src="/files-browser.js"></script>
+<script src="/file-history-drawer.js"></script>
+<script src="/live-file.js"></script>
+<link rel="stylesheet" href="/live-file.css">
+<script src="/change-review-ui.js"></script>
+<script src="/review-locations-ui.js"></script>
+<link rel="stylesheet" href="/change-review.css">
+<link rel="stylesheet" href="/files-browser.css">
 <script>
 // An older running service can serve the updated HTML before it knows the
 // new module route. Keep existing conversations usable until its restart.
@@ -2162,12 +2166,27 @@ function dispatchHash(h, { restore = false } = {}) {
   if (h.startsWith('note=')) return openNoteFile(h.slice(5));
   // Files mode (design/33): the lens home, the project landing, the file
   // workspace. `doc=` stays as an alias for old links.
-  if (h === 'files') { setLens('files', { navigate: false }); return goHome(); }
-  if (h.startsWith('files&project=')) { setLens('files', { navigate: false }); return showFilesProject(h.slice(14)); }
+  if (h.startsWith('review=')) {
+    const parts = new URLSearchParams('id=' + h.slice(7));
+    return showChangeReview(parts.get('id'), parts.get('step') || '', parts.get('scope') || 'task');
+  }
+  if (h.startsWith('browse=')) {
+    try {
+      let value = h.slice(7);
+      if (!value.startsWith('{')) value = decodeURIComponent(value);
+      const opts = JSON.parse(value);
+      return showFilesBrowser(opts.project, opts);
+    } catch { return goHome(); }
+  }
+  if (h === 'files') return goHome();
+  if (h.startsWith('files&project=')) return showFilesProject(h.slice(14));
   if (h === 'file' || h.startsWith('file=') || h.startsWith('file&')) {
     const f = parseFileHash(h);
     if (!f.path) return goHome();
-    return openFileWorkspace(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, landing: !!f.landing, back: f.back || null });
+    let browserContext = null, reviewRef = null;
+    try { if (f.browser) browserContext = JSON.parse(f.browser.startsWith('{') ? f.browser : decodeURIComponent(f.browser)); } catch {}
+    try { if (f.review) reviewRef = JSON.parse(f.review.startsWith('{') ? f.review : decodeURIComponent(f.review)); } catch {}
+    return openFileWorkspace(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, landing: !!f.landing, back: f.back || null, browserContext, focused: !!f.focused, reviewRef });
   }
   if (h.startsWith('doc=')) {
     // doc=PATH[&PROJECT][&conv=KEY]. conv= names the conversation the
@@ -6123,13 +6142,11 @@ async function renderFocusedComparison(compare, row) {
 // Edits the CURRENT on-disk file, never a historical snapshot. The save is
 // optimistic: the server refuses it when the disk changed after the read.
 async function openFocusedFileEditor(compare, row) {
-  // Editing happens in the file workspace (files mode): one editor engine,
-  // one save policy, provenance in the gutter. From inside the workspace
-  // this is the write mode; from any other compare it opens the workspace
-  // with a way back here.
-  if (typeof fileWs !== 'undefined' && fileWs) return fileWsEnterWrite();
+  // Editing leaves the comparison behind and opens the focused live surface,
+  // with an explicit route back to this recorded view.
+  if (typeof fileWs !== 'undefined' && fileWs?.focused) return fileWs.editor?.focus();
   const project = (fileHistoryData && fileHistoryData.project) || (fileHistoryData && fileHistoryData.backProject) || projectOverviewName || null;
-  return openFileWorkspace(compare.path, { project, back: currentHash });
+  return openLiveFile(compare.path, { project, root: row.repoRoot, back: currentHash });
 }
 
 // ---- file history: points once, snapshots by id, cached by content ----
@@ -6174,10 +6191,12 @@ function pointLabel(point) {
   return when;
 }
 
-async function filePointsFor(row, fresh = false) {
+async function filePointsFor(row, fresh = false, selection = {}) {
   const cached = filePointsCache.get(row.id);
-  if (cached && !fresh) return cached;
-  const data = await (await fetch('/api/file-history/points?' + fileHistoryParams(fileScopeFor(row)))).json();
+  if (cached && !fresh && [selection.from, selection.to].filter(Boolean).every(id => cached.points.some(p => p.id === id))) return cached;
+  const params = fileHistoryParams(fileScopeFor(row));
+  for (const key of ['from', 'to']) if (/^saved:\d+$/.test(selection[key] || '')) params.set(key, selection[key]);
+  const data = await (await fetch('/api/file-history/points?' + params)).json();
   if (data.error) throw new Error(data.error);
   if (cached && cached.version !== data.version) invalidateFileCaches(row.id);
   filePointsCache.set(row.id, data);
@@ -6265,7 +6284,7 @@ async function loadFocusedFile(row, selection = {}, options = {}) {
   let compare;
   foregroundFileLoads++;
   try {
-    const doc = await filePointsFor(row, !options.quiet);
+    const doc = await filePointsFor(row, !options.quiet, selection);
     if (request !== focusedFileRequest) return;
     const { from, to } = resolveFilePoints(doc.points, selection);
     const [oldSnapshot, newSnapshot] = await Promise.all([fileSnapshotFor(row, doc, from.id), fileSnapshotFor(row, doc, to.id)]);
@@ -7058,7 +7077,10 @@ async function showProjectDiffs(name) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal aiconvo startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js';
+// A refreshed page can precede the server restart that adds the new route.
+// Keep documents usable during that window without interrupting active runs.
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -7074,11 +7096,19 @@ function loadMrmdDocument() {
   if (window.mrmdDocument) return Promise.resolve(window.mrmdDocument);
   if (!mrmdDocLoad) {
     mrmdDocLoad = new Promise((ok, bad) => {
-      const s = document.createElement('script');
-      s.src = MRMD_DOC_SRC;
-      s.onload = () => ok(window.mrmdDocument);
-      s.onerror = () => { mrmdDocLoad = null; bad(new Error('the document editor bundle failed to load')); };
-      document.head.appendChild(s);
+      const load = (src, fallback) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = () => ok(window.mrmdDocument);
+        s.onerror = () => {
+          s.remove();
+          if (fallback) return load(fallback, null);
+          mrmdDocLoad = null;
+          bad(new Error('the document editor bundle failed to load'));
+        };
+        document.head.appendChild(s);
+      };
+      load(MRMD_DOC_SRC, MRMD_DOC_FALLBACK_SRC);
     });
   }
   return mrmdDocLoad;
@@ -7268,13 +7298,15 @@ function closeDocument() {
 // is destroyed), then the editor goes away.
 function flushAndCloseDocument() {
   if (!docState) return;
+  if (docState.focused) liveFileStash(fileWs);
   if (docState.dirty) autosaveDocument();
   closeDocument();
 }
 
 function docStatusLine(text) {
   const el = $('docStatus');
-  if (el) el.textContent = text;
+  if (el) { el.textContent = text; el.title = text; }
+  if (docState?.focused && $('docSave')) $('docSave').disabled = !docState.dirty || docState.saving;
 }
 
 // Autosave after a 2 s pause. Autosave writes to disk (with the SHA conflict
@@ -7283,7 +7315,7 @@ function docStatusLine(text) {
 function scheduleDocAutosave() {
   if (!docState) return;
   docState.dirty = true;
-  docStatusLine('editing…');
+  docStatusLine(docState.focused ? 'Unsaved' : 'editing…');
   clearTimeout(docState.saveTimer);
   docState.saveTimer = setTimeout(autosaveDocument, 2000);
 }
@@ -7293,16 +7325,18 @@ async function autosaveDocument() {
   const st = docState;
   st.saving = true;
   st.dirty = false;
+  if (st.focused) docStatusLine('Saving…');
   const text = st.editor.getContent();
   let out;
   try {
-    out = await postJson('/api/doc/save', { path: st.path, baseSha: st.sha, text, actor: 'human', input: 'keyboard' });
+    out = await postJson('/api/doc/save', { path: st.path, baseSha: st.sha, text, actor: 'human', input: 'keyboard', reviewId: st.reviewId });
   } catch { out = { error: 'network failure' }; }
   st.saving = false;
   if (docState !== st) return;
   if (out.error) {
     st.dirty = true;
     docStatusLine('⚠ ' + out.error);
+    if (st.focused && fileWs?.path === st.path) fileWsBanner(fileWs, 'Could not save: ' + out.error, [['Copy my edits', () => navigator.clipboard.writeText(st.editor.getContent())]]);
     if (String(out.error).includes('changed on disk')) {
       // The disk moved under us (agent edit, git checkout). Offer a reload.
       if ($('docReload')) $('docReload').hidden = false;
@@ -7310,7 +7344,12 @@ async function autosaveDocument() {
     return;
   }
   st.sha = out.sha;
-  docStatusLine(st.dirty ? 'editing…' : 'autosaved · ' + new Date().toLocaleTimeString());
+  st.baseText = text;
+  if (st.focused && fileWs?.path === st.path) {
+    liveFileSaved(fileWs, text, out.sha);
+    fileWsBanner(fileWs, out.historyWarning ? 'Saved, but history capture failed: ' + out.historyWarning : null);
+  }
+  docStatusLine(out.historyWarning ? 'Saved · history warning: ' + out.historyWarning : st.dirty ? st.focused ? 'Unsaved' : 'editing…' : st.focused ? 'Saved' : 'autosaved · ' + new Date().toLocaleTimeString());
   if (st.dirty) scheduleDocAutosave();
 }
 
@@ -7337,15 +7376,19 @@ async function commitDocument() {
 
 async function reloadDocumentFromDisk() {
   if (!docState) return;
-  const st = docState;
+  const st = docState, before = st.editor.getContent();
   let d;
-  try { d = await (await fetch('/api/file/read?path=' + encodeURIComponent(st.path))).json(); } catch { d = { error: 'network failure' }; }
+  try { d = await (await fetch('/api/file/read?' + new URLSearchParams({ path: st.path, reviewId: st.reviewId || '' }))).json(); } catch { d = { error: 'network failure' }; }
   if (docState !== st || d.error) return d && d.error ? errToast(d.error) : undefined;
+  if (st.focused && st.editor.getContent() !== before) return docStatusLine('Kept your new edits. Try reloading again when ready.');
   st.editor.setContent(d.text);
   st.sha = d.sha;
+  st.baseText = d.text;
   st.dirty = false;
+  clearTimeout(st.saveTimer);
+  if (st.focused && fileWs?.path === st.path) { liveFileSaved(fileWs, d.text, d.sha); fileWsBanner(fileWs, null); }
   if ($('docReload')) $('docReload').hidden = true;
-  docStatusLine('reloaded from disk');
+  docStatusLine(st.focused ? 'Reloaded' : 'reloaded from disk');
 }
 
 // Run the fenced code block at the cursor through rat (Mod-Enter, or the
@@ -7603,6 +7646,7 @@ async function openDocument(docPath, project = null, fromConversation = null) {
 // docStatusLine / commitDocument / reloadDocumentFromDisk work in both.
 // back: null, or [label, title] for the leading back control.
 function documentHeadHtml(docPath, back) {
+  if (typeof fileWs !== 'undefined' && fileWs?.focused && fileWs.path === docPath) return liveFileHead(fileWs);
   const name = String(docPath).split('/').pop();
   return `<div class="doc-head">
       ${back ? `<button id="docBack" title="${esc(back[1])}">${esc(back[0])}</button>` : ''}
@@ -7621,7 +7665,7 @@ function documentHeadHtml(docPath, back) {
 // A newer mount (the user picked another document while this one loaded)
 // wins: the stale load returns without touching the page.
 let docMountSeq = 0;
-async function mountDocumentEditor(docPath, project = null) {
+async function mountDocumentEditor(docPath, project = null, { focused = false } = {}) {
   const seq = ++docMountSeq;
   const fail = (label, detail) => {
     const host = $('docEditor');
@@ -7633,24 +7677,34 @@ async function mountDocumentEditor(docPath, project = null) {
   try {
     [bundle, d] = await Promise.all([
       loadMrmdDocument(),
-      (await fetch('/api/file/read?path=' + encodeURIComponent(docPath))).json(),
+      (await fetch('/api/file/read?' + new URLSearchParams({ path: docPath, reviewId: focused ? fileWs?.reviewRef?.id || '' : '' }))).json(),
     ]);
   } catch (e) { return fail('could not open the document.', e.message); }
   if (seq !== docMountSeq || !$('docEditor')) return; // user navigated away during load
   if (d.error) return fail('could not read the document.', d.error);
-  const st = { path: d.path, project, sha: d.sha, dirty: false, saveTimer: 0, saving: false, source: false };
+  let draft = null;
+  if (focused) try { draft = JSON.parse(sessionStorage.getItem('aiconvo.draft:' + d.path) || 'null'); } catch {}
+  if (draft?.text === d.text) { try { sessionStorage.removeItem('aiconvo.draft:' + d.path); } catch {} draft = null; }
+  const st = { path: d.path, project, sha: draft?.sha || d.sha, baseText: d.text, dirty: !!draft, saveTimer: 0, saving: false, source: false, focused };
+  const ws = focused ? fileWs : null;
+  st.reviewId = ws?.reviewRef?.id || null;
   st.editor = bundle.createDocumentEditor($('docEditor'), {
-    doc: d.text,
+    doc: draft?.text ?? d.text,
+    filename: d.path, lineGutter: focused,
+    onLineHover: focused ? line => liveFileHover(ws, line) : undefined,
+    onNavigateLocation: focused ? location => liveFileNavigate(ws, location) : undefined,
+    onLineHoverEnd: () => { if (ws?.live) { ws.live.hover++; ws.live.hoverController?.abort(); } },
     theme: mrmdHostTheme(),
     placeholder: 'Start writing…',
     assetResolver: url => '/api/doc/asset?doc=' + encodeURIComponent(d.path) + '&src=' + encodeURIComponent(url),
     onChange: scheduleDocAutosave,
-    onSave: commitDocument,
+    onSave: focused ? autosaveDocument : commitDocument,
     onRunCell: (cell, o) => runDocCell(cell, o),
   });
   docState = st;
-  docStatusLine('autosaves after a 2 s pause · save revision = Git commit');
-  $('docSave').onclick = commitDocument;
+  docStatusLine(focused ? draft ? 'Recovered unsaved draft' : 'Saved · autosaves' : 'autosaves after a 2 s pause · save revision = Git commit');
+  $('docSave').onclick = focused ? autosaveDocument : commitDocument;
+  if (focused && draft && draft.sha !== d.sha) fileWsBanner(ws, 'This draft predates the disk file. Your text is preserved; saving will not overwrite newer disk changes.', [['Reload disk', () => liveFileReload(ws)]]);
   // The unwrap affordance appears only when the file actually looks
   // machine-wrapped (2+ joinable pairs), so hand-written docs stay quiet.
   if (unwrapHardLines(d.text).joins >= 2) $('docUnwrap').hidden = false;
@@ -7668,7 +7722,7 @@ async function mountDocumentEditor(docPath, project = null) {
     runDocCell(cell);
   };
   $('docRunAll').onclick = runAllDocCells;
-  refreshDocRuntimeChip();
+  if (!focused) refreshDocRuntimeChip();
   $('docSource').onclick = () => {
     st.source = !st.source;
     st.editor.setSourceMode(st.source);
@@ -10338,6 +10392,7 @@ function paintCtxMeter(el, c) {
 }
 
 function wireHead() {
+  $('conversationFiles').onclick = fbConversationFiles;
   updateLiveBadges();
   refreshCtxMeter(current);
   const proj = $('chProject');
@@ -16005,6 +16060,14 @@ function helpNow() {
     sections.push({ label: pi ? 'composer · pi' : 'composer · claude', keys });
     return sections;
   }
+  if (viewKind === 'files-browser' && ae?.closest('#fbFinder')) {
+    sections.push({ label: 'go to file', keys: [
+      ['type', 'find files and folders across this repository'],
+      ['↑ ↓', 'select a match'], ['enter', 'open the selected match · search in Contents mode'],
+      ['tab', 'search mode and controls'], ['esc', 'close without changing the folder'],
+    ] });
+    return sections;
+  }
   if (ae && ae.classList && ae.classList.contains('file-edit-text')) {
     sections.push({ label: 'file editor', keys: [
       ['ctrl+s', 'save to disk'],
@@ -16089,6 +16152,9 @@ function helpNow() {
       ['n / b', 'jump to now / to the beginning'],
     ] });
   }
+  if (viewKind === 'files-browser') {
+    sections.push({ label: 'files', keys: [['t', 'go to file — search files and folders']] });
+  }
   if (viewKind === 'project') {
     sections.push({ label: 'project', keys: [
       ['↑ ↓ / pgup pgdn', 'scroll'],
@@ -16096,7 +16162,12 @@ function helpNow() {
       ['→', 'last conversation in this project'],
     ] });
   }
-  if (viewKind === 'file' || viewKind === 'files-project') {
+  if (viewKind === 'file' && fileWs?.focused) {
+    sections.push({ label: 'live file', keys: [
+      ['ctrl+s', 'save to disk'], ['ctrl+f', 'find in this file'], ['ctrl+space', 'completion'],
+      ...(fileWs.kind === 'md' ? [['ctrl+enter', 'run this cell'], ['shift+enter', 'run and advance']] : []),
+    ] });
+  } else if (viewKind === 'file' || viewKind === 'files-project') {
     sections.push({ label: 'file workspace', keys: [
       ['w / n', 'write: edit the current file'],
       ['h', 'history: compare two moments (drag the keyframes)'],
@@ -16209,6 +16280,13 @@ document.addEventListener('focusin', refreshHelp);
 document.addEventListener('focusout', () => setTimeout(refreshHelp, 0));
 
 document.addEventListener('keydown', e => {
+  // A focused file owns its editor shortcuts. In particular, app-wide search
+  // must not steal Ctrl-F after CodeMirror opens its own search panel.
+  if (fileWs?.focused && e.target.closest?.('.live-file-view')) {
+    if (e.target.closest('.cm-editor')) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && fileWs.editor?.openSearch) { e.preventDefault(); fileWs.editor.openSearch(); return; }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); fileWs.kind === 'md' ? autosaveDocument() : fileWsSaveCode(fileWs); return; }
+  }
   // Shortcuts never fire while typing in a field or editable region.
   const inField = e.target.closest && e.target.closest('input, select, textarea, [contenteditable="true"]');
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f') {
@@ -16303,13 +16381,19 @@ document.addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   // Space and Enter on a focused button activate the button, not a shortcut.
   if ((e.key === ' ' || e.key === 'Enter') && e.target.closest && e.target.closest('button')) return;
+  if (viewKind === 'files-browser' && e.key.toLowerCase() === 't' && !e.isComposing && !settingsOpen && $('helpOverlay').hidden && $('epicOverlay').hidden && $('filtersPop').hidden) {
+    e.preventDefault();
+    const input = $('fbSearch');
+    input?.focus(); input?.select();
+    return;
+  }
   // File-change picking, the quick file view, and the tree claim their keys first.
   if (quickFileKeydown(e)) return;
   if (filePickKeydown(e)) return;
   if (treeKeydown(e)) return;
   if (typeof fileWsKey === 'function' && fileWsKey(e)) { e.preventDefault(); return; }
   // F flips the lens: conversations ⇄ files (design/33).
-  if (e.key === 'F' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); setLens(lens === 'files' ? 'conv' : 'files'); return; }
+  if (e.key === 'F' && !e.ctrlKey && !e.metaKey && !e.altKey && viewKind === 'conversation') { e.preventDefault(); fbConversationFiles(); return; }
   // Brackets and PageUp/PageDown move the transcript by nearly one screen.
   if ($('conversationTranscript') && (e.key === '[' || e.key === ']' || e.key === 'PageUp' || e.key === 'PageDown')) {
     e.preventDefault();

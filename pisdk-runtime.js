@@ -406,12 +406,13 @@ async function createS(target) {
       cwd, agentDir, settingsManager,
       modelRuntimeSignal: AbortSignal.timeout(15000),
       extensionFlagValues: parsed.flags.size ? parsed.flags : undefined,
-      resourceLoaderOptions: (parsed.extensionPaths.length || parsed.appendSystemPrompt) ? {
+      resourceLoaderOptions: {
+        extensionFactories: [{ name: 'workspace-checkpoints', factory: require('./checkpoint-extension.js').checkpointExtension }],
         additionalExtensionPaths: parsed.extensionPaths.length ? parsed.extensionPaths : undefined,
         // pi's resource loader treats appendSystemPromptSource as an array of
         // paths/texts (each resolved through resolvePromptInput).
         appendSystemPrompt: parsed.appendSystemPrompt ? [parsed.appendSystemPrompt] : undefined,
-      } : undefined,
+      },
     });
     return {
       ...(await SDK.createAgentSessionFromServices({ services, sessionManager, sessionStartEvent })),

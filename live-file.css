@@ -1,0 +1,40 @@
+.live-file-view { height:calc(100dvh - 90px); min-height:300px; display:flex; flex-direction:column; margin:0; }
+.live-file-body { flex:1; min-height:0; }
+.live-file-view .doc-view { height:100%; margin:0; min-height:0; }
+.live-file-head { display:flex; align-items:center; flex-wrap:wrap; gap:9px; min-height:38px; height:auto; padding:5px 8px; border-bottom:1px solid var(--border); background:var(--bg); }
+.live-file-head #ffTitle { flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+.live-file-head button, .live-file-head summary { height:auto; min-height:26px; padding:3px 7px; border:0; border-radius:3px; background:transparent; color:var(--text-dim); font:12px/1.4 var(--font); }
+.live-file-head button:hover, .live-file-head summary:hover { background:var(--surface-2); color:var(--text); }
+.live-file-head #docStatus, #liveServiceStatus { font-size:10px; color:var(--text-dim); }
+.live-file-head #docStatus { max-width:38vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.live-more { position:relative; }
+.live-more summary { cursor:pointer; list-style:none; }
+.live-more summary::-webkit-details-marker { display:none; }
+.live-more > div { position:absolute; right:0; top:100%; z-index:20; display:flex; flex-direction:column; gap:7px; width:min(300px,85vw); padding:12px; border:1px solid var(--border); background:var(--bg); box-shadow:0 5px 15px #0002; }
+.live-more button { text-align:left; }
+.live-more span { font-size:11px; color:var(--text-dim); }
+.live-file-view [hidden] { display:none !important; }
+.live-file-view .doc-editor-host.code-host { overflow:hidden; }
+.live-file-view .doc-editor-host.code-host > div { height:100%; width:100%; max-width:none; margin:0; padding:0; }
+.live-file-view #docEditor .cm-lineNumbers, .live-file-view #docEditor .cm-foldGutter { display:none !important; }
+.live-file-view .doc-editor-host:not(.code-host) > div { padding:18px 16px 40vh; }
+.live-file-view .cm-gutters { background:transparent; border:0; }
+.live-file-view .mrmd-mark-gutter { width:14px; min-width:14px; color:var(--text-faint); }
+.live-file-view .mrmd-mark-gutter .cm-gutterElement { width:14px; cursor:help; }
+.live-file-view .mrmd-line-mark { display:inline-block; width:12px; text-align:center; font-size:12px; cursor:help; }
+.live-file-view .lf-added { color:var(--success, var(--accent)); }
+.live-file-view .lf-modified { color:var(--accent); }
+.live-file-view .lf-deleted { color:var(--danger, var(--accent)); }
+.live-file-view .cm-lineNumbers .cm-gutterElement { font-size:11px; color:var(--text-faint); }
+.live-file-view .cm-activeLine, .live-file-view .cm-activeLineGutter { background:transparent; }
+.live-file-view .fw-banner { font-size:11px; padding:5px 9px; }
+.live-file-view .doc-run-strip { font-size:11px; }
+.live-file-view .mrmd-language-hover { max-width:480px; padding:8px; white-space:pre-wrap; font-size:12px; }
+@media(max-width:700px) {
+  .live-file-view { height:calc(100dvh - 72px); }
+  .live-file-head { gap:5px; }
+  .live-file-head #ffTitle { font-size:12px; }
+  #liveServiceStatus { display:none; }
+  .live-file-head #docStatus { max-width:25vw; }
+  .live-file-view .doc-editor-host:not(.code-host) > div { padding:12px 4px 40vh; }
+}

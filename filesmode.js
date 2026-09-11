@@ -10,7 +10,7 @@
 // means inside shared views. The file workspace itself is lens-agnostic.
 
 // ---- lens ----
-let lens = localStorage.getItem('aiconvo.lens') === 'files' ? 'files' : 'conv';
+let lens = 'conv'; // Files are local to a project/conversation, never a global lens.
 const FILE_LANE_H = 20;
 const FILES_ROWS_PER_PROJECT = 12;
 const FILES_ROWS_FILTERED = 80;
@@ -24,11 +24,6 @@ let filesOpenProjects = new Set(); // projects whose full row list is unfolded a
 
 function applyLensChrome() {
   document.body.classList.toggle('lens-files', lens === 'files');
-  const btn = $('lensBtn');
-  if (btn) {
-    btn.querySelectorAll('[data-lens]').forEach(b => b.classList.toggle('on', b.dataset.lens === lens));
-    btn.title = lens === 'files' ? 'Files mode: home shows files and their edits · press F for conversations' : 'Conversations mode · press F for files';
-  }
   const ft = $('ftabs');
   if (ft) ft.querySelectorAll('[data-ftab]').forEach(b => b.classList.toggle('on', b.dataset.ftab === (tab === 'repos' ? 'repos' : filesKind)));
   const sel = $('selShown');
@@ -38,7 +33,7 @@ function applyLensChrome() {
 // Switch the lens. Home and project views re-render in place; every other
 // view stays where it is (its breadcrumb root changes on the next paint).
 function setLens(next, { navigate = true } = {}) {
-  next = next === 'files' ? 'files' : 'conv';
+  next = 'conv'; // Legacy callers may restore old links; never change the home view.
   const changed = next !== lens;
   lens = next;
   try { localStorage.setItem('aiconvo.lens', lens); } catch {}
@@ -53,15 +48,7 @@ function setLens(next, { navigate = true } = {}) {
 }
 
 function initFilesMode() {
-  const brand = $('brand');
-  if (brand && !$('lensBtn')) {
-    const el = document.createElement('span');
-    el.id = 'lensBtn';
-    el.setAttribute('role', 'tablist');
-    el.innerHTML = `<button type="button" data-lens="conv" title="Conversations mode (F toggles)">conv</button><button type="button" data-lens="files" title="Files mode: home is a Gantt of file edits (F toggles)">files</button>`;
-    brand.insertAdjacentElement('afterend', el);
-    el.querySelectorAll('[data-lens]').forEach(b => b.onclick = () => setLens(b.dataset.lens));
-  }
+  // The global lens switch has been replaced by Conversation / Files.
   const tabs = $('tabs');
   if (tabs && !$('ftabs')) {
     const ft = document.createElement('div');
@@ -344,19 +331,7 @@ async function openConversationAtEvent(key, eventId) {
 
 // ---- project, files lens: README + tree + ridge ----
 async function showFilesProject(name, opts = {}) {
-  if (!name) return;
-  markSettingsClosed();
-  projectOverviewName = name;
-  let d;
-  try { d = await (await fetch('/api/files/project?name=' + encodeURIComponent(name))).json(); }
-  catch { d = { error: 'network failure' }; }
-  if (d.error) {
-    setRoute('files-project', 'files&project=' + encodeURIComponent(name));
-    $('view').innerHTML = `<div class="empty">could not open ${esc(name)}.<div class="hint">${esc(d.error)}</div></div>`;
-    return;
-  }
-  if (d.readme) return openFileWorkspace(d.readme.path, { project: name, landing: true, projectInfo: d });
-  return openFileWorkspace(null, { project: name, landing: true, projectInfo: d });
+  if (name) return showFilesBrowser(name, opts);
 }
 
 // ---- the file workspace ----
@@ -374,7 +349,13 @@ function fileWsKind(p) { return MD_EXT.test(String(p || '')) ? 'md' : 'code'; }
 function fileWsHash(ws) {
   const parts = ['file'];
   if (ws.project) parts.push('p=' + encodeURIComponent(ws.project));
+  // The app dispatcher decodes the whole hash before parsing file parameters.
+  // One extra layer keeps '&' inside context values from becoming separators.
+  if (ws.browserContext) parts.push('browser=' + encodeURIComponent(encodeURIComponent(JSON.stringify(ws.browserContext))));
+  if (ws.back) parts.push('back=' + encodeURIComponent(encodeURIComponent(ws.back)));
   if (ws.landing) parts.push('landing');
+  if (ws.focused) parts.push('focus');
+  if (ws.reviewRef) parts.push('review=' + encodeURIComponent(encodeURIComponent(JSON.stringify(ws.reviewRef))));
   if (ws.mode === 'history' && focusedFileCompare) parts.push('from=' + encodeURIComponent(focusedFileCompare.from), 'to=' + encodeURIComponent(focusedFileCompare.to));
   parts.push('path=' + (ws.path || ''));
   return parts.join('&');
@@ -388,6 +369,7 @@ function parseFileHash(h) {
   if (at >= 0) { out.path = h.slice(at + 6); h = h.slice(0, at); }
   for (const seg of h.split('&').slice(1)) {
     if (seg === 'landing') { out.landing = true; continue; }
+    if (seg === 'focus') { out.focused = true; continue; }
     const eq = seg.indexOf('=');
     if (eq < 0) continue;
     const k = seg.slice(0, eq), v = seg.slice(eq + 1);
@@ -399,6 +381,10 @@ function parseFileHash(h) {
 
 function fileWsCloseEditor({ keepDraft = true } = {}) {
   if (!fileWs) return;
+  fileWs.live?.dispose?.();
+  if (fileWs.editor && fileWs.editor.selection) {
+    try { localStorage.setItem('aiconvo.cursor:' + fileWs.path, String(fileWs.editor.selection().line)); } catch {}
+  }
   if (fileWs.kind === 'md') { flushAndCloseDocument(); }
   else if (fileWs.editor) {
     if (keepDraft && fileWs.dirty) {
@@ -407,12 +393,6 @@ function fileWsCloseEditor({ keepDraft = true } = {}) {
       try { sessionStorage.setItem('aiconvo.draft:' + fileWs.path, JSON.stringify({ sha: fileWs.sha, text: fileWs.editor.getContent(), at: Date.now() })); } catch {}
     }
     try { fileWs.editor.destroy(); } catch {}
-  }
-  if (fileWs.editor && fileWs.editor.selection) {
-    try {
-      const sel = fileWs.editor.selection();
-      localStorage.setItem('aiconvo.cursor:' + fileWs.path, String(sel.line));
-    } catch {}
   }
   fileWs.editor = null;
 }
@@ -425,6 +405,7 @@ function closeFileWorkspace() {
 }
 
 async function openFileWorkspace(pathValue, opts = {}) {
+  if (opts.focused) return openLiveFile(pathValue, opts);
   const seq = ++fileWsSeq;
   markSettingsClosed();
   if (window.fileInk && fileInk.teardown) fileInk.teardown();
@@ -434,6 +415,7 @@ async function openFileWorkspace(pathValue, opts = {}) {
     path: pathValue ? String(pathValue) : null, project: opts.project || null, landing: !!opts.landing, projectInfo: opts.projectInfo || null,
     mode: opts.from || opts.to ? 'history' : 'write', kind: fileWsKind(pathValue), editor: null, sha: null, dirty: false, saving: false,
     touched: null, row: null, seq, line: opts.line || null, back: opts.back || null,
+    browserContext: opts.browserContext || null,
   };
   fileWs = ws;
   setRouteKind(ws.landing ? 'files-project' : 'file');
@@ -444,6 +426,7 @@ async function openFileWorkspace(pathValue, opts = {}) {
   if (fileWs !== ws) return;
   ws.touched = touched && !touched.error ? touched : { sessions: [], commits: [], repoRoot: '', project: '' };
   if (!ws.project) ws.project = ws.touched.project || null;
+  if (ws.browserContext && ws.project) filesBrowserPlaces.set(ws.project + '\0' + (ws.browserContext.conv || ''), { file: ws.path, context: ws.browserContext });
   setRoute(ws.landing ? 'files-project' : 'file', ws.landing ? 'files&project=' + encodeURIComponent(ws.project || '') : fileWsHash(ws));
   const rel = ws.path ? fileWsRel(ws) : '';
   $('view').innerHTML = `<div class="focused-file-view project-code files-ws${ws.landing ? ' landing' : ''}">
@@ -454,7 +437,7 @@ async function openFileWorkspace(pathValue, opts = {}) {
       <b id="ffTitle" class="fw-title" title="${esc(ws.path || '')}">${esc(rel)}</b>
       <span class="fw-who" id="fwWho"></span>
       <span class="fw-spacer"></span>
-      <nav class="fw-mode" role="tablist"><button data-fw-mode="write" role="tab" class="${ws.mode === 'write' ? 'on' : ''}" title="Edit the current file (n)">write</button><button data-fw-mode="history" role="tab" class="${ws.mode === 'history' ? 'on' : ''}" title="Compare two moments of this file (h)">history</button></nav>
+      <nav class="fw-mode" role="tablist"><button data-fw-mode="write" role="tab" class="${ws.mode === 'write' ? 'on' : ''}" title="Edit the current file (n)">Live</button><button data-fw-mode="history" role="tab" class="${ws.mode === 'history' ? 'on' : ''}" title="Compare two recorded moments of this file (h)">History</button></nav>
       ${ws.landing && ws.project ? `<button id="fwNewDoc" class="ghost" title="Create a markdown document in ${esc(ws.project)}/documents/">+ doc</button>` : ''}
       <button id="fwAskBtn" class="primary" title="Ask an agent for a change to this file — the file, your cursor, its recent edits, and the project map go along (Ctrl+K)">✎ ask for a change</button>
       ${ws.project ? `<button id="fwMemory" class="ghost" title="The project overview: generated memory, epics, areas">memory ▸</button>` : ''}
@@ -473,10 +456,11 @@ async function openFileWorkspace(pathValue, opts = {}) {
   if ($('fwNewDoc')) $('fwNewDoc').onclick = () => createProjectDocument(ws.project);
   if ($('fwMemory')) $('fwMemory').onclick = () => showProjectOverview(ws.project);
   renderWhoStrip(ws);
+  if (ws.project) fbFileNavigation(ws);
   if (ws.landing) renderProjectRidge(ws);
   // The project tree (light file history: paths + 24 h badges; it also
   // seeds and watches the repositories on the server).
-  fileWsLoadTree(ws).catch(e => console.error('file workspace tree', e));
+  ws.treeReady = fileWsLoadTree(ws).catch(e => console.error('file workspace tree', e));
   if (!ws.path) {
     $('ffCompare').innerHTML = `<div class="empty">no README in ${esc(ws.project || 'this project')} yet.<div class="hint">The README is the landing page for people and agents alike.</div><button id="fwCreateReadme" class="primary">create README.md</button></div>`;
     $('fwCreateReadme').onclick = async () => {
@@ -521,8 +505,7 @@ async function fileWsLoadTree(ws) {
   $('ffTreeBody').classList.remove('dim');
   fileWsPaintTree(ws);
   $('ffTreeSearch').oninput = e => fileWsPaintTree(ws, e.target.value);
-  // The time track needs the row; mount it now that the row exists.
-  if (ws.path) fileWsLoadTrack(ws);
+  // History is loaded on demand by the drawer, not while opening the editor.
 }
 
 function fileWsRowFor(ws, data) {
@@ -542,7 +525,7 @@ function fileWsPaintTree(ws, query = '') {
   updateFocusedTreeWindow();
   $('ffTreeBody').querySelectorAll('[data-ff-file]').forEach(button => button.onclick = () => {
     const row = rows.find(item => item.id === button.dataset.ffFile);
-    if (row) openFileWorkspace(row.path, { project: ws.project, back: ws.back });
+    if (row) openFileWorkspace(row.path, { project: ws.project, back: ws.back, browserContext: ws.browserContext });
   });
   // Keep the open file visible in the tree.
   const on = $('ffTreeBody').querySelector('.ff-file.on');
@@ -577,31 +560,21 @@ function fileWsPaintModeChrome(ws) {
 
 async function fileWsEnterHistory({ fromTrack = false } = {}) {
   const ws = fileWs;
-  if (!ws || !ws.row) return;
+  if (!ws) return;
+  if (!ws.row) await ws.treeReady;
+  if (fileWs !== ws || !ws.row) return;
   if (ws.mode === 'history' && !fromTrack) return;
   fileWsCloseEditor();
   ws.mode = 'history';
   fileWsPaintModeChrome(ws);
   setRoute('file', fileWsHash(ws));
-  if (!fromTrack) {
-    // Explicit switch: show the newest change — the last point vs the one
-    // before it — unless a compare is already on screen.
-    const points = (focusedFileCompare && focusedFileCompare.points) || [];
-    const last = points[points.length - 1];
-    const prev = points[points.length - 2];
-    await loadFocusedFile(ws.row, last ? { from: prev ? prev.id : last.id, to: last.id } : {}, { keepTree: true });
-  }
+  if (!fromTrack) await fileWsHistoryDrawer(ws);
 }
 
 async function fileWsEnterWrite() {
   const ws = fileWs;
   if (!ws || ws.mode === 'write') return;
-  ws.mode = 'write';
-  fileWsPaintModeChrome(ws);
-  setRoute('file', fileWsHash(ws));
-  await fileWsMountBody(ws, {});
-  // The track returns to "now" without repainting the body.
-  if (ws.row) loadFocusedFile(ws.row, { to: 'current' }, { keepTree: true, quiet: true }).catch(() => {});
+  return openLiveFile(ws.path, { project: ws.project, root: ws.touched?.repoRoot, back: fileWsHash(ws), browserContext: ws.browserContext });
 }
 
 // Resolve an AI-session selection into keyframe ids: "before:<eventId>"
@@ -619,11 +592,8 @@ async function fileWsMountBody(ws, opts) {
   if (ws.mode === 'history') {
     const sel = fileWsResolveSelection(opts);
     ws.historySel = sel;
-    if (!ws.row) {
-      // The tree load mounts the track; make sure history lands once the row exists.
-      const wait = setInterval(() => { if (fileWs !== ws) return clearInterval(wait); if (ws.row) { clearInterval(wait); fileWsMountHistory(ws, sel); } }, 60);
-      return;
-    }
+    if (!ws.row) await ws.treeReady;
+    if (fileWs !== ws || !ws.row) return;
     return fileWsMountHistory(ws, sel);
   }
   fileWsPaintModeChrome(ws);
@@ -638,13 +608,13 @@ async function fileWsMountHistory(ws, sel) {
     // Need the point list to find "the one before".
     try {
       const doc = await filePointsFor(ws.row);
-      const at = doc.points.findIndex(p => p.id === sel.before);
+      const at = doc.points.findIndex(p => p.id === sel.before || p.eventId === sel.before);
       const prev = at > 0 ? doc.points[at - 1] : doc.points[0];
       sel = { from: prev ? prev.id : undefined, to: sel.to || sel.before };
     } catch { sel = { to: sel.to }; }
   }
   ws.historySel = sel;
-  await loadFocusedFile(ws.row, sel, { keepTree: true });
+  await fileWsHistoryDrawer(ws, sel);
 }
 
 // ---- write mode: markdown (MRMD) ----
@@ -652,7 +622,7 @@ async function fileWsMountMarkdown(ws, opts) {
   const host = $('ffCompare');
   if (!host) return;
   host.innerHTML = `<div class="doc-view">${documentHeadHtml(ws.path, null)}<div class="fw-banner" id="fwBanner" hidden></div><div class="doc-editor-host"><div id="docEditor"></div></div></div>`;
-  await mountDocumentEditor(ws.path, ws.project);
+  await mountDocumentEditor(ws.path, ws.project, { focused: !!ws.focused });
   if (fileWs !== ws || !docState || docState.path !== ws.path) return;
   ws.editor = docState.editor;
   ws.sha = docState.sha;
@@ -661,6 +631,7 @@ async function fileWsMountMarkdown(ws, opts) {
 
 // ---- write mode: code (CodeMirror from the same vendored bundle) ----
 function codeHeadHtml(ws) {
+  if (ws.focused) return liveFileHead(ws);
   const name = ws.path.split('/').pop();
   return `<div class="doc-head code-head">
     <b class="doc-title" title="${esc(ws.path)}">${esc(name)}</b>
@@ -677,13 +648,14 @@ async function fileWsMountCode(ws, opts) {
   host.innerHTML = `<div class="doc-view code-view">${codeHeadHtml(ws)}<div class="fw-banner" id="fwBanner" hidden></div><div class="doc-editor-host code-host"><div id="codeEditor"></div></div></div>`;
   let bundle, d;
   try {
-    [bundle, d] = await Promise.all([loadMrmdDocument(), fetch('/api/file/read?path=' + encodeURIComponent(ws.path)).then(r => r.json())]);
+    [bundle, d] = await Promise.all([loadMrmdDocument(), fetch('/api/file/read?' + new URLSearchParams({ path: ws.path, reviewId: ws.reviewRef?.id || '' })).then(r => r.json())]);
   } catch (e) { host.innerHTML = `<div class="empty">could not open the file.<div class="hint">${esc(e.message)}</div></div>`; return; }
   if (fileWs !== ws || !$('codeEditor')) return;
   if (d.error) {
     host.innerHTML = `<div class="empty">could not read the file.<div class="hint">${esc(d.error)}</div></div>`;
     return;
   }
+  if (d.text.includes('\0')) { host.innerHTML = '<div class="empty">This is a binary file. Use an appropriate external editor; this editor only saves text.</div>'; return; }
   if (!bundle.createCodeEditor) { host.innerHTML = '<div class="empty">the editor bundle is too old for code files.<div class="hint">reload the app once; the new bundle is served now.</div></div>'; return; }
   ws.sha = d.sha;
   ws.dirty = false;
@@ -697,14 +669,17 @@ async function fileWsMountCode(ws, opts) {
     if (fileWs !== ws) return;
     ws.dirty = ws.editor.getContent() !== ws.baseText;
     $('fwSave').disabled = !ws.dirty;
-    status(ws.dirty ? 'unsaved · Ctrl+S writes to disk' : 'saved');
+    status(ws.dirty ? ws.focused ? 'Unsaved' : 'unsaved · Ctrl+S writes to disk' : 'Saved');
   };
   ws.baseText = d.text;
   ws.editor = bundle.createCodeEditor($('codeEditor'), {
     doc: text, filename: ws.path, theme: mrmdHostTheme(),
     onChange: markDirty,
     onSave: () => fileWsSaveCode(ws),
-    onMarkClick: (line, info) => { if (info && info.convKey) openConversationAtEvent(info.convKey, info.eventId); },
+    onMarkClick: (line, info) => { if (!ws.focused && info && info.convKey) openConversationAtEvent(info.convKey, info.eventId); },
+    onLineHover: ws.focused ? line => liveFileHover(ws, line) : undefined,
+    onNavigateLocation: ws.focused ? location => liveFileNavigate(ws, location) : undefined,
+    onLineHoverEnd: () => { if (ws.live) { ws.live.hover++; ws.live.hoverController?.abort(); } },
   });
   $('fwSave').onclick = () => fileWsSaveCode(ws);
   $('docReload').onclick = () => fileWsReloadCode(ws);
@@ -712,10 +687,13 @@ async function fileWsMountCode(ws, opts) {
     ws.dirty = true;
     $('fwSave').disabled = false;
     fileWsBanner(ws, `an unsaved draft from ${ago(Date.now() - draft.at)} ago was restored — save it, or reload from disk to drop it`, [['reload from disk', () => fileWsReloadCode(ws, { dropDraft: true })]]);
-    if (draft.sha !== d.sha) fileWsBanner(ws, 'the draft was made on an older version of this file — the disk changed since. Review before saving.', [['see history', () => fileWsEnterHistory()], ['reload from disk', () => fileWsReloadCode(ws, { dropDraft: true })]]);
-  } else status('saved · code never autosaves — Ctrl+S writes to disk');
+    if (draft.sha !== d.sha) {
+      ws.sha = draft.sha;
+      fileWsBanner(ws, 'This draft was made on an older disk version. Your text is preserved; saving will not silently replace the newer disk file.', ws.focused ? [['Reload disk', () => liveFileReload(ws)]] : [['see history', () => fileWsEnterHistory()], ['reload from disk', () => fileWsReloadCode(ws, { dropDraft: true })]]);
+    }
+  } else status(ws.focused ? 'Saved' : 'saved · code never autosaves — Ctrl+S writes to disk');
   fileWsAfterMount(ws, opts);
-  fileWsTrustGutter(ws);
+  if (!ws.focused) fileWsTrustGutter(ws);
 }
 
 async function fileWsSaveCode(ws) {
@@ -724,25 +702,30 @@ async function fileWsSaveCode(ws) {
   if (text === ws.baseText) return;
   ws.saving = true;
   $('fwSave').disabled = true;
-  const out = await postJson('/api/file/save', { path: ws.path, baseSha: ws.sha, text });
+  let out;
+  try { out = await postJson('/api/file/save', { path: ws.path, baseSha: ws.sha, text, reviewId: ws.reviewRef?.id }); }
+  catch { out = { error: 'Network failure; your edits are still in the editor' }; }
   ws.saving = false;
   if (fileWs !== ws) return;
   if (out.error) {
     $('fwSave').disabled = false;
     if (String(out.error).includes('changed on disk')) {
-      fileWsBanner(ws, 'the file changed on disk after you loaded it — your text is kept here; compare before overwriting', [['see history', () => fileWsEnterHistory()], ['reload from disk (drops your edits)', () => fileWsReloadCode(ws, { dropDraft: true })], ['overwrite anyway', () => fileWsForceSave(ws)]]);
+      fileWsBanner(ws, 'The disk file changed. Your edits are kept here and were not overwritten.', ws.focused ? [['Copy my edits', () => navigator.clipboard.writeText(ws.editor.getContent())], ['Reload disk', () => liveFileReload(ws)]] : [['see history', () => fileWsEnterHistory()], ['reload from disk (drops your edits)', () => fileWsReloadCode(ws, { dropDraft: true })], ['overwrite anyway', () => fileWsForceSave(ws)]]);
     }
     return errToast('save failed: ' + out.error);
   }
   ws.sha = out.sha;
   ws.baseText = text;
-  ws.dirty = false;
-  try { sessionStorage.removeItem('aiconvo.draft:' + ws.path); } catch {}
-  const el = $('docStatus'); if (el) el.textContent = 'saved · ' + new Date().toLocaleTimeString();
-  fileWsBanner(ws, null);
-  toast('saved · ' + fileWsRel(ws));
-  invalidateFileCaches(ws.row && ws.row.id);
-  fileWsTrustGutter(ws);
+  // Typing may continue while the save is in flight. Only the submitted
+  // revision was saved; retain the newer text as an unsaved draft.
+  ws.dirty = ws.editor.getContent() !== text;
+  $('fwSave').disabled = !ws.dirty;
+  if (!ws.dirty) try { sessionStorage.removeItem('aiconvo.draft:' + ws.path); } catch {}
+  const el = $('docStatus'); if (el) el.textContent = ws.dirty ? 'Unsaved' : ws.focused ? 'Saved' : 'saved · ' + new Date().toLocaleTimeString();
+  fileWsBanner(ws, out.historyWarning ? 'Saved, but history capture failed: ' + out.historyWarning : null);
+  if (!ws.focused) toast('saved · ' + fileWsRel(ws));
+  if (ws.focused) liveFileSaved(ws, text, out.sha);
+  else { invalidateFileCaches(ws.row && ws.row.id); fileWsTrustGutter(ws); }
 }
 
 async function fileWsForceSave(ws) {
@@ -759,10 +742,12 @@ async function fileWsForceSave(ws) {
 
 async function fileWsReloadCode(ws, { dropDraft = false, quiet = false } = {}) {
   if (fileWs !== ws || !ws.editor) return;
+  const requestedText = ws.editor.getContent();
   let d;
-  try { d = await (await fetch('/api/file/read?path=' + encodeURIComponent(ws.path))).json(); } catch { d = { error: 'network failure' }; }
+  try { d = await (await fetch('/api/file/read?' + new URLSearchParams({ path: ws.path, reviewId: ws.reviewRef?.id || '' }))).json(); } catch { d = { error: 'network failure' }; }
   if (fileWs !== ws || !ws.editor) return;
   if (d.error) return errToast(d.error);
+  if (ws.focused && ws.editor.getContent() !== requestedText) return fileWsBanner(ws, 'Kept the edits you typed while reloading. Reload again when ready.', [['Reload disk', () => liveFileReload(ws)]]);
   const before = ws.baseText;
   const sel = ws.editor.selection();
   ws.editor.setContent(d.text);
@@ -772,7 +757,8 @@ async function fileWsReloadCode(ws, { dropDraft = false, quiet = false } = {}) {
   $('docReload').hidden = true;
   try { ws.editor.gotoLine(sel.line); } catch {}
   fileWsBanner(ws, null);
-  fileWsMarkChanged(ws, before, d.text, quiet ? 'reloaded' : 'reloaded from disk');
+  if (ws.focused) { liveFileSaved(ws, d.text, d.sha); $('docStatus').textContent = 'Reloaded'; }
+  else fileWsMarkChanged(ws, before, d.text, quiet ? 'reloaded' : 'reloaded from disk');
 }
 
 // After a reload: mark the lines that changed (code gutter) and say how much.
@@ -850,6 +836,7 @@ function fileWsAfterMount(ws, opts) {
   if (!line) { const saved = Number(localStorage.getItem('aiconvo.cursor:' + ws.path)); if (saved > 1) line = saved; }
   if (line && ws.editor.gotoLine) { try { ws.editor.gotoLine(line); } catch {} }
   ws.line = null;
+  if (ws.focused) { liveFileAfterMount(ws); return; }
   if (ws.editor.view && ws.editor.view.dom) {
     ws.editor.view.dom.addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); fileWsToggleAsk(true); }
@@ -1119,24 +1106,23 @@ function renderWhoStripLater(ws) {
 
 // SSE file-activity: the open file changed on disk (by anyone).
 function fileWsFileActivity(d) {
+  fbActivity(d);
   const ws = fileWs;
   if (!ws || !ws.path || d.path !== ws.path) { if (lens === 'files' && viewKind === 'home') filesRefreshSoon(); return; }
+  if (ws.focused) { liveFileActivity(ws); return; }
   if (ws.run) return; // the run's own settle handles the reload
   if (ws.mode !== 'write' || !ws.editor) { renderWhoStripLater(ws); return; }
   const who = d.actor === 'ai' ? 'an agent' : d.actor === 'human' ? 'the editor' : 'something on disk';
   if (ws.kind === 'code') {
-    if (!ws.dirty) fileWsReloadCode(ws, { quiet: true }).then(() => { const el = $('docStatus'); if (el) el.textContent = `changed on disk by ${who} · reloaded`; });
+    if (!ws.dirty) fileWsBanner(ws, `New changes on disk (${who}). Your reading position is unchanged.`, [['load latest', () => fileWsReloadCode(ws)]]);
     else { if ($('docReload')) $('docReload').hidden = false; fileWsBanner(ws, `the file changed on disk (${who}) while you have unsaved edits — reload drops them; history compares`, [['see history', () => fileWsEnterHistory()], ['reload from disk', () => fileWsReloadCode(ws, { dropDraft: true })]]); }
   } else if (docState && docState.path === ws.path) {
     if (!docState.dirty) {
       fetch('/api/file/read?path=' + encodeURIComponent(ws.path)).then(r => r.json()).then(dd => {
         if (fileWs !== ws || !docState || docState.path !== ws.path || dd.error || docState.dirty) return;
         if (dd.sha === docState.sha) return;
-        const sel = docState.editor.selection ? docState.editor.selection() : null;
-        docState.editor.setContent(dd.text);
-        docState.sha = dd.sha; docState.dirty = false;
-        if (sel && docState.editor.gotoLine) try { docState.editor.gotoLine(sel.line); } catch {}
-        docStatusLine(`changed on disk by ${who} · reloaded`);
+        if ($('docReload')) $('docReload').hidden = false;
+        docStatusLine(`New changes on disk (${who}) · reload when ready`);
       }).catch(() => {});
     } else {
       if ($('docReload')) $('docReload').hidden = false;
@@ -1144,13 +1130,13 @@ function fileWsFileActivity(d) {
     }
   }
   renderWhoStripLater(ws);
-  if (ws.row) { invalidateFileCaches(ws.row.id); loadFocusedFile(ws.row, { to: 'current' }, { keepTree: true, quiet: true }).catch(() => {}); }
+  if (ws.row) invalidateFileCaches(ws.row.id);
 }
 
 // ---- keyboard, inside the workspace ----
 function fileWsKey(e) {
   const ws = fileWs;
-  if (!ws) return false;
+  if (!ws || ws.focused) return false;
   const inField = e.target && (e.target.closest('input, textarea, select, [contenteditable], .cm-editor'));
   if (inField) return false;
   if (e.key === 'h') { fileWsEnterHistory(); return true; }

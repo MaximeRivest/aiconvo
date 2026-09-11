@@ -131,6 +131,79 @@ const usageIdx = usageLib.openUsageIndex(USAGE_DB_FILE);
 // derived cache too; the boot backfill rebuilds it when it is missing.
 const fileLedgerLib = require('./fileledger.js');
 const fileLedger = process.env.AICONVO_NO_LEDGER === '1' ? null : fileLedgerLib.openFileLedger(path.join(CACHE_DIR, 'files.db'));
+// This archive is durable user data, not part of CACHE_DIR or the note index.
+let fileArchive = null, fileArchiveError = '';
+if (process.env.AICONVO_NO_FILE_HISTORY !== '1') {
+  try {
+    const { FileArchive } = require('./file-archive.js');
+    const budgetMB = Number(process.env.AICONVO_FILE_HISTORY_MB || 512);
+    if (!Number.isFinite(budgetMB) || budgetMB < 1) throw new Error('AICONVO_FILE_HISTORY_MB must be at least 1');
+    fileArchive = new FileArchive(path.join(process.env.AICONVO_FILE_HISTORY_DIR || path.join(os.homedir(), '.local/share/aiconvo/file-history'), 'versions.sqlite'), { budget: budgetMB * 1024 * 1024 });
+  } catch (e) { fileArchiveError = e.message; console.error('File history unavailable:', e.message); }
+}
+let checkpointStore = null, changeReviews = null;
+function reviewServices() {
+  if (!checkpointStore) checkpointStore = new (require('./checkpoint-store.js').CheckpointStore)();
+  if (!changeReviews) changeReviews = new (require('./change-reviews.js').ChangeReviews)(checkpointStore, { archive: fileArchive, baseURL: 'http://127.0.0.1:' + PORT });
+  return changeReviews;
+}
+async function reviewInput(key, requested) {
+  const { sessionPath, entry } = sessionPathsFor(key);
+  if (!Array.isArray(requested) || !requested.length || requested.length > 1000 || requested.some(c => typeof c !== 'string')) throw Error('Choose between 1 and 1000 tool steps');
+  const wanted = new Set(requested), found = [], contextTools = [], results = new Map();
+  const raw = await fsp.readFile(sessionPath, 'utf8');
+  for (const line of raw.split('\n')) {
+    let row; try { row = JSON.parse(line); } catch { continue; }
+    const m = row.message || {}, ts = row.timestamp || (m.timestamp ? new Date(m.timestamp).toISOString() : '');
+    if (m.role === 'toolResult') results.set(m.toolCallId, { success: !m.isError, endTs: ts });
+    if (Array.isArray(m.content)) for (const c of m.content) {
+      if (c?.type === 'tool_result') results.set(c.tool_use_id, { success: !c.is_error, endTs: ts });
+      if ((m.role === 'assistant' || row.type === 'assistant') && ['toolCall', 'tool_use'].includes(c?.type)) {
+        const tool = { id: c.id, name: c.name, input: c.arguments || c.input || {}, ts };
+        if (wanted.has(c.id)) found.push(tool);
+        if (['bash', 'shell'].includes(c.name)) contextTools.push(tool);
+      }
+    }
+  }
+  if (new Set(found.map(c => c.id)).size !== wanted.size) throw Error('Some selected tools are not in this conversation');
+  const rows = checkpointStore.boundaries(sessionPath, [...wanted]), captured = new Set(rows.map(r => r.call));
+  const tools = [...new Map(found.filter(t => captured.has(t.id) || !require('./checkpoint-store.js').READ_ONLY.has(t.name)).map(t => [t.id, { ...t, ...results.get(t.id) }])).values()];
+  const project = projectNameOf(entry.cwd, key), otherEvents = [];
+  const from = rows.length ? Math.min(...rows.map(r => r.started)) : Math.min(...tools.map(t => Date.parse(t.ts)));
+  const to = rows.length ? Math.max(...rows.map(r => r.finished)) : Math.max(...tools.map(t => Date.parse(t.endTs || t.ts)));
+  const peers = Object.entries(index).filter(([k, e]) => k !== key && projectNameOf(e.cwd, k) === project && Date.parse(e.lastTs || '') >= from && Date.parse(e.firstTs || '') <= to).slice(0, 80);
+  for (const [k] of peers) {
+    try { otherEvents.push(...(await conversationDiffs(k)).filter(e => e.kind !== 'shell' && e.outcome === 'applied' && Date.parse(e.ts) >= from && Date.parse(e.ts) <= to).map(e => ({ key: k, path: e.path, ts: e.ts }))); } catch {}
+  }
+  return { key, session: sessionPath, cwd: entry.cwd, host: entry.source === 'pi-remote' ? 'unresolved-remote' : 'local', project, tools, contextTools: contextTools.slice(-2000), sourceCalls: [...wanted], calls: tools.map(t => t.id), otherEvents, title: `${tools.length} tool ${tools.length === 1 ? 'step' : 'steps'}` };
+}
+const checkpointTimers = new Map(), checkpointCapturing = new Set(), checkpointDirty = new Map();
+function scheduleWorkspaceCheckpoint(cwd, phase) {
+  if (!cwd || process.env.AICONVO_NO_CHECKPOINTS === '1' || foldsLib.isLooseCwd(cwd)) return;
+  if (checkpointCapturing.has(cwd)) { checkpointDirty.set(cwd, phase); return; }
+  clearTimeout(checkpointTimers.get(cwd));
+  checkpointTimers.set(cwd, setTimeout(async () => {
+    checkpointTimers.delete(cwd); checkpointCapturing.add(cwd);
+    try {
+      reviewServices();
+      const result = await checkpointStore.capture(cwd, { phase });
+      if (result.error) console.error('Checkpoint observation:', result.error);
+    } catch (e) { console.error('Checkpoint observation:', e.message); }
+    finally {
+      checkpointCapturing.delete(cwd);
+      if (checkpointDirty.has(cwd)) { const next = checkpointDirty.get(cwd); checkpointDirty.delete(cwd); scheduleWorkspaceCheckpoint(cwd, next); }
+    }
+  }, 750));
+}
+function observeFileHistory(file, observation) {
+  if (!fileArchive) return fileArchiveError || 'File history capture is disabled';
+  try {
+    const version = fileArchive.observe(file, observation);
+    fileArchiveError = '';
+    return version.state === 'unavailable' ? version.reason : '';
+  }
+  catch (e) { fileArchiveError = e.message; console.error('File history capture:', e.message); return e.message; }
+}
 let usagePricingCatalog = null;
 function pricingCatalog() {
   if (!usagePricingCatalog) usagePricingCatalog = usageLib.loadPricingCatalog();
@@ -358,12 +431,6 @@ function toolEventsOf(content, ts, entry, cwd = null) {
   // Bash creates files too (redirects, tee, heredocs, inline scripts). The
   // same miner that feeds the diff timeline annotates the transcript message,
   // so the chat view can link those files exactly like write/edit calls.
-  const resolveWrite = value => {
-    value = String(value);
-    if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
-    if (!path.isAbsolute(value) && cwd) return path.resolve(cwd, value);
-    return value;
-  };
   for (let bi = 0; bi < content.length; bi++) {
     const b = content[bi];
     if (!b) continue;
@@ -374,8 +441,10 @@ function toolEventsOf(content, ts, entry, cwd = null) {
       const msg = { role: 'tool', name: b.name || '?', text,
                     path: typeof p === 'string' ? p : null, paths: pathCandidates(text), id: b.id || null, ts };
       if (/^(bash|shell)$/i.test(b.name || '') && typeof (input.command || input.cmd) === 'string') {
-        const writes = shellMutationPaths(input.command || input.cmd).map(resolveWrite).slice(0, 6);
+        const located = require('./task-locations').inspectShell(input.command || input.cmd, { host: 'local', cwd });
+        const writes = [...new Set(located.locations.filter(l => l.host === 'local' && l.path && l.role !== 'copy-source').map(l => l.path))].slice(0, 6);
         if (writes.length) msg.writes = writes;
+        if (located.remote) msg.paths = writes; // never turn a quoted SSH path into a local link
       }
       out.push(msg);
     } else if (b.type === 'tool_result') {
@@ -3719,7 +3788,7 @@ function splitTextToTokenBudget(text, tokenBudget) {
 
 async function runPi(fileContent, prompt, onChunk, options = {}) {
   const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
-  fs.writeFileSync(tmp, fileContent);
+  fs.writeFileSync(tmp, fileContent, { mode: 0o600 });
   const inherited = modelCallContext.getStore();
   const automatic = options.automatic == null ? !!(inherited && inherited.automatic) : !!options.automatic;
   let permit = null;
@@ -3731,7 +3800,7 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
       execFile,
       'pi',
       [...piArgs(), '--mode', 'json', '@' + tmp, prompt],
-      { maxBuffer: 64 * 1024 * 1024, timeout: 1800000 },
+      { maxBuffer: 64 * 1024 * 1024, timeout: options.timeoutMs || 1800000 },
       {
         activityTimeoutMs: MODEL_ACTIVITY_TIMEOUT_MS,
         onChild: child => child.stdin.end(), // pi -p waits for stdin EOF otherwise
@@ -6553,7 +6622,7 @@ async function sendFileFeedback(body) {
 // use and only the parsed conversation is written, atomically.
 const DIFF_CACHE_FILE = path.join(CACHE_DIR, 'diff-cache.json');
 const DIFF_CACHE_DIR = path.join(CACHE_DIR, 'diff-cache');
-const DIFF_CACHE_VERSION = 'v6:';
+const DIFF_CACHE_VERSION = 'v7-locations:';
 let diffCache = {};
 const diffCacheDiskChecked = new Set();
 
@@ -6721,12 +6790,10 @@ function shellMutationPaths(command) {
 
 function shellMutationEvents(key, entry, input, ts, callId) {
   const command = input && (input.command || input.cmd) || '';
-  let shellEntry = entry;
-  const cd = String(command).match(/^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&]+))\s*&&/);
-  if (cd && entry.cwd) shellEntry = { ...entry, cwd: path.resolve(entry.cwd, cd[1] || cd[2] || cd[3]) };
-  const hasOtherCd = /(?:^|[;&|]\s*)cd\s+/m.test(String(command).replace(/^\s*cd\s+[^;&|]+\s*&&/, ''));
-  return shellMutationPaths(command).filter(file => path.isAbsolute(file) || file.startsWith('~/') || !hasOtherCd).map((file, i) => {
-    const event = makeDiffEvent(key, shellEntry, file, 'shell', null, null, ts, i, callId);
+  const located = require('./task-locations').inspectShell(command, { host: entry.source === 'pi-remote' ? 'unresolved-remote' : 'local', cwd: entry.cwd });
+  const paths = [...new Set(located.locations.filter(l => l.host === 'local' && l.path && l.role !== 'copy-source').map(l => l.path))];
+  return paths.map((file, i) => {
+    const event = makeDiffEvent(key, entry, file, 'shell', null, null, ts, i, callId);
     if (event) event.command = clipped(command, 8000);
     return event;
   }).filter(Boolean);
@@ -7714,18 +7781,25 @@ async function ledgerIngestRepo(root, repo, project = '') {
 }
 
 // Editor producer.
-function ledgerRecordEditorSave(abs, { added, removed, chars, sha, actor = 'human', input = 'keyboard', commitHash = null, project = '' }) {
-  if (!fileLedger) return;
+function ledgerRecordEditorSave(abs, { added, removed, chars, sha, actor = 'human', input = 'keyboard', commitHash = null, project = '', archiveFrom = null, archiveTo = null }) {
+  if (!fileLedger) {
+    gitRootForCwd(path.dirname(abs)).then(root => scheduleWorkspaceCheckpoint(root || (project && projectMetaFor(project)?.cwd), 'editor-observation')).catch(() => {});
+    return;
+  }
   const ts = Date.now();
   const id = (commitHash ? 'commit:' : 'doc:') + ts + ':' + crypto.randomBytes(3).toString('hex');
+  if (fileArchive && archiveTo) {
+    try { fileArchive.link(id, abs, archiveFrom, archiveTo); } catch (e) { console.error('File history link:', e.message); }
+  }
   gitRootForCwd(path.dirname(abs)).catch(() => null).then(root => {
     const row = {
       id, ts, path: abs, repo_root: root || '', project: project || projectNameOf(root || path.dirname(abs)),
-      producer: commitHash ? 'editor-commit' : 'editor-save', actor: actor === 'ai' ? 'ai' : 'human', outcome: 'applied',
+      producer: commitHash ? 'editor-commit' : 'editor-save', actor: actor === 'ai' || actor === 'external-agent' ? 'ai' : actor === 'human' ? 'human' : 'external', outcome: 'applied',
       added, removed, chars, sha_after: sha || null, input, commit_hash: commitHash,
     };
     fileLedger.put(row);
     broadcastFileActivity(row);
+    scheduleWorkspaceCheckpoint(root || projectMetaFor(row.project)?.cwd, 'editor-observation');
   });
 }
 
@@ -7762,19 +7836,35 @@ function rememberProjectFileSnapshot(file, snap) {
 
 async function readProjectFileSnapshot(file) {
   try {
-    const stat = await fsp.stat(file);
-    if (!stat.isFile() || stat.size > 2 * 1024 * 1024) return null;
+    const stat = await fsp.lstat(file);
+    if (stat.isSymbolicLink()) return null;
+    if (!stat.isFile() || stat.size > 2 * 1024 * 1024) {
+      observeFileHistory(file, { state: 'unavailable', reason: 'Not a text file within the 2 MiB capture limit' });
+      return null;
+    }
     const text = await fsp.readFile(file, 'utf8');
+    const after = await fsp.stat(file);
+    if (stat.mtimeMs !== after.mtimeMs || stat.size !== after.size || stat.ino !== after.ino) return null;
+    observeFileHistory(file, { text, actor: 'unknown', source: 'filesystem observation' });
     if (text.includes('\0')) return null;
     return { text, mtimeMs: stat.mtimeMs, size: stat.size };
-  } catch { return null; }
+  } catch (e) {
+    if (e.code === 'ENOENT' && fileArchive?.latestId(file)) observeFileHistory(file, { state: 'deleted', source: 'filesystem observation' });
+    return null;
+  }
 }
 
 async function updateWatchedProjectFile(root, relativePath, project = '') {
   const file = path.resolve(root, relativePath);
   if (file !== root && !file.startsWith(root + path.sep)) return;
   let old = projectFileSnapshots.get(file) || null;
+  const archiveFrom = fileArchive?.latestId(file);
   const next = await readProjectFileSnapshot(file);
+  const archiveTo = fileArchive?.latestId(file);
+  if (!next) {
+    // Unreadable, oversized, or concurrently changing does not mean deleted.
+    try { await fsp.lstat(file); return; } catch (e) { if (e.code !== 'ENOENT') return; }
+  }
   if (!old && !next) return;
   // No snapshot (never read, or evicted): the committed blob is the honest
   // baseline for a tracked file. Without one, the delta is unknown — it
@@ -7793,11 +7883,15 @@ async function updateWatchedProjectFile(root, relativePath, project = '') {
   else if (old.text === next.text) return;
   else delta = watchedLineDelta(old.text, next.text);
   if (next) rememberProjectFileSnapshot(file, next); else projectFileSnapshots.delete(file);
+  scheduleWorkspaceCheckpoint(root, 'filesystem-observation');
   if (!fileLedger) return;
   const row = {
     id: `watch:${Date.now()}:${crypto.randomBytes(3).toString('hex')}`, ts: Date.now(), path: file, repo_root: root,
     project: project || projectNameOf(root), producer: 'watch', actor: 'external', outcome: 'applied', ...delta, input: 'filesystem',
   };
+  if (archiveTo && archiveTo !== archiveFrom) {
+    try { fileArchive.link(row.id, file, archiveFrom, archiveTo); } catch (e) { console.error('File history link:', e.message); }
+  }
   if (fileLedger.put(row)) broadcastFileActivity(row);
   else broadcastFileActivity({ ...row, actor: 'unknown' }); // explained elsewhere; the open editor still wants to reload
 }
@@ -7827,7 +7921,7 @@ function watchRepoTree(root, onChange) {
         if (WATCH_SKIP_DIRS.has(name)) return;
         onChange(path.relative(root, abs).replace(/\\/g, '/'));
         if (event !== 'rename') return;
-        fs.stat(abs, (err, st) => {
+        fs.lstat(abs, (err, st) => {
           if (err) { if (watchers.has(abs)) remove(abs); return; }
           if (st.isDirectory()) add(abs);
         });
@@ -8721,13 +8815,30 @@ async function fileHistoryDocument(params) {
       truth: 'This view includes only file changes recorded in this conversation. Complete AI snapshots are reconstructed and can skip divergent edits.',
     };
   }
-  const ctx = await projectFileContext(params.name || '', repo, file);
+  const baseCtx = await projectFileContext(params.name || '', repo, file);
+  const saved = fileArchive ? fileArchive.versions(baseCtx.fullPath, 2001) : [];
+  const truncated = saved.length > 2000;
+  if (truncated) saved.shift();
+  const archiveVersion = saved.at(-1)?.id || 0;
+  // Old snapshot URLs remain valid even beyond the bounded timeline listing.
+  for (const requested of [params.point, params.from, params.to]) {
+    if (!fileArchive || !/^saved:\d+$/.test(requested || '')) continue;
+    const id = Number(requested.slice(6));
+    if (saved.some(v => v.id === id)) continue;
+    const older = fileArchive.version(baseCtx.fullPath, id);
+    if (older) saved.push(older);
+  }
+  const ctx = { ...baseCtx, version: baseCtx.version + ':archive:' + archiveVersion };
   const points = fileHistoryPoints(ctx);
+  for (const v of saved) points.push({ id: 'saved:' + v.id, kind: 'saved', ms: v.ts, ts: new Date(v.ts).toISOString(), actor: v.actor, state: v.state,
+    label: `${v.state === 'deleted' ? 'Deletion observed' : v.state === 'unavailable' ? 'Contents unavailable' : 'Saved version'} · ${v.actor} · ${v.source}` });
+  points.sort((a, b) => a.kind === 'current' ? 1 : b.kind === 'current' ? -1 : a.ms - b.ms || (a.kind === 'saved' && b.kind === 'saved' ? Number(a.id.slice(6)) - Number(b.id.slice(6)) : a.id.localeCompare(b.id)));
+  points.forEach((p, i) => p.order = i);
   return {
-    scope, ctx, points, key: null,
-    snapshotAt: point => snapshotAtFilePoint(ctx, point),
+    scope, ctx, points, key: null, archiveTruncated: truncated,
+    snapshotAt: point => point.kind === 'saved' ? fileArchive.snapshot(ctx.fullPath, Number(point.id.slice(6))) : snapshotAtFilePoint(baseCtx, point),
     changesBetween: async (from, to) => [...aiChangesBetween(ctx.events, points, from, to), ...await gitChangesBetween(ctx, points, from, to)],
-    truth: 'Git and current-file points are exact. AI points replay recorded tool calls and can skip divergent edits.',
+    truth: 'Saved versions are exact observations, not a continuous recording. Git and live versions are exact for those versions. Agent reconstructions can skip divergent edits.' + (truncated ? ' Only the latest 2000 saved observations are listed.' : '') + (fileArchive?.error || fileArchiveError ? ' Capture warning: ' + (fileArchive?.error || fileArchiveError) : !fileArchive ? ' Saved observation capture is disabled.' : ''),
   };
 }
 
@@ -8737,7 +8848,8 @@ function publicFilePoint(point) {
   };
   if (point.hash) { out.hash = point.hash; out.shortHash = point.shortHash; out.subject = point.subject; }
   if (point.eventId) { out.eventId = point.eventId; out.key = point.key; out.eventKind = point.eventKind; out.title = point.title; out.outcome = point.outcome; }
-  if (point.kind === 'boundary') out.label = point.label;
+  if (point.kind === 'boundary' || point.kind === 'saved') out.label = point.label;
+  if (point.kind === 'saved') { out.actor = point.actor; out.state = point.state; }
   return out;
 }
 
@@ -8759,7 +8871,7 @@ async function fileHistorySnapshotResponse(params) {
   if (!snapshot.sha) snapshot.sha = sha256Hex(String(snapshot.content || ''));
   return {
     scope: doc.scope, version: doc.ctx.version, point: publicFilePoint(point), sha: snapshot.sha, content: snapshot.content,
-    exact: !!snapshot.exact, method: snapshot.method, applied: snapshot.applied || 0, skipped: snapshot.skipped || 0,
+    exact: !!snapshot.exact, method: snapshot.method, state: snapshot.state || 'present', applied: snapshot.applied || 0, skipped: snapshot.skipped || 0,
   };
 }
 
@@ -8834,6 +8946,16 @@ function transcriptPathCandidates(key, pathValue) {
   return bases.map(base => path.resolve(path.join(base, expanded)));
 }
 
+async function editableReviewFile(pathValue, reviewId) {
+  if (reviewId && reviewServices().get(reviewId).schema === 2) {
+    // A verified file identity is exact; do not reinterpret a literal ':123'
+    // filename suffix as a transcript line reference or choose another file.
+    const file = await reviewServices().localFile(reviewId, path.resolve(pathValue));
+    if (file.size > FILE_EDIT_MAX || file.mediaType) throw Error('This artifact cannot be edited as text');
+    return file.path;
+  }
+  return editableFilePath(pathValue);
+}
 async function editableFilePath(pathValue, key = '') {
   let abs = null, st = null;
   for (const candidate of transcriptPathCandidates(key, pathValue)) {
@@ -9024,28 +9146,33 @@ async function nativePathAction(key, pathValue, action) {
   return { ok: true, action, path: abs };
 }
 
-async function fileReadResponse(pathValue, key = '') {
-  const abs = await editableFilePath(pathValue, key);
+async function fileReadResponse(pathValue, key = '', reviewId = '') {
+  const abs = reviewId ? await editableReviewFile(pathValue, reviewId) : await editableFilePath(pathValue, key);
   const text = await fsp.readFile(abs, 'utf8');
-  return { path: abs, text, sha: sha256Hex(text) };
+  const historyWarning = observeFileHistory(abs, { text, source: 'opened file' });
+  return { path: abs, text, sha: sha256Hex(text), historyWarning };
 }
 
 async function fileSaveResponse(body) {
   const { path: p, baseSha, text } = body;
   if (typeof text !== 'string') throw new Error('missing text');
-  const abs = await editableFilePath(p || '');
+  const abs = await editableReviewFile(p || '', body.reviewId);
   if (baseSha) {
     const current = await fsp.readFile(abs, 'utf8');
     if (sha256Hex(current) !== baseSha) throw new Error('the file changed on disk after you loaded it — reload and edit again');
   }
-  let oldText = '';
-  try { oldText = await fsp.readFile(abs, 'utf8'); } catch {}
+  let oldText = '', oldState = 'present';
+  try { oldText = await fsp.readFile(abs, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; oldState = 'deleted'; }
+  let historyWarning = observeFileHistory(abs, { text: oldText, state: oldState, source: 'before editor save' });
+  const archiveFrom = fileArchive?.latestId(abs);
   await writeFileAtomic(abs, text);
+  historyWarning = observeFileHistory(abs, { text, actor: body.actor === 'ai' ? 'agent' : 'human', source: 'editor save' }) || historyWarning;
+  const archiveTo = historyWarning ? null : fileArchive?.latestId(abs);
   if (oldText !== text) {
     const delta = docLineDelta(oldText, text);
-    ledgerRecordEditorSave(abs, { added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text), actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard' });
+    ledgerRecordEditorSave(abs, { added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text), actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard', archiveFrom, archiveTo });
   }
-  return { ok: true, path: abs, sha: sha256Hex(text) };
+  return { ok: true, path: abs, sha: sha256Hex(text), historyWarning };
 }
 
 // ---- documents: MRMD-backed markdown editing ----
@@ -9092,12 +9219,16 @@ function docLineDelta(oldText, newText) {
 async function docSaveResponse(body) {
   const { path: p, baseSha, text } = body;
   if (typeof text !== 'string') throw new Error('missing text');
-  const abs = await editableFilePath(p || '');
+  const abs = await editableReviewFile(p || '', body.reviewId);
   if (!abs.endsWith('.md')) throw new Error('only markdown documents save here');
   const oldText = await fsp.readFile(abs, 'utf8');
   if (baseSha && sha256Hex(oldText) !== baseSha) throw new Error('the file changed on disk after you loaded it');
+  let historyWarning = '';
   if (oldText !== text) {
+    historyWarning = observeFileHistory(abs, { text: oldText, source: 'before Markdown save' });
+    const archiveFrom = fileArchive?.latestId(abs);
     await writeFileAtomic(abs, text);
+    historyWarning = observeFileHistory(abs, { text, actor: body.actor === 'ai' || body.actor === 'external-agent' ? 'agent' : body.actor === 'runtime' ? 'runtime' : 'human', source: 'Markdown save' }) || historyWarning;
     const delta = docLineDelta(oldText, text);
     await recordDocEdit({
       ts: Date.now(), path: abs, action: 'save',
@@ -9110,9 +9241,10 @@ async function docSaveResponse(body) {
     ledgerRecordEditorSave(abs, {
       added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text),
       actor: DOC_ACTORS.has(body.actor) ? body.actor : 'human', input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
+      archiveFrom, archiveTo: historyWarning ? null : fileArchive?.latestId(abs),
     });
   }
-  return { ok: true, path: abs, sha: sha256Hex(text), changed: oldText !== text };
+  return { ok: true, path: abs, sha: sha256Hex(text), changed: oldText !== text, historyWarning };
 }
 
 const DOC_COMMIT_TITLE_PROMPT =
@@ -11439,6 +11571,16 @@ const server = http.createServer(async (req, res) => {
       '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/files-browser.js': { file: 'files-browser.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/file-history-drawer.js': { file: 'file-history-drawer.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/live-file.js': { file: 'live-file.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/live-file.css': { file: 'live-file.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/live-file-marks.js': { file: 'live-file-marks.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/live-file-marks-worker.js': { file: 'live-file-marks-worker.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/change-review-ui.js': { file: 'change-review-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/review-locations-ui.js': { file: 'review-locations-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/change-review.css': { file: 'change-review.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/files-browser.css': { file: 'files-browser.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/conversation-flow.js': { file: 'conversation-flow.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/streaming-tool.js': { file: 'streaming-tool.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-reader.js': { file: 'conversation-reader.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
@@ -11451,6 +11593,8 @@ const server = http.createServer(async (req, res) => {
       '/vendor/mermaid.min.js': { file: 'vendor/mermaid.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
     if (staticFile) {
@@ -11722,6 +11866,94 @@ const server = http.createServer(async (req, res) => {
         const items = await require('./file-completion.js').completeFiles({ piDir: dir, root, cwd, query, signal: ctl.signal });
         if (!res.destroyed) json(res, 200, { items });
       } finally { clearTimeout(timeout); res.removeListener('close', abort); }
+    } else if (u.pathname === '/api/reviews' || u.pathname.startsWith('/api/reviews/')) {
+      try {
+        const service = reviewServices();
+        let body = {};
+        if (req.method === 'POST') {
+          let raw = ''; for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 256 * 1024) throw Error('Review request is too large'); }
+          body = JSON.parse(raw || '{}');
+        }
+        const id = body.id || u.searchParams.get('id');
+        if (u.pathname === '/api/reviews' && req.method === 'POST') {
+          json(res, 200, await service.createTask(await reviewInput(String(body.key || ''), body.calls)));
+        } else if (u.pathname === '/api/reviews' && req.method === 'GET') {
+          const review = service.get(id);
+          const targets = Object.entries(index).filter(([key, e]) => conversationKind(e) !== 'claude' && projectNameOf(e.cwd, key) === review.project).map(([key, e]) => ({ key, title: e.title || key }));
+          const step = u.searchParams.get('step'), scope = u.searchParams.get('scope') === 'other' ? 'other' : 'task';
+          json(res, 200, { ...review, targets, shownFiles: review.schema !== 2 && !step ? review.files : service.pair(review, step, scope).files, stepFiles: step ? service.pair(review, step, scope).files : undefined, captureScopes: review.root ? checkpointStore.scopes(review.root) : [] });
+        } else if (u.pathname === '/api/reviews/asset' && req.method === 'GET') {
+          const file = await service.localFile(id, u.searchParams.get('path'));
+          if (file.size > 20 * 1024 * 1024) throw Error('Preview is limited to 20 MiB');
+          const handle = await fsp.open(file.path, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+          let data;
+          try {
+            const stat = await handle.stat(); if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw Error('File is too large to preview');
+            const bytes = Buffer.alloc(stat.size + 1); let n = 0;
+            while (n < bytes.length) { const r = await handle.read(bytes, n, bytes.length - n, n); if (!r.bytesRead) break; n += r.bytesRead; }
+            if (n !== stat.size) throw Error('File changed during preview'); data = bytes.subarray(0, n);
+          } finally { await handle.close(); }
+          res.writeHead(200, { 'Content-Type': file.mediaType || (data.includes(0) ? 'application/octet-stream' : 'text/plain; charset=utf-8'), 'Content-Length': data.length, 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox", 'Cache-Control': 'no-store' }); res.end(data);
+        } else if (u.pathname === '/api/reviews/file' && req.method === 'GET') {
+          json(res, 200, await service.file(id, u.searchParams.get('path'), u.searchParams.get('step'), false, u.searchParams.get('scope')));
+        } else if (u.pathname === '/api/reviews/repair' && req.method === 'POST') {
+          const original = service.get(id);
+          if (original.original && original.followup) throw Error('Rebuild the original and follow-up reviews separately, then combine them again.');
+          let overrides = original.overrides || {};
+          if (body.proposal) overrides = require('./review-repair').accepted(service, original, body.proposal.token, Number(body.proposal.index));
+          json(res, 200, await service.createTask({ ...await reviewInput(original.key, original.sourceCalls || original.calls), repairOf: original.id, overrides }));
+        } else if (u.pathname === '/api/reviews/capture-scope' && req.method === 'POST') {
+          const review = service.get(id), folder = path.resolve(String(body.path || ''));
+          if (body.remove && review.root && checkpointStore.scopes(review.root).includes(folder)) { json(res, 200, { scopes: checkpointStore.revokeScope(review.root, folder) }); return; }
+          if (!review.root || ![...review.files, ...(review.artifacts || [])].some(f => f.location?.host === 'local' && f.location.path && (f.location.path === folder || f.location.path.startsWith(folder + path.sep)))) throw Error('Choose a folder containing a recorded local task target');
+          json(res, 200, { scopes: await checkpointStore.approveScope(review.root, folder) });
+        } else if (u.pathname === '/api/reviews/suggest-preview' && req.method === 'POST') {
+          const review = service.get(id);
+          if (review.schema !== 2) throw Error('Rebuild this legacy review first');
+          const input = await reviewInput(review.key, review.sourceCalls || review.calls);
+          json(res, 200, require('./review-repair').preview(service, review, input.tools, currentModelLabel()));
+        } else if (u.pathname === '/api/reviews/suggest' && req.method === 'POST') {
+          json(res, 200, await require('./review-repair').suggest(service, String(body.token || ''), currentModelLabel(), (input, prompt) => runPi(input, prompt, null, { automatic: false, timeoutMs: 60000 })));
+        } else if (u.pathname === '/api/reviews/combine' && req.method === 'POST') {
+          json(res, 200, service.combine(body.original, body.followup));
+        } else if (u.pathname === '/api/reviews/comment' && req.method === 'POST') {
+          json(res, 200, await service.comment(id, body));
+        } else if (u.pathname === '/api/reviews/resolve' && req.method === 'POST') {
+          json(res, 200, service.resolve(id, body.comment, body.resolved));
+        } else if (u.pathname === '/api/reviews/mark' && req.method === 'POST') {
+          service.mark(id, body.path, body.checked); json(res, 200, { ok: true });
+        } else if (u.pathname === '/api/reviews/prepare' && req.method === 'POST') {
+          const review = service.get(id), target = String(body.target || review.key);
+          if (!index[target] || conversationKind(index[target]) === 'claude' || projectNameOf(index[target].cwd, target) !== review.project) throw Error('Select a Pi conversation in this project');
+          json(res, 200, await service.prepare(id, target, String(body.note || '')));
+        } else if (u.pathname === '/api/reviews/send' && req.method === 'POST') {
+          const result = await service.deliver(String(body.token || ''), async delivery => {
+            const out = await startAgentRun(delivery.target, { message: delivery.message, images: [], force: false, allowQueue: true });
+            return { key: delivery.target, queued: !!out.queued };
+          });
+          json(res, 200, result);
+        } else json(res, 405, { error: 'Unsupported review operation' });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/files/browse' || u.pathname === '/api/files/activity') {
+      try {
+        const params = Object.fromEntries(u.searchParams);
+        const meta = projectMetaFor(params.name || '');
+        if (!meta) throw new Error('project not found');
+        const browser = require('./files-browser-server.js');
+        if (u.pathname.endsWith('/activity')) {
+          if (!fileLedger) throw new Error('File activity is unavailable');
+          const activity = browser.activityQuery(fileLedger.db, params.name, params);
+          if (fileArchive) activity.events = activity.events.map(e => ({ ...e, ...fileArchive.reference(e.id, e.path) }));
+          activity.historyWarning = fileArchive?.error || fileArchiveError || (!fileArchive ? 'Saved file history capture is disabled' : '');
+          json(res, 200, activity);
+        } else {
+          const candidates = [meta.cwd, ...await projectGitRepositories(meta)].filter(Boolean);
+          const roots = [...new Set(await Promise.all(candidates.map(p => fsp.realpath(p))))];
+          const root = params.root ? path.resolve(params.root) : roots[0];
+          if (!root || !roots.includes(root)) throw new Error('Repository is not part of this project');
+          json(res, 200, { ...await browser.browse(root, { dir: params.dir, q: params.q, contents: params.contents === '1' }), roots });
+        }
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/files/timeline') {
       try { json(res, 200, filesTimelineResponse(u.searchParams)); }
       catch (e) { json(res, 503, { error: e.message }); }
@@ -11792,8 +12024,21 @@ const server = http.createServer(async (req, res) => {
       if (!pathValue) return json(res, 400, { error: 'missing path' });
       try { json(res, 200, await fileBlameResponse(pathValue, u.searchParams.get('project') || '', u.searchParams.get('key') || '')); }
       catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/file/line-info' && req.method === 'GET') {
+      try {
+        const file = await editableReviewFile(u.searchParams.get('path') || '', u.searchParams.get('reviewId'));
+        const sha = u.searchParams.get('sha') || '';
+        if (!/^[a-f0-9]{64}$/.test(sha)) throw Error('A matching document version is required');
+        const stat = await fsp.stat(file);
+        if (!stat.isFile() || stat.size > 2 * 1024 * 1024) json(res, 200, { kind: 'unknown', reason: 'Inline attribution is limited to text files up to 2 MiB' });
+        else {
+          const text = await fsp.readFile(file, 'utf8');
+          if (sha256Hex(text) !== sha) json(res, 200, { kind: 'stale', reason: 'Disk contents changed; reload when ready for current attribution' });
+          else json(res, 200, { ...await require('./live-file-services.js').blameLine(file, text, Number(u.searchParams.get('line'))), sha });
+        }
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/file/read' && req.method === 'GET') {
-      try { json(res, 200, await fileReadResponse(u.searchParams.get('path') || '', u.searchParams.get('id') || '')); }
+      try { json(res, 200, await fileReadResponse(u.searchParams.get('path') || '', u.searchParams.get('id') || '', u.searchParams.get('reviewId') || '')); }
       catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/file/save' && req.method === 'POST') {
       let body = '';
