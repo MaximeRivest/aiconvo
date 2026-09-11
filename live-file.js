@@ -56,7 +56,7 @@ async function openLiveFile(pathValue, opts = {}) {
 }
 function liveFileAfterMount(ws) {
   if (fileWs !== ws || !ws.editor) return;
-  $('liveBack').onclick = () => ws.back ? dispatchHash(ws.back) : ws.browserContext ? showFilesBrowser(ws.project, ws.browserContext) : ws.project ? showFilesBrowser(ws.project) : goHome();
+  $('liveBack').onclick = () => ws.back ? (typeof fbReturnTo === 'function' ? fbReturnTo(ws.back) : dispatchHash(ws.back)) : ws.browserContext ? showFilesBrowser(ws.project, ws.browserContext) : ws.project ? showFilesBrowser(ws.project) : goHome();
   const editor = ws.editor;
   const savedText = ws.kind === 'md' ? docState.baseText : ws.baseText;
   $('docReload').onclick = () => liveFileReload(ws);

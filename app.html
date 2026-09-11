@@ -1393,6 +1393,12 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 /* A confirmed file mention inside inline code: same dotted cue as a path button. */
 .md code[data-transcript-path] { cursor: pointer; color: var(--cyan); border-bottom: 1px dotted var(--border-strong); }
 .md code[data-transcript-path]:hover { color: var(--text); }
+/* A markdown link to a file: a link once the server found the file, plain
+   words (with the target in the title) when it did not. */
+.md a.md-file { color: inherit; text-decoration: none; }
+.md a.md-file[data-transcript-path] { cursor: pointer; color: var(--cyan); border-bottom: 1px dotted var(--border-strong); }
+.md a.md-file[data-transcript-path]:hover { color: var(--text); }
+.md a.md-file-missing { color: var(--text-dim); border-bottom: 1px dotted var(--border); }
 .media-lightbox { position: fixed; inset: 0; z-index: 10020; display: grid; grid-template-rows: auto minmax(0, 1fr); background: color-mix(in srgb, var(--bg) 94%, transparent); }
 .media-lightbox-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
 .media-lightbox-head button { margin-left: auto; }
@@ -9095,14 +9101,15 @@ function messageMediaHtml(images, key = activeRel) {
     return `<button type="button" data-media-src="${esc(src)}" title="Open image ${i + 1} of ${images.length}"><img src="${esc(src)}" loading="lazy" decoding="async" alt="Attached image ${i + 1}"></button>`;
   }).join('')}</div>`;
 }
-// File names quoted in chat prose (`README.md`, `plans/`) become links only
-// after the server confirms they exist next to the conversation's cwd.
-// Results are cached per conversation, so a re-render (streaming, fold,
-// search) links known files at once and asks only about new names.
+// File names quoted in chat prose (`README.md`, `plans/`) and relative
+// markdown links ([the page](website/index.md)) become links only after the
+// server confirms they exist next to the conversation's cwd. Results are
+// cached per conversation, so a re-render (streaming, fold, search) links
+// known files at once and asks only about new names.
 const pathCandidateCache = new Map();
 function linkPathCandidate(el, hit) {
   el.removeAttribute('data-path-candidate');
-  if (!hit) return;
+  if (!hit) { if (el.classList.contains('md-file')) el.classList.add('md-file-missing'); return; }
   el.dataset.transcriptPath = hit.path;
   el.setAttribute('role', 'button');
   el.tabIndex = 0;
@@ -9111,7 +9118,7 @@ function linkPathCandidate(el, hit) {
 async function wireTranscriptPathCandidates(root, key) {
   if (!root || !key) return;
   const sources = new Map();
-  for (const el of root.querySelectorAll('code[data-path-candidate]')) {
+  for (const el of root.querySelectorAll('[data-path-candidate]')) {
     const source = el.closest('[data-msg-key]')?.dataset.msgKey || key;
     const cand = el.dataset.pathCandidate, cacheKey = source + '|' + cand;
     if (pathCandidateCache.has(cacheKey)) { linkPathCandidate(el, pathCandidateCache.get(cacheKey)); continue; }
@@ -13421,23 +13428,35 @@ function mdRender(src, q = '') {
   // Multi-word queries mark each term (matching the AND search semantics).
   const qr = q ? termRegex(q) : null;
   const mark = h => qr ? h.replace(qr, m => `<mark>${m}</mark>`) : h;
-  // Absolute file paths in chat prose become open buttons. A plain click
-  // previews in aiconvo; Ctrl-click sends the current path to the desktop.
-  // The text is already HTML-escaped here, so the
-  // match is safe inside an attribute. The last char must be a word char:
-  // this drops sentence punctuation glued to the path.
-  const pathify = h => h.replace(/(^|[\s(*`>;])((?:~\/|\/)(?:[\w.@+-]+\/)+[\w.@+-]*[A-Za-z0-9_])/g,
-    (_, pre, p) => `${pre}<button type="button" class="msg-path" data-transcript-path="${p}" title="Open ${p}">${p}</button>`);
-  // Links run last, in one pass, so a markdown link's text is never re-linked.
-  // Bare URLs may sit at the start of a line, after whitespace, brackets or
-  // quotes, after an opening tag (bold/italic/code emitted above: "<b>https…"),
-  // or after an entity ("&quot;" ends in ";"). The text is HTML-escaped, so
-  // "&amp;" is one URL char while "&lt;" / "&gt;" end the URL. Trailing
-  // sentence punctuation and unbalanced ")" are left outside the link.
+  // Every link form in one pass, so nothing is linked twice: markdown links
+  // to any target, bare absolute file paths, bare URLs.
+  //  - [text](https://…) and bare URLs open in a new tab.
+  //  - [text](/abs/path) and bare /abs/paths become open buttons: a plain
+  //    click previews in aiconvo, Ctrl-click sends the path to the desktop.
+  //  - [text](website/index.md) is a relative file link. The conversation
+  //    view asks the server whether it exists next to the session's cwd and
+  //    links it then (wireTranscriptPathCandidates); the target stays in the
+  //    title either way, so a dead link still says where it pointed.
+  // The text is HTML-escaped here, so a match is safe inside an attribute
+  // once quotes are entity-encoded. Bare URLs may sit at the start of a
+  // line, after whitespace, brackets or quotes, after an opening tag, or
+  // after an entity ("&quot;" ends in ";"); "&amp;" is one URL char while
+  // "&lt;" / "&gt;" end it. Trailing sentence punctuation and unbalanced
+  // ")" stay outside. A bare path ends on a word char, dropping glued
+  // punctuation.
+  const attr = v => String(v).replace(/"/g, '&quot;');
+  const pathButton = (p, label) => `<button type="button" class="msg-path" data-transcript-path="${attr(p)}" title="Open ${attr(p)}">${label}</button>`;
+  const mdLink = (text, target) => {
+    if (/^(?:https?:\/\/|mailto:)/i.test(target)) return `<a href="${attr(target)}" target="_blank" rel="noopener">${text}</a>`;
+    if (/^(?:~\/|\/)/.test(target)) return pathButton(target, text);
+    if (target.startsWith('#') || /[<>&]/.test(target)) return text;
+    return `<a class="md-file" data-path-candidate="${attr(target.replace(/^\.\//, ''))}" title="${attr(target)}">${text}</a>`;
+  };
   const linkify = h => h.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^)\s"]+)\)|(^|[\s(\["'>;])(https?:\/\/(?:[^\s<&"]|&amp;)+)/g,
-    (m, text, href, pre, url) => {
-      if (href) return `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+    /\[([^\]\n]+)\]\(([^()\s]+)(?:\s+&quot;[^&]*&quot;)?\)|(^|[\s(*`>;])((?:~\/|\/)(?:[\w.@+-]+\/)+[\w.@+-]*[A-Za-z0-9_])|(^|[\s(\["'>;])(https?:\/\/(?:[^\s<&"]|&amp;)+)/g,
+    (m, text, target, prePath, p, pre, url) => {
+      if (target !== undefined) return mdLink(text, target);
+      if (p !== undefined) return `${prePath}${pathButton(p, p)}`;
       let tail = '';
       for (;;) {
         const last = url[url.length - 1];
@@ -13455,7 +13474,9 @@ function mdRender(src, q = '') {
     const cand = relPathCandidate(c);
     return cand ? `<code data-path-candidate="${cand}">${c}</code>` : `<code>${c}</code>`;
   };
-  const inline = s => linkify(pathify(mark(esc(s)))
+  // Links run last: bold, italic, and code are already tags, so a URL or
+  // link after "<b>" still links and a link's own text is never re-linked.
+  const inline = s => linkify(mark(esc(s))
     .replace(/`([^`]+)`/g, (_, c) => codeSpan(c))
     .replace(/\*\*((?:[^*]|\*(?!\*))+?)\*\*/g, '<b>$1</b>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>')
@@ -15164,6 +15185,25 @@ window.nativeNotifyChanged = on => {
   if (!on && box && box.dataset.wanted === '1') toast('notifications were not allowed on this phone');
   if (box) delete box.dataset.wanted;
 };
+
+// In the Android app a link to another site must leave for the device
+// browser. The app's single WebView ignores target="_blank" and would load
+// the page in place of aiconvo, with no way back on a device without a
+// navigation bar (the e-ink tablet). Same-host links (this server, any
+// port) and the machine switcher (a plain navigation, not a link) stay in
+// the app. Capture phase: it runs before any handler of the link itself.
+document.addEventListener('click', e => {
+  const bridge = window.AiconvoApp;
+  if (!bridge || !bridge.openExternal || e.defaultPrevented) return;
+  const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+  if (!a) return;
+  let url;
+  try { url = new URL(a.getAttribute('href'), location.href); } catch { return; }
+  if (!/^https?:$/.test(url.protocol) || url.host === location.host) return;
+  e.preventDefault();
+  e.stopPropagation();
+  try { bridge.openExternal(url.href); } catch { location.href = url.href; }
+}, true);
 
 function bindPaneSound(root) {
   bindOptions(root, 'setDoneSound', async v => {

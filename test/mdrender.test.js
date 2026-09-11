@@ -126,3 +126,24 @@ test('mdRender marks path-like code spans as candidates only', () => {
   assert.match(h, /<code>plan\.describe\(\)<\/code>/);
   assert.ok(!h.includes('data-transcript-path'));
 });
+
+test('markdown links to relative files are candidates that keep their text', () => {
+  const h = mdRender('[Read the revised homepage](website/index.md) and [the review](./website/reviews/hormozi-lens.md "notes")');
+  assert.match(h, /<a class="md-file" data-path-candidate="website\/index\.md" title="website\/index\.md">Read the revised homepage<\/a>/);
+  assert.match(h, /<a class="md-file" data-path-candidate="website\/reviews\/hormozi-lens\.md" title="\.\/website\/reviews\/hormozi-lens\.md">the review<\/a>/);
+  assert.ok(!h.includes('['), 'no bracket syntax leaks through');
+  // Parent references are explicit in a link, so they stay candidates too.
+  assert.match(mdRender('[up](../other/x.md)'), /data-path-candidate="\.\.\/other\/x\.md"/);
+});
+
+test('markdown links to absolute paths become open buttons with the link text', () => {
+  const h = mdRender('[the log](/tmp/build.log) and [home](~/notes/a.md)');
+  assert.match(h, /<button type="button" class="msg-path" data-transcript-path="\/tmp\/build\.log" title="Open \/tmp\/build\.log">the log<\/button>/);
+  assert.match(h, /data-transcript-path="~\/notes\/a\.md"[^>]*>home<\/button>/);
+  assert.strictEqual((h.match(/msg-path/g) || []).length, 2, 'the path inside the link is not linked a second time');
+});
+
+test('bare absolute paths still become open buttons and anchors stay text', () => {
+  assert.match(mdRender('see /home/me/x/y.md.'), /<button[^>]*data-transcript-path="\/home\/me\/x\/y\.md"[^>]*>\/home\/me\/x\/y\.md<\/button>\./);
+  assert.strictEqual(squash(mdRender('[top](#top)')), '<p>top</p>');
+});

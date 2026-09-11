@@ -36,20 +36,47 @@ function fbOpenFile(s, file, line) {
   filesBrowserPlaces.set(s.project + '\0' + s.conv, { file, context });
   return openFileWorkspace(file, { project: s.project, line, browserContext: context });
 }
+// A route hash that names a conversation (no "view=" grammar, a source
+// prefix). Such a hash as ws.back means the file was opened from that
+// conversation's text: a markdown link, a quoted path, a context chip.
+function fbConversationHash(hash) {
+  return typeof hash === 'string' && /^(?:pi|pi-remote|claude):/.test(hash) ? hash : null;
+}
+// Return to the place a file was opened from. A conversation return lands
+// on the link that opened the file when that was recorded, and otherwise
+// where the reader last was — never at the bottom.
+function fbReturnTo(hash) {
+  const conv = fbConversationHash(hash);
+  const recorded = typeof conversationFileReturn !== 'undefined' && conversationFileReturn && conversationFileReturn.key === conv;
+  if (conv && !recorded) return open(conv, 'restore');
+  return dispatchHash(hash);
+}
+
 function fbFileNavigation(ws) {
-  const context = ws.browserContext || { project: ws.project };
+  // The file remembers where it was opened from (ws.back): a conversation,
+  // a review, a browser. That place is what "back" returns to; the folder
+  // browser is only the fallback when nothing is recorded. A conversation
+  // return lands on the very link that opened the file.
+  const fromConversation = fbConversationHash(ws.back);
+  const context = ws.browserContext || { project: ws.project, conv: fromConversation || '' };
   const host = document.createElement('div'); host.className = 'fb-file-nav';
   host.innerHTML = `${context.conv ? '<button data-fb-conv>Conversation</button><b>Files</b>' : '<button data-fb-summary>Project summary</button>'}<button data-fb-browse>Browse folders</button><button data-fb-changes>Changes</button><span class="dim">Live edits · History is read-only</span>`;
   $('view').prepend(host);
-  host.querySelector('[data-fb-conv]')?.addEventListener('click', () => open(context.conv, 'restore'));
+  host.querySelector('[data-fb-conv]')?.addEventListener('click', () => fromConversation && context.conv === fromConversation ? fbReturnTo(fromConversation) : open(context.conv, 'restore'));
   host.querySelector('[data-fb-summary]')?.addEventListener('click', () => showProjectOverview(ws.project));
   host.querySelector('[data-fb-browse]').onclick = () => showFilesBrowser(ws.project, { ...context, mode: 'browse' });
   host.querySelector('[data-fb-changes]').onclick = () => showFilesBrowser(ws.project, { ...context, mode: 'changes' });
+  const back = $('fwBack');
   if (ws.back && ws.back.startsWith('review=')) {
-    const back = document.createElement('button'); back.textContent = 'Return to review';
-    back.onclick = () => dispatchHash(ws.back); host.prepend(back);
-    $('fwBack').onclick = back.onclick;
-  } else $('fwBack').onclick = () => showFilesBrowser(ws.project, context);
+    const button = document.createElement('button'); button.textContent = 'Return to review';
+    button.onclick = () => dispatchHash(ws.back); host.prepend(button);
+    back.onclick = button.onclick;
+    back.textContent = '← Review'; back.title = 'Return to the review';
+  } else if (ws.back) {
+    back.onclick = () => fbReturnTo(ws.back);
+    back.textContent = fromConversation ? '← Conversation' : '← Back';
+    back.title = fromConversation ? 'Return to the conversation, at the link that opened this file' : 'Return to where this file was opened from';
+  } else back.onclick = () => showFilesBrowser(ws.project, context);
 }
 
 function fbFinderClose(s) {

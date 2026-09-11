@@ -196,6 +196,7 @@ class MainActivity : AppCompatActivity() {
         web.addJavascriptInterface(InkBridge(), "AiconvoInk")
         web.addJavascriptInterface(speech, "AiconvoSpeech")
         web.addJavascriptInterface(NotifyBridge(), "AiconvoNotify")
+        web.addJavascriptInterface(AppBridge(), "AiconvoApp")
         web.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 view: WebView?,
@@ -250,8 +251,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            // The page routes links to other sites through AiconvoApp
+            // .openExternal (it knows a link from the machine switcher; this
+            // side does not). Here only non-web schemes (mailto:, tel:,
+            // intent:) are handed out: the WebView cannot show them and
+            // would replace aiconvo with an error page.
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                return false
+                val url = request?.url ?: return false
+                val scheme = url.scheme?.lowercase() ?: return false
+                if (scheme == "http" || scheme == "https" || scheme == "file" || scheme == "about" || scheme == "javascript") return false
+                return openOutside(url)
             }
         }
     }
@@ -286,6 +295,32 @@ class MainActivity : AppCompatActivity() {
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             NotifyService.setEnabled(this, granted)
             tellPageNotify(granted)
+        }
+    }
+
+    // Hand a URL to whatever app handles it (browser, mail, maps). Returns
+    // true when something took it; false lets the WebView load it as the
+    // last resort on a device with no handler at all.
+    private fun openOutside(url: Uri): Boolean {
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, url).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // Page-side bridge: a link to another site leaves for the device
+    // browser instead of replacing aiconvo inside this WebView (which has no
+    // way back on a device without a navigation bar). When no app can take
+    // the URL, the WebView loads it after all: a page is better than nothing.
+    inner class AppBridge {
+        @JavascriptInterface
+        fun openExternal(url: String) {
+            runOnUiThread {
+                val parsed = try { Uri.parse(url) } catch (_: Exception) { null } ?: return@runOnUiThread
+                if (!openOutside(parsed)) web.loadUrl(url)
+            }
         }
     }
 

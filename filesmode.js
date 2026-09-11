@@ -481,7 +481,7 @@ function fileWsRel(ws) {
 }
 
 function fileWsBack(ws) {
-  if (ws.back) return dispatchHash(ws.back);
+  if (ws.back) return typeof fbReturnTo === 'function' ? fbReturnTo(ws.back) : dispatchHash(ws.back);
   if (ws.landing) { setLens('files', { navigate: false }); return goHome(); }
   if (ws.project) return lens === 'files' ? showFilesProject(ws.project) : showProjectOverview(ws.project);
   return goHome();

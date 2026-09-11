@@ -723,6 +723,23 @@ async function* walk(dir, base) {
   }
 }
 
+// The files of a project folder that is not a checkout. Nested checkouts
+// are other repositories (listed on their own), and dependency or build
+// trees are noise, so neither is entered.
+const WORKSPACE_WALK_SKIP = new Set(['.git', 'node_modules', '.venv', 'venv', 'target', 'dist', 'build', '__pycache__', '.cache',
+  '.next', '.nuxt', '.turbo', '.gradle', '.idea', '.mypy_cache', '.pytest_cache', '.ruff_cache', '.tox', '.svelte-kit', 'bower_components']);
+async function* walkWorkspaceFiles(root, dir = root) {
+  let entries;
+  try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+  if (dir !== root && entries.some(e => e.name === '.git')) return;
+  for (const e of entries) {
+    if (WORKSPACE_WALK_SKIP.has(e.name)) continue;
+    const abs = path.join(dir, e.name);
+    if (e.isDirectory()) yield* walkWorkspaceFiles(root, abs);
+    else if (e.isFile()) yield path.relative(root, abs).replace(/\\/g, '/');
+  }
+}
+
 async function fullScan() {
   const seen = new Set();
   let n = 0;
@@ -7031,11 +7048,28 @@ async function gitText(root, args) {
   return execText('git', ['-C', root, ...args]);
 }
 
+// Every checkout that belongs to the project. Two sources: the git root of
+// each conversation cwd, and every indexed checkout whose project
+// attribution (the same rule conversations use, folds included) names this
+// project. The second matters for a project folder that is not a checkout
+// itself but holds several (lm15-dev/lm15-ts, lm15-python…): conversations
+// run from the folder root, so their edits land in repositories no
+// conversation ever had as its cwd. Without them those edits match no
+// repository and vanish from the file tree, the history and the reviews.
+const PROJECT_REPOSITORY_LIMIT = 60;
 async function projectGitRepositories(meta) {
   const roots = new Set();
   for (const cwd of [...new Set(meta.entries.map(({ entry }) => entry.cwd).filter(Boolean))]) {
     const root = await gitRootForCwd(cwd); // cached .git walk-up, no spawn
-    if (root && fs.existsSync(root)) roots.add(root);
+    if (root && fs.existsSync(root)) roots.add(path.resolve(root));
+  }
+  let listed = [];
+  try { listed = await discoverGitRepos(); } catch {}
+  for (const repo of listed) {
+    if (roots.size >= PROJECT_REPOSITORY_LIMIT) break;
+    if (!repo || !repo.root || repo.project !== meta.project) continue;
+    const root = path.resolve(repo.root);
+    if (!roots.has(root) && fs.existsSync(root)) roots.add(root);
   }
   return [...roots].sort((a, b) => b.length - a.length);
 }
@@ -7931,6 +7965,10 @@ function watchRepoTree(root, onChange) {
     watchers.set(dir, w);
     fs.readdir(dir, { withFileTypes: true }, (err, entries) => {
       if (err) return;
+      // A nested checkout is another repository: it gets its own watcher
+      // when it belongs to the project, and its files must never be
+      // reported twice through the enclosing folder.
+      if (dir !== root && entries.some(e => e.name === '.git')) { remove(dir); return; }
       for (const e of entries) if (e.isDirectory() && !WATCH_SKIP_DIRS.has(e.name)) add(path.join(dir, e.name));
     });
   };
@@ -8326,12 +8364,22 @@ async function projectFileHistoryResponse(project) {
   if (!meta) throw new Error('project not found');
   const roots = await projectGitRepositories(meta);
   const repositories = await mapLimit(roots, 3, loadGitRepository);
-  if (!repositories.length && meta.cwd && fs.existsSync(meta.cwd)) {
-    const root = path.resolve(meta.cwd);
-    repositories.push({
-      id: crypto.createHash('sha256').update('workspace:' + root).digest('hex').slice(0, 12),
-      root, currentBranch: null, head: null, refs: [], commits: [], workingTree: [], truncated: false, isGit: false,
-    });
+  // The project folder itself, when it is not a checkout: its own files
+  // (a website/, notes, scripts beside several sub-repositories) are part
+  // of the project too. Deepest root first, so an edit inside a
+  // sub-repository still matches that repository, never the folder.
+  const projectRoot = meta.cwd && fs.existsSync(meta.cwd) ? path.resolve(meta.cwd) : '';
+  if (projectRoot) {
+    const projectGitRoot = await gitRootForCwd(projectRoot);
+    if (projectGitRoot && !roots.includes(path.resolve(projectGitRoot))) {
+      const repo = await loadGitRepository(path.resolve(projectGitRoot)).catch(() => null);
+      if (repo) repositories.push(repo);
+    } else if (!projectGitRoot) {
+      repositories.push({
+        id: crypto.createHash('sha256').update('workspace:' + projectRoot).digest('hex').slice(0, 12),
+        root: projectRoot, currentBranch: null, head: null, refs: [], commits: [], workingTree: [], truncated: false, isGit: false,
+      });
+    }
   }
   const allEvents = [];
   const conversations = [...meta.entries].sort((a, b) => String(a.entry.firstTs || '').localeCompare(String(b.entry.firstTs || '')));
@@ -8400,7 +8448,7 @@ async function projectFileHistoryResponse(project) {
     // it has no commit or AI event yet. The code tree is a file browser.
     if (repo.isGit === false) {
       let count = 0;
-      for await (const relativePath of walk(repo.root, repo.root)) {
+      for await (const relativePath of walkWorkspaceFiles(repo.root)) {
         rowFor(repo, relativePath).current = true;
         if (++count >= 12000) break;
       }
