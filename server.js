@@ -247,7 +247,7 @@ try { index = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf8')); } catch { index =
 // loss right after the call cannot leave an empty file under the final name.
 // Caches skip the fsync (they are rebuilt from the transcripts anyway).
 let atomicWriteSeq = 0;
-async function writeFileAtomic(p, data, { sync = false } = {}) {
+async function writeFileAtomic(p, data, { sync = false, syncDirectory = false, guard = null } = {}) {
   const tmp = p + '.tmp-' + process.pid + '-' + (++atomicWriteSeq) + '-' + Math.random().toString(36).slice(2, 8);
   try {
     if (sync) {
@@ -256,7 +256,14 @@ async function writeFileAtomic(p, data, { sync = false } = {}) {
     } else {
       await fsp.writeFile(tmp, data);
     }
-    await fsp.rename(tmp, p);
+    // A guarded replacement re-checks permission with no await between the
+    // check and the rename, so a revocation cannot lose the race.
+    if (guard) { guard(); fs.renameSync(tmp, p); }
+    else await fsp.rename(tmp, p);
+    if (syncDirectory) {
+      const directory = await fsp.open(path.dirname(p), 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
+    }
   } catch (e) {
     await fsp.unlink(tmp).catch(() => {});
     throw e;
@@ -3372,6 +3379,7 @@ const PROJECT_RETITLE_PROMPT =
 
 // Retitle one project on demand, from its memory overview and recent work.
 async function retitleProject(project, manual = true) {
+  requireAiTitles();
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
   const memory = await projectMemoryInfo(project, meta).catch(() => null);
@@ -3386,8 +3394,9 @@ async function retitleProject(project, manual = true) {
     identity: o.identity || '', overview: o.summary || '',
     recentConversationTitles: recent,
   };
-  const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT);
+  const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT, null, { automatic: !manual });
   const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
+  requireAiTitles();
   return setProjectTitle(project, parsed.title, manual);
 }
 
@@ -3403,6 +3412,7 @@ function setEpicTitle(id, rawTitle) {
 }
 
 async function retitleEpic(id) {
+  requireAiTitles();
   const epic = epics[id];
   if (!epic) throw new Error('unknown epic');
   const payload = {
@@ -3414,6 +3424,7 @@ async function retitleEpic(id) {
   };
   const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT);
   const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
+  requireAiTitles();
   return setEpicTitle(id, parsed.title);
 }
 
@@ -3421,6 +3432,7 @@ async function retitleEpic(id) {
 // A manual (or earlier AI) title always blocks this.
 const projectTitleInFlight = new Set();
 function maybeAutoProjectTitle(project) {
+  if (!appSettings.aiTitles) return;
   if (projectTitles[project]) return;
   if (projectTitleInFlight.has(project)) return;
   projectTitleInFlight.add(project);
@@ -3517,6 +3529,12 @@ const CLAUDE_CODE_EXT = path.join(os.homedir(), '.pi', 'agent', 'extensions', 'c
 let appSettings = settingsLib.normalizeSettings(settingsLib.DEFAULT_SETTINGS);
 try { appSettings = settingsLib.normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch {}
 memoryModelHealth.setIdentity(currentModelLabel());
+// Every AI naming path funnels through this. It is checked at the entry point,
+// at the timer, at the shared transport, and once more before publication, so
+// turning titles off mid-flight cannot still land a generated title.
+function requireAiTitles() {
+  if (!appSettings.aiTitles) throw new Error('AI titles are disabled in settings');
+}
 function saveAppSettings() {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(appSettings, null, 2) + '\n', { mode: 0o600 });
@@ -3787,6 +3805,13 @@ function splitTextToTokenBudget(text, tokenBudget) {
 }
 
 async function runPi(fileContent, prompt, onChunk, options = {}) {
+  // Callers pass a guard when their result may be revoked mid-call (a title
+  // switched off, a source edited). Guard failures are tracked separately so a
+  // completed transport is never misreported as a provider failure.
+  let guardFailure;
+  const guard = () => { try { options.guard?.(); } catch (e) { guardFailure = e; throw e; } };
+  guard();
+  if (!appSettings.aiTitles && [TITLE_PROMPT, RETITLE_PROMPT, PROJECT_RETITLE_PROMPT, TIMELINE_TITLE_PROMPT, DOC_COMMIT_TITLE_PROMPT].includes(prompt)) requireAiTitles();
   const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
   fs.writeFileSync(tmp, fileContent, { mode: 0o600 });
   const inherited = modelCallContext.getStore();
@@ -3817,6 +3842,7 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
         },
       },
     );
+    guard();
     memoryModelHealth.success(permit);
 
     // JSON mode gives the final provider usage. These no-session calls were
@@ -3838,6 +3864,12 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
     if (!finalMessage) return result.stdout.trim();
     return textOf(finalMessage.content).trim();
   } catch (error) {
+    if (error === guardFailure) {
+      // The transport completed successfully. Release a possible health probe,
+      // but never classify source invalidation as a provider failure/retry signal.
+      if (permit) memoryModelHealth.success(permit);
+      throw error;
+    }
     if (permit) {
       error.modelCallFailure = true;
       memoryModelHealth.failure(permit, error);
@@ -3863,6 +3895,7 @@ let timelineTitleRunning = false;
 let timelineTitleAgain = false;
 function scheduleTimelineTitles(delayMs = 5000) {
   clearTimeout(scheduleTimelineTitles.t);
+  if (!appSettings.aiTitles) return;
   scheduleTimelineTitles.t = setTimeout(refreshTimelineTitles, Math.max(1000, delayMs));
 }
 
@@ -3879,12 +3912,18 @@ function mapTimelineLimit(items, limit, fn) {
 }
 
 async function refreshTimelineTitles() {
+  if (!appSettings.aiTitles) return;
   if (timelineTitleRunning) { timelineTitleAgain = true; return; }
+  const authorize = () => { requireAiTitles(); };
+  const persist = async (file, data, guard) => {
+    await writeFileAtomic(file, JSON.stringify(data), { guard });
+    guard();
+  };
   const pending = Object.entries(index).filter(([key, e]) => {
     const saved = timelineTitles[key];
     if (saved && saved.manual) return false; // never overwrite a user-owned title
     return !saved || saved.hash !== e.timelineTitleHash;
-  });
+  }).map(([key, e]) => [key, { title: e.title, timelineTitleHash: e.timelineTitleHash }]);
   if (!pending.length) return;
   timelineTitleRunning = true;
   try {
@@ -3893,30 +3932,51 @@ async function refreshTimelineTitles() {
     await mapTimelineLimit(batches, 3, async batch => {
       const input = batch.map(([, e], id) => ({ id, request: e.title }));
       try {
+        authorize();
         const raw = await runPi(JSON.stringify(input), TIMELINE_TITLE_PROMPT, null, { automatic: true });
+        authorize();
         const result = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
         if (!Array.isArray(result)) return;
-        const updates = [];
         for (const item of result) {
+          authorize();
           const pair = batch[Number(item.id)];
           if (!pair) continue;
           const [key, oldEntry] = pair;
-          if (!index[key] || index[key].timelineTitleHash !== oldEntry.timelineTitleHash) continue;
+          const current = () => index[key] && !timelineTitles[key]?.manual &&
+            index[key].timelineTitleHash === oldEntry.timelineTitleHash && index[key].title === oldEntry.title;
+          if (!current()) continue;
+          const saved = timelineTitles[key];
+          const guard = () => {
+            authorize();
+            if (!current() || timelineTitles[key] !== saved) throw new Error('Timeline source or title changed during publication');
+          };
           const title = timelineTitle(item.title).slice(0, 10);
-          timelineTitles[key] = { hash: oldEntry.timelineTitleHash, title };
-          index[key].timelineTitle = title;
-          try {
-            const file = cachePathFor(key);
-            const data = JSON.parse(await fsp.readFile(file, 'utf8'));
+          const file = cachePathFor(key);
+          let data;
+          try { data = JSON.parse(await fsp.readFile(file, 'utf8')); } catch { /* Missing/rebuilt cache is optional. */ }
+          guard(); // Authorization failures are never caught as ordinary cache errors.
+          if (data) {
             data.timelineTitle = title;
             data.timelineTitleHash = oldEntry.timelineTitleHash;
-            await fsp.writeFile(file, JSON.stringify(data));
-          } catch {}
-          updates.push({ key, title });
+            await persist(file, data, guard);
+          }
+          // These are separate atomic files, not a transaction. A later guard
+          // can retain earlier replacements, but cannot publish another file
+          // or the in-memory title after revocation. Do not enqueue unguarded saves.
+          const beforeTitles = JSON.stringify(timelineTitles), beforeIndex = JSON.stringify(index);
+          const publicationGuard = () => {
+            guard();
+            if (JSON.stringify(timelineTitles) !== beforeTitles || JSON.stringify(index) !== beforeIndex) throw new Error('Timeline state changed during persistence');
+          };
+          const nextTitle = { hash: oldEntry.timelineTitleHash, title };
+          const nextIndex = { ...index[key], timelineTitle: title };
+          await persist(TIMELINE_TITLES_FILE, { ...timelineTitles, [key]: nextTitle }, publicationGuard);
+          publicationGuard();
+          timelineTitles[key] = nextTitle;
+          index[key] = nextIndex;
+          saveIndexSoon();
+          broadcast({ type: 'timeline-titles', titles: [{ key, title }] });
         }
-        if (updates.length) broadcast({ type: 'timeline-titles', titles: updates });
-        saveTimelineTitles();
-        saveIndexSoon();
       } catch (e) {
         console.error('timeline title batch failed:', e.message);
         const retryDelay = e.code === 'MODEL_CALLS_PAUSED'
@@ -3971,6 +4031,7 @@ const RETITLE_PROMPT =
 // user messages to two or more. A manual/override title always blocks this.
 const autoRetitleInFlight = new Set();
 function scheduleAutoRetitle(key, delayMs = 2000) {
+  if (!appSettings.aiTitles) return;
   if (autoRetitleInFlight.has(key)) return;
   autoRetitleInFlight.add(key);
   const timer = setTimeout(async () => {
@@ -3992,6 +4053,7 @@ function scheduleAutoRetitle(key, delayMs = 2000) {
   timer.unref();
 }
 function maybeAutoRetitle(key, prev, entry) {
+  if (!appSettings.aiTitles) return;
   const saved = timelineTitles[key];
   if (saved && saved.manual) return; // a person (or an earlier retitle) owns this title
   if (entry.realUserCount < 2) return;
@@ -4003,6 +4065,7 @@ function maybeAutoRetitle(key, prev, entry) {
 
 // Retitle one conversation on demand, from its first real (non-bootstrap) user messages.
 async function retitleConversation(key, options = {}) {
+  requireAiTitles();
   if (!index[key]) throw new Error('unknown conversation');
   const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
   const users = data.messages.filter(m => m.role === 'user' && String(m.text || '').trim());
@@ -4014,6 +4077,7 @@ async function retitleConversation(key, options = {}) {
   const fullTitle = String(parsed.title || '').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!fullTitle) throw new Error('the model returned no title');
   const shortTitle = timelineTitle(String(parsed.label || parsed.title)).slice(0, 10);
+  requireAiTitles();
   return applyTitleOverride(key, fullTitle, shortTitle);
 }
 
@@ -4173,8 +4237,13 @@ async function distill(data, emit = () => {}) {
 function noteFileFor(data, title) {
   const date = (data.firstTs || '').slice(0, 10) || 'undated';
   const slug = (title || data.title || 'session').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
-  return path.join(NOTES_DIR, `${date}-${slug}.md`);
+  // Without AI titles the slug falls back to the source title, so two sessions
+  // on the same day can collide. A session-derived suffix keeps them distinct.
+  const identity = appSettings.aiTitles ? '' : '-' + crypto.createHash('sha256').update(data.key).digest('hex').slice(0, 16);
+  return path.join(NOTES_DIR, `${date}-${slug}${identity}.md`);
 }
+
+const ABSTRACT_PROMPT = 'The attached file is a distilled work note. Reply with strict JSON only: {"abstract":"2-4 useful sentences about what was done and what the note contains"}. Do not generate a title.';
 
 const TITLE_PROMPT =
   'The attached file is a distilled note of a work session. Reply with STRICT JSON only, no prose, no code fence: ' +
@@ -5459,28 +5528,27 @@ function startDistillJob(key, data, options = {}) {
   };
   job.completion = (async () => {
     try {
-      const { note } = await distill(data, emit);
-      emit({ type: 'status', text: 'Titling and saving…' });
+      const { note, guard = () => {}, hasAbstract = false } = await distill(data, emit);
+      emit({ type: 'status', text: appSettings.aiTitles ? 'Titling and saving…' : 'Writing abstract and saving…' });
       let title = null, abstract = null;
-      try {
-        const raw = await runPi(note, TITLE_PROMPT);
+      // With titles off the note still gets an abstract — it is the same call,
+      // asked for one field instead of two, so the note is not left bare.
+      if (appSettings.aiTitles || !hasAbstract) try {
+        guard();
+        const titles = appSettings.aiTitles;
+        const raw = await runPi(note, titles ? TITLE_PROMPT : ABSTRACT_PROMPT);
+        guard();
         const j = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
-        title = j.title; abstract = j.abstract;
+        title = titles && appSettings.aiTitles ? j.title : null;
+        abstract = hasAbstract ? null : j.abstract;
       } catch {}
-      const lines = note.split('\n');
-      if (title) lines[0] = `# ${title}`;
-      if (abstract) {
-        const at = lines.findIndex(l => l.startsWith('## '));
-        lines.splice(at >= 0 ? at : lines.length, 0, `**Abstract.** ${abstract}`, '');
-      }
-      const finalNote = lines.join('\n');
-      await fsp.mkdir(NOTES_DIR, { recursive: true });
-      // Re-distills update the existing file in place — no orphaned notes.
-      const file = (index[key] && index[key].notePath) || noteFileFor(data, title);
-      await fsp.writeFile(file, finalNote);
+      const saved = await require('./note-publication').publishNote({ note, title, abstract, sourceTitle: data.title,
+        aiTitles: () => appSettings.aiTitles, guard,
+        target: permittedTitle => index[key]?.notePath || noteFileFor(data, permittedTitle) });
+      const file = saved.file;
       if (index[key]) { index[key].notePath = file; index[key].notedAt = sourceMtime; saveIndexSoon(); }
       broadcast({ type: 'update', key, ...index[key], project: projectNameOf(index[key].cwd, key) });
-      emit({ type: 'saved', notePath: file, title: title || data.title });
+      emit({ type: 'saved', notePath: file, title: saved.title });
     } catch (e) {
       emit({ type: 'error', error: e.message });
     } finally {
@@ -9255,14 +9323,17 @@ const DOC_COMMIT_TITLE_PROMPT =
 // Fire-and-forget: give the fresh commit an AI title. Amend only while HEAD
 // is still that exact commit and the stage is clean — never rewrite other work.
 function scheduleDocCommitTitle(root, hash, diffText) {
+  if (!appSettings.aiTitles) return;
   setTimeout(async () => {
     try {
+      requireAiTitles();
       const raw = await runPi(clipped(diffText, 60000), DOC_COMMIT_TITLE_PROMPT);
       const title = oneLine(JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, '')).title, '').slice(0, 60);
       if (!title) return;
       const head = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
       if (head !== hash) return;
       await gitText(root, ['diff', '--cached', '--quiet']); // throws when something is staged
+      requireAiTitles();
       await gitText(root, ['commit', '--amend', '--no-verify', '-m', title]);
       broadcast({ type: 'doc-commit-titled', root, was: hash });
     } catch {}

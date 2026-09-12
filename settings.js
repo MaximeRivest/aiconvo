@@ -20,6 +20,7 @@ const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ma
 const DONE_SOUND_MODES = ['off', 'chime', 'title', 'summary', 'voice'];
 const DEFAULT_SETTINGS = {
   usePiDefault: false,
+  aiTitles: true,
   provider: 'openai-codex',
   model: 'gpt-5.6-sol',
   thinking: 'off',
@@ -169,6 +170,8 @@ function normalizeUsageBilling(raw) {
 
 function normalizeSettings(input) {
   const src = input && typeof input === 'object' ? input : {};
+  if (src.aiTitles !== undefined && typeof src.aiTitles !== 'boolean') throw new Error('aiTitles must be a boolean');
+  const aiTitles = src.aiTitles !== false;
   const thinking = THINKING_LEVELS.includes(src.thinking) ? src.thinking : DEFAULT_SETTINGS.thinking;
   const provider = String(src.provider || '').trim();
   const model = String(src.model || '').trim();
@@ -185,9 +188,10 @@ function normalizeSettings(input) {
   const doneSound = DONE_SOUND_MODES.includes(src.doneSound) ? src.doneSound : DEFAULT_SETTINGS.doneSound;
   const machines = normalizeMachines(src.machines);
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound, machines };
+    return { aiTitles, usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound, machines };
   }
   return {
+    aiTitles,
     usePiDefault: false,
     provider: provider || DEFAULT_SETTINGS.provider,
     model: model || DEFAULT_SETTINGS.model,
