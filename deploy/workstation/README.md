@@ -95,8 +95,24 @@ node scripts/verify-local-editor.js \
   /home/tryinget/ai-society/softwareco/owned/compass-c/evals/dspx-jury/subscription-review.md
 ```
 
-The full upstream suite was not run. Service-file validation emitted an unrelated
-existing `school-asr-recorder.service` warning; that unit was not modified.
+The full upstream suite was initially omitted. Operator-requested follow-up ran
+all 71 test files at `67db96e`, serially in a network-isolated, read-only-host
+sandbox with private HOME/TMPDIR: **468 passed, 1 failed, 1 skipped** (exit 1).
+The failure is `test/project-create.test.js:64`, which expects rejection of the
+configured temporary directory; `isLooseCwd()` does not recognize this custom
+home-relative TMPDIR. The NixOS-only sudo-wrapper test skipped. All four browser
+integration tests passed. No tests were changed to obtain this result.
+
+An initial full run had four additional Chromium failures because its nested
+scratch path exceeded the Unix-socket path limit. Shortening owned scratch fixed
+those harness failures; the temporary-directory classification failure remains.
+Full logs: `aiconvo-full-suite.AVmDnR.log` (final) and
+`aiconvo-full-suite.3dk1sa.log` (initial) under
+`/home/tryinget/.local/state/pi-quests/tmp/`; exact sandbox invocation:
+`/home/tryinget/.local/state/pi-quests/tmp/a.3ZXctY/invocation.sh`.
+
+Service-file validation emitted an unrelated existing
+`school-asr-recorder.service` warning; that unit was not modified.
 
 ## Rollback
 
