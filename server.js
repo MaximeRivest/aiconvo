@@ -19,6 +19,8 @@ const zlib = require('zlib');
 const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const { readSessionSnapshot, publishSession } = require('./session-snapshot.js');
 const settingsLib = require('./settings.js');
+const memoryImages = require('./memory-images');
+const { createMemoryFeature } = require('./memory-feature');
 const snippetsLib = require('./snippets.js');
 const memoryFingerprint = require('./memory-fingerprint.js');
 const { openSearchIndex, SearchIndex } = require('./searchindex.js');
@@ -247,7 +249,7 @@ try { index = JSON.parse(fs.readFileSync(INDEX_FILE, 'utf8')); } catch { index =
 // loss right after the call cannot leave an empty file under the final name.
 // Caches skip the fsync (they are rebuilt from the transcripts anyway).
 let atomicWriteSeq = 0;
-async function writeFileAtomic(p, data, { sync = false } = {}) {
+async function writeFileAtomic(p, data, { sync = false, syncDirectory = false, guard = null } = {}) {
   const tmp = p + '.tmp-' + process.pid + '-' + (++atomicWriteSeq) + '-' + Math.random().toString(36).slice(2, 8);
   try {
     if (sync) {
@@ -256,7 +258,12 @@ async function writeFileAtomic(p, data, { sync = false } = {}) {
     } else {
       await fsp.writeFile(tmp, data);
     }
-    await fsp.rename(tmp, p);
+    if (guard) { guard(); fs.renameSync(tmp, p); }
+    else await fsp.rename(tmp, p);
+    if (syncDirectory) {
+      const directory = await fsp.open(path.dirname(p), 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
+    }
   } catch (e) {
     await fsp.unlink(tmp).catch(() => {});
     throw e;
@@ -468,7 +475,7 @@ function isNoise(text) {
   );
 }
 
-async function parseFile(absPath) {
+async function parseFile(absPath, sourceText = null) {
   const messages = [];
   let meta = { sessionId: null, cwd: null, gitBranch: null, firstTs: null, lastTs: null, rootId: null, parentSession: null };
   // Branch awareness: both formats store a real entry tree (pi: id/parentId,
@@ -479,8 +486,9 @@ async function parseFile(absPath) {
   // they get off:true so the transcript can fold them.
   const parents = new Map();
   let leafId = null;
-  const stream = fs.createReadStream(absPath, { encoding: 'utf8' });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const rl = sourceText === null
+    ? readline.createInterface({ input: fs.createReadStream(absPath, { encoding: 'utf8' }), crlfDelay: Infinity })
+    : sourceText.split('\n');
   for await (const line of rl) {
     if (!line) continue;
     let d;
@@ -628,7 +636,8 @@ async function indexFile(source, relPath, stat) {
   const absPath = path.join(SOURCES[source], relPath);
   const prev = index[key];
   try {
-    const { meta, messages, entryParents } = await parseFile(absPath);
+    const snapshot = memoryFeature.enabled() ? memoryImages.sourceSnapshot(absPath) : null;
+    const { meta, messages, entryParents } = await parseFile(absPath, snapshot ? snapshot.text : null);
     let delegated = null;
     if (source === 'pi' && relPath.startsWith('--delegated--' + path.sep) && meta.sessionId) {
       try {
@@ -643,7 +652,8 @@ async function indexFile(source, relPath, stat) {
     const firstUser = titleSourceMessage(messages);
     const fullTitle = delegated ? delegated.title : firstUser ? firstUser.text.slice(0, 200).replace(/\s+/g, ' ').trim() : '(no user message)';
     const titleHash = crypto.createHash('sha256').update('v2\x00' + fullTitle).digest('hex').slice(0, 16);
-    const memoryHash = memoryFingerprint.fingerprint(messages);
+    const memoryHash = snapshot
+      ? memoryFeature.fingerprint(snapshot.revision) : memoryFingerprint.fingerprint(messages);
     const savedTimelineTitle = timelineTitles[key];
     // A manual (or user-requested AI) title override wins over anything re-derived here.
     const manualTitle = savedTimelineTitle && savedTimelineTitle.manual ? savedTimelineTitle : null;
@@ -675,6 +685,8 @@ async function indexFile(source, relPath, stat) {
           ? savedTimelineTitle.title : timelineTitle(fullTitle),
       timelineTitleHash: titleHash,
       memoryHash,
+      sourceRevision: snapshot?.revision || null,
+      memoryImages: appSettings.memoryImages,
       firstTs: meta.firstTs,
       lastTs: meta.lastTs,
       userCount: messages.filter(m => m.role === 'user').length,
@@ -692,6 +704,7 @@ async function indexFile(source, relPath, stat) {
     await writeFileAtomic(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages, entryParents }));
     saveIndexSoon();
     broadcast({ type: 'update', key, ...entry, project: projectNameOf(entry.cwd, key) });
+    if (snapshot) memoryFeature.observe(key, snapshot.revision);
     markLeafDirty(key, prev, entry, stat.mtimeMs);
     if (searchIdx) {
       try {
@@ -734,7 +747,8 @@ async function fullScan() {
       let stat;
       try { stat = await fsp.stat(path.join(baseDir, relPath)); } catch { continue; }
       const cur = index[key];
-      if (!cur || cur.v !== CACHE_VERSION || cur.mtimeMs !== stat.mtimeMs || cur.size !== stat.size) {
+      if (!cur || cur.v !== CACHE_VERSION || cur.mtimeMs !== stat.mtimeMs || cur.size !== stat.size ||
+          (memoryFeature.enabled() && (!cur.sourceRevision || cur.memoryImages !== appSettings.memoryImages))) {
         await indexFile(source, relPath, stat);
         n++;
       }
@@ -806,7 +820,8 @@ function reindexIfChanged(key) {
     try { stat = await fsp.stat(path.join(baseDir, relPath)); }
     catch (e) { if (e.code === 'ENOENT') dropIndexed(key); else console.error('reindex stat failed:', key, e.message); return; }
     const cur = index[key];
-    if (cur && cur.v === CACHE_VERSION && cur.mtimeMs === stat.mtimeMs && cur.size === stat.size) return;
+    if (cur && cur.v === CACHE_VERSION && cur.mtimeMs === stat.mtimeMs && cur.size === stat.size &&
+        (!memoryFeature.enabled() || (cur.sourceRevision && cur.memoryImages === appSettings.memoryImages))) return;
     const t0 = Date.now();
     await indexFile(source, relPath, stat);
     parseCostMs.set(key, Date.now() - t0);
@@ -829,42 +844,7 @@ function reindexIfChanged(key) {
 // vanish drop theirs. Files already inside a newly watched directory are
 // handed to onFile once (the scheduler skips unchanged bytes).
 function watchTree(baseDir, onFile) {
-  const watchers = new Map(); // absolute directory → FSWatcher
-  const remove = dir => {
-    for (const [d, w] of watchers) {
-      if (d === dir || d.startsWith(dir + path.sep)) { w.close(); watchers.delete(d); }
-    }
-  };
-  const add = dir => {
-    if (watchers.has(dir)) return;
-    let w;
-    try {
-      w = fs.watch(dir, (event, name) => {
-        if (!name) return;
-        const abs = path.join(dir, name);
-        const rel = path.relative(baseDir, abs);
-        if (isMainTranscript(rel)) { onFile(rel); return; }
-        // Only a rename (create, delete, move) can change the directory set.
-        if (event !== 'rename') return;
-        fs.stat(abs, (err, st) => {
-          if (err) { if (watchers.has(abs)) remove(abs); return; }
-          if (st.isDirectory()) add(abs);
-        });
-      });
-    } catch (e) { console.error('watch failed:', dir, e.message); return; }
-    w.on('error', () => remove(dir));
-    watchers.set(dir, w);
-    fs.readdir(dir, { withFileTypes: true }, (err, entries) => {
-      if (err) return;
-      for (const e of entries) {
-        const abs = path.join(dir, e.name);
-        if (e.isDirectory()) add(abs);
-        else if (e.isFile()) { const rel = path.relative(baseDir, abs); if (isMainTranscript(rel)) onFile(rel); }
-      }
-    });
-  };
-  add(baseDir);
-  return { close: () => remove(baseDir), count: () => watchers.size };
+  return require('./source-watcher').watchTree(baseDir, onFile, isMainTranscript);
 }
 
 // Watcher: re-index a file shortly after it changes.
@@ -872,7 +852,11 @@ const treeWatchers = new Map(); // source → watchTree handle
 function watch() {
   for (const [source, baseDir] of Object.entries(SOURCES)) {
     if (!fs.existsSync(baseDir)) continue;
-    treeWatchers.set(source, watchTree(baseDir, rel => scheduleIndex(source + ':' + rel)));
+    treeWatchers.set(source, watchTree(baseDir, (rel, observation) => {
+      const key = source + ':' + rel;
+      memoryFeature.created(key, observation);
+      scheduleIndex(key);
+    }));
     console.log('watching', baseDir);
   }
   setInterval(() => { sweepIndexDrift().catch(e => console.error('drift sweep failed:', e.message)); }, DRIFT_SWEEP_MS);
@@ -2831,8 +2815,9 @@ fs.mkdirSync(EPIC_INPUTS_DIR, { recursive: true });
 // Epics keep a stable group of conversations and a generated cross-session timeline.
 let epics = {};
 try { epics = JSON.parse(fs.readFileSync(EPICS_FILE, 'utf8')); } catch {}
-function saveEpics() {
-  fs.writeFile(EPICS_FILE, JSON.stringify(epics), () => {});
+function saveEpics({ guard, value = epics } = {}) {
+  if (guard) return writeFileAtomic(EPICS_FILE, JSON.stringify(value), { guard, sync: true, syncDirectory: true });
+  fs.writeFile(EPICS_FILE, JSON.stringify(value), () => {});
 }
 const epicPathFor = id => path.join(EPICS_DIR, id + '.md');
 const epicInputsPathFor = id => path.join(EPIC_INPUTS_DIR, id + '.json');
@@ -2885,7 +2870,7 @@ async function assignConversationProject(key, rawProject) {
   // regenerates the new project's documents (and any epics) when it lands.
   // Without a leaf there is nothing to re-weigh: the backfill builds it later.
   let reextract = false;
-  if (project !== oldProject && index[key].realUserCount && await readLeaf(key)) {
+  if (memoryFeature.legacyAllowed() && project !== oldProject && index[key].realUserCount && await readLeaf(key)) {
     try {
       startMemoryExtractJob([key], `${oneLine(index[key].title, '(untitled)').slice(0, 60)}: re-read for ${project}`, { automatic: true });
       reextract = true;
@@ -3372,6 +3357,7 @@ const PROJECT_RETITLE_PROMPT =
 
 // Retitle one project on demand, from its memory overview and recent work.
 async function retitleProject(project, manual = true) {
+  requireAiTitles();
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
   const memory = await projectMemoryInfo(project, meta).catch(() => null);
@@ -3386,8 +3372,9 @@ async function retitleProject(project, manual = true) {
     identity: o.identity || '', overview: o.summary || '',
     recentConversationTitles: recent,
   };
-  const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT);
+  const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT, null, { automatic: !manual });
   const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
+  requireAiTitles();
   return setProjectTitle(project, parsed.title, manual);
 }
 
@@ -3403,6 +3390,7 @@ function setEpicTitle(id, rawTitle) {
 }
 
 async function retitleEpic(id) {
+  requireAiTitles();
   const epic = epics[id];
   if (!epic) throw new Error('unknown epic');
   const payload = {
@@ -3414,6 +3402,7 @@ async function retitleEpic(id) {
   };
   const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT);
   const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
+  requireAiTitles();
   return setEpicTitle(id, parsed.title);
 }
 
@@ -3421,6 +3410,7 @@ async function retitleEpic(id) {
 // A manual (or earlier AI) title always blocks this.
 const projectTitleInFlight = new Set();
 function maybeAutoProjectTitle(project) {
+  if (!appSettings.aiTitles) return;
   if (projectTitles[project]) return;
   if (projectTitleInFlight.has(project)) return;
   projectTitleInFlight.add(project);
@@ -3517,6 +3507,55 @@ const CLAUDE_CODE_EXT = path.join(os.homedir(), '.pi', 'agent', 'extensions', 'c
 let appSettings = settingsLib.normalizeSettings(settingsLib.DEFAULT_SETTINGS);
 try { appSettings = settingsLib.normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch {}
 memoryModelHealth.setIdentity(currentModelLabel());
+function requireAiTitles() {
+  if (!appSettings.aiTitles) throw new Error('AI titles are disabled in settings');
+}
+const memoryFeature = createMemoryFeature({
+  stateFile: path.join(path.dirname(SETTINGS_FILE), 'memory-automation.json'),
+  settings: () => appSettings, context: modelCallContext, parseFile,
+  sourceFile: absPathForKey,
+  projectOf: key => projectNameOf(index[key]?.cwd, key),
+  claudeCodeExtension: () => fs.existsSync(CLAUDE_CODE_EXT) ? CLAUDE_CODE_EXT : '',
+  async *sources() {
+    for (const [source, base] of Object.entries(SOURCES)) for await (const rel of walk(base, base)) {
+      if (isMainTranscript(rel)) yield { key: source + ':' + rel, file: path.join(base, rel) };
+    }
+  },
+  data: async key => JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')),
+  canRun: key => !!index[key] && !activeMemoryLeafKeys.has(key) && (!distillJobs.has(key) || distillJobs.get(key).finished),
+  reserve: (key, yes) => yes ? activeMemoryLeafKeys.add(key) : activeMemoryLeafKeys.delete(key),
+  async publish(key, data, built) {
+    const guard = () => { memoryFeature.check(); built.guard(); };
+    const file = index[key].notePath || noteFileFor(data, data.title);
+    await fsp.mkdir(NOTES_DIR, { recursive: true });
+    await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true });
+    await writeFileAtomic(file, built.note, { guard, sync: true, syncDirectory: true });
+    await writeFileAtomic(leafPathFor(key), JSON.stringify(built.leaf), { guard, sync: true, syncDirectory: true });
+    guard();
+    memoryLeafCache.delete(key);
+    index[key].notePath = file; index[key].notedAt = index[key].mtimeMs;
+    saveIndexSoon();
+    broadcast({ type: 'update', key, ...index[key], project: projectNameOf(index[key].cwd, key) });
+  },
+  async documents(key) {
+    const project = projectNameOf(index[key]?.cwd, key);
+    if (projectMetaFor(project) && fs.existsSync(projectMemoryPaths(project).manifest)) await regenerateProjectDocs(project);
+    for (const rel of Object.keys(declaredAreasFor(project))) {
+      if (fs.existsSync(areaMemoryPaths(project, rel).manifest)) await regenerateAreaDocs(project, rel);
+    }
+    for (const epic of Object.values(epics)) {
+      if (epic.sessionIds?.includes(key) && fs.existsSync(epicMemoryPaths(epic.id).manifest)) await regenerateEpicDocs(epic.id);
+    }
+  },
+  usage(message) {
+    if (!message.usage) return;
+    const record = { type: 'message', id: crypto.randomUUID(), parentId: null,
+      timestamp: new Date(message.timestamp || Date.now()).toISOString(), aiconvoCategory: 'internal', message: { ...message, content: [] } };
+    try { fs.appendFileSync(INTERNAL_USAGE_FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); } catch {}
+  },
+  changed: () => broadcast({ type: 'memory-automation', state: memoryFeature.status() }),
+  error: (key, e) => console.error('automatic memory:', key, e.message),
+});
 function saveAppSettings() {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(appSettings, null, 2) + '\n', { mode: 0o600 });
@@ -3567,7 +3606,9 @@ function listPiModels(force = false) {
   }
   if (modelsPending) return modelsPending;
   modelsPending = new Promise(resolve => {
-    execFile('pi', ['--list-models'], { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const catalogArgs = memoryFeature.enabled() || Object.keys(appSettings.providerExtensions).length
+      ? [...piArgs().filter(arg => arg !== '-p'), '--list-models'] : ['--list-models'];
+    execFile('pi', catalogArgs, { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
       const parsed = err ? [] : settingsLib.parseListModels(stdout);
       if (err) {
         modelsCache = {
@@ -3688,6 +3729,7 @@ function settingsResponse() {
   const piDefault = readPiDefault();
   return {
     settings: appSettings,
+    memoryAutomation: memoryFeature.status(),
     resolved: {
       provider: appSettings.usePiDefault ? piDefault.provider : appSettings.provider,
       model: appSettings.usePiDefault ? piDefault.model : appSettings.model,
@@ -3787,6 +3829,19 @@ function splitTextToTokenBudget(text, tokenBudget) {
 }
 
 async function runPi(fileContent, prompt, onChunk, options = {}) {
+  let guardFailure;
+  const guard = () => { try { options.guard?.(); } catch (e) { guardFailure = e; throw e; } };
+  guard();
+  if (!appSettings.aiTitles && [TITLE_PROMPT, RETITLE_PROMPT, PROJECT_RETITLE_PROMPT, TIMELINE_TITLE_PROMPT, DOC_COMMIT_TITLE_PROMPT].includes(prompt)) requireAiTitles();
+  const route = memoryFeature.routeCall({ text: fileContent, images: [] }, prompt, { ...options, onChunk });
+  const auto = route.automatic, callEpoch = route.epoch;
+  const memoryCall = route.modelOnly || !!modelCallContext.getStore()?.ticket || options.memory === true;
+  if (memoryCall && auto && !memoryFeature.automaticAllowed()) throw new Error('Automatic memory calls are disabled by memory policy');
+  if (route.modelOnly) {
+    const result = await route.invoke();
+    guard();
+    return result;
+  }
   const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
   fs.writeFileSync(tmp, fileContent, { mode: 0o600 });
   const inherited = modelCallContext.getStore();
@@ -3817,6 +3872,8 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
         },
       },
     );
+    guard();
+    if (memoryCall && auto && (memoryFeature.epoch() !== callEpoch || !memoryFeature.automaticAllowed())) throw new Error('Automatic memory consent changed during the model call');
     memoryModelHealth.success(permit);
 
     // JSON mode gives the final provider usage. These no-session calls were
@@ -3838,6 +3895,12 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
     if (!finalMessage) return result.stdout.trim();
     return textOf(finalMessage.content).trim();
   } catch (error) {
+    if (error === guardFailure) {
+      // The transport completed successfully. Release a possible health probe,
+      // but never classify source invalidation as a provider failure/retry signal.
+      if (permit) memoryModelHealth.success(permit);
+      throw error;
+    }
     if (permit) {
       error.modelCallFailure = true;
       memoryModelHealth.failure(permit, error);
@@ -3863,6 +3926,7 @@ let timelineTitleRunning = false;
 let timelineTitleAgain = false;
 function scheduleTimelineTitles(delayMs = 5000) {
   clearTimeout(scheduleTimelineTitles.t);
+  if (!appSettings.aiTitles) return;
   scheduleTimelineTitles.t = setTimeout(refreshTimelineTitles, Math.max(1000, delayMs));
 }
 
@@ -3879,12 +3943,18 @@ function mapTimelineLimit(items, limit, fn) {
 }
 
 async function refreshTimelineTitles() {
+  if (!appSettings.aiTitles) return;
   if (timelineTitleRunning) { timelineTitleAgain = true; return; }
+  const authorize = () => { requireAiTitles(); };
+  const persist = async (file, data, guard) => {
+    await writeFileAtomic(file, JSON.stringify(data), { guard });
+    guard();
+  };
   const pending = Object.entries(index).filter(([key, e]) => {
     const saved = timelineTitles[key];
     if (saved && saved.manual) return false; // never overwrite a user-owned title
     return !saved || saved.hash !== e.timelineTitleHash;
-  });
+  }).map(([key, e]) => [key, { title: e.title, timelineTitleHash: e.timelineTitleHash }]);
   if (!pending.length) return;
   timelineTitleRunning = true;
   try {
@@ -3893,30 +3963,51 @@ async function refreshTimelineTitles() {
     await mapTimelineLimit(batches, 3, async batch => {
       const input = batch.map(([, e], id) => ({ id, request: e.title }));
       try {
+        authorize();
         const raw = await runPi(JSON.stringify(input), TIMELINE_TITLE_PROMPT, null, { automatic: true });
+        authorize();
         const result = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
         if (!Array.isArray(result)) return;
-        const updates = [];
         for (const item of result) {
+          authorize();
           const pair = batch[Number(item.id)];
           if (!pair) continue;
           const [key, oldEntry] = pair;
-          if (!index[key] || index[key].timelineTitleHash !== oldEntry.timelineTitleHash) continue;
+          const current = () => index[key] && !timelineTitles[key]?.manual &&
+            index[key].timelineTitleHash === oldEntry.timelineTitleHash && index[key].title === oldEntry.title;
+          if (!current()) continue;
+          const saved = timelineTitles[key];
+          const guard = () => {
+            authorize();
+            if (!current() || timelineTitles[key] !== saved) throw new Error('Timeline source or title changed during publication');
+          };
           const title = timelineTitle(item.title).slice(0, 10);
-          timelineTitles[key] = { hash: oldEntry.timelineTitleHash, title };
-          index[key].timelineTitle = title;
-          try {
-            const file = cachePathFor(key);
-            const data = JSON.parse(await fsp.readFile(file, 'utf8'));
+          const file = cachePathFor(key);
+          let data;
+          try { data = JSON.parse(await fsp.readFile(file, 'utf8')); } catch { /* Missing/rebuilt cache is optional. */ }
+          guard(); // Authorization failures are never caught as ordinary cache errors.
+          if (data) {
             data.timelineTitle = title;
             data.timelineTitleHash = oldEntry.timelineTitleHash;
-            await fsp.writeFile(file, JSON.stringify(data));
-          } catch {}
-          updates.push({ key, title });
+            await persist(file, data, guard);
+          }
+          // These are separate atomic files, not a transaction. A later guard
+          // can retain earlier replacements, but cannot publish another file
+          // or the in-memory title after revocation. Do not enqueue unguarded saves.
+          const beforeTitles = JSON.stringify(timelineTitles), beforeIndex = JSON.stringify(index);
+          const publicationGuard = () => {
+            guard();
+            if (JSON.stringify(timelineTitles) !== beforeTitles || JSON.stringify(index) !== beforeIndex) throw new Error('Timeline state changed during persistence');
+          };
+          const nextTitle = { hash: oldEntry.timelineTitleHash, title };
+          const nextIndex = { ...index[key], timelineTitle: title };
+          await persist(TIMELINE_TITLES_FILE, { ...timelineTitles, [key]: nextTitle }, publicationGuard);
+          publicationGuard();
+          timelineTitles[key] = nextTitle;
+          index[key] = nextIndex;
+          saveIndexSoon();
+          broadcast({ type: 'timeline-titles', titles: [{ key, title }] });
         }
-        if (updates.length) broadcast({ type: 'timeline-titles', titles: updates });
-        saveTimelineTitles();
-        saveIndexSoon();
       } catch (e) {
         console.error('timeline title batch failed:', e.message);
         const retryDelay = e.code === 'MODEL_CALLS_PAUSED'
@@ -3971,6 +4062,7 @@ const RETITLE_PROMPT =
 // user messages to two or more. A manual/override title always blocks this.
 const autoRetitleInFlight = new Set();
 function scheduleAutoRetitle(key, delayMs = 2000) {
+  if (!appSettings.aiTitles) return;
   if (autoRetitleInFlight.has(key)) return;
   autoRetitleInFlight.add(key);
   const timer = setTimeout(async () => {
@@ -3992,6 +4084,7 @@ function scheduleAutoRetitle(key, delayMs = 2000) {
   timer.unref();
 }
 function maybeAutoRetitle(key, prev, entry) {
+  if (!appSettings.aiTitles) return;
   const saved = timelineTitles[key];
   if (saved && saved.manual) return; // a person (or an earlier retitle) owns this title
   if (entry.realUserCount < 2) return;
@@ -4003,6 +4096,7 @@ function maybeAutoRetitle(key, prev, entry) {
 
 // Retitle one conversation on demand, from its first real (non-bootstrap) user messages.
 async function retitleConversation(key, options = {}) {
+  requireAiTitles();
   if (!index[key]) throw new Error('unknown conversation');
   const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
   const users = data.messages.filter(m => m.role === 'user' && String(m.text || '').trim());
@@ -4014,6 +4108,7 @@ async function retitleConversation(key, options = {}) {
   const fullTitle = String(parsed.title || '').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!fullTitle) throw new Error('the model returned no title');
   const shortTitle = timelineTitle(String(parsed.label || parsed.title)).slice(0, 10);
+  requireAiTitles();
   return applyTitleOverride(key, fullTitle, shortTitle);
 }
 
@@ -4094,6 +4189,10 @@ function renderNode(n, depth, parts) {
 }
 
 async function distill(data, emit = () => {}) {
+  if (appSettings.memoryImages) {
+    const built = await memoryFeature.build(data);
+    return { note: built.note, outline: '', guard: built.guard, hasAbstract: true };
+  }
   emit({ type: 'status', text: 'Mapping the problem tree…' });
   const full = numberedTranscript(data.messages);
   let prior = null;
@@ -4173,8 +4272,12 @@ async function distill(data, emit = () => {}) {
 function noteFileFor(data, title) {
   const date = (data.firstTs || '').slice(0, 10) || 'undated';
   const slug = (title || data.title || 'session').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
-  return path.join(NOTES_DIR, `${date}-${slug}.md`);
+  const identity = (!appSettings.aiTitles || memoryFeature.enabled())
+    ? '-' + crypto.createHash('sha256').update(data.key).digest('hex').slice(0, 16) : '';
+  return path.join(NOTES_DIR, `${date}-${slug}${identity}.md`);
 }
+
+const ABSTRACT_PROMPT = 'The attached file is a distilled work note. Reply with strict JSON only: {"abstract":"2-4 useful sentences about what was done and what the note contains"}. Do not generate a title.';
 
 const TITLE_PROMPT =
   'The attached file is a distilled note of a work session. Reply with STRICT JSON only, no prose, no code fence: ' +
@@ -4323,7 +4426,14 @@ async function existingEvidenceFor(data, allowStale = false) {
   return null;
 }
 
-async function epicEvidenceFor(data, emit = () => {}, forceCard = false) {
+async function epicEvidenceFor(data, emit = () => {}, forceCard = false, guard = () => {}) {
+  guard();
+  if (appSettings.memoryImages) {
+    const built = await memoryFeature.build(data, guard);
+    guard(); built.guard();
+    return { text: built.note, kind: 'card', source: 'multimodal-evidence', hash: built.memoryHash,
+      sourceRevision: built.sourceRevision, guard: built.guard, outdated: false, created: true };
+  }
   if (!forceCard) {
     const existing = await existingEvidenceFor(data);
     if (existing) return existing;
@@ -4550,6 +4660,10 @@ async function readLeaf(key) {
 
 function leafStateFor(entry, leaf) {
   if (!leaf) return 'missing';
+  if (appSettings.memoryImages || leaf.sourceRevision) {
+    if (leaf.memoryImages !== appSettings.memoryImages || !entry?.sourceRevision || leaf.sourceRevision !== entry.sourceRevision ||
+        leaf.memoryHash !== memoryFeature.fingerprint(entry.sourceRevision)) return 'stale';
+  }
   if (leaf.partial) return 'seeded'; // intent lane only (migrated from an old build)
   if ((leaf.v || 1) < LEAF_VERSION) return 'stale'; // older extraction quality — re-extract on the next backfill
   return leaf.memoryHash && entry && leaf.memoryHash === entry.memoryHash ? 'fresh' : 'stale';
@@ -4572,6 +4686,14 @@ async function projectPrimerFor(project) {
 // verbatim intent quotes are attached here from the transcript — the model
 // only returns ids.
 async function extractLeaf(key) {
+  if (appSettings.memoryImages) {
+    const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+    const built = await memoryFeature.build(data);
+    await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true });
+    await writeFileAtomic(leafPathFor(key), JSON.stringify(built.leaf), { guard: built.guard });
+    memoryLeafCache.delete(key);
+    return built.leaf;
+  }
   const entry = index[key];
   if (!entry) throw new Error('unknown conversation: ' + key);
   const memoryHash = entry.memoryHash || null; // captured before the call: growth during the job leaves the leaf correctly stale
@@ -4667,7 +4789,7 @@ async function extractLeaf(key) {
     abstract, intent, environment, problems,
   };
   await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true });
-  await writeFileAtomic(leafPathFor(key), JSON.stringify(leaf));
+  await writeFileAtomic(leafPathFor(key), JSON.stringify(leaf), { guard: memoryFeature.check });
   memoryLeafCache.delete(key);
   return leaf;
 }
@@ -4805,7 +4927,12 @@ async function weighIntentCandidates(project, overview, candidates, emit, step, 
   const tiers = new Map();
   if (!candidates.length) return tiers;
   const header = `PROJECT: ${project}\nCURRENT OVERVIEW: ${clipped(JSON.stringify(overview), 2000)}\n\n`;
-  const blockOf = q => JSON.stringify({
+  const blockOf = q => JSON.stringify(appSettings.memoryImages ? {
+    id: q.id, date: String(q.ts || '?').slice(0, 10), kind: q.kind, force: q.force || null,
+    situation: q.situation || null, reason: q.reason || null, quote: clipped(q.user, 900),
+    offBranch: !!q.offBranch, entry: q.entry, assistantBeforeEntry: q.assistantBeforeEntry,
+    assistantBefore: clipped(q.assistantBefore, 900), images: q.images,
+  } : {
     id: q.id, date: String(q.ts || '?').slice(0, 10), kind: q.kind, force: q.force || null,
     situation: q.situation || null, reason: q.reason || null, quote: clipped(q.user, 900),
   });
@@ -4826,7 +4953,9 @@ async function weighIntentCandidates(project, overview, candidates, emit, step, 
   // rows it corrects. This keeps the output tiny regardless of project size
   // (a full rewrite of 800+ rows can exceed the provider output cap).
   const deltaPass = async rows => {
-    const compact = rows.map(t => JSON.stringify({ id: t.id, tier: t.tier, note: oneLine(t.note, '') }));
+    const byEvidence = new Map(candidates.map(q => [q.id, q]));
+    const compact = rows.map(t => JSON.stringify({ id: t.id, tier: t.tier, note: oneLine(t.note, ''),
+      evidence: byEvidence.has(t.id) ? JSON.parse(blockOf(byEvidence.get(t.id))) : null }));
     const merged = await runPiJson(header + compact.join('\n'), PYRAMID_WEIGH_MERGE_PROMPT);
     const changes = Array.isArray(merged.changes) ? merged.changes : Array.isArray(merged.tiers) ? merged.tiers : [];
     const byId = new Map(rows.map(t => [String(t.id), t]));
@@ -4900,6 +5029,9 @@ function renderPyramidIntentDoc(project, intent, quotes, tiers, builtAt, sourceH
       parts.push(`#### ${String(item.ts || '?').slice(0, 10)} — ${oneLine(item.title, '(untitled)')}`, '',
         `- **Kind:** ${item.kind} · **Force:** ${item.force || '?'}${t.note ? ` · **Weighing:** ${t.note}` : ''}`);
       if (item.situation) parts.push(`- **Situation:** ${item.situation}`);
+      if (appSettings.memoryImages) {
+        parts.push(`- **Branch:** ${item.offBranch ? 'off-branch alternative (not the active path)' : 'active path'} · **Entry:** ${item.entry || '?'} · **Preceding assistant:** ${item.assistantBeforeEntry || '(none)'}`);
+      }
       parts.push(`- **Session:** \`${item.key}\` · message #${item.messageIndex}`, '',
         quoteIntent(item.user), '');
     }
@@ -4914,6 +5046,7 @@ function pyramidIntentBlock(item, tierInfo) {
     `Date: ${item.ts || '?'}`,
     `Tier: ${tierInfo.tier}${tierInfo.note ? ' — ' + tierInfo.note : ''}`,
     `Kind: ${item.kind} · force: ${item.force || '?'} · situation: ${item.situation || '?'}`,
+    ...(appSettings.memoryImages ? [`Branch: ${item.offBranch ? 'off-branch alternative; not active-path intent' : 'active path'} · entry: ${item.entry || '?'} · preceding assistant entry: ${item.assistantBeforeEntry || '(none)'}`] : []),
     '', 'USER:', clipped(item.user, historical ? 1500 : 12000),
     ...(historical ? [] : ['', 'ASSISTANT BEFORE:', clipped(item.assistantBefore, 4000) || '(none)']),
   ].join('\n');
@@ -5009,18 +5142,21 @@ async function regenerateDocsCore({ label, entries, paths, existingEpics, discov
     `Abstract: ${r.leaf.abstract || '(none)'}`,
     (r.leaf.problems || []).some(p => p.state === 'open') ? `Open problems: ${(r.leaf.problems || []).filter(p => p.state === 'open').map(p => p.fact).join('; ')}` : '',
   ].filter(Boolean).join('\n'));
-  const intentSelected = rows.flatMap(r => (r.leaf.intent || []).map((q, i) => ({
-    id: r.key + ':' + q.messageIndex, key: r.key, messageIndex: q.messageIndex, ts: q.ts || r.leaf.span?.lastTs || null,
-    title: r.leaf.title, kind: q.kind || 'outcome', confidence: q.confidence || 0, reason: q.reason || '',
-    user: q.user || '', assistantBefore: q.assistantBefore || '',
-  }))).sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+  const intentSelected = appSettings.memoryImages
+    ? rows.flatMap(r => (r.leaf.intent || []).map(q => require('./memory-intent-evidence').intentEvidence(r.key, r.leaf, q)))
+      .sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')))
+    : rows.flatMap(r => (r.leaf.intent || []).map(q => ({
+      id: r.key + ':' + q.messageIndex, key: r.key, messageIndex: q.messageIndex, ts: q.ts || r.leaf.span?.lastTs || null,
+      title: r.leaf.title, kind: q.kind || 'outcome', confidence: q.confidence || 0, reason: q.reason || '',
+      user: q.user || '', assistantBefore: q.assistantBefore || '', force: q.force || '',
+    }))).sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
   const envFacts = rows.flatMap(r => (r.leaf.environment || []).map(f => `[${dated(r.leaf.span?.lastTs)}] ${f.type}: ${f.fact}`));
   const problemFacts = rows.flatMap(r => (r.leaf.problems || []).map(f => `[${dated(r.leaf.span?.lastTs)}] ${f.state}: ${f.fact} (session ${r.key})`));
   const newestAbstracts = rows.slice(-12).map(r => `[${dated(r.leaf.span?.lastTs)}] ${r.leaf.title}: ${r.leaf.abstract || '(none)'}`);
 
   const laneHashes = {
     overview: laneHashOf(abstractBlocks),
-    intent: laneHashOf(intentSelected.map(q => [q.id, q.force || '', q.kind])),
+    intent: appSettings.memoryImages ? laneHashOf(intentSelected) : laneHashOf(intentSelected.map(q => [q.id, q.force || '', q.kind])),
     environment: laneHashOf(envFacts), status: laneHashOf(problemFacts.concat(newestAbstracts)),
   };
   const skip = lane => prevHashes[lane] === laneHashes[lane] && fs.existsSync(paths[lane === 'status' ? 'status' : lane]);
@@ -5076,16 +5212,25 @@ async function regenerateDocsCore({ label, entries, paths, existingEpics, discov
   ]);
 
   emit('Writing project memory documents…', 5, 6);
+  const guard = () => {
+    memoryFeature.check();
+    if ((appSettings.memoryImages || modelCallContext.getStore()?.ticket) && entries.some(({ key, entry }) => index[key] !== entry)) {
+      throw new Error('Document sources changed; result not published');
+    }
+  };
+  const durable = !!modelCallContext.getStore()?.ticket;
+  const write = (file, contents) => writeFileAtomic(file, contents, { guard, sync: durable, syncDirectory: durable });
+  guard();
   const builtAt = Date.now();
   const sourceHash = projectSourceHash({ entries });
   const candidates = discoverCandidates ? cleanEpicCandidates(profile, { entries, epics: existingEpics }) : [];
   await fsp.mkdir(paths.dir, { recursive: true });
   const writes = [];
-  if (!skip('overview')) writes.push(writeFileAtomic(paths.overview, renderPyramidOverviewDoc(project, profile, builtAt, sourceHash)));
-  if (intent) writes.push(writeFileAtomic(paths.intent, renderPyramidIntentDoc(project, intent, weighedQuotes, tiers, builtAt, sourceHash)));
-  if (environment) writes.push(writeFileAtomic(paths.environment, renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash)));
-  if (status) writes.push(writeFileAtomic(paths.status, renderProjectStatusDoc(project, status, builtAt, sourceHash)));
-  writes.push(writeFileAtomic(inputsPath, JSON.stringify({
+  if (!skip('overview')) writes.push(write(paths.overview, renderPyramidOverviewDoc(project, profile, builtAt, sourceHash)));
+  if (intent) writes.push(write(paths.intent, renderPyramidIntentDoc(project, intent, weighedQuotes, tiers, builtAt, sourceHash)));
+  if (environment) writes.push(write(paths.environment, renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash)));
+  if (status) writes.push(write(paths.status, renderProjectStatusDoc(project, status, builtAt, sourceHash)));
+  writes.push(write(inputsPath, JSON.stringify({
     project, builtAt, sourceHash, laneHashes, leaves: rows.map(r => ({ key: r.key, state: leafStateFor(r.entry, r.leaf) })),
     intentQuotes: intentSelected.length, weighedQuotes: weighedQuotes.length,
     tiers: [...tiers.entries()].map(([id, t]) => ({ id, ...t })),
@@ -5101,7 +5246,7 @@ async function regenerateDocsCore({ label, entries, paths, existingEpics, discov
     paths: { overview: paths.overview, intent: paths.intent, environment: paths.environment, status: paths.status, inputs: inputsPath },
     pyramid: { v: 2, builtAt, laneHashes, leafCount: rows.length, seededLeaves: rows.filter(r => r.leaf.partial).length },
   };
-  await writeFileAtomic(paths.manifest, JSON.stringify(manifest));
+  await write(paths.manifest, JSON.stringify(manifest));
   emit('Project memory saved.', 6, 6);
   return manifest;
 }
@@ -5180,7 +5325,14 @@ function projectMemoryIndex() {
 
 const oneLine = (s, fallback) => String(s || fallback).replace(/\s+/g, ' ').trim();
 
-async function buildEpicStory(evidenceInputs, focus, emit = () => {}) {
+async function buildEpicStory(evidenceInputs, focus, emit = () => {}, guard = () => {}) {
+  const call = async (input, prompt) => {
+    guard();
+    const raw = await runPi(input, prompt, null, { memory: true, guard });
+    guard();
+    return raw;
+  };
+  guard();
   const blocks = evidenceInputs.map(e => [
     `=== CONVERSATION ${e.key} ===`,
     `Date: ${e.firstTs || '?'} -> ${e.lastTs || '?'}`,
@@ -5191,7 +5343,7 @@ async function buildEpicStory(evidenceInputs, focus, emit = () => {}) {
   ].join('\n'));
   const budget = piTargetTokens() - 12000;
   if (estimateInputTokens(blocks.join('\n\n')) <= budget) {
-    return runPi(blocks.join('\n\n'), EPIC_PROMPT(focus));
+    return call(blocks.join('\n\n'), EPIC_PROMPT(focus));
   }
   // Very large epics get chronological chapter drafts first, then one final merge.
   const groups = [];
@@ -5203,11 +5355,12 @@ async function buildEpicStory(evidenceInputs, focus, emit = () => {}) {
   }
   if (group.length) groups.push(group);
   emit({ text: `Writing ${groups.length} epic timeline sections…` });
-  const drafts = await mapLimit(groups, 3, (items, i) => runPi(items.join('\n\n'),
+  const drafts = await mapLimit(groups, 3, (items, i) => call(items.join('\n\n'),
     EPIC_PROMPT(focus) + ` This is chronological evidence group ${i + 1} of ${groups.length}.`));
   const merged = drafts.map((text, i) => `=== TIMELINE DRAFT ${i + 1}/${drafts.length} ===\n${text}`).join('\n\n');
   if (estimateInputTokens(merged) > budget) throw new Error('Epic timeline drafts remain too large. Split this epic into smaller epics.');
-  return runPi(merged,
+  guard();
+  return call(merged,
     EPIC_PROMPT(focus) + ' The attached file contains chronological partial timeline drafts. Merge them into one timeline and preserve exact session ids.');
 }
 
@@ -5275,6 +5428,10 @@ async function buildEpic(ids, epicId = null, focus = '', assignedId = null, emit
   sessions.sort((a, b) => (a.firstTs || '').localeCompare(b.firstTs || ''));
   if (sessions.length < 2) throw new Error('could not read enough conversations');
   let evidenceDone = 0;
+  // Guards are live collaborators, not serializable provenance. Each completed
+  // input also fences the remaining builders' subcalls and correction retries.
+  const evidenceGuards = [];
+  const guard = () => { for (const check of evidenceGuards) check(); };
   emit({ text: 'Preparing conversation evidence…', done: 0, total: sessions.length + 1 });
   const evidenceInputs = await mapLimit(sessions, 3, async s => {
     const evidence = await epicEvidenceFor(s, detail => {
@@ -5285,17 +5442,22 @@ async function buildEpic(ids, epicId = null, focus = '', assignedId = null, emit
       } else if (detail.phase === 'retry-split') {
         emit({ text: `Model requested smaller input; retrying ${detail.sections} sections · evidence ${evidenceDone}/${sessions.length}…`, done: evidenceDone, total: sessions.length + 1 });
       }
-    });
+    }, false, guard);
+    if (evidence.guard) evidenceGuards.push(evidence.guard);
+    guard();
     emit({ text: `Preparing evidence ${++evidenceDone}/${sessions.length}…`, done: evidenceDone, total: sessions.length + 1 });
     return {
       key: s.key, title: s.title, cwd: s.cwd, firstTs: s.firstTs, lastTs: s.lastTs,
       source: evidence.source, kind: evidence.kind, outdated: evidence.outdated,
       notePath: evidence.notePath || null, hash: evidence.hash || null, text: evidence.text,
+      ...(evidence.sourceRevision ? { sourceRevision: evidence.sourceRevision } : {}),
     };
   });
+  guard();
   emit({ text: 'Writing the cross-session timeline…', done: sessions.length, total: sessions.length + 1 });
   const raw = await buildEpicStory(evidenceInputs, focus || (old && old.title) || '', progress =>
-    emit({ ...progress, done: sessions.length, total: sessions.length + 1 }));
+    emit({ ...progress, done: sessions.length, total: sessions.length + 1 }), guard);
+  guard();
   const story = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
   if (!Array.isArray(story.chapters) || !story.chapters.length) throw new Error('the epic narrative had no timeline');
   const id = (old && old.id) || assignedId || crypto.randomUUID();
@@ -5312,10 +5474,24 @@ async function buildEpic(ids, epicId = null, focus = '', assignedId = null, emit
     notePath: epicPathFor(id),
   };
   const text = renderEpicMarkdown(epic, story, sessions);
-  await fsp.writeFile(epic.notePath, text);
-  await fsp.writeFile(epicInputsPathFor(id), JSON.stringify({ epicId: id, builtAt: now, inputs: evidenceInputs }));
+  // Separate durable atomic files, NOT a transaction: a later failure retains
+  // earlier files for explicit recovery, but never labels the build complete.
+  const publish = async (file, content) => {
+    guard();
+    await writeFileAtomic(file, content, { guard, sync: true, syncDirectory: true });
+    guard();
+  };
+  await publish(epic.notePath, text);
+  await publish(epicInputsPathFor(id), JSON.stringify({ epicId: id, builtAt: now, inputs: evidenceInputs }));
+  guard();
+  const beforeEpics = JSON.stringify(epics);
+  const publicationGuard = () => {
+    guard();
+    if (JSON.stringify(epics) !== beforeEpics) throw new Error('Epics changed during publication');
+  };
+  await saveEpics({ guard: publicationGuard, value: { ...epics, [id]: epic } });
+  publicationGuard();
   epics[id] = epic;
-  saveEpics();
   emit({ text: 'Epic saved.', done: sessions.length + 1, total: sessions.length + 1 });
   return { ...epic, text, sessions: sessions.map(s => ({ key: s.key, title: s.title, firstTs: s.firstTs, cwd: s.cwd })) };
 }
@@ -5459,28 +5635,25 @@ function startDistillJob(key, data, options = {}) {
   };
   job.completion = (async () => {
     try {
-      const { note } = await distill(data, emit);
-      emit({ type: 'status', text: 'Titling and saving…' });
+      const { note, guard = () => {}, hasAbstract = false } = await distill(data, emit);
+      emit({ type: 'status', text: appSettings.aiTitles ? 'Titling and saving…' : 'Writing abstract and saving…' });
       let title = null, abstract = null;
-      try {
-        const raw = await runPi(note, TITLE_PROMPT);
+      if (appSettings.aiTitles || !hasAbstract) try {
+        guard();
+        const titles = appSettings.aiTitles;
+        const raw = await runPi(note, titles ? TITLE_PROMPT : ABSTRACT_PROMPT);
+        guard();
         const j = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
-        title = j.title; abstract = j.abstract;
+        title = titles && appSettings.aiTitles ? j.title : null;
+        abstract = hasAbstract ? null : j.abstract;
       } catch {}
-      const lines = note.split('\n');
-      if (title) lines[0] = `# ${title}`;
-      if (abstract) {
-        const at = lines.findIndex(l => l.startsWith('## '));
-        lines.splice(at >= 0 ? at : lines.length, 0, `**Abstract.** ${abstract}`, '');
-      }
-      const finalNote = lines.join('\n');
-      await fsp.mkdir(NOTES_DIR, { recursive: true });
-      // Re-distills update the existing file in place — no orphaned notes.
-      const file = (index[key] && index[key].notePath) || noteFileFor(data, title);
-      await fsp.writeFile(file, finalNote);
+      const saved = await require('./note-publication').publishNote({ note, title, abstract, sourceTitle: data.title,
+        aiTitles: () => appSettings.aiTitles, guard,
+        target: permittedTitle => index[key]?.notePath || noteFileFor(data, permittedTitle) });
+      const file = saved.file;
       if (index[key]) { index[key].notePath = file; index[key].notedAt = sourceMtime; saveIndexSoon(); }
       broadcast({ type: 'update', key, ...index[key], project: projectNameOf(index[key].cwd, key) });
-      emit({ type: 'saved', notePath: file, title: title || data.title });
+      emit({ type: 'saved', notePath: file, title: saved.title });
     } catch (e) {
       emit({ type: 'error', error: e.message });
     } finally {
@@ -5500,6 +5673,7 @@ function startDistillJob(key, data, options = {}) {
 // and a manual action from writing the same leaf at the same time.
 function startMemoryExtractJob(ids, label = null, options = {}) {
   const automatic = !!options.automatic;
+  if (automatic && !memoryFeature.legacyAllowed()) throw new Error('Legacy automatic extraction is disabled');
   const keys = [...new Set(ids)].filter(k => index[k] && !activeMemoryLeafKeys.has(k) && memoryModelHealth.canRunLeaf(k, { automatic }));
   if (!keys.length) throw new Error('no memory leaves are ready to extract');
   const id = crypto.randomUUID();
@@ -5520,7 +5694,7 @@ function startMemoryExtractJob(ids, label = null, options = {}) {
     const savedKeys = [];
     await mapLimit(keys, 2, async key => {
       try {
-        await modelCallContext.run({ automatic }, () => extractLeaf(key));
+        await modelCallContext.run({ automatic, epoch: memoryFeature.epoch() }, () => extractLeaf(key));
         memoryModelHealth.leafSuccess(key);
         savedKeys.push(key);
         const entry = index[key];
@@ -5578,6 +5752,7 @@ function startEpicDocsJob(epicId, options = {}) {
 }
 
 function startDocsJobCore(mapKey, title, project, epicId, run, options = {}) {
+  if (options.automatic && !memoryFeature.automaticAllowed()) throw new Error('Automatic document work is disabled');
   const running = memoryDocsJobs.get(mapKey);
   if (running && !running.finished) return running;
   const job = {
@@ -5587,7 +5762,7 @@ function startDocsJobCore(mapKey, title, project, epicId, run, options = {}) {
   };
   memoryDocsJobs.set(mapKey, job);
   jobChanged(job);
-  job.completion = modelCallContext.run({ automatic: !!options.automatic }, async () => {
+  job.completion = modelCallContext.run({ automatic: !!options.automatic, memory: true, epoch: memoryFeature.epoch() }, async () => {
     try {
       const manifest = await run((text, done, total) => {
         job.statusText = text; job.done = done; job.total = total; jobChanged(job);
@@ -5697,13 +5872,18 @@ const LEAF_SWEEP_MS = 2 * 60 * 1000;
 const leafDirty = new Map(); // key -> last content change (ms)
 
 function markLeafDirty(key, prevEntry, entry, mtimeMs) {
+  if (!memoryFeature.legacyAllowed()) return;
   if (!entry || !entry.realUserCount) return;
+  if (prevEntry && entry.sourceRevision && prevEntry.sourceRevision === entry.sourceRevision) return;
+  if (prevEntry && !!prevEntry.memoryImages !== !!entry.memoryImages && prevEntry.mtimeMs === entry.mtimeMs && prevEntry.size === entry.size) return;
   if (prevEntry && prevEntry.memoryHash === entry.memoryHash) return; // re-index without content change
   if (!prevEntry && Date.now() - (mtimeMs || 0) > 24 * 60 * 60 * 1000) return; // old file first seen (cache bump / backfill territory)
   leafDirty.set(key, Date.now());
 }
 
 async function sweepSettledLeaves() {
+  if (appSettings.automaticMemory === 'changes-after-enable') return memoryFeature.sweep(LEAF_SETTLE_MS);
+  if (!memoryFeature.legacyAllowed()) return;
   // Keep dirty work queued while the circuit is open. After the cooldown, one
   // call becomes the half-open probe; the health gate blocks all other calls.
   if (memoryModelHealth.isAutomaticPaused()) return;
@@ -5743,6 +5923,7 @@ function modelAutomaticRetryDelay() {
   return Math.max(LEAF_SWEEP_MS, memoryModelHealth.automaticWaitMs() + 1000);
 }
 function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
+  if (!memoryFeature.legacyAllowed()) return;
   if (!project || project === '?') return;
   clearTimeout(docsRegenTimers.get(project));
   docsRegenTimers.set(project, setTimeout(() => {
@@ -5785,6 +5966,7 @@ function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
 // current on the same settle -> leaf -> debounced-docs path. Epics never
 // create themselves; only already-built epic memory refreshes.
 function scheduleEpicRegenForKeys(keys, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
+  if (!memoryFeature.legacyAllowed()) return;
   const touched = new Set(keys);
   for (const epic of Object.values(epics)) {
     if (!epic || !epic.id) continue;
@@ -9255,14 +9437,17 @@ const DOC_COMMIT_TITLE_PROMPT =
 // Fire-and-forget: give the fresh commit an AI title. Amend only while HEAD
 // is still that exact commit and the stage is clean — never rewrite other work.
 function scheduleDocCommitTitle(root, hash, diffText) {
+  if (!appSettings.aiTitles) return;
   setTimeout(async () => {
     try {
+      requireAiTitles();
       const raw = await runPi(clipped(diffText, 60000), DOC_COMMIT_TITLE_PROMPT);
       const title = oneLine(JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, '')).title, '').slice(0, 60);
       if (!title) return;
       const head = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
       if (head !== hash) return;
       await gitText(root, ['diff', '--cached', '--quiet']); // throws when something is staged
+      requireAiTitles();
       await gitText(root, ['commit', '--amend', '--no-verify', '-m', title]);
       broadcast({ type: 'doc-commit-titled', root, was: hash });
     } catch {}
@@ -11567,6 +11752,7 @@ const server = http.createServer(async (req, res) => {
     const staticFile = {
       '/sw.js': { file: 'sw.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/context-panel.js': { file: 'context-panel.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/memory-settings.js': { file: 'memory-settings.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/file-completion-ui.js': { file: 'file-completion-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
@@ -12598,6 +12784,10 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { usageBilling: appSettings.usageBilling });
     } else if (u.pathname === '/api/settings' && req.method === 'GET') {
       json(res, 200, settingsResponse());
+    } else if (u.pathname === '/api/memory/automation/discard' && req.method === 'POST') {
+      let body = ''; for await (const chunk of req) body += chunk;
+      memoryFeature.discard(JSON.parse(body || '{}').key);
+      json(res, 200, settingsResponse());
     } else if (u.pathname === '/api/machines/connect' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -12619,12 +12809,23 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}');
       const piDefault = readPiDefault();
       const listed = (modelsCache.models.length ? modelsCache : await listPiModels()).models;
-      if (!parsed.usePiDefault && parsed.provider && parsed.model && listed.length && !settingsLib.findModel(listed, parsed.provider, parsed.model)) {
-        return json(res, 400, { error: 'unknown model: ' + parsed.provider + '/' + parsed.model });
-      }
       const prevSemTarget = (appSettings.semanticUrl || '') + '|' + semNs();
-      appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
+      const nextSettings = settingsLib.applyResolvedContext({ ...appSettings, ...parsed }, listed, piDefault);
+      if (!parsed.usePiDefault && parsed.provider && parsed.model && listed.length && !settingsLib.findModel(listed, parsed.provider, parsed.model)) {
+        const extensions = (parsed.providerExtensions !== undefined ? parsed.providerExtensions : appSettings.providerExtensions) || {};
+        const trusted = Array.isArray(extensions[parsed.provider]) && extensions[parsed.provider].length;
+        let staticHit = false;
+        try {
+          const models = JSON.parse(fs.readFileSync(PI_MODELS_FILE, 'utf8'));
+          staticHit = (models.providers?.[parsed.provider]?.models || []).some(m => m && m.id === parsed.model);
+        } catch {}
+        if (!trusted && !staticHit) return json(res, 400, { error: 'unknown model: ' + parsed.provider + '/' + parsed.model });
+      }
+      if (nextSettings.memoryImages && nextSettings.usePiDefault) return json(res, 400, { error: 'Image memory requires an explicit provider/model' });
+      await memoryFeature.configure(nextSettings);
+      appSettings = nextSettings;
       saveAppSettings();
+      modelsCache.at = 0; // explicit provider-entrypoint changes invalidate the catalog view
       memoryModelHealth.setIdentity(currentModelLabel());
       // A new URL or namespace means a different remote index: re-push all.
       if (searchIdx && (appSettings.semanticUrl || '') + '|' + semNs() !== prevSemTarget) {

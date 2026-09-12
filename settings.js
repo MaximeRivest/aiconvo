@@ -1,6 +1,8 @@
 'use strict';
 
 const os = require('os');
+const path = require('path');
+const AUTOMATIC_MEMORY_MODES = ['legacy', 'off', 'changes-after-enable'];
 
 const DEFAULT_CONTEXT_TOKENS = 272000;
 
@@ -20,6 +22,10 @@ const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ma
 const DONE_SOUND_MODES = ['off', 'chime', 'title', 'summary', 'voice'];
 const DEFAULT_SETTINGS = {
   usePiDefault: false,
+  providerExtensions: {},
+  aiTitles: true,
+  memoryImages: false,
+  automaticMemory: 'legacy',
   provider: 'openai-codex',
   model: 'gpt-5.6-sol',
   thinking: 'off',
@@ -167,8 +173,30 @@ function normalizeUsageBilling(raw) {
   return { providerModes, monthlyFees };
 }
 
+function normalizeProviderExtensions(raw) {
+  if (raw == null) return {};
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('providerExtensions must be an object');
+  const out = {};
+  for (const [provider, value] of Object.entries(raw)) {
+    const paths = typeof value === 'string' ? [value] : value;
+    if (!provider.trim() || !Array.isArray(paths) || paths.some(p => typeof p !== 'string' || !path.isAbsolute(p))) {
+      throw new Error('Provider extensions must be explicit absolute trusted file paths');
+    }
+    Object.defineProperty(out, provider, { value: [...new Set(paths)], enumerable: true });
+  }
+  return out;
+}
+
 function normalizeSettings(input) {
   const src = input && typeof input === 'object' ? input : {};
+  if (src.automaticMemory !== undefined && !AUTOMATIC_MEMORY_MODES.includes(src.automaticMemory)) throw new Error('Invalid automaticMemory policy');
+  for (const key of ['aiTitles', 'memoryImages']) if (src[key] !== undefined && typeof src[key] !== 'boolean') throw new Error(key + ' must be a boolean');
+  const memory = {
+    providerExtensions: normalizeProviderExtensions(src.providerExtensions),
+    aiTitles: src.aiTitles !== false,
+    memoryImages: src.memoryImages === true,
+    automaticMemory: AUTOMATIC_MEMORY_MODES.includes(src.automaticMemory) ? src.automaticMemory : 'legacy',
+  };
   const thinking = THINKING_LEVELS.includes(src.thinking) ? src.thinking : DEFAULT_SETTINGS.thinking;
   const provider = String(src.provider || '').trim();
   const model = String(src.model || '').trim();
@@ -185,9 +213,10 @@ function normalizeSettings(input) {
   const doneSound = DONE_SOUND_MODES.includes(src.doneSound) ? src.doneSound : DEFAULT_SETTINGS.doneSound;
   const machines = normalizeMachines(src.machines);
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound, machines };
+    return { ...memory, usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound, machines };
   }
   return {
+    ...memory,
     usePiDefault: false,
     provider: provider || DEFAULT_SETTINGS.provider,
     model: model || DEFAULT_SETTINGS.model,
@@ -227,10 +256,11 @@ function buildPiArgs(settings, options = {}) {
   if (!s.usePiDefault) {
     if (s.provider) args.push('--provider', s.provider);
     if (s.model) args.push('--model', s.model);
-    // claude-code is a local Pi extension. --no-extensions still allows explicit -e.
-    if (s.provider === 'claude-code' && options.claudeCodeExtension) {
-      args.push('-e', options.claudeCodeExtension);
-    }
+    // --no-extensions remains set: only the selected provider's trusted
+    // entrypoints are allowed. Preserve the legacy claude-code default.
+    const selected = s.providerExtensions[s.provider] ||
+      (s.provider === 'claude-code' && options.claudeCodeExtension ? [options.claudeCodeExtension] : []);
+    for (const entrypoint of selected) args.push('-e', entrypoint);
   }
   return args;
 }
@@ -267,6 +297,8 @@ function applyResolvedContext(settings, models, piDefault) {
 module.exports = {
   DEFAULT_CONTEXT_TOKENS,
   DEFAULT_SETTINGS,
+  AUTOMATIC_MEMORY_MODES,
+  normalizeProviderExtensions,
   THINKING_LEVELS,
   DONE_SOUND_MODES,
   hasClaudeCodeCredential,

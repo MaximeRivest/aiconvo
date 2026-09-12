@@ -2009,6 +2009,7 @@ window.aiconvoSyncTheme();
 <script src="/conversation-flow.js"></script>
 <script src="/conversation-reader.js"></script>
 <script src="/context-panel.js"></script>
+<script src="/memory-settings.js"></script>
 <script src="/file-completion-ui.js"></script>
 <script src="/linediff.js"></script>
 <script src="/streaming-tool.js"></script>
@@ -15103,10 +15104,18 @@ function paneModel() {
       <label for="setThinking">thinking</label>
       <select id="setThinking">${settingsThinkingOptions(resolved.thinking || 'off', modelSupportsThinking(current.provider, current.model))}</select>
       <div class="set-help">${modelSupportsThinking(current.provider, current.model) ? 'How much the model reasons before it answers. Higher is slower and costs more.' : 'This model does not support thinking.'}</div>
-    </div>`;
+    </div>${MemorySettings.render(settingsState, esc)}`;
 }
 
 function bindPaneModel(root) {
+  MemorySettings.bind(root, { state: () => settingsState, save: saveSettings, confirm: text => window.confirm(text), refresh: loadSettings,
+    discard: async key => {
+      const response = await fetch('/api/memory/automation/discard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+      const data = await response.json();
+      if (data.error) return errToast(data.error);
+      settingsState = data; renderSettings();
+    },
+  });
   bindOptions(root, 'setModelSource', v => {
     if (v === 'pi') return saveSettings({ usePiDefault: true, provider: '', model: '' }, 'model: pi’s default');
     const cur = currentSettingsModel();
