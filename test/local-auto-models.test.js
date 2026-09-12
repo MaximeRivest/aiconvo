@@ -80,7 +80,7 @@ test('catalog stays cached unless an explicit refresh is requested', async () =>
   let calls = 0;
   const result = await load('listPiModels', {
     modelsCache: cache, modelsPending: null,
-    execFile: (_cmd, _args, _opts, cb) => { calls++; cb(new Error('fixture unavailable'), '', ''); },
+    execFileWithFileStdout: (_cmd, _args, _opts, cb) => { calls++; cb(new Error('fixture unavailable'), '', ''); },
   })(true);
   assert.equal(calls, 1);
   assert.match(result.error, /fixture unavailable/);

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { upgradeLeaf } = require('../memory-fingerprint.js');
+const { sessionCachePath } = require('../cachepaths.js');
 const cache = path.resolve(process.env.AICONVO_CACHE_DIR || path.join(os.homedir(), '.cache/aiconvo'));
 const apply = process.argv.includes('--apply');
 const sources = {
@@ -24,7 +25,7 @@ for (const name of fs.readdirSync(path.join(cache, 'memory-leaves'))) {
     const original = fs.readFileSync(file, 'utf8');
     const leaf = JSON.parse(original), entry = index[leaf.key];
     if (!entry || leaf.partial || leaf.memoryHash === entry.memoryHash) { counts.unchanged++; continue; }
-    const cachedPath = path.join(cache, 'sessions', leaf.key.replace(/[:/\\]/g, '__') + '.json');
+    const cachedPath = sessionCachePath(path.join(cache, 'sessions'), leaf.key);
     const cached = JSON.parse(fs.readFileSync(cachedPath, 'utf8'));
     const next = upgradeLeaf(leaf, entry, cached);
     if (next === leaf) { counts.unchanged++; continue; }

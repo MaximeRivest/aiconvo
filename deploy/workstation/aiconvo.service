@@ -9,10 +9,7 @@ Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
 Environment=TMPDIR=%h/.local/state/aiconvo/tmp
 Environment=AICONVO_HOST=127.0.0.1
 Environment=PORT=7433
-Environment=AICONVO_CACHE_DIR=%h/.cache/aiconvo-compass-pilot
-Environment=AICONVO_PI_SESSIONS_DIR=%h/.pi/agent/sessions/--home-tryinget-ai-society-softwareco-owned-compass-c--
-Environment=AICONVO_CLAUDE_PROJECTS_DIR=%h/.local/state/aiconvo/empty/claude
-Environment=AICONVO_PI_REMOTE_SESSIONS_DIR=%h/.local/state/aiconvo/empty/pi-remote
+Environment=AICONVO_CACHE_DIR=%h/.cache/aiconvo-all-sessions
 Environment=AICONVO_NO_AUTO_MODELS=1
 Environment=AICONVO_DISABLE_DELEGATION_CALLBACKS=1
 Environment=AICONVO_SPEAK_DONE=0

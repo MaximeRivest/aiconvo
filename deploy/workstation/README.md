@@ -6,7 +6,8 @@
 - Origin: `https://github.com/MaximeRivest/aiconvo.git`.
 - Upstream branch: `master` (not `main`). Initial baseline:
   `aa023073bb8eee985ebfd404ee4d431cb83ccf6c`.
-- Local modifications preserve upstream behavior unless the new environment flags are set.
+- Deployment limits are opt-in. The cache-filename and CLI-output capture repairs
+  apply without a flag; their behavior differs from upstream as documented below.
 - No NAS deployment, Pi extension installation, host file-association changes,
   provider inference, or publication was performed for this installation.
 
@@ -18,11 +19,15 @@
 - Service enabled at user login; no linger setting was changed. No automatic restart loop.
 - Node: `/usr/bin/node`, verified with v26.8.1; upstream requires modern Node with `node:sqlite`.
 - Service memory high/max: 768 MiB / 1 GiB. An OOM must be investigated before expanding limits.
-- Cache: `~/.cache/aiconvo-compass-pilot`; temporary files: `~/.local/state/aiconvo/tmp`.
+- Cache: `~/.cache/aiconvo-all-sessions`; temporary files: `~/.local/state/aiconvo/tmp`.
+  The old `~/.cache/aiconvo-compass-pilot` index is retained, not merged or deleted.
 - Default upstream durable data paths remain under `~/.local/share/aiconvo` and `~/notes/aiconvo`.
-- The full Pi archive measured 13 GiB. Initial source is only the 14 MiB COMPASS-C
-  session directory (three conversations), not a copied or edited archive.
-- Claude and remote-Pi sources point to dedicated empty directories for this initial scope.
+- Operator expanded the initial three-session COMPASS-C scope to the upstream defaults:
+  `~/.pi/agent/sessions`, `~/.claude/projects`, and `~/.pi/remote/sessions`.
+  The remote-Pi directory was absent at verification. Upstream transcript filtering
+  still applies; this does not import standalone Codex or arbitrary chat formats.
+- Input archives measured 13 GiB Pi and 238 MiB Claude. The expanded derived cache
+  measured about 9 GiB; source transcripts were not rewritten by the expansion.
 
 ```sh
 systemctl --user status aiconvo
@@ -71,7 +76,41 @@ root, use a fresh `AICONVO_CACHE_DIR` to avoid old keys/caches referring to the 
 files. Do not copy old index state blindly. Existing agent credentials/settings
 are not rewritten by these overrides.
 
-## Verification (2026-09-12)
+## Expansion verification (2026-09-12)
+
+After explicit operator approval, the three source overrides were removed and
+Pi's catalog was explicitly refreshed. Other deployment limits remain unchanged.
+Live readback after restart: **4,072 sessions** (4,048 Pi, 24 Claude), **535 models
+across 13 provider IDs**, and all **224 hashed long-key caches** readable. Counts
+are point-in-time observations; session watching remains active. No claim of
+successful inference/authentication for every provider follows from catalog listing.
+
+Two newly observed upstream integration defects required bounded local repairs:
+
+- Long session keys overflowed filesystem cache filename limits. `cachepaths.js`
+  preserves short legacy names and hashes long UTF-8 names. Missing caches cause
+  reindexing. Runtime and the fingerprint repair utility share the same helper.
+- Pi 0.84.4 can exit before piped model-list stdout drains, returning a successful
+  but incomplete catalog. `modelcatalog.js` captures stdout through a private
+  regular file, retaining timeout/error handling and cleanup. Its 4 MiB limit
+  bounds accepted output, not disk growth while the CLI is running. Scratch setup
+  failures invoke callbacks asynchronously, so a failed refresh remains retryable.
+  This workaround does not modify Pi or provider configuration.
+
+The final whole-suite run on these changes completed all 74 test files:
+**481 passed, 1 failed, 1 skipped** (483 tests, exit 1). The only failure is the
+same custom-TMPDIR classification discrepancy documented below. All browser tests
+and the installed-service read-only report/MRMD probe passed. Runtime stayed
+within the unchanged 1 GiB service cap (about 771 MiB observed peak during full
+indexing; about 139 MiB shortly after a warm restart).
+
+Final log: `/home/tryinget/.local/state/pi-quests/tmp/aiconvo-expanded-final.pm9sBD.log`.
+Exact isolated invocation: `/home/tryinget/.local/state/pi-quests/tmp/a.VTZUU9/invocation.sh`.
+Independent review found and reproduced the scratch-failure retry problem and
+repair-utility cache mismatch; both were corrected before the final suite.
+No automatic provider inference or live manual inference test was performed.
+
+## Initial installation verification (2026-09-12)
 
 - 41 focused Node tests passed, including automatic/manual launch guards and source overrides.
 - Upstream complete browser/server fixture passed: conversation reading, MRMD,

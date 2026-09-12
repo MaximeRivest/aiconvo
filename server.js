@@ -38,6 +38,8 @@ const delegationLib = require('./delegation.js');
 const { createDelegationCoordinator, inspectDeliverySession, TERMINAL: DELEGATION_TERMINAL } = require('./server-delegations.js');
 const DELEGATION_ROOT = process.env.AICONVO_DELEGATION_ROOT || path.join(os.homedir(), '.local', 'share', 'aiconvo', 'delegations');
 const { execFileWithActivityTimeout } = require('./modelprocess.js');
+const { execFileWithFileStdout } = require('./modelcatalog.js');
+const { sessionCachePath } = require('./cachepaths.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
@@ -306,7 +308,7 @@ const memoryModelHealth = createModelHealth({
 });
 
 function cachePathFor(key) {
-  return path.join(SESS_DIR, key.replace(/[:\/\\]/g, '__') + '.json');
+  return sessionCachePath(SESS_DIR, key);
 }
 
 // Bump when the cached message format changes; forces a re-index.
@@ -736,7 +738,7 @@ async function fullScan() {
       let stat;
       try { stat = await fsp.stat(path.join(baseDir, relPath)); } catch { continue; }
       const cur = index[key];
-      if (!cur || cur.v !== CACHE_VERSION || cur.mtimeMs !== stat.mtimeMs || cur.size !== stat.size) {
+      if (!cur || cur.v !== CACHE_VERSION || cur.mtimeMs !== stat.mtimeMs || cur.size !== stat.size || !fs.existsSync(cachePathFor(key))) {
         await indexFile(source, relPath, stat);
         n++;
       }
@@ -3571,7 +3573,7 @@ function listPiModels(force = false) {
   }
   if (modelsPending) return modelsPending;
   modelsPending = new Promise(resolve => {
-    execFile('pi', ['--list-models'], { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFileWithFileStdout('pi', ['--list-models'], { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
       const parsed = err ? [] : settingsLib.parseListModels(stdout);
       if (err) {
         modelsCache = {
