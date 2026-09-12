@@ -41,9 +41,9 @@ const { execFileWithActivityTimeout } = require('./modelprocess.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
 const SOURCES = {
-  claude: path.join(os.homedir(), '.claude', 'projects'),
-  pi: path.join(os.homedir(), '.pi', 'agent', 'sessions'),
-  'pi-remote': path.join(os.homedir(), '.pi', 'remote', 'sessions'),
+  claude: process.env.AICONVO_CLAUDE_PROJECTS_DIR || path.join(os.homedir(), '.claude', 'projects'),
+  pi: process.env.AICONVO_PI_SESSIONS_DIR || path.join(os.homedir(), '.pi', 'agent', 'sessions'),
+  'pi-remote': process.env.AICONVO_PI_REMOTE_SESSIONS_DIR || path.join(os.homedir(), '.pi', 'remote', 'sessions'),
 };
 const CACHE_DIR = process.env.AICONVO_CACHE_DIR ? path.resolve(process.env.AICONVO_CACHE_DIR) : path.join(os.homedir(), '.cache', 'aiconvo');
 const NOTES_DIR = path.join(os.homedir(), 'notes', 'aiconvo');
@@ -53,6 +53,8 @@ const USAGE_DB_FILE = path.join(CACHE_DIR, 'usage.db');
 const INTERNAL_USAGE_FILE = path.join(CACHE_DIR, 'internal-usage.jsonl');
 const MODEL_HEALTH_FILE = path.join(CACHE_DIR, 'memory-model-health.json');
 const MODEL_ACTIVITY_TIMEOUT_MS = Math.max(30000, Number(process.env.AICONVO_MODEL_ACTIVITY_TIMEOUT_MS) || 2 * 60 * 1000);
+// Local deployment opt-out: browsing must not silently initiate model work.
+const AUTO_MODELS_DISABLED = process.env.AICONVO_NO_AUTO_MODELS === '1';
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7433;
 const HOST = process.env.AICONVO_HOST || (process.env.AICONVO_LAN === '1' ? '0.0.0.0' : '127.0.0.1');
 const TLS_PORT = process.env.AICONVO_TLS_PORT ? Number(process.env.AICONVO_TLS_PORT) : 7443;
@@ -3386,7 +3388,7 @@ async function retitleProject(project, manual = true) {
     identity: o.identity || '', overview: o.summary || '',
     recentConversationTitles: recent,
   };
-  const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT);
+  const raw = await runPi(JSON.stringify(payload), PROJECT_RETITLE_PROMPT, null, { automatic: !manual });
   const parsed = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
   return setProjectTitle(project, parsed.title, manual);
 }
@@ -3421,6 +3423,7 @@ async function retitleEpic(id) {
 // A manual (or earlier AI) title always blocks this.
 const projectTitleInFlight = new Set();
 function maybeAutoProjectTitle(project) {
+  if (AUTO_MODELS_DISABLED) return;
   if (projectTitles[project]) return;
   if (projectTitleInFlight.has(project)) return;
   projectTitleInFlight.add(project);
@@ -3557,6 +3560,7 @@ try {
 let modelsPending = null;
 let modelsSmallSeen = null; // row count of the last rejected small fetch
 function listPiModels(force = false) {
+  if (AUTO_MODELS_DISABLED && !force) return Promise.resolve(modelsCache);
   if (!force && modelsCache.models.length) {
     // Serve the last good catalog at once. An expired catalog refreshes in
     // the background, so opening a picker never waits for a Pi process.
@@ -3787,10 +3791,13 @@ function splitTextToTokenBudget(text, tokenBudget) {
 }
 
 async function runPi(fileContent, prompt, onChunk, options = {}) {
-  const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
-  fs.writeFileSync(tmp, fileContent, { mode: 0o600 });
   const inherited = modelCallContext.getStore();
   const automatic = options.automatic == null ? !!(inherited && inherited.automatic) : !!options.automatic;
+  if (AUTO_MODELS_DISABLED && automatic) {
+    throw Object.assign(new Error('Automatic model calls disabled'), { code: 'AUTO_MODELS_DISABLED' });
+  }
+  const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
+  fs.writeFileSync(tmp, fileContent, { mode: 0o600 });
   let permit = null;
   let carry = '';
   try {
@@ -3862,6 +3869,7 @@ const TIMELINE_TITLE_PROMPT =
 let timelineTitleRunning = false;
 let timelineTitleAgain = false;
 function scheduleTimelineTitles(delayMs = 5000) {
+  if (AUTO_MODELS_DISABLED) return;
   clearTimeout(scheduleTimelineTitles.t);
   scheduleTimelineTitles.t = setTimeout(refreshTimelineTitles, Math.max(1000, delayMs));
 }
@@ -3879,6 +3887,7 @@ function mapTimelineLimit(items, limit, fn) {
 }
 
 async function refreshTimelineTitles() {
+  if (AUTO_MODELS_DISABLED) return;
   if (timelineTitleRunning) { timelineTitleAgain = true; return; }
   const pending = Object.entries(index).filter(([key, e]) => {
     const saved = timelineTitles[key];
@@ -3971,6 +3980,7 @@ const RETITLE_PROMPT =
 // user messages to two or more. A manual/override title always blocks this.
 const autoRetitleInFlight = new Set();
 function scheduleAutoRetitle(key, delayMs = 2000) {
+  if (AUTO_MODELS_DISABLED) return;
   if (autoRetitleInFlight.has(key)) return;
   autoRetitleInFlight.add(key);
   const timer = setTimeout(async () => {
@@ -5500,6 +5510,7 @@ function startDistillJob(key, data, options = {}) {
 // and a manual action from writing the same leaf at the same time.
 function startMemoryExtractJob(ids, label = null, options = {}) {
   const automatic = !!options.automatic;
+  if (AUTO_MODELS_DISABLED && automatic) throw new Error('Automatic model calls disabled');
   const keys = [...new Set(ids)].filter(k => index[k] && !activeMemoryLeafKeys.has(k) && memoryModelHealth.canRunLeaf(k, { automatic }));
   if (!keys.length) throw new Error('no memory leaves are ready to extract');
   const id = crypto.randomUUID();
@@ -5578,6 +5589,7 @@ function startEpicDocsJob(epicId, options = {}) {
 }
 
 function startDocsJobCore(mapKey, title, project, epicId, run, options = {}) {
+  if (AUTO_MODELS_DISABLED && options.automatic) throw new Error('Automatic model calls disabled');
   const running = memoryDocsJobs.get(mapKey);
   if (running && !running.finished) return running;
   const job = {
@@ -5704,6 +5716,7 @@ function markLeafDirty(key, prevEntry, entry, mtimeMs) {
 }
 
 async function sweepSettledLeaves() {
+  if (AUTO_MODELS_DISABLED) return;
   // Keep dirty work queued while the circuit is open. After the cooldown, one
   // call becomes the half-open probe; the health gate blocks all other calls.
   if (memoryModelHealth.isAutomaticPaused()) return;
@@ -5743,6 +5756,7 @@ function modelAutomaticRetryDelay() {
   return Math.max(LEAF_SWEEP_MS, memoryModelHealth.automaticWaitMs() + 1000);
 }
 function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
+  if (AUTO_MODELS_DISABLED) return;
   if (!project || project === '?') return;
   clearTimeout(docsRegenTimers.get(project));
   docsRegenTimers.set(project, setTimeout(() => {
@@ -5785,6 +5799,7 @@ function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
 // current on the same settle -> leaf -> debounced-docs path. Epics never
 // create themselves; only already-built epic memory refreshes.
 function scheduleEpicRegenForKeys(keys, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
+  if (AUTO_MODELS_DISABLED) return;
   const touched = new Set(keys);
   for (const epic of Object.values(epics)) {
     if (!epic || !epic.id) continue;
@@ -9255,9 +9270,10 @@ const DOC_COMMIT_TITLE_PROMPT =
 // Fire-and-forget: give the fresh commit an AI title. Amend only while HEAD
 // is still that exact commit and the stage is clean — never rewrite other work.
 function scheduleDocCommitTitle(root, hash, diffText) {
+  if (AUTO_MODELS_DISABLED) return;
   setTimeout(async () => {
     try {
-      const raw = await runPi(clipped(diffText, 60000), DOC_COMMIT_TITLE_PROMPT);
+      const raw = await runPi(clipped(diffText, 60000), DOC_COMMIT_TITLE_PROMPT, null, { automatic: true });
       const title = oneLine(JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, '')).title, '').slice(0, 60);
       if (!title) return;
       const head = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
@@ -13343,5 +13359,5 @@ server.listen(PORT, HOST, () => {
     seedLeavesFromSnapshots().catch(() => {});
     setInterval(() => { sweepSettledLeaves().catch(() => {}); }, LEAF_SWEEP_MS);
   });
-  listPiModels().finally(() => setTimeout(() => listPiModels(true), 2500));
+  if (!AUTO_MODELS_DISABLED) listPiModels().finally(() => setTimeout(() => listPiModels(true), 2500));
 });

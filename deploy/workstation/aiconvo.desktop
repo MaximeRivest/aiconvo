@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=AIconvo
+Comment=Local conversation browser and Markdown editor
+Exec=xdg-open http://127.0.0.1:7433
+Icon=/home/tryinget/ai-society/softwareco/contrib/aiconvo/icon.svg
+Terminal=false
+Categories=Development;Utility;
