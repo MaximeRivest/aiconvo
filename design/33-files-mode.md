@@ -1,5 +1,7 @@
 # 33 — Files mode: the inverted funnel
 
+Status (2026-09-11): superseded — the files lens home, the files landing (README, tree, ridge) and the big file workspace (tree, who-strip, Live/History modes, vouch/dispute) are gone. What remains: the files browser (design/35), the live editor with History and Ask (design/37), and the change review (design/36).
+
 Status: implemented 2026-09-08 (commit after `aec2240`); the notes at the
 end record where the build departed from this text. Date: 2026-09-08.
 

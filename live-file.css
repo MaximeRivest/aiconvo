@@ -35,6 +35,36 @@
   .live-file-head { gap:5px; }
   .live-file-head #ffTitle { font-size:12px; }
   #liveServiceStatus { display:none; }
-  .live-file-head #docStatus { max-width:25vw; }
+  .live-file-head #docStatus { max-width:22vw; }
+  .live-file-head #liveBack { padding:3px 5px; }
+  .lf-back-arrow + .lf-wide { margin-left:4px; }
   .live-file-view .doc-editor-host:not(.code-host) > div { padding:12px 4px 40vh; }
+}
+
+/* History: the editor makes way for the version list and one version or a
+   diff of two, drawn by the review's diff component. */
+.live-file-view .lf-narrow { display:none; }
+.lf-back-arrow + .lf-wide { margin-left:4px; }
+.live-history { flex:1; min-height:0; display:grid; grid-template-columns:260px minmax(0,1fr); }
+.fw-history-drawer { display:flex; flex-direction:column; gap:10px; min-width:0; min-height:0; overflow:auto; padding:12px; border-right:1px solid var(--border); background:var(--surface-1); }
+.fw-history-drawer header,.fh-step { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.fw-history-drawer label { font-size:12px; }
+.fw-history-drawer label[hidden] { display:none; }
+.fw-history-drawer select { display:block; max-width:100%; width:100%; padding:6px; background:var(--bg); color:var(--text); }
+.fh-truth,.fh-readonly { margin:0; font-size:11px; line-height:1.5; color:var(--text-dim); }
+.fh-readonly { border:1px solid var(--border); padding:8px; }
+.fh-versions { display:flex; flex-direction:column; gap:4px; }
+.fh-versions button { display:flex; flex-direction:column; height:auto; padding:8px; text-align:left; white-space:normal; overflow-wrap:anywhere; }
+.fh-versions time { font-size:11px; color:var(--text-dim); }
+.fh-versions button[aria-current="true"] { border-left:3px solid var(--accent); background:var(--surface-2); font-weight:bold; }
+.lf-history-main { min-width:0; min-height:0; overflow:auto; }
+.lf-history-main .cr-line { flex:0 0 45px; width:45px; min-height:20px; padding:0 5px 0 10px; font:11px/20px var(--font); color:var(--text-dim); text-align:right; }
+.lf-history-main .cr-line::before { display:none; }
+.lf-version { margin:0; padding:8px 0 40vh; font:12px/20px var(--font); white-space:pre-wrap; overflow-wrap:anywhere; }
+.lf-ln { display:inline-block; width:45px; padding-right:8px; box-sizing:border-box; text-align:right; color:var(--text-faint); user-select:none; }
+@media(max-width:700px) {
+  .live-file-view .lf-wide { display:none; }
+  .live-file-view .lf-narrow { display:block; }
+  .live-history { grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
+  .fw-history-drawer { max-height:40vh; border-right:0; border-bottom:1px solid var(--border); }
 }

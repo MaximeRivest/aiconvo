@@ -24,8 +24,8 @@ test('save completion does not discard edits typed while the request was in flig
   let resolve, text = 'submitted';
   const elements = { fwSave: {}, docStatus: {} };
   const state = { path: '/tmp/test.js', kind: 'code', baseText: 'original', sha: 'old', editor: { getContent: () => text } };
-  const { context } = workspace({ state, $: id => elements[id], postJson: () => new Promise(r => resolve = r), toast() {}, invalidateFileCaches() {} });
-  vm.runInContext('fileWs = state; fileWsTrustGutter = () => {}; fileWsBanner = () => {};', context);
+  const { context } = workspace({ state, $: id => elements[id], postJson: () => new Promise(r => resolve = r), toast() {}, liveFileSaved() {} });
+  vm.runInContext('fileWs = state; fileWsBanner = () => {};', context);
   const saving = context.fileWsSaveCode(state);
   text = 'typed later'; resolve({ sha: 'saved' }); await saving;
   assert.equal(state.baseText, 'submitted');

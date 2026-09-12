@@ -215,7 +215,9 @@ function crCanAnchor(comment, data) {
   const lines = side.text.split('\n'), end = comment.end || comment.line;
   return Number.isInteger(comment.line) && Number.isInteger(end) && comment.line >= 1 && end >= comment.line && end <= lines.length && lines.slice(comment.line - 1, end).join('\n') === comment.quote;
 }
-function crDiff(old, next, { anchors = new Set(), expanded = [] } = {}) {
+// comments: false draws plain line numbers (the history view reads; only a
+// review comments).
+function crDiff(old, next, { anchors = new Set(), expanded = [], comments = true } = {}) {
   if (old.unavailable || next.unavailable) return `<p class="cr-diff-notice">${esc(old.unavailable || next.unavailable)}</p>`;
   if (old.text.length + next.text.length > 500000 || old.text.split('\n').length + next.text.split('\n').length > 20000) return '<p class="cr-diff-notice">Large comparison: use Read recorded file to inspect either version. Comments remain with the file below its header.</p>';
   const rows = crDiffRows(old, next), keep = new Set();
@@ -225,6 +227,7 @@ function crDiff(old, next, { anchors = new Set(), expanded = [] } = {}) {
   for (const [from, to] of expanded) for (let i = Math.max(0, from); i <= Math.min(rows.length - 1, to); i++) keep.add(i);
   const cell = (side, value, same, afterLine) => {
     if (!value) return `<div class="cr-diff-cell cr-empty" data-cr-cell="${side}"></div>`;
+    if (!comments) return `<div class="cr-diff-cell${same ? '' : side === 'old' ? ' cr-deleted' : ' cr-added'}" data-cr-cell="${side}" data-cr-number="${value.line}"><pre><span class="cr-line">${value.line}</span>${same && side === 'old' ? `<span class="cr-line cr-unified-next">${afterLine}</span>` : ''}<code>${esc(value.text)}</code></pre></div>`;
     return `<div class="cr-diff-cell${same ? '' : side === 'old' ? ' cr-deleted' : ' cr-added'}" data-cr-cell="${side}" data-cr-number="${value.line}"><pre><button class="cr-line" data-cr-line="${value.line}" data-cr-side="${side}" title="Comment on ${side === 'old' ? 'before' : 'after'} line ${value.line}" aria-label="Comment on ${side === 'old' ? 'before' : 'after'} line ${value.line}">${value.line}</button>${same && side === 'old' ? `<button class="cr-line cr-unified-next" data-cr-line="${afterLine}" data-cr-side="next" title="Comment on after line ${afterLine}" aria-label="Comment on after line ${afterLine}">${afterLine}</button>` : ''}<code>${esc(value.text)}</code></pre><div class="cr-inline-slot" data-cr-anchor="${side}:${value.line}"></div></div>`;
   };
   const out = [];

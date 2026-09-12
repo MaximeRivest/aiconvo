@@ -2,7 +2,7 @@
 
 ## User surface
 
-**Edit live file** in a checkpoint review now opens a dedicated focused view: back to the review, filename, save state, Save, and the editor. Markdown also has Run, with Run all / source mode / unwrap under a small options menu. There is no repository tree, history drawer, replay track, provenance chip strip or agent composer. Editing from the older file comparison uses the same focused surface. Existing browsing/history routes remain available elsewhere.
+Since 2026-09-11 this is the only file screen: every file link (a markdown link in a conversation, a quoted path, a browser row, a review's Edit live file, a context chip, an old `doc=` link) opens it. One header row: Back (named after where the file was opened from), the file, its state, History, Ask, Run (Markdown), Save, and ⋯. On a phone History, Ask and Run sit under ⋯. **History** swaps the editor for the recorded-version list and one version or a diff of two (the change review's diff component, without comments); the route names the versions. **Ask** (Ctrl+K) docks the ask-for-a-change composer under the file. Files the project cannot edit open read-only in the same screen. There is no repository tree, replay track, who-strip, vouch/dispute or second header row; trust marks belong to the review.
 
 `openLiveFile(path, options)` in `live-file.js` owns this frame, while the existing `fileWs` and `docState` own save/draft/run lifecycles. Routes retain a `focus` flag, the return route and optional review reference; a refresh does not revert to the large workspace. Opening does not fetch `/api/project/file-history`, touched-file sessions or reconstructed snapshots. File and editor-bundle loading are parallel.
 

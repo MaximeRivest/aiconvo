@@ -1,5 +1,7 @@
 # 21 — Git repository Gantt
 
+Status (2026-09-11): superseded — the repository Gantt is gone; the repos tab opens a checkout in its project's files browser (design/35).
+
 ## Purpose
 
 Browse every local Git repository and worktree. Compare two commit (or working-tree) points of one file. Annotate the compare view. Send the page to a new coding agent with project memory.

@@ -1,5 +1,7 @@
 # 16 — Agent blame: line-level file history
 
+Status (2026-09-11): superseded — the agent blame view is gone; the live editor shows Git attribution in its gutter (design/37).
+
 ## Purpose
 
 The diff timeline answers "what happened when". Blame answers the more common

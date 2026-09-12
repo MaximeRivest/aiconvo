@@ -8375,9 +8375,10 @@ async function projectFileHistoryResponse(project) {
       const repo = await loadGitRepository(path.resolve(projectGitRoot)).catch(() => null);
       if (repo) repositories.push(repo);
     } else if (!projectGitRoot) {
-      repositories.push({
-        id: crypto.createHash('sha256').update('workspace:' + projectRoot).digest('hex').slice(0, 12),
-        root: projectRoot, currentBranch: null, head: null, refs: [], commits: [], workingTree: [], truncated: false, isGit: false,
+      const workspace = await projectWorkspaceRoot(meta);
+      if (workspace) repositories.push({
+        id: crypto.createHash('sha256').update('workspace:' + workspace).digest('hex').slice(0, 12),
+        root: workspace, currentBranch: null, head: null, refs: [], commits: [], workingTree: [], truncated: false, isGit: false,
       });
     }
   }
@@ -8549,11 +8550,43 @@ function normalizedRepoFile(root, file) {
   return { fullPath: resolved, relativePath: path.relative(root, resolved).replace(/\\/g, '/') };
 }
 
+// The project folder as a file root of its own: only when the folder is not
+// inside a checkout (a folder holding several sub-repositories, or a plain
+// folder). Inside a checkout the checkout is the root.
+async function projectWorkspaceRoot(meta) {
+  if (!meta || !meta.cwd || !fs.existsSync(meta.cwd)) return null;
+  const root = path.resolve(meta.cwd);
+  return (await gitRootForCwd(root)) ? null : root;
+}
+
+// Where a file's history lives: its checkout, or the project folder when the
+// file sits beside the sub-repositories. The live editor asks this once,
+// when History is opened, instead of loading the whole project tree.
+async function fileHistoryScopeResponse(pathValue, projectHint = '') {
+  const abs = path.resolve(expandHomePath(pathValue || ''));
+  if (!path.isAbsolute(abs)) throw new Error('missing path');
+  let root = await gitRootForCwd(path.dirname(abs)).catch(() => null);
+  let project = projectHint || projectNameOf(root || path.dirname(abs));
+  let meta = projectMetaFor(project);
+  if (root && meta && !(await projectGitRepositories(meta)).includes(path.resolve(root))) {
+    // The checkout is attributed elsewhere: follow the attribution.
+    project = projectNameOf(root);
+    meta = projectMetaFor(project);
+  }
+  if (!root) {
+    const workspace = await projectWorkspaceRoot(meta);
+    if (workspace && pathInside(abs, workspace)) root = workspace;
+  }
+  if (!root || !meta) throw new Error('this file is outside every project');
+  root = path.resolve(root);
+  return { project, root, relativePath: path.relative(root, abs).replace(/\\/g, '/') };
+}
+
 async function projectFileContext(project, rootValue, fileValue) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
   const gitRoots = await projectGitRepositories(meta);
-  const fallbackRoot = !gitRoots.length && meta.cwd ? path.resolve(meta.cwd) : null;
+  const fallbackRoot = await projectWorkspaceRoot(meta);
   const root = path.resolve(rootValue || '');
   if (!gitRoots.includes(root) && root !== fallbackRoot) throw new Error('repository is not part of this project');
   const { fullPath, relativePath } = normalizedRepoFile(root, fileValue);
@@ -11620,7 +11653,6 @@ const server = http.createServer(async (req, res) => {
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/files-browser.js': { file: 'files-browser.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
-      '/file-history-drawer.js': { file: 'file-history-drawer.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.js': { file: 'live-file.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.css': { file: 'live-file.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/live-file-marks.js': { file: 'live-file-marks.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
@@ -12011,6 +12043,9 @@ const server = http.createServer(async (req, res) => {
       json(res, 200, { rows: fileLedger ? fileLedger.count() : null, version: fileLedger ? fileLedger.version : null, backfilling: ledgerBackfillRunning, watchers: projectFileWatchers.size, watchedDirs: [...projectFileWatchers.values()].reduce((n, w) => n + (w.count ? w.count() : 1), 0), snapshots: projectFileSnapshots.size, snapshotBytes: projectFileSnapshotBytes, diffCacheRows: Object.keys(diffCache).length, gitHistories: gitHistoryCache.size, memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external, arrayBuffers: mem.arrayBuffers } });
     } else if (u.pathname === '/api/files/touched') {
       try { json(res, 200, await filesTouchedResponse(u.searchParams.get('path') || '')); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/file/history-scope') {
+      try { json(res, 200, await fileHistoryScopeResponse(u.searchParams.get('path') || '', u.searchParams.get('project') || '')); }
       catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/files/ask-target') {
       try { json(res, 200, await filesAskTargetResponse(u.searchParams.get('path') || '', u.searchParams.get('project') || '')); }

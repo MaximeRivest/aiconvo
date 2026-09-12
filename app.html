@@ -444,10 +444,9 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .loose-pick-list { display: grid; gap: 4px; margin-top: 10px; max-height: 45vh; overflow: auto; }
 .loose-pick-list button { text-align: left; }
 @media (max-width: 700px) { .loose-row { grid-template-columns: minmax(0, 1fr); } .loose-assign { justify-self: start; } }
-.phead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; background: var(--bg); border-bottom: 1px solid var(--border); border-left: 4px solid var(--accent); padding: var(--sp-2) 0 var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); }
-.phead h2 { margin: 0 0 2px; font-size: var(--fs-title); }
+
 .pmeta { color: var(--text-dim); font-size: var(--fs-meta); margin-bottom: var(--sp-2); }
-.pactions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
 /* ---- project folds: chips, suggestions, and the fold picker ---- */
 .pfolds, .pfold-suggest { margin-top: var(--sp-2); font-size: var(--fs-meta); color: var(--text-dim); display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
 .fold-chip { border: 1px solid var(--border); background: var(--surface-1); color: var(--text); padding: 0 2px 0 6px; display: inline-flex; align-items: center; gap: 4px; }
@@ -499,21 +498,11 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .ptoolbar .psep { width: 1px; height: 12px; background: var(--border); margin: 0 2px; }
 .ptoolbar + .pfolds, .ptoolbar + .pfold-suggest { margin-top: 0; }
 .pfolds, .pfold-suggest, #pFoldPanel { margin-bottom: var(--sp-3); }
-.project-code-bar { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-3); min-height: 38px; padding: 0 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
-.project-code-bar > b { font-size: var(--fs-body); }
-.project-code-bar .project-switch { margin: 0; align-self: stretch; border-bottom: 0; }
-.project-code-bar > .dim { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); }
-.project-code .ff-tree { font-size: 10.5px; line-height: 1.25; padding: 5px; }
-.project-code .ff-tree summary { padding: 2px 1px; }
-.project-code .ff-tree .ff-file { padding-top: 2px; padding-bottom: 2px; font-size: inherit; }
-.project-code .ff-tree .ff-lines { font-size: 8.5px; }
+
 /* project documents: the complete markdown list beside the editor */
 /* ---- document view: aiconvo chrome around the MRMD editing surface ---- */
 .doc-view { height: calc(100vh - 82px); min-height: 400px; display: flex; flex-direction: column; margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-6)); }
-.doc-head { flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
-.doc-head .doc-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.doc-head #docStatus { flex: 1; min-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); }
-.doc-head #docSource.on { background: var(--accent-strong); color: var(--accent-ink); }
+
 .doc-editor-host { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
 /* The page: the same reading column as a conversation (--read-max). */
 .doc-editor-host > div { max-width: var(--read-max); margin: 0 auto; padding: 28px 20px 50vh; min-height: 100%; }
@@ -610,66 +599,14 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pmemline { font-size: var(--fs-micro); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pmemline button { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); }
 .pfoldbtn { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); margin-left: 6px; }
-/* ---- files mode (design/33): lens control, files chart, file workspace ---- */
-#ftabs { display: none; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-#ftabs button { flex: 1; border: 0; border-right: 1px solid var(--border); height: 28px; color: var(--text-dim); border-radius: 0; }
-#ftabs button:last-child { border-right: 0; }
-#ftabs button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
-body.lens-files.home #ftabs { display: flex; }
-body.lens-files.home #tabs { display: none; }
-body.lens-files #ganttGroup, body.lens-files #densityTools { display: none; }
-/* the files chart */
-.files-labels, .files-labels::after, .files-labels .project-row-label { width: 236px; }
-.files-labels .project-row-label { padding: 0; }
-.files-labels .fpl-head { display: flex; align-items: baseline; gap: 6px; height: 20px; line-height: 20px; box-sizing: border-box; padding: 0 8px; border-bottom: 1px dashed var(--border); }
-.files-labels .fpl-head strong { font-size: 11px; }
-.files-labels .fpl-head span { color: var(--text-faint); font-size: 9px; margin: 0; }
-.files-labels .fpl-files { position: relative; }
-.file-row-label { position: absolute; left: 0; right: 0; height: 20px; line-height: 20px; padding: 0 8px 0 10px; display: flex; gap: 4px; align-items: center; font-size: 10.5px; white-space: nowrap; overflow: hidden; cursor: pointer; color: var(--text); }
-.file-row-label:hover { background: var(--surface-3); color: var(--accent); }
-.file-row-label .frl-kind { color: var(--text-faint); font-size: 9px; width: 10px; flex: none; }
-.file-row-label .frl-dir { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
-.file-row-label .frl-name { font-weight: 600; flex: none; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
-.file-row-label.more { color: var(--text-dim); font-style: italic; }
-.files-labels .project-row-label.hl > span:first-of-type::after { content: none; }
-.files-labels .project-row-label.hl .fpl-head span { font-size: 9px; }
-.fmark .violin { stroke-width: 1; opacity: .95; }
-.fmark.a-ai .violin { fill: url(#aiHatch) !important; }
-.fmark.a-external .violin { fill: var(--surface-1) !important; stroke-dasharray: 2 2; }
-.fmark.failed .violin { fill: transparent !important; stroke: var(--danger) !important; stroke-dasharray: 2 2; }
-.fcommit path { fill: var(--text-dim); stroke: var(--surface-1); stroke-width: 1; cursor: pointer; }
-.fcommit:hover path { fill: var(--text); }
-:root[data-theme-mode="binary"] .fmark.a-human .violin { fill: var(--text) !important; }
-:root[data-theme-mode="binary"] .fmark.a-ai .violin { fill: url(#aiHatch) !important; }
-:root[data-theme-mode="binary"] .fmark.a-external .violin { fill: var(--bg) !important; stroke: var(--text) !important; }
-:root[data-theme-mode="binary"] .fcommit path { fill: var(--text); stroke: var(--bg); }
-/* the file workspace */
-.files-ws .fw-head { flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
-.files-ws .fw-project { margin: 0; font-size: var(--fs-title); font-weight: 700; }
-.files-ws .fw-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34vw; }
+/* ---- the live file (live-file.js + filesmode.js) ---- */
 .files-ws .fw-spacer { flex: 1; }
-.fw-who { display: inline-flex; gap: 4px; flex-wrap: wrap; align-items: center; min-width: 0; }
-.fw-chip { display: inline-flex; gap: 4px; align-items: center; height: 20px; padding: 0 6px; border: 1px solid var(--border); border-radius: 0; background: var(--surface-1); color: var(--text-dim); font: 10.5px var(--font); white-space: nowrap; max-width: 220px; overflow: hidden; }
-button.fw-chip { cursor: pointer; }
-button.fw-chip:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
-.fw-chip.a-ai { border-style: dashed; }
-.fw-chip.live { border-color: var(--live); }
-.fw-mode { display: inline-flex; border: 1px solid var(--border); }
-.fw-mode button { border: 0; border-radius: 0; height: 22px; padding: 0 9px; font: 11px var(--font); color: var(--text-dim); background: transparent; }
-.fw-mode button + button { border-left: 1px solid var(--border); }
-.fw-mode button.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
-.fw-ridge { flex: 0 0 auto; border-bottom: 1px solid var(--border); background: var(--surface-1); line-height: 0; }
-.fw-ridge svg { display: block; width: 100%; }
-.fw-ridge .fmark { cursor: pointer; }
 .files-ws .doc-view { height: 100%; min-height: 0; margin: 0; }
 .files-ws .code-host > div { max-width: none; padding: 0; }
 .files-ws .code-host .cm-editor { height: 100%; }
 .files-ws .code-host .cm-scroller { overflow: auto; }
 .files-ws .doc-editor-host.code-host { overflow: hidden; display: flex; flex-direction: column; }
 .files-ws .doc-editor-host.code-host > div { flex: 1; min-height: 0; }
-.mrmd-line-mark.t-v { color: var(--success) !important; }
-.mrmd-line-mark.t-d { color: var(--danger) !important; }
-.mrmd-line-mark.fw-changed { color: var(--accent) !important; font-weight: 700; }
 .fw-banner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); font-size: var(--fs-micro); color: var(--text); }
 .fw-banner button { height: 22px; padding: 0 8px; font-size: 11px; }
 :root[data-theme-mode="binary"] .fw-banner { background: var(--bg); border: 2px solid var(--text); }
@@ -683,14 +620,9 @@ button.fw-chip:hover { color: var(--text); border-color: var(--border-strong); b
 .fw-run .fw-run-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
 .fw-run.settled { border-color: var(--border-strong); }
 .fw-preview { max-height: 40vh; overflow: auto; margin: 0; padding: 8px; border: 1px solid var(--border); background: var(--bg); font-size: 11px; white-space: pre-wrap; }
-.files-ws.history .ff-compare { display: flex; }
+
 .agent-ctx-chip.file { cursor: pointer; }
 .agent-ctx-chip.file:hover b { text-decoration: underline; }
-@media (max-width: 700px) {
-  .files-ws .fw-head { padding: 6px; }
-  .files-ws .fw-title { max-width: 100%; }
-  .fw-who { display: none; }
-}
 
 /* ---- settings page ----
    A section list on the left, one pane on the right. The pane is a short
@@ -806,54 +738,14 @@ button.fw-chip:hover { color: var(--text); border-color: var(--border-strong); b
   .usage-rule { grid-template-columns: 1fr 120px; }
   .usage-rule .usage-fee { grid-column: 1 / -1; }
 }
-.diff-view { max-width: var(--read-max); margin: 0 auto; }
-.diff-toolbar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3); }
-.diff-toolbar input[type=search] { flex: 1; min-width: 220px; }
-.diff-files { border: 1px solid var(--border); }
-.diff-file { border-bottom: 1px solid var(--border); background: var(--surface-1); }
-.diff-file:last-child { border-bottom: 0; }
-.diff-file-head { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; cursor: pointer; }
-.diff-file-head:hover { background: var(--surface-2); }
-.diff-file-head .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
-.diff-file-head .meta { color: var(--text-dim); font-size: var(--fs-micro); white-space: nowrap; }
-.diff-events { border-top: 1px solid var(--border); }
+
 .diff-event { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: var(--fs-meta); }
 .diff-event:last-child { border-bottom: 0; }
 .diff-event:hover, .diff-event.on { background: var(--accent-strong); color: var(--accent-ink); }
-.diff-event .dtitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.diff-event .dstats { color: var(--text-dim); font-size: var(--fs-micro); }
-.diff-event.on .dstats { color: var(--accent-ink); opacity: .8; }
-.diff-card { border: 1px solid var(--border-strong); margin: var(--sp-3) 0; background: var(--bg); }
-.diff-card-head { padding: 8px 10px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.diff-card-head b { flex: 1; min-width: 200px; }
-.diff-body { overflow: auto; max-height: 65vh; }
-.diff-body table { border-collapse: collapse; width: 100%; font: 11px/1.45 var(--font); }
-.diff-body td { padding: 1px 6px; vertical-align: top; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
-.diff-body td.old { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); }
-.diff-body td.new { color: var(--success); background: color-mix(in srgb, var(--success) 9%, transparent); }
-:root[data-theme-mode="binary"] .diff-body td.old, :root[data-theme-mode="binary"] .diff-body td.new { color: var(--text); background: var(--bg); }
-:root[data-theme-mode="binary"] .diff-body td.old { text-decoration: line-through; }
-.diff-body td.gap { text-align: center; color: var(--text-faint); background: var(--surface-1); }
+
 /* Git-weaved file Gantt: one sticky row label, AI marks above Git marks. */
 .file-gantt-view { margin: 0 auto; min-width: 0; }
-.fg-toolbar { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-2); }
-.fg-toolbar input[type=search] { flex: 1; min-width: 200px; }
-.fg-legend { display: flex; gap: var(--sp-3); flex-wrap: wrap; color: var(--text-dim); font-size: var(--fs-micro); margin: 4px 0 8px; }
-.fg-scroll { overflow: auto; max-height: calc(100vh - 250px); border: 1px solid var(--border-strong); background: var(--surface-1); }
-.fg-axis, .fg-row { display: grid; grid-template-columns: 260px var(--fg-width); width: max-content; min-width: 100%; }
-.fg-axis { position: sticky; top: 0; z-index: 7; height: 28px; background: var(--surface-1); border-bottom: 1px solid var(--border-strong); }
-.fg-corner, .fg-label { position: sticky; left: 0; z-index: 5; width: 260px; background: var(--surface-1); border-right: 1px solid var(--border-strong); }
-.fg-corner { padding: 6px 9px; color: var(--text-faint); font-size: var(--fs-micro); z-index: 9; }
-.fg-time-axis, .fg-track { position: relative; width: var(--fg-width); }
-.fg-time-axis { background: var(--surface-1); }
-.fg-tick { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--border); color: var(--text-faint); font-size: 9px; padding: 5px 0 0 3px; white-space: nowrap; }
-.fg-row { min-height: 32px; border-bottom: 1px solid var(--border); }
-.fg-row:last-child { border-bottom: 0; }
-.fg-row:hover .fg-label, .fg-row:hover .fg-track { background-color: var(--surface-2); }
-.fg-label { display: flex; gap: 6px; align-items: center; padding: 5px 8px; min-width: 0; }
-.fg-label .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; flex: 1; }
-.fg-label .n { color: var(--text-faint); font-size: 9px; }
-.fg-track { height: 32px; background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px); background-size: var(--fg-grid, 160px) 100%; }
+
 .fg-mark { position: absolute; z-index: 3; transform: translateX(-50%); width: 13px; height: 13px; padding: 0; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: 9px/11px var(--font); cursor: pointer; }
 .fg-mark.ai { top: 3px; }
 .fg-mark.git { top: 18px; width: 10px; height: 10px; border-color: var(--magenta); background: var(--magenta); transform: translateX(-50%) rotate(45deg); }
@@ -861,28 +753,12 @@ button.fw-chip:hover { color: var(--text); border-color: var(--border-strong); b
 .fg-mark.failed { background: var(--bg); color: var(--danger); border-color: var(--danger); text-decoration: line-through; }
 .fg-mark.unresolved { background: var(--bg); color: var(--accent); }
 .fg-mark.working { border-style: dashed; }
-.fg-link { position: absolute; top: 15px; z-index: 1; height: 0; border-top: 1px dotted var(--text-dim); pointer-events: none; }
-.fg-link.high { border-top-style: solid; border-color: var(--success); }
-.fg-link.medium { border-color: var(--cyan); }
-.fg-link.low { border-color: var(--text-faint); }
-.fg-work { position: absolute; right: 2px; top: 4px; bottom: 4px; width: 3px; background: var(--warn); z-index: 2; }
-.fg-empty { padding: 30px; color: var(--text-dim); }
-.git-card pre { margin: 0; padding: 10px; max-height: 65vh; overflow: auto; white-space: pre; font: 11px/1.45 var(--font); }
+
 :root[data-theme-mode="binary"] .fg-mark { background: var(--bg); color: var(--text); border: 2px solid var(--text); }
 :root[data-theme-mode="binary"] .fg-mark.git { background: var(--text); }
-:root[data-theme-mode="binary"] .fg-link { border-color: var(--text) !important; }
-/* Whole-file time comparison opened from one file-Gantt row. */
-.fg-label[data-fg-file] { border: 0; border-radius: 0; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
-.fg-label[data-fg-file]:hover { background: var(--accent-strong); color: var(--accent-ink); }
+
 .fi-columns { overflow: auto; max-height: 72vh; font: 11px/1.45 var(--font); position: relative; }
-/* Virtual window: only rows near the viewport (or the current page) exist.
-   The spacer carries the full computed height; the window is translated
-   to the first rendered row. Probe rows measure the real metrics once. */
-.fi-spacer { position: relative; min-height: 1px; }
-.fi-window { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
-.fi-columns.paged .fi-spacer { height: auto !important; }
-.fi-columns.paged .fi-window { position: static; transform: none !important; }
-.fi-probe { position: absolute; left: 0; right: 0; top: 0; visibility: hidden; pointer-events: none; }
+
 .fi-diff-row { display: flex; justify-content: center; }
 .fi-diff-row:not(.changed) .fi-cell { flex: 0 0 50%; width: 50%; max-width: 50%; }
 .fi-diff-row.changed { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -928,118 +804,32 @@ button.fw-chip:hover { color: var(--text); border-color: var(--border-strong); b
 .trust-sum { color: var(--text-dim); }
 .st.tmark { font-weight: 700; }
 .fi-cell.empty { margin: 0; background: var(--surface-1); text-align: left; }
-.fi-line-history { min-width: 900px; padding: 8px 10px 10px; border: 2px solid var(--accent); background: var(--surface-1); }
-.fi-line-history h4 { margin: 0 0 6px; font-size: var(--fs-label); display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-.fi-history-entry { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; padding: 7px 5px; border-top: 1px solid var(--border); cursor: pointer; }
-.fi-history-entry:hover { background: var(--surface-2); }
-.fi-history-meta { color: var(--text-dim); font-size: var(--fs-micro); }
-.fi-history-change { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
-.fi-history-change pre { margin: 0; padding: 5px 7px; overflow: auto; max-height: 160px; white-space: pre; background: var(--bg); border: 1px solid var(--border); font: inherit; }
-.focused-file-view { height: calc(100vh - 82px); min-height: 520px; display: flex; flex-direction: column; margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-6)); }
-.ff-head { flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
-.ff-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ff-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
-.ff-tree { min-height: 0; overflow: auto; border-right: 1px solid var(--border-strong); background: var(--surface-1); padding: 7px; }
-.ff-tree input { width: 100%; margin-bottom: 5px; }
-.ff-tree-summary { padding: 3px 5px 7px; color: var(--text-dim); font-size: var(--fs-micro); border-bottom: 1px solid var(--border); margin-bottom: 4px; }
-.ff-tree details { margin-left: 10px; }
-.ff-tree summary { cursor: pointer; padding: 3px 2px; color: var(--text-dim); user-select: none; }
-.ff-tree .ff-file { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 4px; align-items: center; width: 100%; height: auto; padding: 4px 5px 4px 14px; border: 0; border-left: 3px solid transparent; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
-.ff-tree .ff-file .ff-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ff-tree .ff-file .ff-state { color: var(--text-faint); }
-.ff-tree .ff-file .ff-lines { color: var(--text-dim); font-size: 9px; white-space: nowrap; }
-.ff-tree .ff-file.changed { border-left-color: var(--accent); font-weight: 700; }
-.ff-tree .ff-file.changed .ff-state { color: var(--accent); }
-.ff-tree .ff-file:hover, .ff-tree .ff-file.on { background: var(--accent-strong); color: var(--accent-ink); }
-.ff-tree .ff-file.on .ff-state, .ff-tree .ff-file.on .ff-lines { color: var(--accent-ink); }
-:root[data-theme-mode="binary"] .ff-tree .ff-file.changed { border-left: 4px double var(--text); text-decoration: underline; }
-:root[data-theme-mode="binary"] .ff-tree .ff-file.changed .ff-state, :root[data-theme-mode="binary"] .ff-tree .ff-file.changed .ff-lines { color: var(--text); }
-:root[data-theme-mode="binary"] .ff-tree .ff-file.on .ff-state, :root[data-theme-mode="binary"] .ff-tree .ff-file.on .ff-lines { color: var(--bg); }
-.ff-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.ff-timeline { flex: 0 0 auto; padding: 8px 12px 10px; border-bottom: 1px solid var(--border-strong); background: var(--surface-1); }
-.ff-track { position: relative; height: 38px; margin: 0 8px 6px; border-bottom: 1px solid var(--border-strong); cursor: crosshair; touch-action: none; }
-.ff-point { position: absolute; bottom: -5px; width: 8px; height: 8px; padding: 0; border-radius: 0; transform: translateX(-50%); border: 1px solid var(--accent); background: var(--accent); }
-.ff-point.git { transform: translateX(-50%) rotate(45deg); background: var(--magenta); border-color: var(--magenta); }
-.ff-point.current { width: 3px; height: 30px; bottom: -1px; background: var(--warn); border: 0; }
-.ff-point.boundary { width: 5px; height: 28px; bottom: -1px; background: var(--bg); border: 2px solid var(--border-strong); }
-.ff-key { --key-color: var(--accent); position: absolute; top: 0; bottom: -6px; width: 18px; transform: translateX(-50%); cursor: ew-resize; touch-action: none; z-index: 5; }
-.ff-key::after { content: ''; position: absolute; left: 8px; top: 0; bottom: 0; border-left: 2px solid var(--key-color); }
-.ff-key.old { --key-color: var(--danger); }
-.ff-key.old::after { border-left-style: dashed; }
-.ff-key.new { --key-color: var(--success); }
-.ff-key::before { content: ''; position: absolute; left: 4px; top: -5px; width: 10px; height: 10px; border: 2px solid var(--key-color); background: var(--bg); transform: rotate(45deg); box-sizing: border-box; }
-.ff-key.new::before { background: var(--key-color); }
-.ff-key.dragging { width: 28px; }
-.ff-ranges { display: grid; grid-template-columns: 42px minmax(120px, 1fr) minmax(160px, 34%); gap: 5px 8px; align-items: center; }
-.ff-ranges input[type=range] { width: 100%; accent-color: var(--accent); }
-.ff-range-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: var(--fs-micro); }
-.ff-compare { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-.ff-status { flex: 0 0 auto; padding: 5px 9px; color: var(--text-dim); font-size: var(--fs-micro); border-bottom: 1px solid var(--border); }
-.ff-dock { flex: 0 0 auto; position: sticky; top: 0; z-index: 30; display: flex; gap: 6px; align-items: center; padding: 6px 8px; background: var(--bg); border-bottom: 1px solid var(--border-strong); }
-.ff-dock button { min-width: 36px; height: 28px; }
-.ff-compare .fi-columns { flex: 1; max-height: none; }
+
 /* Quick file view: one tool call's change + a fast editor. */
 .quick-file-view { height: calc(100vh - 82px); min-height: 400px; display: flex; flex-direction: column; }
-.qf-head { flex: 0 0 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-bottom: var(--sp-2); }
-.qf-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
-.qf-head .dim { font-size: var(--fs-micro); }
-.qf-body { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--border); background: var(--bg); }
+/* Same header language as the change review: one row, quiet buttons, the
+   file as the title with the moment beside it. */
+.qf-head { flex: 0 0 auto; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 42px; padding: 8px 0; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+.qf-head h1 { flex: 1; min-width: 150px; margin: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qf-head h1 span { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--text-dim); }
+.qf-head button { min-height: 26px; height: auto; padding: 3px 7px; border: 0; border-radius: 3px; background: transparent; color: var(--text-dim); font: 12px/1.4 var(--font); }
+.qf-head button:hover { background: var(--surface-2); color: var(--text); }
+.qf-head button.primary { padding: 4px 10px; background: var(--accent-strong); color: var(--accent-ink); }
+.qf-head button.primary:disabled { opacity: .5; }
+.qf-body { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
 .qf-body.editing { overflow: hidden; display: flex; flex-direction: column; }
 .qf-hunk-head { position: sticky; top: 0; z-index: 2; padding: 5px 9px; color: var(--text-dim); font-size: var(--fs-micro); background: var(--surface-1); border-bottom: 1px solid var(--border); }
 .qf-cmd { margin: 0; padding: 8px 12px; white-space: pre-wrap; font: 11px/1.45 var(--font); }
 .quick-file-view .fi-columns { max-height: none; overflow: visible; }
 [data-file-diff].kbd-pick { outline: 2px solid var(--accent); outline-offset: 1px; }
 [data-file-diff].file-return-jump, [data-transcript-path].file-return-jump { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ff-sheet { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-.ff-sheet .fi-columns { height: 100%; overflow: hidden; }
-.ff-sheet.scroll .fi-columns { overflow: auto; }
-.ff-ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; touch-action: none; z-index: 6; }
-.ff-sheet.inking .ff-ink { pointer-events: auto; cursor: crosshair; }
-.ff-sheet.erasing .ff-ink { cursor: cell; }
-body.file-full header, body.file-full #left, body.file-full #filtersPop, body.file-full #agentsPop, body.file-full .ff-head, body.file-full .ff-timeline, body.file-full .ff-status { display: none !important; }
-body.file-full #view { padding: 0; overflow: hidden; }
-body.file-full .focused-file-view { height: 100vh; min-height: 0; margin: 0; }
-body.file-full .ff-layout { grid-template-columns: minmax(0, 1fr); }
-body.file-full .ff-tree { display: none !important; }
-body.file-full.file-full-tree .ff-tree { display: block !important; }
-body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); }
-.ff-loading { padding: 30px; color: var(--text-dim); }
-@media (max-width: 1100px) { .ff-layout { grid-template-columns: 230px minmax(0, 1fr); } }
+
 :root[data-theme-mode="binary"] .fi-cell.old-change, :root[data-theme-mode="binary"] .fi-cell.new-change { color: var(--text); background: var(--bg); }
 :root[data-theme-mode="binary"] .fi-cell.old-change { border-left: 4px dashed var(--text); }
 :root[data-theme-mode="binary"] .fi-cell.old-change .code { text-decoration: line-through; }
 :root[data-theme-mode="binary"] .fi-cell.new-change { border-left: 4px double var(--text); }
 :root[data-theme-mode="binary"] .fi-cell.new-change .code { font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; }
-:root[data-theme-mode="binary"] .ff-point { background: var(--bg); border: 2px solid var(--text); }
-:root[data-theme-mode="binary"] .ff-point.git { background: var(--text); }
-:root[data-theme-mode="binary"] .ff-point.current { background: var(--text); border: 0; }
-:root[data-theme-mode="binary"] .ff-point.boundary { background: var(--bg); border: 2px double var(--text); }
-:root[data-theme-mode="binary"] .ff-key { --key-color: var(--text); }
-:root[data-theme-mode="binary"] .ff-key.old::before { background: var(--bg); }
-:root[data-theme-mode="binary"] .ff-key.new::before { background: var(--text); }
-.blame-view { max-width: var(--read-max); margin: 0 auto; }
-.blame-head { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; background: var(--bg); border-bottom: 1px solid var(--border); padding: var(--sp-2) 0; margin-bottom: var(--sp-2); }
-.blame-head h2 { margin: 0 0 2px; font-size: var(--fs-title); }
-.blame-head .pmeta { margin-bottom: 4px; }
-.blame-tools { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; }
-.blame-tools input[type=search] { flex: 1; min-width: 180px; }
-.blame-day { color: var(--text-faint); font-size: var(--fs-micro); border-bottom: 1px solid var(--border); padding: 8px 6px 2px; margin-top: 6px; }
-.blame-line { display: grid; grid-template-columns: 44px 42px 16px 4px 1fr; gap: 6px; align-items: baseline; padding: 0 6px 0 0; font: 11px/1.5 var(--font); cursor: pointer; }
-.blame-line:hover { background: var(--surface-2); }
-.blame-line .ln { text-align: right; color: var(--text-faint); user-select: none; }
-.blame-line .age { color: var(--text-dim); font-size: 10px; user-select: none; }
-.blame-line .glyph { color: var(--text-dim); user-select: none; }
-.blame-line .bar { align-self: stretch; background: var(--border); }
-.blame-line.a0 .bar { background: var(--accent); }
-.blame-line.a1 .bar { background: var(--success); }
-.blame-line.a2 .bar { background: var(--text-dim); }
-.blame-line.a3 .bar, .blame-line.a4 .bar { background: var(--border); }
-.blame-line.a3 .age, .blame-line.a4 .age { color: var(--text-faint); }
-.blame-line .txt { white-space: pre-wrap; word-break: break-word; }
-.blame-line.unowned { cursor: default; }
-.blame-line.unowned .txt { color: var(--text-dim); }
-:root[data-theme-mode="binary"] .blame-line .bar { background: var(--text) !important; }
-:root[data-theme-mode="binary"] .blame-line.a0 .age, :root[data-theme-mode="binary"] .blame-line.a1 .age { font-weight: 700; color: var(--text); }
+
 .empty { color: var(--text-dim); text-align: center; margin-top: 60px; }
 .empty .hint { color: var(--text-faint); font-size: var(--fs-meta); }
 
@@ -1141,8 +931,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 .rc-dialog-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
 .rc-dialog-row input[type="text"] { flex: 1; min-width: 120px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 4px 6px; font: inherit; }
 .rc-dialog textarea { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); padding: 6px; font: inherit; font-size: var(--fs-micro); }
-
-
 
 /* launcher mode row + overlays (mode manager, mode form, context confirm) */
 .mode-form, .ctx-confirm { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: var(--overlay); padding: 16px; }
@@ -1410,12 +1198,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 .file-action-head { padding: 5px 8px 7px; color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-bottom: 1px solid var(--border); }
 .file-action-menu button { display: block; width: 100%; height: auto; min-height: 28px; padding: 5px 8px; border: 0; background: transparent; color: var(--text); text-align: left; font: inherit; font-size: 11px; }
 .file-action-menu button:hover, .file-action-menu button:focus-visible { background: var(--surface-2); color: var(--accent); }
-.file-preview { position: fixed; inset: 0; z-index: 10020; display: grid; grid-template-rows: auto minmax(0, 1fr); background: color-mix(in srgb, var(--bg) 94%, transparent); }
-.file-preview-head { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
-.file-preview-head span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-preview-body { min-height: 0; overflow: auto; padding: 16px; }
-.file-preview-body > .md { max-width: var(--read-max); margin: 0 auto; }
-.file-preview-body > pre { margin: 0; padding: 12px; min-width: min-content; white-space: pre; font: 12.5px/1.5 var(--font); }
 :root[data-theme-mode="binary"] .file-action-menu { box-shadow: none; border-width: 2px; }
 .msg.toolline { padding: 3px 14px; font-size: 11px; color: var(--text-faint); }
 .msg-file-inline { border: 0; background: transparent; color: var(--text-dim); font-size: 11px; padding: 0; height: auto; cursor: pointer; font-family: inherit; }
@@ -1445,10 +1227,7 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
 /* file-edit links on the group line and in the ▤ files fold */
 .tg-file { height: 18px; padding: 0 5px; border: 0; background: transparent; color: var(--text-dim); font-size: 10px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 .tg-file:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
-.tg-files > summary { cursor: pointer; list-style: none; user-select: none; text-align: center; padding: 2px 14px; font-size: 11px; color: var(--text-dim); }
-.tg-files > summary::-webkit-details-marker { display: none; }
-.tg-files > summary:hover { color: var(--text); }
-.tg-files-list { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; padding: 4px 14px; }
+
 /* the run card's growing steps line: same voice as the settled toolgroup */
 /* the card's status line duplicates the pane head now — keep it quiet */
 .runcard .rc-status { display: none; }
@@ -1797,9 +1576,7 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
   #agentSend, #agentRun { margin-left: auto; position: sticky; right: 0; z-index: 1; box-shadow: -6px 0 6px -2px var(--surface-1); }
 
   .project-overview, .settings-page, .diff-view { width: 100%; }
-  /* Phone: the project head scrolls away like the conversation head does.
-     Sticky here buried the content under title + buttons + fold chips. */
-  .phead { position: static; top: auto; margin: -1px -2px 10px; }
+
   /* Column direction + align-items:flex-start let items grow to max-content
      width; wide code blocks then push the text off screen. Stretch fixes it. */
   .pdoclayout { flex-direction: column; align-items: stretch; }
@@ -1818,8 +1595,7 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
   .pdocsec, .pdsub, .pdocbody h1, .pdocbody h2 { scroll-margin-top: 48px; }
   /* Long tokens (paths, urls) must wrap, not push the page sideways. */
   .pdocbody { overflow-wrap: anywhere; }
-  .pactions { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-  .pactions button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
+
   /* The toolbar's status line drops under the tabs and scrolls sideways. */
   .ptoolbar .pmemline { margin-left: 0; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 4px 0 8px; }
   .ptoolbar .pmemline > * { flex: 0 0 auto; white-space: nowrap; }
@@ -1833,24 +1609,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
   .ntree { position: static; width: 100%; max-height: 38dvh; }
   .npane { width: 100%; padding: 10px 12px; }
 
-  .mobile-only { display: inline-flex; }
-  .focused-file-view { height: calc(100dvh - 96px); min-height: 0; margin: -8px -10px calc(-20px - env(safe-area-inset-bottom)); }
-  .ff-head { padding: 5px 7px; gap: 5px; }
-  .ff-head button { min-height: 38px; height: 38px; }
-  .ff-head b { order: 10; flex-basis: 100%; min-width: 0; font-size: 12px; }
-  .ff-head .dim, .ff-head #ffLatest { display: none; }
-  .ff-layout { display: block; min-height: 0; position: relative; }
-  .ff-tree { display: none; width: 100%; height: 100%; border-right: 0; }
-  .focused-file-view.show-tree .ff-tree { display: block !important; }
-  .focused-file-view.show-tree .ff-main { display: none; }
-  .ff-main { height: 100%; }
-  .ff-timeline { padding: 6px 8px; }
-  .ff-track { margin: 0 5px 5px; }
-  .ff-ranges { grid-template-columns: 38px minmax(0, 1fr); gap: 5px; }
-  .ff-range-label { display: none; }
-  .ff-dock { overflow-x: auto; gap: 5px; padding: 5px 6px; }
-  .ff-dock button { min-width: 42px; height: 40px; flex: 0 0 auto; }
-  .ff-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fi-columns { font-size: 11px; max-height: none; }
   .fi-diff-row.changed { grid-template-columns: minmax(0, 1fr); }
   .fi-diff-row.changed .fi-cell + .fi-cell { border-left: 0; border-top: 1px solid var(--border-strong); }
@@ -1858,10 +1616,6 @@ body.file-full.file-full-tree .ff-layout { grid-template-columns: minmax(180px, 
   .fi-cell { grid-template-columns: 36px minmax(0, 1fr); }
   .fi-cell .ln { padding: 2px 4px; }
   .fi-cell .code { padding: 2px 6px; }
-  .fi-line-history { min-width: 0; }
-  .fi-history-entry, .fi-history-change { grid-template-columns: 1fr; }
-  .diff-body table, .diff-body tbody, .diff-body tr, .diff-body td { display: block; width: 100%; }
-  .diff-body td { padding: 5px 7px; }
 
   .overlay { padding: 8px; align-items: center; }
   .dialog { width: 100%; max-height: 90dvh; overflow: auto; padding: 12px; }
@@ -2021,7 +1775,6 @@ window.aiconvoSyncTheme();
 <script src="/delegation-ui.js"></script>
 <script src="/filesmode.js"></script>
 <script src="/files-browser.js"></script>
-<script src="/file-history-drawer.js"></script>
 <script src="/live-file.js"></script>
 <link rel="stylesheet" href="/live-file.css">
 <script src="/change-review-ui.js"></script>
@@ -2146,11 +1899,24 @@ window.addEventListener('popstate', () => {
 });
 
 function goHome() {
-  if (window.fileInk && fileInk.teardown) fileInk.teardown();
   markSettingsClosed();
   if (progressStream) { progressStream.close(); progressStream = null; }
-  setRoute('home', lens === 'files' ? 'files' : '');
+  setRoute('home', '');
   renderTabList();
+}
+
+// The files browser, in Changes mode, filtered to one conversation: what
+// that conversation changed, with the diffs.
+function showConversationChanges(key) {
+  const s = sessions.find(x => x.key === key);
+  const project = s ? projectOf(s) : currentProjectName();
+  if (!project) return errToast('This conversation belongs to no project.');
+  return showFilesBrowser(project, { conv: key, mode: 'changes', range: 'conversation' });
+}
+// The project a checkout belongs to, from the repository cards on home.
+function projectNameForRoot(root) {
+  const hit = (gitReposCache || []).find(r => r.root === root);
+  return hit ? hit.project || '' : '';
 }
 
 // The route dispatcher: one hash grammar for every view.
@@ -2160,7 +1926,6 @@ function dispatchHash(h, { restore = false } = {}) {
   if (h === 'usage') return showUsageDashboard();
   // Saved search links use the current dialog, not the removed list view.
   if (h.startsWith('q=')) {
-    if (window.fileInk && fileInk.teardown) fileInk.teardown();
     markSettingsClosed();
     if (progressStream) { progressStream.close(); progressStream = null; }
     setRouteKind('home');
@@ -2170,8 +1935,8 @@ function dispatchHash(h, { restore = false } = {}) {
     return;
   }
   if (h.startsWith('note=')) return openNoteFile(h.slice(5));
-  // Files mode (design/33): the lens home, the project landing, the file
-  // workspace. `doc=` stays as an alias for old links.
+  // Files: the browser, and the file (the live editor). `doc=` stays as an
+  // alias for old links.
   if (h.startsWith('review=')) {
     const parts = new URLSearchParams('id=' + h.slice(7));
     return showChangeReview(parts.get('id'), parts.get('step') || '', parts.get('scope') || 'task');
@@ -2185,14 +1950,14 @@ function dispatchHash(h, { restore = false } = {}) {
     } catch { return goHome(); }
   }
   if (h === 'files') return goHome();
-  if (h.startsWith('files&project=')) return showFilesProject(h.slice(14));
+  if (h.startsWith('files&project=')) return showFilesBrowser(h.slice(14));
   if (h === 'file' || h.startsWith('file=') || h.startsWith('file&')) {
     const f = parseFileHash(h);
     if (!f.path) return goHome();
     let browserContext = null, reviewRef = null;
     try { if (f.browser) browserContext = JSON.parse(f.browser.startsWith('{') ? f.browser : decodeURIComponent(f.browser)); } catch {}
     try { if (f.review) reviewRef = JSON.parse(f.review.startsWith('{') ? f.review : decodeURIComponent(f.review)); } catch {}
-    return openFileWorkspace(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, landing: !!f.landing, back: f.back || null, browserContext, focused: !!f.focused, reviewRef });
+    return openLiveFile(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, back: f.back || null, browserContext, reviewRef });
   }
   if (h.startsWith('doc=')) {
     // doc=PATH[&PROJECT][&conv=KEY]. conv= names the conversation the
@@ -2220,7 +1985,8 @@ function dispatchHash(h, { restore = false } = {}) {
   }
   if (h.startsWith('tree=')) return showTree(h.slice(5));
   if (h === 'git') { goHome(); return setTab('repos'); }
-  if (h.startsWith('git=')) return showGitRepoHistory(h.slice(4));
+  // Old repository-history links: the files browser of that checkout.
+  if (h.startsWith('git=')) { const root = h.slice(4); return showFilesBrowser(projectNameForRoot(root), { root }); }
   if (h.startsWith('epic=')) return showEpic(h.slice(5));
   if (h.startsWith('project=')) {
     const project = h.slice(8);
@@ -2228,24 +1994,24 @@ function dispatchHash(h, { restore = false } = {}) {
     if (areaAt >= 0) return showAreaView(project.slice(0, areaAt), project.slice(areaAt + 6));
     const docsAt = project.indexOf('&docs');
     if (docsAt >= 0) {
-      // The old documents surface: a document opens in the file workspace,
-      // the list is the files landing (design/33 §5.2).
+      // Old document links: the live editor; the old documents list is the browser.
       const rest = project.slice(docsAt + 5);
       const docAt = rest.indexOf('&doc=');
       const name = project.slice(0, docsAt);
-      return docAt >= 0 ? openFileWorkspace(rest.slice(docAt + 5), { project: name }) : showFilesProject(name);
+      return docAt >= 0 ? openLiveFile(rest.slice(docAt + 5), { project: name }) : showFilesBrowser(name);
     }
-    if (project.endsWith('&files')) return showProjectFileHistory(project.slice(0, -6));
-    if (project.endsWith('&diffs')) return showProjectDiffs(project.slice(0, -6));
-    if (project.endsWith('&tree')) return showFilesProject(project.slice(0, -5));
-    return lens === 'files' ? showFilesProject(project) : showProjectOverview(project);
+    // Old files / diffs / tree links: the files browser (Changes for diffs).
+    if (project.endsWith('&files')) return showFilesBrowser(project.slice(0, -6));
+    if (project.endsWith('&diffs')) return showFilesBrowser(project.slice(0, -6), { mode: 'changes' });
+    if (project.endsWith('&tree')) return showFilesBrowser(project.slice(0, -5));
+    return showProjectOverview(project);
   }
-  if (h.startsWith('diffs=')) return showConversationDiffs(h.slice(6));
+  if (h.startsWith('diffs=')) return showConversationChanges(h.slice(6));
   if (h.startsWith('filecall=')) {
     const [key, call, pathValue, ts, anchor] = h.slice(9).split('&').map(s => { try { return decodeURIComponent(s); } catch { return s; } });
     return openToolCallFile(key, pathValue, ts, anchor, call);
   }
-  if (h.startsWith('blame=')) return showFileBlame(h.slice(6));
+  if (h.startsWith('blame=')) return goHome();
   // Browser Back from a file change or a document opened out of the
   // conversation lands on the control that opened it, not at the bottom.
   if (viewKind === 'file' && conversationFileReturn && conversationFileReturn.key === h)
@@ -2315,7 +2081,7 @@ function contextNavHtml(key, related, currentKind, currentEpicId = null) {
   ];
   if (related.notePath) items.push(`<button class="${currentKind === 'note' ? 'on' : ''}" data-nav-note="${esc(key)}">note</button>`);
   items.push(`<button class="${currentKind === 'standalone-evidence' ? 'on' : ''}" data-nav-card="${esc(key)}" title="The evidence card for this conversation. Built once, reused by epics.">evidence</button>`);
-  items.push(`<button class="${currentKind === 'diffs' ? 'on' : ''}" data-nav-diffs="${esc(key)}" title="Files the agent edited or wrote in this conversation.">diffs</button>`);
+  items.push(`<button data-nav-diffs="${esc(key)}" title="Files changed in this conversation, with what changed.">changes</button>`);
   for (const epic of related.epics || []) {
     const on = (currentKind === 'epic' || currentKind === 'evidence') && currentEpicId === epic.id;
     items.push(`<button class="${on ? 'on' : ''}" data-nav-epic="${esc(epic.id)}" title="${esc(epic.title)}">▸ ${esc(String(epic.title || 'epic').slice(0, 26))}</button>`);
@@ -2328,7 +2094,7 @@ function wireContextNav(root = $('view')) {
   root.querySelectorAll('[data-nav-tree]').forEach(b => b.onclick = () => showTree(b.dataset.navTree));
   root.querySelectorAll('[data-nav-note]').forEach(b => b.onclick = () => openRelatedNote(b.dataset.navNote));
   root.querySelectorAll('[data-nav-card]').forEach(b => b.onclick = () => openOrBuildEvidence(b.dataset.navCard));
-  root.querySelectorAll('[data-nav-diffs]').forEach(b => b.onclick = () => showConversationDiffs(b.dataset.navDiffs));
+  root.querySelectorAll('[data-nav-diffs]').forEach(b => b.onclick = () => showConversationChanges(b.dataset.navDiffs));
   root.querySelectorAll('[data-nav-epic]').forEach(b => b.onclick = () => showEpic(b.dataset.navEpic, activeRel));
   root.querySelectorAll('[data-nav-evidence]').forEach(b => b.onclick = () => showEpicEvidence(b.dataset.navEvidence, b.dataset.key || activeRel));
 }
@@ -4266,7 +4032,6 @@ function render() {
 }
 function renderNow() {
   renderQueued = false;
-  if (lens === 'files' && tab !== 'repos') { if (viewKind === 'home') { updateActiveBtn(); renderFilesTimeline(); renderSelbar(); } return; }
   if (tab !== 'conv') return;
   updateActiveBtn();
   $('count').textContent = shown.length + ' conversations';
@@ -4287,9 +4052,8 @@ function renderSelbar() {
 $('list').addEventListener('click', e => {
   if (e.timeStamp < suppressClickUntil) return; // a rubber-band drag ended here
   if (!e.target.closest('.tmark')) hideMarkPop();
-  if (lens === 'files' && filesListClick(e)) return;
   const repoLink = e.target.closest('[data-git-repo]');
-  if (repoLink) return showGitRepoHistory(repoLink.dataset.gitRepo);
+  if (repoLink) return showFilesBrowser(repoLink.dataset.gitProject || '', { root: repoLink.dataset.gitRepo });
   const foldChip = e.target.closest('[data-fold-from]');
   if (foldChip) return quickFold(foldChip.dataset.foldFrom, foldChip.dataset.foldInto);
   if (e.target.closest('[data-new-project]')) return openNewProjectForm();
@@ -4384,7 +4148,7 @@ function applyProjectRowHl() {
 $('list').addEventListener('dblclick', e => {
   if (e.timeStamp < suppressClickUntil) return; // a rubber-band drag ended here
   const label = e.target.closest('.project-row-label');
-  if (label) { rowHlProject = null; return lens === 'files' ? showFilesProject(label.dataset.project) : showProjectOverview(label.dataset.project); }
+  if (label) { rowHlProject = null; return showProjectOverview(label.dataset.project); }
   const mark = e.target.closest('.tmark');
   if (mark && viewKind === 'home' && mark.dataset.rel) { hideMarkPop(); return open(mark.dataset.rel); }
 });
@@ -4469,132 +4233,8 @@ async function openNoteFile(file) {
   }
 }
 
-// ---- Git-weaved file Gantt (design/18-git-weaved-file-gantt.md) ----
-const FG_DAY = 86400000;
-let fileHistoryData = null;
-let fileGanttScale = 160;
-let fileGanttInitialScroll = true;
-let focusedFileRow = null;
-let focusedFileCompare = null;
-let focusedFileWindow = null;
-let fileCompareLines = localStorage.getItem('aiconvo.fileLines') === '1';
-let fileReadingMode = localStorage.getItem('aiconvo.fileRead') === '1';
-let fileComparePages = localStorage.getItem('aiconvo.filePages') !== '0';
-let focusedFileRequest = 0;
-let focusedCompareTimer = null;
-const focusedRowsCache = new Map();
-
+// Attribute-safe text for HTML attribute values.
 const fgAttr = value => esc(value).replace(/"/g, '&quot;');
-
-function fileHistoryBranches(data) {
-  const names = new Set();
-  for (const row of data.rows || []) {
-    for (const event of row.aiEvents || []) {
-      if (event.branch) names.add(event.branch);
-      if (event.inferredBranch) names.add(event.inferredBranch);
-    }
-    for (const commit of row.commitEvents || []) for (const branch of commit.branches || []) names.add(branch);
-  }
-  return [...names].sort();
-}
-
-function fileTickLabel(ms, interval) {
-  const date = new Date(ms);
-  if (interval < FG_DAY) return date.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  if (interval < 28 * FG_DAY) return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
-}
-
-function fileGanttBounds(data) {
-  const times = [];
-  for (const row of data.rows || []) {
-    for (const event of row.aiEvents || []) { const t = Date.parse(event.ts || ''); if (Number.isFinite(t)) times.push(t); }
-    for (const event of row.commitEvents || []) { const t = Date.parse(event.ts || ''); if (Number.isFinite(t)) times.push(t); }
-  }
-  const now = Date.now();
-  const min = times.length ? Math.min(...times) : now - FG_DAY;
-  const max = Math.max(now, ...(times.length ? times : [now]));
-  const pad = Math.max(3600000, Math.min(FG_DAY, (max - min) * 0.02));
-  return { start: min - pad, end: max + pad };
-}
-
-function renderFileGanttChart() {
-  const data = fileHistoryData;
-  if (!data || !$('fgRows')) return;
-  const search = $('fgSearch').value.trim().toLowerCase();
-  const branch = $('fgBranch').value;
-  const mode = $('fgMode').value;
-  const bounds = fileGanttBounds(data);
-  const span = Math.max(FG_DAY / 24, bounds.end - bounds.start);
-  const rawWidth = span / FG_DAY * fileGanttScale;
-  const width = Math.round(Math.max(900, Math.min(60000, rawWidth)));
-  const pxPerMs = (width - 40) / span;
-  const xFor = ts => Math.max(0, Math.min(width, 20 + (Date.parse(ts || '') - bounds.start) * pxPerMs));
-  const effectiveDay = FG_DAY * pxPerMs;
-  let interval = 30 * FG_DAY;
-  if (effectiveDay >= 1000) interval = 3600000;
-  else if (effectiveDay >= 280) interval = 6 * 3600000;
-  else if (effectiveDay >= 65) interval = FG_DAY;
-  else if (effectiveDay >= 14) interval = 7 * FG_DAY;
-  const firstTick = Math.floor(bounds.start / interval) * interval;
-  const ticks = [];
-  for (let time = firstTick; time <= bounds.end && ticks.length < 500; time += interval) {
-    const left = 20 + (time - bounds.start) * pxPerMs;
-    if (left >= 0 && left <= width) ticks.push(`<span class="fg-tick" style="left:${left}px">${esc(fileTickLabel(time, interval))}</span>`);
-  }
-  const filtered = [];
-  for (const row of data.rows || []) {
-    if (search && !(row.relativePath || '').toLowerCase().includes(search) && !(row.repoRoot || '').toLowerCase().includes(search)) continue;
-    let ai = (row.aiEvents || []).filter(event => !branch || event.branch === branch || event.inferredBranch === branch);
-    let commits = (row.commitEvents || []).filter(commit => !branch || (commit.branches || []).includes(branch));
-    if (mode === 'ai') commits = [];
-    else if (mode === 'commits') ai = [];
-    else if (mode === 'unpaired') { ai = ai.filter(event => !event.commitPair); commits = []; }
-    else if (mode === 'working') { ai = []; commits = []; if (!row.workingTree) continue; }
-    if (!ai.length && !commits.length && !(row.workingTree && (mode === 'all' || mode === 'working'))) continue;
-    filtered.push({ row, ai, commits });
-  }
-  const shown = filtered.slice(0, 120);
-  $('fgShown').textContent = `showing ${shown.length}/${filtered.length} files`;
-  $('fgRoot').style.setProperty('--fg-width', width + 'px');
-  $('fgRoot').style.setProperty('--fg-grid', Math.max(4, effectiveDay) + 'px');
-  $('fgAxis').innerHTML = ticks.join('');
-  $('fgRows').innerHTML = shown.map(({ row, ai, commits }) => {
-    const commitByHash = new Map(commits.map(commit => [commit.hash, commit]));
-    const links = ai.map(event => {
-      const pair = event.commitPair;
-      if (!pair || !commitByHash.has(pair.hash)) return '';
-      const a = xFor(event.ts), b = xFor(pair.ts);
-      return `<span class="fg-link ${esc(pair.confidence)}" style="left:${Math.min(a, b)}px;width:${Math.max(1, Math.abs(b - a))}px" title="${fgAttr(pair.confidence)} inferred link · ${fgAttr(pair.basis)}"></span>`;
-    }).join('');
-    const aiMarks = ai.map((event, i) => {
-      const pair = event.commitPair;
-      const state = event.outcome === 'failed' ? 'failed' : event.repositoryState === 'working-tree' ? 'working' : !pair ? 'unresolved' : '';
-      const pairText = pair ? ` · ${pair.confidence} → ${pair.shortHash}` : ` · ${event.repositoryState}`;
-      const branchText = event.inferredBranch ? `${event.branch || 'HEAD'} → ${event.inferredBranch}` : event.branch || 'branch ?';
-      const title = `${event.kind} · ${event.outcome} · ${event.conversationTitle || ''} · ${branchText}${pairText} · ${fmtDate(event.ts)}`;
-      const left = xFor(event.ts) + ((i % 5) - 2) * 2;
-      return `<button class="fg-mark ai ${state}" data-fg-ai="${esc(event.id)}" style="left:${left}px" title="${fgAttr(title)}">${diffKindGlyph(event.kind)}</button>`;
-    }).join('');
-    const commitMarks = commits.map(commit => {
-      const title = `${commit.shortHash} · ${commit.subject} · ${(commit.branches || []).join(', ') || 'detached'} · ${fmtDate(commit.ts)}`;
-      return `<button class="fg-mark git" data-fg-commit="${esc(commit.hash)}" data-fg-repo="${esc(row.repoId)}" style="left:${xFor(commit.ts)}px" title="${fgAttr(title)}"><span>◆</span></button>`;
-    }).join('');
-    const counts = `${ai.length} AI · ${commits.length} Git`;
-    return `<div class="fg-row"><button type="button" class="fg-label" data-fg-file="${fgAttr(row.id)}" title="Open the whole file and compare two times\n${fgAttr(row.path)}"><span class="path">${esc(row.relativePath)}</span><span class="n">${esc(counts)}</span></button><div class="fg-track">${links}${aiMarks}${commitMarks}${row.workingTree ? `<span class="fg-work" title="working tree: ${fgAttr(row.workingTree)}"></span>` : ''}</div></div>`;
-  }).join('') || '<div class="fg-empty">no file history matches these filters.</div>';
-  $('fgRows').querySelectorAll('[data-fg-file]').forEach(label => label.onclick = () => {
-    const row = (data.rows || []).find(item => item.id === label.dataset.fgFile);
-    if (row) enterFocusedFile(row);
-  });
-  $('fgRows').querySelectorAll('[data-fg-ai]').forEach(mark => mark.onclick = () => showDiffEvent(mark.dataset.fgAi));
-  $('fgRows').querySelectorAll('[data-fg-commit]').forEach(mark => mark.onclick = () => showGitCommit(mark.dataset.fgRepo, mark.dataset.fgCommit));
-  const scroller = $('fgScroll');
-  if (fileGanttInitialScroll) {
-    fileGanttInitialScroll = false;
-    requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth; });
-  }
-}
 
 // ---- line diff ----
 // LineDiff (/linediff.js, shared with the server) is exact and has no size
@@ -4862,519 +4502,6 @@ function fileCompareCell(kind, n, html) {
   return `<div class="fi-cell ${cls}"><span class="ln" title="Open the source of this change">${n || ''}</span><span class="code">${html || ''}</span></div>`;
 }
 
-// First row index of every run of changed rows (computed from the row
-// model, so it does not depend on which rows are currently rendered).
-function fileChangeStarts(rows) {
-  const starts = [];
-  for (let i = 0; i < rows.length; i++) if (rows[i].changed && (i === 0 || !rows[i - 1].changed)) starts.push(i);
-  return starts;
-}
-function compareListOf(root) {
-  if (!root) return null;
-  return root.__compareList || (root.closest && root.closest('.ff-compare, .qf-body') || {}).__compareList || null;
-}
-
-function fileCompareDockHtml(identical) {
-  const full = document.body.classList.contains('file-full');
-  return `<div class="ff-dock" id="ffDock">
-    <button id="ffDockClose" title="Leave full screen"${full ? '' : ' hidden'}>X</button>
-    <button id="ffDockPrev" title="Previous change, or previous file in this interval">↑</button><button id="ffDockNext" title="Next change, or next file in this interval">↓</button>
-    <button id="ffDockFull" title="File diff full screen"${full ? ' hidden' : ''}>full</button>
-    <button id="ffDockTree" title="Open file tree"${full ? '' : ' hidden'}>${document.body.classList.contains('file-full-tree') ? 'hide tree' : 'tree'}</button>
-    <button id="ffInk" title="Draw on this page">ink</button>
-    <button id="ffErase" hidden title="Erase ink">erase</button>
-    <button id="ffInkClear" hidden title="Clear ink on this page">clear</button>
-    <button id="ffInkSend" hidden title="Send this page to the conversation">send</button>
-    <button id="ffViewMode" title="Paginated or scrolling file view">pages</button>
-    <button id="ffPagePrev" title="Previous page">‹</button>
-    <span id="ffPageInfo" class="dim">1/1</span>
-    <button id="ffPageNext" title="Next page">›</button>
-  </div>`;
-}
-function syncFileDiffFullUi() {
-  const on = document.body.classList.contains('file-full');
-  if ($('ffDockClose')) $('ffDockClose').hidden = !on;
-  if ($('ffDockFull')) $('ffDockFull').hidden = on;
-  if ($('ffDockTree')) {
-    $('ffDockTree').hidden = !on || !$('ffTree');
-    $('ffDockTree').textContent = document.body.classList.contains('file-full-tree') ? 'hide tree' : 'tree';
-  }
-}
-function enterFileDiffFull() {
-  document.body.classList.add('file-full');
-  syncFileDiffFullUi();
-  const node = document.documentElement;
-  if (node.requestFullscreen) node.requestFullscreen().catch(() => {});
-  requestAnimationFrame(() => fileInk.paginate());
-}
-function exitFileDiffFull() {
-  document.body.classList.remove('file-full', 'file-full-tree');
-  syncFileDiffFullUi();
-  if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
-  fileInk.teardown();
-}
-function wireFileCompareDock(root, list) {
-  if (list) root.__compareList = list;
-  if ($('ffDockPrev')) $('ffDockPrev').onclick = () => jumpFileChange(root, -1);
-  if ($('ffDockNext')) $('ffDockNext').onclick = () => jumpFileChange(root, 1);
-  if ($('ffDockFull')) $('ffDockFull').onclick = enterFileDiffFull;
-  if ($('ffDockClose')) $('ffDockClose').onclick = exitFileDiffFull;
-  if ($('ffDockTree')) $('ffDockTree').onclick = () => {
-    document.body.classList.toggle('file-full-tree');
-    syncFileDiffFullUi();
-  };
-  fileInk.bind(root, list);
-}
-
-const fileInk = {
-  root: null, sheet: null, canvas: null, ctx: null,
-  rows: [], compare: null, fileRow: null,
-  pages: [], page: 0, strokes: [], draft: null,
-  on: false, erase: false, lastPen: 0,
-  store: new Map(), rowBox: [], hostBox: null, haloQ: 0,
-  key() {
-    const c = this.compare || {}, r = this.fileRow || {};
-    return (r.id || c.path || '') + '\0' + (c.from || '') + '\0' + (c.to || '');
-  },
-  bind(root, list) {
-    this.root = root;
-    this.list = list || compareListOf(root);
-    const cols = this.list ? this.list.el : root.querySelector('.fi-columns');
-    if (!cols) return;
-    let sheet = root.querySelector('.ff-sheet');
-    if (!sheet) {
-      sheet = document.createElement('div');
-      sheet.className = 'ff-sheet';
-      cols.parentNode.insertBefore(sheet, cols);
-      sheet.appendChild(cols);
-    }
-    let canvas = sheet.querySelector('.ff-ink');
-    if (!canvas) {
-      canvas = document.createElement('canvas');
-      canvas.className = 'ff-ink';
-      sheet.appendChild(canvas);
-    }
-    this.sheet = sheet; this.canvas = canvas; this.ctx = canvas.getContext('2d');
-    this.hook();
-    requestAnimationFrame(() => this.paginate());
-  },
-  attach(compare, fileRow, rows) {
-    this.compare = compare; this.fileRow = fileRow; this.rows = rows || [];
-    this.strokes = this.store.get(this.key()) || [];
-    this.page = 0;
-    this.setMode(false, false);
-  },
-  hook() {
-    if (!this.canvas.dataset.inkHooked) {
-      this.canvas.dataset.inkHooked = '1';
-      this.canvas.onpointerdown = e => this.down(e);
-      this.canvas.onpointermove = e => this.move(e);
-      this.canvas.onpointerup = e => this.up(e);
-      this.canvas.onpointercancel = e => this.up(e);
-      window.addEventListener('resize', () => {
-        if (!this.sheet || !this.sheet.isConnected) return;
-        if (this.list) this.list.refresh();
-        this.paginate();
-      });
-    }
-    if ($('ffInk')) $('ffInk').onclick = () => this.setMode(!this.on, false);
-    if ($('ffErase')) $('ffErase').onclick = () => this.setMode(true, !this.erase);
-    if ($('ffInkClear')) $('ffInkClear').onclick = () => this.clearPage();
-    if ($('ffInkSend')) $('ffInkSend').onclick = () => this.send();
-    if ($('ffPagePrev')) $('ffPagePrev').onclick = () => this.showPage(this.page - 1);
-    if ($('ffPageNext')) $('ffPageNext').onclick = () => this.showPage(this.page + 1);
-    if ($('ffViewMode')) $('ffViewMode').onclick = () => {
-      fileComparePages = !fileComparePages;
-      localStorage.setItem('aiconvo.filePages', fileComparePages ? '1' : '0');
-      this.applyViewMode();
-    };
-    this.applyViewMode(false);
-  },
-  applyViewMode(repaginate = true) {
-    if (this.sheet) this.sheet.classList.toggle('scroll', !fileComparePages);
-    if ($('ffViewMode')) {
-      $('ffViewMode').textContent = fileComparePages ? 'pages' : 'scroll';
-      $('ffViewMode').classList.toggle('primary', !fileComparePages);
-    }
-    if ($('ffPagePrev')) $('ffPagePrev').hidden = !fileComparePages;
-    if ($('ffPageNext')) $('ffPageNext').hidden = !fileComparePages;
-    if ($('ffPageInfo')) $('ffPageInfo').hidden = !fileComparePages;
-    if (repaginate) this.paginate();
-  },
-  setMode(on, erase) {
-    this.on = on; this.erase = !!(on && erase);
-    if (this.sheet) {
-      this.nativeInk = !!(window.AiconvoInk && window.AiconvoInk.setEnabled);
-      this.sheet.classList.toggle('inking', this.on && !this.nativeInk);
-      this.sheet.classList.toggle('erasing', this.erase && !this.nativeInk);
-    }
-    if ($('ffInk')) $('ffInk').classList.toggle('primary', this.on && !this.erase);
-    if ($('ffErase')) { $('ffErase').hidden = !this.on; $('ffErase').classList.toggle('primary', this.erase); }
-    if ($('ffInkClear')) $('ffInkClear').hidden = !this.on;
-    if ($('ffInkSend')) $('ffInkSend').hidden = !this.on;
-    this.nativeInk = !!(window.AiconvoInk && window.AiconvoInk.setEnabled);
-    if (this.nativeInk) {
-      try {
-        window.AiconvoInk.setEnabled(this.on);
-        window.AiconvoInk.setErase(this.erase);
-        if (!this.on && window.AiconvoInk.clearAll) window.AiconvoInk.clearAll();
-      } catch (e) {}
-    }
-    if (!this.on && this.ctx && this.canvas) this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-  },
-  teardown() {
-    this.setMode(false, false);
-    this.clearNativeAll();
-    this.draft = null;
-  },
-  // Pages and row boxes come from the virtual list: no per-row measuring.
-  paginate() {
-    if (!this.sheet || !this.list) return;
-    this.list.setPagesMode(!!fileComparePages);
-    this.syncPageUi();
-    this.resize();
-    this.cacheRows();
-    this.draw(true);
-    this.clearNativeAll();
-  },
-  showPage(n) {
-    if (!this.list || !this.list.pagesMode) return;
-    this.list.setPage(n);
-    this.syncPageUi();
-    this.resize();
-    this.cacheRows();
-    this.draw(true);
-    this.clearNativeAll();
-  },
-  syncPageUi() {
-    if (!this.list) return;
-    this.page = this.list.page;
-    const count = this.list.pagesMode ? this.list.pageCount() : 1;
-    if ($('ffPageInfo')) $('ffPageInfo').textContent = (this.page + 1) + '/' + count;
-    if ($('ffPagePrev')) $('ffPagePrev').disabled = this.page <= 0;
-    if ($('ffPageNext')) $('ffPageNext').disabled = this.page >= count - 1;
-  },
-  // Called by the list after every window render: ink follows scrolling.
-  onListRender(list) {
-    if (!this.canvas || !this.sheet || !this.sheet.isConnected || list !== this.list) return;
-    this.syncPageUi();
-    this.cacheRows();
-    this.draw(true);
-  },
-  resize() {
-    if (!this.canvas || !this.sheet) return;
-    const w = Math.max(1, this.sheet.clientWidth);
-    const h = Math.max(1, this.sheet.clientHeight);
-    const dpr = 1;
-    this.canvas.width = Math.round(w * dpr);
-    this.canvas.height = Math.round(h * dpr);
-    this.canvas.style.width = w + 'px';
-    this.canvas.style.height = h + 'px';
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  },
-  renderedRows() {
-    return this.list ? this.list.rendered() : [];
-  },
-  cacheRows() {
-    if (!this.canvas) return;
-    this.hostBox = this.canvas.getBoundingClientRect();
-    const host = this.hostBox;
-    this.rowBox = this.renderedRows().map(({ i, el }) => {
-      const box = el.getBoundingClientRect();
-      return { i, l: box.left - host.left, t: box.top - host.top, w: Math.max(1, box.width), h: Math.max(1, box.height) };
-    });
-    this.rowByI = new Map(this.rowBox.map(r => [r.i, r]));
-  },
-  locXY(x, y) {
-    const rows = this.rowBox;
-    let hit = null;
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i];
-      if (y >= r.t && y <= r.t + r.h) { hit = r; break; }
-    }
-    if (!hit) {
-      const host = this.hostBox || { width: 1, height: 1 };
-      return { i: -1, x: x / Math.max(1, host.width), y: y / Math.max(1, host.height) };
-    }
-    return { i: hit.i, x: (x - hit.l) / hit.w, y: (y - hit.t) / hit.h };
-  },
-  loc(e) {
-    const r = this.hostBox || this.canvas.getBoundingClientRect();
-    return this.locXY(e.clientX - r.left, e.clientY - r.top);
-  },
-  screen(pt) {
-    if (pt.i < 0) {
-      const host = this.hostBox || { width: 1, height: 1 };
-      return { x: pt.x * host.width, y: pt.y * host.height };
-    }
-    const row = this.rowByI && this.rowByI.get(pt.i);
-    if (!row) return null;
-    return { x: row.l + pt.x * row.w, y: row.t + pt.y * row.h };
-  },
-  down(e) {
-    if (!this.on) return;
-    if (e.pointerType !== 'pen' && e.pointerType !== 'eraser') return;
-    if ((e.width || 0) > 28 || (e.height || 0) > 28) return;
-    this.lastPen = Date.now();
-    e.preventDefault();
-    this.canvas.setPointerCapture(e.pointerId);
-    const erase = this.erase || e.pointerType === 'eraser' || e.button === 5;
-    const p = this.raw(e);
-    this.draft = { erase, raw: [p], last: p };
-    if (this.nativeInk) return;
-    if (erase) this.eraseAt(p.x, p.y);
-    else this.live(p, p);
-  },
-  move(e) {
-    if (!this.draft) return;
-    e.preventDefault();
-    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    for (const ev of evs) {
-      const p = this.raw(ev);
-      const last = this.draft.last;
-      if (last && (p.x - last.x) * (p.x - last.x) + (p.y - last.y) * (p.y - last.y) < 4) continue;
-      this.draft.raw.push(p);
-      if (this.nativeInk) { this.draft.last = p; continue; }
-      if (this.draft.erase) this.eraseAt(p.x, p.y);
-      else this.live(last, p);
-      this.draft.last = p;
-    }
-  },
-  up(e) {
-    if (!this.draft) return;
-    if (e) e.preventDefault();
-    this.commitRaw(this.draft.raw, this.draft.erase);
-    this.draft = null;
-  },
-  raw(e) {
-    const r = this.hostBox || this.canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  },
-  live(a, b) {
-    if (!this.ctx || !a || !b) return;
-    this.ctx.lineCap = 'round'; this.ctx.lineJoin = 'round';
-    this.ctx.strokeStyle = themeToken('--ink');
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath(); this.ctx.moveTo(a.x, a.y); this.ctx.lineTo(b.x, b.y); this.ctx.stroke();
-  },
-  commitRaw(raw, erase) {
-    if (!this.hostBox) this.cacheRows();
-    const pts = [];
-    for (const p of raw || []) pts.push(this.locXY(p.x, p.y));
-    if (erase) {
-      for (const p of pts) this.eraseNear(p);
-      this.store.set(this.key(), this.strokes);
-      this.draw(true);
-      this.clearNativeAll();
-      return;
-    }
-    if (pts.length > 1) {
-      const stroke = { erase: false, pts };
-      this.strokes.push(stroke);
-      this.store.set(this.key(), this.strokes);
-      this.queueHalo(stroke);
-    }
-  },
-  queueHalo(stroke) {
-    this.haloQ = (this.haloQ || 0) + 1;
-    const id = this.haloQ;
-    setTimeout(() => {
-      if (id !== this.haloQ || !this.ctx) return;
-      this.stroke(this.ctx, stroke.pts, false, false, true);
-    }, 80);
-  },
-  clearNative() {
-    if (window.AiconvoInk && window.AiconvoInk.clearLive) {
-      try { window.AiconvoInk.clearLive(); } catch (e) {}
-    }
-  },
-  clearNativeAll() {
-    if (window.AiconvoInk && window.AiconvoInk.clearAll) {
-      try { window.AiconvoInk.clearAll(); } catch (e) {}
-    } else this.clearNative();
-  },
-  eraseAt(x, y) {
-    const r2 = 16 * 16;
-    const before = this.strokes.length;
-    this.strokes = this.strokes.filter(stroke => {
-      for (const p of stroke.pts) {
-        const s = this.screen(p);
-        if (s && (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y) <= r2) return false;
-      }
-      return true;
-    });
-    if (this.strokes.length !== before) this.draw(true);
-  },
-  eraseNear(pt) {
-    const hit = this.screen(pt);
-    if (!hit) return;
-    this.eraseAt(hit.x, hit.y);
-  },
-  clearPage() {
-    const visible = new Set(this.renderedRows().map(item => item.i));
-    this.strokes = this.strokes.filter(stroke => !stroke.pts.some(pt => visible.has(pt.i)));
-    this.store.set(this.key(), this.strokes);
-    this.draw();
-  },
-  stroke(ctx, pts, erase, ai, halo) {
-    const pts2 = pts.map(pt => this.screen(pt)).filter(Boolean);
-    if (pts2.length < 2) return;
-    const binary = isEink();
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    if (erase) return;
-    if (halo && !ai && binary) {
-      ctx.strokeStyle = themeToken('--ink-halo'); ctx.lineWidth = 5; ctx.beginPath();
-      ctx.moveTo(pts2[0].x, pts2[0].y);
-      for (let i = 1; i < pts2.length; i++) ctx.lineTo(pts2[i].x, pts2[i].y);
-      ctx.stroke();
-      ctx.strokeStyle = themeToken('--ink'); ctx.lineWidth = 2;
-    } else {
-      ctx.strokeStyle = themeToken(ai ? '--ink-ai' : '--ink');
-      ctx.lineWidth = ai ? 2.6 : 2.2;
-    }
-    ctx.beginPath();
-    ctx.moveTo(pts2[0].x, pts2[0].y);
-    for (let i = 1; i < pts2.length; i++) ctx.lineTo(pts2[i].x, pts2[i].y);
-    ctx.stroke();
-  },
-  draw(halo) {
-    if (!this.ctx || !this.canvas) return;
-    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
-    this.ctx.clearRect(0, 0, w, h);
-    const useHalo = halo !== false;
-    for (const stroke of this.strokes) this.stroke(this.ctx, stroke.pts, stroke.erase, false, useHalo);
-  },
-  pageMeta() {
-    const lines = this.renderedRows().map(item => this.rows[item.i]).filter(Boolean);
-    const pageCount = this.list && this.list.pagesMode ? this.list.pageCount() : 1;
-    const nums = lines.flatMap(line => [line.oldN, line.newN]).filter(Boolean);
-    const key = (fileHistoryData && fileHistoryData.scope === 'conversation' && fileHistoryData.key)
-      || (this.compare && this.compare.changes && this.compare.changes[0] && this.compare.changes[0].key)
-      || '';
-    return {
-      key,
-      path: (this.compare && (this.compare.path || this.compare.relativePath)) || (this.fileRow && this.fileRow.path) || '',
-      relativePath: (this.compare && this.compare.relativePath) || (this.fileRow && this.fileRow.relativePath) || '',
-      fromLine: nums.length ? Math.min(...nums) : 1,
-      toLine: nums.length ? Math.max(...nums) : 1,
-      page: this.page + 1,
-      pages: pageCount,
-      lines,
-    };
-  },
-  snapshot() {
-    const meta = this.pageMeta();
-    const w = Math.max(640, this.canvas.clientWidth);
-    const scale = w / Math.max(1, this.canvas.clientWidth);
-    const h = Math.max(1, Math.round(this.canvas.clientHeight * scale));
-    const out = document.createElement('canvas');
-    out.width = w; out.height = h;
-    const ctx = out.getContext('2d');
-    ctx.fillStyle = themeToken('--bg'); ctx.fillRect(0, 0, w, h);
-    ctx.save(); ctx.scale(scale, scale);
-    const host = this.canvas.getBoundingClientRect();
-    ctx.font = '11px ui-monospace, Menlo, monospace';
-    ctx.textBaseline = 'top';
-    for (const { i, el } of this.renderedRows()) {
-      const line = this.rows[i];
-      if (!line) continue;
-      const box = el.getBoundingClientRect();
-      if (box.bottom < host.top || box.top > host.bottom) continue;
-      const x = box.left - host.left, y = box.top - host.top;
-      const text = line.changed
-        ? ((line.oldText !== null ? '- ' + line.oldText : '') + (line.oldText !== null && line.newText !== null ? '  |  ' : '') + (line.newText !== null ? '+ ' + line.newText : ''))
-        : String(line.newText || line.oldText || '');
-      ctx.fillStyle = themeToken(line.changed ? '--danger' : '--text');
-      ctx.fillText(text.replace(/\s+/g, ' ').slice(0, 220), x + 4, y + 2);
-    }
-    for (const stroke of this.strokes) this.stroke(ctx, stroke.pts, stroke.erase, true);
-    ctx.restore();
-    ctx.fillStyle = themeToken('--text'); ctx.font = '12px ui-monospace, Menlo, monospace';
-    ctx.fillText((meta.relativePath || meta.path) + ' · lines ' + meta.fromLine + '-' + meta.toLine + ' · page ' + meta.page + '/' + meta.pages, 8, 8);
-    return { meta, dataUrl: out.toDataURL('image/png') };
-  },
-  async send() {
-    const shot = this.snapshot();
-    const gitScope = fileHistoryData && fileHistoryData.scope === 'git';
-    if (!gitScope && !shot.meta.key) return errToast('no conversation is tied to this page');
-    if ($('ffInkSend')) { $('ffInkSend').disabled = true; $('ffInkSend').textContent = 'sending…'; }
-    try {
-      const res = await fetch(gitScope ? '/api/git/file-feedback' : '/api/file-feedback', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(gitScope ? {
-          repo: (this.compare && this.compare.repoRoot) || (this.fileRow && this.fileRow.repoRoot) || '',
-          path: shot.meta.path, relativePath: shot.meta.relativePath,
-          from: this.compare && this.compare.from, to: this.compare && this.compare.to,
-          fromLine: shot.meta.fromLine, toLine: shot.meta.toLine,
-          page: shot.meta.page, pages: shot.meta.pages, image: shot.dataUrl,
-        } : {
-          key: shot.meta.key, path: shot.meta.path, relativePath: shot.meta.relativePath,
-          fromLine: shot.meta.fromLine, toLine: shot.meta.toLine,
-          page: shot.meta.page, pages: shot.meta.pages, image: shot.dataUrl,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      toast(gitScope ? ('sent page ' + shot.meta.page + ' to a new conversation') : ('sent page ' + shot.meta.page + ' to the conversation'));
-      this.teardown();
-      if (gitScope && data.key) await open(data.key, 'bottom');
-    } catch (err) {
-      errToast(err.message || 'send failed');
-    }
-    if ($('ffInkSend')) { $('ffInkSend').disabled = false; $('ffInkSend').textContent = 'send'; }
-  },
-  acceptPacked(packed, erase) {
-    this.cacheRows();
-    const host = this.hostBox || { left: 0, top: 0 };
-    const raw = [];
-    const parts = String(packed || '').split(' ');
-    for (const part of parts) {
-      const c = part.indexOf(',');
-      if (c < 0) continue;
-      raw.push({ x: +part.slice(0, c) - host.left, y: +part.slice(c + 1) - host.top });
-    }
-    this.commitRaw(raw, !!erase);
-  },
-};
-window.fileInkAcceptPacked = (packed, erase) => fileInk.acceptPacked(packed, erase);
-function intervalChangedRows() {
-  return (fileHistoryData && fileHistoryData.rows || []).filter(row => {
-    const stats = fileWindowStats(row);
-    return stats && stats.events > 0;
-  }).sort((a, b) => a.relativePath.localeCompare(b.relativePath) || String(a.repoRoot || '').localeCompare(String(b.repoRoot || '')));
-}
-function revealDiffRow(list, index, dir = 1) {
-  if (!list || index < 0) return;
-  list.reveal(index, dir);
-  if (list.pagesMode) fileInk.syncPageUi();
-}
-async function jumpIntervalFile(dir) {
-  const rows = intervalChangedRows();
-  if (!rows.length || !focusedFileRow) return false;
-  let i = rows.findIndex(row => row.id === focusedFileRow.id);
-  if (i < 0) i = dir > 0 ? -1 : 0;
-  const next = rows[(i + dir + rows.length) % rows.length];
-  if (!next || next.id === focusedFileRow.id) return false;
-  const oldPoint = focusedFileCompare && focusedFileCompare.old.point;
-  const newPoint = focusedFileCompare && focusedFileCompare.new.point;
-  await loadFocusedFile(next, { fromAt: oldPoint && oldPoint.ms, toAt: newPoint && newPoint.ms });
-  const list = compareListOf($('ffCompare') || $('diffCard'));
-  const starts = list ? fileChangeStarts(list.rows) : [];
-  if (starts.length) revealDiffRow(list, dir > 0 ? starts[0] : starts[starts.length - 1], dir);
-  return true;
-}
-function jumpFileChange(root, dir) {
-  const list = compareListOf(root);
-  const starts = list ? fileChangeStarts(list.rows) : [];
-  if (starts.length) {
-    const mark = list.indexAtViewport(dir > 0 ? 0.28 : 0.72);
-    const idx = dir > 0 ? starts.find(i => i > mark) : [...starts].reverse().find(i => i < mark);
-    if (idx !== undefined) return revealDiffRow(list, idx, dir);
-  }
-  jumpIntervalFile(dir);
-}
-
-
 // ---- trust: vouch / dispute ----
 // A vouch says: "a human checked this exact content at this time." Nothing is
 // ever hidden by trust state; content is only labeled. The ledger lives in
@@ -5414,64 +4541,8 @@ function trustButtonsHtml() {
   return `<button data-vouch="v" title="Vouch: you checked the selected lines (or, with no selection, the whole file) and they are correct">✓ vouch</button><button data-vouch="x" title="Dispute: mark the selected lines (or the whole file) as wrong — they stay visible, labeled">✗ dispute</button> <span class="trust-sum" data-trust-sum></span>`;
 }
 
-// Map the browser text selection to new-side line numbers inside a compare.
-function selectedCompareRange(container, rows) {
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
-  const rowIndex = node => {
-    const el = node && (node.nodeType === 1 ? node : node.parentElement);
-    const row = el && el.closest && el.closest('.fi-diff-row');
-    return row && container.contains(row) ? Number(row.dataset.fiAny) : null;
-  };
-  const a = rowIndex(sel.anchorNode), b = rowIndex(sel.focusNode);
-  if (a === null || b === null) return null;
-  const ns = [];
-  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (rows[i] && rows[i].newN) ns.push(rows[i].newN);
-  return ns.length ? [ns[0], ns[ns.length - 1]] : null;
-}
-
-function applyTrustMarks(container, rows, st) {
-  if (!st || st.error) return;
-  const list = compareListOf(container);
-  if (list) return list.setTrust(st.lines || {});
-  container.querySelectorAll('.fi-diff-row').forEach(el => {
-    const line = rows[Number(el.dataset.fiAny)];
-    el.classList.remove('t-v', 't-d');
-    const m = line && line.newN && st.lines[line.newN];
-    if (m) el.classList.add(m === 'd' ? 't-d' : 't-v');
-  });
-}
-
-async function wireCompareTrust(container, compare, rows) {
-  const sumEl = container.querySelector('[data-trust-sum]');
-  if (!sumEl || !compare.path || !compare.new) return;
-  const content = String(compare.new.content || '');
-  // The current working file is what the server has on disk: ask by path
-  // only, instead of posting the whole file (900 KB for app.html) each time.
-  const onDisk = compare.new.point && compare.new.point.kind === 'current';
-  const refresh = st => {
-    if (!document.body.contains(sumEl) || !st || st.error) return;
-    sumEl.textContent = trustStateText(st);
-    applyTrustMarks(container, rows, st);
-  };
-  const act = async action => {
-    const range = selectedCompareRange(container, rows);
-    const text = range ? content.split('\n').slice(range[0] - 1, range[1]).join('\n') : content;
-    const note = action === 'dispute' ? (prompt('what is wrong here? (optional note)') || '') : '';
-    const out = await postVouch({ action, path: compare.path, range, text, note, source: 'file-view' });
-    if (out.error) return errToast(out.error);
-    toast((action === 'dispute' ? '✗ disputed' : '✓ vouched') + (range ? ` · lines ${range[0]}–${range[1]}` : ' · whole file'));
-    refresh(await fetchTrust(compare.path, onDisk ? undefined : content));
-  };
-  container.querySelectorAll('[data-vouch]').forEach(b => {
-    b.onmousedown = e => e.preventDefault(); // keep the text selection alive through the click
-    b.onclick = () => act(b.dataset.vouch === 'x' ? 'dispute' : 'vouch');
-  });
-  refresh(await fetchTrust(compare.path, onDisk ? undefined : content));
-}
-
 function fileCompareRowHtml(line, i, oldHl, newHl, trust = null, selected = false) {
-  let cls = fileCompareLines ? ' lines' : '';
+  let cls = '';
   const mark = trust && line.newN && trust[line.newN];
   if (mark) cls += mark === 'd' ? ' t-d' : ' t-v';
   if (selected) cls += ' selected';
@@ -5507,242 +4578,6 @@ function displayColumns(text) {
   return cols;
 }
 
-function createCompareList(host, opts) {
-  const rows = opts.rows || [];
-  const n = rows.length;
-  const el = document.createElement('div');
-  el.className = 'fi-columns' + (opts.reading ? ' reading' : '');
-  el.innerHTML = '<div class="fi-spacer"><div class="fi-window"></div></div>';
-  host.appendChild(el);
-  const spacer = el.firstElementChild, win = spacer.firstElementChild;
-  const geo = { lineH: 16, base: 2, minH: 18, colsSame: 80, colsChanged: 40, stacked: false, stackGap: 1, width: 0 };
-  const heights = new Float64Array(n), tops = new Float64Array(n + 1);
-  let rendered = new Map();
-  let start = 0, end = 0;
-  let pagesMode = false, page = 0, pageRanges = [[0, 0]];
-  let expanded = null, selected = -1, trust = null, raf = 0, destroyed = false;
-
-  function probe() {
-    const sample = [
-      { oldText: 'x', newText: 'x', oldN: 1, newN: 1, changed: false },
-      { oldText: 'x\ny', newText: 'x\ny', oldN: 1, newN: 1, changed: false },
-      { oldText: 'x', newText: 'x', oldN: 1, newN: 1, changed: true },
-    ];
-    const hl = ['x', 'x\ny'];
-    const box = document.createElement('div');
-    box.className = 'fi-probe';
-    box.innerHTML = sample.map((line, i) => fileCompareRowHtml(line, i, hl, hl)).join('') +
-      '<div class="fi-diff-row"><div class="fi-cell same"><span class="ln">1</span><span class="code"><span class="fi-ruler">' + 'M'.repeat(100) + '</span></span></div></div>';
-    // The second probe row must really wrap: give it a two-line code body.
-    box.children[1].querySelector('.code').textContent = 'x\ny';
-    el.appendChild(box);
-    const h1 = box.children[0].offsetHeight, h2 = box.children[1].offsetHeight;
-    const changedCells = box.children[2].querySelectorAll('.fi-cell');
-    const sameCode = box.children[0].querySelector('.code'), changedCode = changedCells[0].querySelector('.code');
-    const ruler = box.querySelector('.fi-ruler');
-    const charW = Math.max(1, ruler.getBoundingClientRect().width / 100);
-    const inner = node => { const cs = getComputedStyle(node); return node.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0); };
-    geo.lineH = Math.max(1, h2 - h1) || geo.lineH;
-    geo.base = Math.max(0, h1 - geo.lineH);
-    geo.minH = h1;
-    geo.colsSame = Math.max(1, Math.floor(inner(sameCode) / charW));
-    geo.colsChanged = Math.max(1, Math.floor(inner(changedCode) / charW));
-    const a = changedCells[0].getBoundingClientRect(), b = changedCells[1].getBoundingClientRect();
-    geo.stacked = b.top >= a.bottom - 1;
-    geo.stackGap = geo.stacked ? Math.max(0, box.children[2].offsetHeight - a.height - b.height) : 0;
-    geo.width = el.clientWidth;
-    box.remove();
-  }
-  const wrapLines = (text, cols) => { const c = displayColumns(text); return c <= cols ? 1 : Math.ceil(c / cols); };
-  function estimate(i) {
-    const r = rows[i];
-    if (!r.changed) return Math.max(geo.minH, geo.base + geo.lineH * wrapLines(r.newText !== null ? r.newText : r.oldText, geo.colsSame));
-    const hOld = r.oldText === null ? geo.minH : Math.max(geo.minH, geo.base + geo.lineH * wrapLines(r.oldText, geo.colsChanged));
-    const hNew = r.newText === null ? geo.minH : Math.max(geo.minH, geo.base + geo.lineH * wrapLines(r.newText, geo.colsChanged));
-    return geo.stacked ? hOld + hNew + geo.stackGap : Math.max(hOld, hNew);
-  }
-  function reflow(from) {
-    for (let i = from; i < n; i++) tops[i + 1] = tops[i] + heights[i];
-    if (!pagesMode) spacer.style.height = tops[n] + 'px';
-  }
-  function estimateAll() { for (let i = 0; i < n; i++) heights[i] = estimate(i); reflow(0); }
-  function indexAt(y) {
-    if (n === 0 || y <= 0) return 0;
-    if (y >= tops[n]) return n - 1;
-    let lo = 0, hi = n - 1;
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (tops[mid + 1] > y) hi = mid; else lo = mid + 1; }
-    return lo;
-  }
-  const htmlFor = (s, e) => { let out = ''; for (let i = s; i < e; i++) out += fileCompareRowHtml(rows[i], i, opts.oldHl, opts.newHl, trust, i === selected); return out; };
-  function collectRendered() {
-    rendered = new Map();
-    for (const node of win.children) if (node.dataset && node.dataset.fiAny !== undefined) rendered.set(Number(node.dataset.fiAny), node);
-  }
-  function renderRange(s, e) {
-    s = Math.max(0, Math.min(n, s)); e = Math.max(s, Math.min(n, e));
-    if (start === end || s >= end || e <= start) win.innerHTML = htmlFor(s, e);
-    else {
-      for (let i = start; i < s; i++) { const node = rendered.get(i); if (node) node.remove(); }
-      for (let i = e; i < end; i++) { const node = rendered.get(i); if (node) node.remove(); }
-      if (s < start) win.insertAdjacentHTML('afterbegin', htmlFor(s, start));
-      if (e > end) win.insertAdjacentHTML('beforeend', htmlFor(end, e));
-    }
-    start = s; end = e;
-    collectRendered();
-    if (expanded) {
-      const row = rendered.get(expanded.index);
-      if (row) { if (row.nextElementSibling !== expanded.el) row.insertAdjacentElement('afterend', expanded.el); }
-      else if (expanded.el.isConnected) expanded.el.remove();
-    }
-    win.style.transform = pagesMode ? '' : `translateY(${tops[start]}px)`;
-    measure();
-    if (opts.onRender) opts.onRender(api);
-  }
-  function measure() {
-    let dirty = -1;
-    for (const [i, node] of rendered) {
-      let h = node.offsetHeight;
-      if (expanded && expanded.index === i && expanded.el.isConnected) h += expanded.el.offsetHeight;
-      if (h !== heights[i]) { heights[i] = h; if (dirty < 0 || i < dirty) dirty = i; }
-    }
-    if (dirty < 0) return;
-    const before = tops[start];
-    reflow(dirty);
-    if (!pagesMode) {
-      const shift = tops[start] - before;
-      if (shift) el.scrollTop += shift;
-      win.style.transform = `translateY(${tops[start]}px)`;
-    }
-  }
-  function update(force) {
-    if (destroyed || pagesMode) return;
-    const top = el.scrollTop, h = Math.max(el.clientHeight, 200);
-    const needS = indexAt(top - 300), needE = Math.min(n, indexAt(top + h + 300) + 1);
-    if (!force && needS >= start && needE <= end && start !== end) return;
-    renderRange(indexAt(top - 900), Math.min(n, indexAt(top + h + 900) + 1));
-  }
-  function computePages() {
-    pageRanges = [];
-    const limit = Math.max(120, el.clientHeight - 2);
-    let s = 0;
-    while (s < n) {
-      let e = s, used = 0;
-      while (e < n && (e === s || used + heights[e] <= limit)) { used += heights[e]; e++; }
-      pageRanges.push([s, e]); s = e;
-    }
-    if (!pageRanges.length) pageRanges.push([0, 0]);
-    return limit;
-  }
-  function setPage(p) {
-    if (!pagesMode) return;
-    page = Math.max(0, Math.min(pageRanges.length - 1, p));
-    let limit = Math.max(120, el.clientHeight - 2);
-    for (let guard = 0; guard < 3; guard++) {
-      const [s, e] = pageRanges[page];
-      renderRange(s, e);
-      if (tops[e] - tops[s] <= limit || e - s <= 1) break;
-      const firstRow = s;
-      limit = computePages();
-      page = pageOf(firstRow);
-    }
-  }
-  function pageOf(i) { for (let p = 0; p < pageRanges.length; p++) if (i < pageRanges[p][1]) return p; return pageRanges.length - 1; }
-  function setPagesMode(on) {
-    if (pagesMode === !!on) return;
-    pagesMode = !!on;
-    el.classList.toggle('paged', pagesMode);
-    if (pagesMode) {
-      const anchor = start < end ? Math.max(start, Math.min(end - 1, indexAt(el.scrollTop))) : 0;
-      spacer.style.height = '';
-      computePages();
-      setPage(pageOf(anchor));
-    } else {
-      const anchor = pageRanges[page] ? pageRanges[page][0] : 0;
-      spacer.style.height = tops[n] + 'px';
-      el.scrollTop = tops[anchor];
-      update(true);
-    }
-  }
-  el.addEventListener('scroll', () => {
-    if (pagesMode || raf) return;
-    raf = requestAnimationFrame(() => { raf = 0; update(false); });
-  });
-  el.addEventListener('click', event => {
-    const ln = event.target.closest('.ln');
-    if (!ln) return;
-    const row = ln.closest('.fi-diff-row');
-    if (!row || !win.contains(row) || row.dataset.fiAny === undefined) return;
-    if (opts.onLineClick) opts.onLineClick(Number(row.dataset.fiAny), row);
-  });
-  const api = {
-    el, rows,
-    get page() { return page; },
-    get pagesMode() { return pagesMode; },
-    pageCount: () => pageRanges.length,
-    pageOf, setPage, setPagesMode,
-    rendered: () => { const out = []; for (let i = start; i < end; i++) { const node = rendered.get(i); if (node) out.push({ i, el: node }); } return out; },
-    elementAt: i => rendered.get(i) || null,
-    range: () => [start, end],
-    indexAtViewport(fraction) {
-      if (pagesMode) { const [s, e] = pageRanges[page]; return indexAt(tops[s] + (tops[e] - tops[s]) * fraction); }
-      return indexAt(el.scrollTop + el.clientHeight * fraction);
-    },
-    topOf: i => tops[Math.max(0, Math.min(n, i))],
-    reveal(i, dir = 1) {
-      if (i < 0 || i >= n) return;
-      if (pagesMode) setPage(pageOf(i));
-      else { el.scrollTop = Math.max(0, tops[i] - el.clientHeight * (dir > 0 ? 0.25 : 0.75)); update(true); }
-      const node = rendered.get(i);
-      if (node) { node.classList.add('jump'); setTimeout(() => node.classList.remove('jump'), 900); }
-    },
-    select(i) {
-      const old = rendered.get(selected);
-      if (old) old.classList.remove('selected');
-      selected = i;
-      const node = rendered.get(i);
-      if (node) node.classList.add('selected');
-    },
-    expand(i, panel) {
-      api.collapse();
-      expanded = { index: i, el: panel };
-      api.select(i);
-      const row = rendered.get(i);
-      if (row) row.insertAdjacentElement('afterend', panel);
-      measure();
-    },
-    collapse() {
-      if (!expanded) return;
-      if (expanded.el.isConnected) expanded.el.remove();
-      expanded = null;
-      api.select(-1);
-      measure();
-    },
-    expandedIndex: () => expanded ? expanded.index : -1,
-    setTrust(lines) {
-      trust = lines || null;
-      for (const [i, node] of rendered) {
-        const mark = trust && rows[i].newN && trust[rows[i].newN];
-        node.classList.toggle('t-v', mark === 'v');
-        node.classList.toggle('t-d', mark === 'd');
-      }
-    },
-    refresh() {
-      if (destroyed) return;
-      const anchor = pagesMode ? (pageRanges[page] ? pageRanges[page][0] : 0) : indexAt(el.scrollTop);
-      probe();
-      estimateAll();
-      if (pagesMode) { computePages(); setPage(pageOf(anchor)); }
-      else { el.scrollTop = tops[anchor]; start = end = 0; win.innerHTML = ''; rendered = new Map(); update(true); }
-    },
-    destroy() { destroyed = true; if (raf) cancelAnimationFrame(raf); },
-  };
-  probe();
-  estimateAll();
-  if (opts.pages) { pagesMode = true; el.classList.add('paged'); spacer.style.height = ''; computePages(); setPage(0); }
-  else update(true);
-  return api;
-}
-
 function fileReadingRows(content) {
   return String(content || '').split('\n').map((text, i) => ({ oldText: null, newText: text, oldN: null, newN: i + 1, changed: false }));
 }
@@ -5758,614 +4593,6 @@ async function wholeFileDiffRowsAsync(oldText, newText) {
   return rowsFromScript(await diffLinesAsync(oldText, newText), oldLines, newLines);
 }
 
-function lineToken(line) {
-  if (line === null || line === undefined) return '';
-  const raw = String(line);
-  const trimmed = raw.trim();
-  return trimmed.length >= 2 ? trimmed : raw.length >= 2 ? raw : '';
-}
-
-function fileLineHistory(changes, row) {
-  const tokens = new Set([lineToken(row.oldText), lineToken(row.newText)].filter(Boolean));
-  const selected = new Set();
-  let progressed = true;
-  while (progressed) {
-    progressed = false;
-    for (let ci = 0; ci < (changes || []).length; ci++) {
-      if (selected.has(ci)) continue;
-      const change = changes[ci];
-      const oldLines = String(change.oldText || '').split('\n');
-      const newLines = String(change.newText || '').split('\n');
-      const oldKeys = oldLines.map(lineToken), newKeys = newLines.map(lineToken);
-      const hits = [];
-      oldKeys.forEach((key, i) => { if (key && tokens.has(key)) hits.push(i); });
-      newKeys.forEach((key, i) => { if (key && tokens.has(key)) hits.push(i); });
-      if (!hits.length) continue;
-      selected.add(ci); progressed = true;
-      for (const i of hits) {
-        for (const at of [i - 1, i, i + 1]) {
-          if (oldKeys[at]) tokens.add(oldKeys[at]);
-          if (newKeys[at]) tokens.add(newKeys[at]);
-        }
-      }
-    }
-  }
-  return { entries: (changes || []).filter((_, i) => selected.has(i)), tokens };
-}
-
-function historyExcerpt(text, tokens) {
-  const lines = String(text || '').split('\n');
-  let at = lines.findIndex(line => tokens.has(lineToken(line)));
-  if (at < 0) at = 0;
-  const start = Math.max(0, at - 2), end = Math.min(lines.length, at + 3);
-  return (start ? '…\n' : '') + lines.slice(start, end).join('\n') + (end < lines.length ? '\n…' : '');
-}
-
-// Change bodies for the line history are fetched on the first line click,
-// not with every compare (up to 1 MB per keyframe move on app.html).
-async function ensureCompareChanges(compare) {
-  if (Array.isArray(compare.changes)) return compare.changes;
-  if (compare.changesPending) return compare.changesPending;
-  const params = fileHistoryParams(compare);
-  params.set('from', compare.from); params.set('to', compare.to);
-  compare.changesPending = fetch('/api/file-history/changes?' + params).then(r => r.json())
-    .then(data => { compare.changes = data.error ? [] : (data.changes || []); return compare.changes; })
-    .catch(() => { compare.changes = []; return compare.changes; })
-    .finally(() => { compare.changesPending = null; });
-  return compare.changesPending;
-}
-
-function lineHistoryPanelHtml(history) {
-  return `<h4>line history · newest first <button class="ghost" data-fi-hist-close>close</button></h4>` + (history.entries.length ? history.entries.map((change, i) => {
-    const title = change.type === 'git' ? `${change.shortHash} · ${change.subject}` : `${change.conversationTitle} · ${change.agent} · ${change.kind}`;
-    return `<div class="fi-history-entry" data-fi-change="${i}" tabindex="0" role="button" title="${change.type === 'git' ? 'Open this commit' : 'Open the conversation at this edit'}"><div class="fi-history-meta"><b>${esc(fmtDate(change.ts))}</b><br>${esc(title)}</div><div class="fi-history-change"><pre>- ${esc(historyExcerpt(change.oldText, history.tokens))}</pre><pre>+ ${esc(historyExcerpt(change.newText, history.tokens))}</pre></div></div>`;
-  }).join('') : '<div class="dim">No recorded AI or Git change in this interval matches this line.</div>');
-}
-
-// Click a line number: open its history under the row (toggle on repeat).
-async function toggleLineHistory(list, compare, row, index) {
-  if (list.expandedIndex() === index) { list.collapse(); return; }
-  const line = list.rows[index];
-  const panel = document.createElement('div');
-  panel.className = 'fi-line-history';
-  panel.innerHTML = '<h4>line history · loading… <button class="ghost" data-fi-hist-close>close</button></h4>';
-  panel.querySelector('[data-fi-hist-close]').onclick = event => { event.stopPropagation(); list.collapse(); };
-  list.expand(index, panel);
-  const changes = await ensureCompareChanges(compare);
-  if (list.expandedIndex() !== index) return;
-  const history = fileLineHistory(changes, line);
-  panel.innerHTML = lineHistoryPanelHtml(history);
-  panel.querySelector('[data-fi-hist-close]').onclick = event => { event.stopPropagation(); list.collapse(); };
-  panel.querySelectorAll('[data-fi-change]').forEach(el => {
-    const change = history.entries[Number(el.dataset.fiChange)];
-    const activate = () => change.type === 'git' ? showGitCommit(row.repoId, change.hash) : openAtTs(change.key, change.ts);
-    el.onclick = activate;
-    el.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(); } };
-  });
-  list.expand(index, panel);
-}
-
-function snapshotMetaText(snapshot) {
-  return `${snapshot.exact ? 'exact' : 'reconstructed'} · ${snapshot.method}${snapshot.skipped ? ` · ${snapshot.skipped} skipped` : ''}`;
-}
-
-// Rows for a compare: the diff runs in the worker; results are cached per
-// (file, old sha, new sha, mode) so a keyframe scrub back and forth is free.
-async function compareRowsFor(compare, row) {
-  const key = `${row.id}\x00${compare.old.sha || compare.from}\x00${compare.new.sha || compare.to}\x00${fileReadingMode ? 'read' : 'diff'}`;
-  let rows = focusedRowsCache.get(key);
-  if (rows) return rows;
-  rows = fileReadingMode ? fileReadingRows(compare.new.content) : await wholeFileDiffRowsAsync(compare.old.content, compare.new.content);
-  focusedRowsCache.set(key, rows);
-  if (focusedRowsCache.size > 20) focusedRowsCache.delete(focusedRowsCache.keys().next().value);
-  return rows;
-}
-
-function fileEventMs(event) {
-  if (typeof event.ts === 'number') return event.ts;
-  const ms = Date.parse(event.ts || '');
-  return Number.isFinite(ms) ? ms : null;
-}
-
-async function refreshGitIntervalStats(compare) {
-  if (!fileHistoryData || fileHistoryData.scope !== 'git' || !compare || !compare.repoRoot) return;
-  const key = compare.repoRoot + '\0' + compare.from + '\0' + compare.to;
-  if (fileHistoryData.intervalKey === key && fileHistoryData.intervalStats) {
-    updateFocusedTreeWindow();
-    return;
-  }
-  try {
-    const data = await (await fetch('/api/git/file-history/interval?repo=' + encodeURIComponent(compare.repoRoot) +
-      '&from=' + encodeURIComponent(compare.from || '') + '&to=' + encodeURIComponent(compare.to || ''))).json();
-    if (data.error) return;
-    fileHistoryData.intervalKey = key;
-    fileHistoryData.intervalStats = new Map((data.files || []).map(file => [file.path, file]));
-    updateFocusedTreeWindow();
-  } catch {}
-}
-
-function fileWindowStats(row) {
-  if (!fileHistoryData) return null;
-  if (fileHistoryData.scope === 'git' && fileHistoryData.intervalStats) {
-    const hit = fileHistoryData.intervalStats.get(row.relativePath);
-    if (!hit) return { events: 0, removed: 0, added: 0, touches: 0 };
-    return { events: 1, removed: hit.removed || 0, added: hit.added || 0, touches: 0 };
-  }
-  if (!focusedFileWindow) return null;
-  const scope = fileHistoryData.scope;
-  let events = 0, removed = 0, added = 0, touches = 0;
-  if (scope !== 'git') {
-    for (const event of row.aiEvents || []) {
-      const ms = fileEventMs(event);
-      if (ms === null || ms <= focusedFileWindow.fromMs || ms > focusedFileWindow.toMs || event.outcome === 'failed') continue;
-      events++;
-      if (event.kind === 'shell') touches++;
-      else {
-        removed += event.kind === 'write' ? 0 : ((event.stats && event.stats.oldLines) || 0);
-        added += (event.stats && event.stats.newLines) || 0;
-      }
-    }
-  }
-  if (scope !== 'conversation') {
-    for (const commit of row.commitEvents || []) {
-      const ms = fileEventMs(commit);
-      if (ms === null || ms <= focusedFileWindow.fromMs || ms > focusedFileWindow.toMs) continue;
-      events++;
-      removed += Number(commit.deletions) || 0;
-      added += Number(commit.additions) || 0;
-    }
-  }
-  return { events, removed, added, touches };
-}
-
-function conversationWindowSummary(rows) {
-  const stats = (rows || []).map(fileWindowStats).filter(Boolean);
-  const changed = stats.filter(stat => stat.events > 0);
-  return {
-    files: changed.length,
-    events: changed.reduce((sum, stat) => sum + stat.events, 0),
-    removed: changed.reduce((sum, stat) => sum + stat.removed, 0),
-    added: changed.reduce((sum, stat) => sum + stat.added, 0),
-  };
-}
-
-function fileTreeHtml(rows, selectedId, query = '') {
-  const projectCode = !!(fileHistoryData && fileHistoryData.projectCode);
-  const filtered = (rows || []).filter(row => !query || row.relativePath.toLowerCase().includes(query));
-  const repos = new Map();
-  for (const row of filtered) {
-    if (!repos.has(row.repoRoot)) repos.set(row.repoRoot, { dirs: new Map(), files: [] });
-    let node = repos.get(row.repoRoot);
-    const parts = row.relativePath.split('/').filter(Boolean);
-    const file = parts.pop() || row.relativePath;
-    for (const dir of parts) {
-      if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] });
-      node = node.dirs.get(dir);
-    }
-    node.files.push({ row, file });
-  }
-  const hasRecent = node => node.files.some(item => item.row.recent24 && item.row.recent24.events) || [...node.dirs.values()].some(hasRecent);
-  const renderNode = (node, prefix = '', repoRoot = '') => {
-    const dirs = [...node.dirs.entries()].sort((a, b) => Number(hasRecent(b[1])) - Number(hasRecent(a[1])) || a[0].localeCompare(b[0])).map(([name, child]) => {
-      const pathValue = prefix ? `${prefix}/${name}` : name;
-      const selected = focusedFileRow && focusedFileRow.repoRoot === repoRoot && focusedFileRow.relativePath.startsWith(pathValue + '/');
-      const open = selected || (projectCode ? hasRecent(child) : !prefix);
-      return `<details${open ? ' open' : ''}><summary>▸ ${esc(name)}</summary>${renderNode(child, pathValue, repoRoot)}</details>`;
-    }).join('');
-    const files = node.files.sort((a, b) => Number(!!b.row.recent24) - Number(!!a.row.recent24) || a.file.localeCompare(b.file)).map(({ row, file }) => {
-      const stats = projectCode ? row.recent24 : fileWindowStats(row);
-      const changed = stats && stats.events > 0;
-      const lines = changed ? (projectCode
-        ? `${stats.added ? `+${stats.added}` : ''}${stats.added && stats.removed ? ' ' : ''}${stats.removed ? `−${stats.removed}` : ''}`
-        : (stats.removed || stats.added ? `−${stats.removed} +${stats.added}` : `${stats.touches} touch${stats.touches === 1 ? '' : 'es'}`)) : '';
-      const title = projectCode ? `${row.relativePath}${changed ? `\nlast 24 hours · ${lines}` : ''}` : `${row.relativePath}${changed ? `\n${stats.events} changes between keyframes · ${lines}` : focusedFileWindow ? '\nno changes between keyframes' : ''}`;
-      return `<button class="ff-file${row.id === selectedId.id ? ' on' : ''}${changed ? ' changed' : ''}" data-ff-file="${fgAttr(row.id)}" title="${fgAttr(title)}"><span class="ff-state">${changed ? '●' : '·'}</span><span class="ff-name">${esc(file)}</span><span class="ff-lines">${esc(lines)}</span></button>`;
-    }).join('');
-    return dirs + files;
-  };
-  return [...repos.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([root, node]) =>
-    `<details open><summary>▣ ${esc(root.split('/').pop() || root)}</summary>${renderNode(node, '', root)}</details>`).join('') || '<div class="dim">no matching files</div>';
-}
-
-function updateFocusedTreeWindow() {
-  if (!fileHistoryData) return;
-  if (fileHistoryData.projectCode) {
-    if ($('ffTreeSummary')) {
-      const recent = fileHistoryData.rows.filter(row => row.recent24 && row.recent24.events);
-      $('ffTreeSummary').textContent = `${fileHistoryData.rows.length} files · ${recent.length} changed in 24h`;
-    }
-    return;
-  }
-  if ($('ffTreeSummary')) {
-    if (focusedFileWindow) {
-      const summary = conversationWindowSummary(fileHistoryData.rows);
-      const unit = fileHistoryData.scope === 'git' ? 'commits' : 'events';
-      $('ffTreeSummary').textContent = `${summary.files} files changed · ${summary.events} ${unit} · −${summary.removed} +${summary.added} lines`;
-    } else $('ffTreeSummary').textContent = `${fileHistoryData.rows.length} files`;
-  }
-  if (!$('ffTreeBody')) return;
-  $('ffTreeBody').querySelectorAll('[data-ff-file]').forEach(button => {
-    const row = fileHistoryData.rows.find(item => item.id === button.dataset.ffFile);
-    if (!row) return;
-    const stats = fileWindowStats(row);
-    const changed = stats && stats.events > 0;
-    const lines = changed ? (stats.removed || stats.added ? `−${stats.removed} +${stats.added}` : `${stats.touches} touch${stats.touches === 1 ? '' : 'es'}`) : '';
-    button.classList.toggle('changed', !!changed);
-    button.querySelector('.ff-state').textContent = changed ? '●' : '·';
-    button.querySelector('.ff-lines').textContent = lines;
-    button.title = `${row.relativePath}${changed ? `\n${stats.events} changes between keyframes · ${lines}` : focusedFileWindow ? '\nno changes between keyframes' : ''}`;
-  });
-}
-
-function renderFocusedFileTree(query = '') {
-  if (!$('ffTreeBody') || !fileHistoryData || !focusedFileRow) return;
-  $('ffTreeBody').innerHTML = fileTreeHtml(fileHistoryData.rows, focusedFileRow, query.trim().toLowerCase());
-  updateFocusedTreeWindow();
-  $('ffTreeBody').querySelectorAll('[data-ff-file]').forEach(button => button.onclick = () => {
-    const row = fileHistoryData.rows.find(item => item.id === button.dataset.ffFile);
-    if (!row) return;
-    const oldPoint = focusedFileCompare && focusedFileCompare.old.point;
-    const newPoint = focusedFileCompare && focusedFileCompare.new.point;
-    loadFocusedFile(row, { fromAt: oldPoint && oldPoint.ms, toAt: newPoint && newPoint.ms });
-  });
-}
-
-function focusedPointLeft(points, point) {
-  if (!points.length) return 0;
-  const min = points[0].ms, max = points[points.length - 1].ms;
-  return max === min ? 50 : Math.max(0, Math.min(100, (point.ms - min) / (max - min) * 100));
-}
-
-function renderFocusedTimeline(compare, row) {
-  if (!$('ffTimeline')) return;
-  const points = compare.points || [];
-  const oldIndex = Math.max(0, points.findIndex(point => point.id === compare.from));
-  const newIndex = Math.max(0, points.findIndex(point => point.id === compare.to));
-  const pointMarks = points.map((point, i) => `<button class="ff-point ${esc(point.kind)}" data-ff-point="${i}" style="left:${focusedPointLeft(points, point)}%" title="${fgAttr(pointLabel(point))}"></button>`).join('');
-  $('ffTimeline').innerHTML = `<div class="ff-track" id="ffTrack">${pointMarks}<span class="ff-key old" id="ffOldKey" tabindex="0" role="slider" aria-label="Old keyframe"></span><span class="ff-key new" id="ffNewKey" tabindex="0" role="slider" aria-label="New keyframe"></span></div>
-    <div class="ff-ranges"><b>OLD</b><input id="ffOldRange" type="range" min="0" max="${Math.max(0, points.length - 1)}" step="1" value="${oldIndex}"><span class="ff-range-label" id="ffOldLabel"></span>
-      <b>NEW</b><input id="ffNewRange" type="range" min="0" max="${Math.max(0, points.length - 1)}" step="1" value="${newIndex}"><span class="ff-range-label" id="ffNewLabel"></span></div>`;
-  const oldRange = $('ffOldRange'), newRange = $('ffNewRange');
-  const updateKeys = () => {
-    const oldPoint = points[Number(oldRange.value)], newPoint = points[Number(newRange.value)];
-    $('ffOldKey').style.left = focusedPointLeft(points, oldPoint) + '%';
-    $('ffNewKey').style.left = focusedPointLeft(points, newPoint) + '%';
-    $('ffOldLabel').textContent = pointLabel(oldPoint);
-    $('ffNewLabel').textContent = pointLabel(newPoint);
-    $('ffOldKey').setAttribute('aria-valuetext', pointLabel(oldPoint));
-    $('ffNewKey').setAttribute('aria-valuetext', pointLabel(newPoint));
-    focusedFileWindow = { fromMs: oldPoint.ms, toMs: newPoint.ms };
-    updateFocusedTreeWindow();
-  };
-  // Cached snapshots make a scrub free; a new point is one small request.
-  const schedule = changed => {
-    if (changed === 'old' && Number(oldRange.value) > Number(newRange.value)) newRange.value = oldRange.value;
-    if (changed === 'new' && Number(newRange.value) < Number(oldRange.value)) oldRange.value = newRange.value;
-    updateKeys();
-    const fromId = points[Number(oldRange.value)].id, toId = points[Number(newRange.value)].id;
-    clearTimeout(focusedCompareTimer);
-    focusedCompareTimer = setTimeout(() => loadFocusedFile(row, { from: fromId, to: toId }, { keepTree: true, keepTimeline: true, quiet: true }), 30);
-  };
-  const setKeyframe = (kind, at) => {
-    at = Math.max(0, Math.min(points.length - 1, at));
-    if (kind === 'old') oldRange.value = at;
-    else newRange.value = at;
-    schedule(kind);
-  };
-  const pointAtX = clientX => {
-    const rect = $('ffTrack').getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
-    const min = points[0].ms, max = points[points.length - 1].ms;
-    const targetMs = min + ratio * (max - min);
-    let best = 0;
-    for (let i = 1; i < points.length; i++) if (Math.abs(points[i].ms - targetMs) < Math.abs(points[best].ms - targetMs)) best = i;
-    return best;
-  };
-  const dragKey = (element, kind) => {
-    element.onpointerdown = event => {
-      event.preventDefault(); event.stopPropagation();
-      element.classList.add('dragging');
-      element.setPointerCapture(event.pointerId);
-      setKeyframe(kind, pointAtX(event.clientX));
-    };
-    element.onpointermove = event => {
-      if (!element.hasPointerCapture(event.pointerId)) return;
-      event.preventDefault();
-      setKeyframe(kind, pointAtX(event.clientX));
-    };
-    const finish = event => {
-      if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
-      element.classList.remove('dragging');
-    };
-    element.onpointerup = finish;
-    element.onpointercancel = finish;
-    element.onkeydown = event => {
-      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-      event.preventDefault();
-      const currentValue = kind === 'old' ? Number(oldRange.value) : Number(newRange.value);
-      setKeyframe(kind, event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : currentValue + (event.key === 'ArrowLeft' ? -1 : 1));
-    };
-  };
-  oldRange.oninput = () => schedule('old');
-  newRange.oninput = () => schedule('new');
-  dragKey($('ffOldKey'), 'old');
-  dragKey($('ffNewKey'), 'new');
-  $('ffTrack').onpointerdown = event => {
-    if (event.target.closest('.ff-key, .ff-point')) return;
-    const at = pointAtX(event.clientX);
-    const oldDistance = Math.abs(points[at].ms - points[Number(oldRange.value)].ms);
-    const newDistance = Math.abs(points[at].ms - points[Number(newRange.value)].ms);
-    setKeyframe(oldDistance <= newDistance ? 'old' : 'new', at);
-  };
-  $('ffTimeline').querySelectorAll('[data-ff-point]').forEach(mark => mark.onclick = event => {
-    event.stopPropagation();
-    const at = Number(mark.dataset.ffPoint);
-    const oldDistance = Math.abs(points[at].ms - points[Number(oldRange.value)].ms);
-    const newDistance = Math.abs(points[at].ms - points[Number(newRange.value)].ms);
-    setKeyframe(oldDistance <= newDistance ? 'old' : 'new', at);
-  });
-  updateKeys();
-}
-
-let focusedRenderSeq = 0;
-async function renderFocusedComparison(compare, row) {
-  const target = $('ffCompare');
-  if (!target) return;
-  if (window.fileWsSuppressCompare && window.fileWsSuppressCompare()) return; // the file workspace keeps its editor
-  const seq = ++focusedRenderSeq;
-  const rows = await compareRowsFor(compare, row);
-  if (seq !== focusedRenderSeq || $('ffCompare') !== target) return;
-  const lang = fileHighlightLang(compare.relativePath || row.relativePath);
-  const oldHl = highlightFileLines(compare.old.content, lang);
-  const newHl = highlightFileLines(compare.new.content, lang);
-  const identical = !rows.some(line => line.changed);
-  if (target.__compareList) target.__compareList.destroy();
-  target.innerHTML = `<div class="ff-status"><button id="ffRead" title="Toggle between the diff and a clean reading view of the new snapshot">${fileReadingMode ? 'diff' : 'read'}</button> <button id="ffLines">${fileCompareLines ? 'hide lines' : 'show lines'}</button> <button id="ffEdit" title="Edit the current on-disk file (not a snapshot)">edit file</button> ${trustButtonsHtml()} ${fileReadingMode ? 'reading · new snapshot only' : identical ? 'one view · no line changes' : 'common is full width · changes split − / +'} · highlight ${esc(lang)} · left: ${esc(snapshotMetaText(compare.old))} · right: ${esc(snapshotMetaText(compare.new))} · ${esc(compare.truth)}</div>
-    ${fileCompareDockHtml(identical)}`;
-  const list = createCompareList(target, {
-    rows, oldHl, newHl, reading: fileReadingMode, pages: fileComparePages,
-    onRender: list => fileInk.onListRender(list),
-    onLineClick: index => toggleLineHistory(list, compare, row, index),
-  });
-  target.__compareList = list;
-  $('ffLines').onclick = () => {
-    fileCompareLines = !fileCompareLines;
-    localStorage.setItem('aiconvo.fileLines', fileCompareLines ? '1' : '0');
-    renderFocusedComparison(compare, row);
-  };
-  $('ffRead').onclick = () => {
-    fileReadingMode = !fileReadingMode;
-    localStorage.setItem('aiconvo.fileRead', fileReadingMode ? '1' : '0');
-    renderFocusedComparison(compare, row);
-  };
-  $('ffEdit').onclick = () => openFocusedFileEditor(compare, row);
-  fileInk.attach(compare, row, rows);
-  wireFileCompareDock(target, list);
-  wireCompareTrust(target, compare, rows);
-}
-
-// ---- direct file editing (whole-file view) ----
-// Edits the CURRENT on-disk file, never a historical snapshot. The save is
-// optimistic: the server refuses it when the disk changed after the read.
-async function openFocusedFileEditor(compare, row) {
-  // Editing leaves the comparison behind and opens the focused live surface,
-  // with an explicit route back to this recorded view.
-  if (typeof fileWs !== 'undefined' && fileWs?.focused) return fileWs.editor?.focus();
-  const project = (fileHistoryData && fileHistoryData.project) || (fileHistoryData && fileHistoryData.backProject) || projectOverviewName || null;
-  return openLiveFile(compare.path, { project, root: row.repoRoot, back: currentHash });
-}
-
-// ---- file history: points once, snapshots by id, cached by content ----
-// A keyframe move used to fetch a 3–4 MB compare (both files, every point
-// label, every change body). Now: the point list once per file, one small
-// snapshot request per point (the browser revalidates by ETag = sha), the
-// diff in a worker, and the change bodies only on a line click. Moving
-// between already-seen points costs no request at all.
-const filePointsCache = new Map();      // row.id -> points document
-const fileSnapshotCache = new Map();    // row.id \0 version \0 point id -> snapshot
-let fileSnapshotBytes = 0;
-const FILE_SNAPSHOT_BUDGET = 96 * 1024 * 1024;
-let filePrefetchSeq = 0;
-
-function invalidateFileCaches(rowId) {
-  focusedRowsCache.clear();
-  if (rowId === undefined) { filePointsCache.clear(); fileSnapshotCache.clear(); fileSnapshotBytes = 0; return; }
-  filePointsCache.delete(rowId);
-  for (const key of [...fileSnapshotCache.keys()]) if (key.startsWith(rowId + '\x00')) { fileSnapshotBytes -= fileSnapshotCache.get(key).content.length; fileSnapshotCache.delete(key); }
-}
-
-function fileHistoryParams(compare) {
-  const scope = compare.scope || 'project';
-  const params = new URLSearchParams({ scope, repo: compare.repoRoot, path: compare.relativePath });
-  if (scope === 'conversation') params.set('id', compare.key);
-  else if (scope !== 'git') params.set('name', compare.project);
-  return params;
-}
-
-function fileScopeFor(row) {
-  const scope = fileHistoryData.scope === 'conversation' ? 'conversation' : fileHistoryData.scope === 'git' ? 'git' : 'project';
-  return { scope, key: fileHistoryData.key, project: fileHistoryData.project, repoRoot: row.repoRoot, relativePath: row.relativePath };
-}
-
-function pointLabel(point) {
-  if (!point) return '';
-  if (point.label) return point.label;
-  const when = point.ms ? new Date(point.ms).toLocaleString() : '';
-  if (point.kind === 'git') return `${point.shortHash || String(point.hash || '').slice(0, 10)} · ${point.subject || ''} · ${when}`;
-  if (point.kind === 'ai') return `${point.eventKind || 'edit'} · ${point.title || ''} · ${when}`;
-  if (point.kind === 'current') return 'current working file';
-  return when;
-}
-
-async function filePointsFor(row, fresh = false, selection = {}) {
-  const cached = filePointsCache.get(row.id);
-  if (cached && !fresh && [selection.from, selection.to].filter(Boolean).every(id => cached.points.some(p => p.id === id))) return cached;
-  const params = fileHistoryParams(fileScopeFor(row));
-  for (const key of ['from', 'to']) if (/^saved:\d+$/.test(selection[key] || '')) params.set(key, selection[key]);
-  const data = await (await fetch('/api/file-history/points?' + params)).json();
-  if (data.error) throw new Error(data.error);
-  if (cached && cached.version !== data.version) invalidateFileCaches(row.id);
-  filePointsCache.set(row.id, data);
-  if (filePointsCache.size > 40) filePointsCache.delete(filePointsCache.keys().next().value);
-  return data;
-}
-
-async function fileSnapshotFor(row, doc, pointId) {
-  const key = `${row.id}\x00${doc.version}\x00${pointId}`;
-  const hit = fileSnapshotCache.get(key);
-  if (hit) return hit.pending || hit;
-  const params = fileHistoryParams(doc);
-  params.set('point', pointId);
-  const pending = fetch('/api/file-history/snapshot?' + params).then(r => r.json()).then(snap => {
-    if (snap.error) throw new Error(snap.error);
-    fileSnapshotCache.set(key, snap);
-    fileSnapshotBytes += snap.content.length;
-    while (fileSnapshotBytes > FILE_SNAPSHOT_BUDGET && fileSnapshotCache.size > 2) {
-      const oldest = fileSnapshotCache.keys().next().value;
-      if (oldest === key) break;
-      const gone = fileSnapshotCache.get(oldest);
-      if (gone && !gone.pending) fileSnapshotBytes -= gone.content.length;
-      fileSnapshotCache.delete(oldest);
-    }
-    return snap;
-  }).catch(error => { fileSnapshotCache.delete(key); throw error; });
-  fileSnapshotCache.set(key, { pending, content: '' });
-  return pending;
-}
-
-// Warm the points a scrub is likely to reach: the two AI neighbours of each
-// keyframe, then every Git commit (exact, served from git objects). One
-// request at a time, and never while the user's own load is in flight: an
-// AI snapshot is a server-side replay, and a queue of them would sit in
-// front of the click the user just made.
-let foregroundFileLoads = 0;
-function prefetchFileSnapshots(row, doc, fromId, toId) {
-  const seq = ++filePrefetchSeq;
-  const points = doc.points || [];
-  const byId = new Map(points.map((point, i) => [point.id, i]));
-  const wanted = [];
-  const push = point => { if (point && !wanted.includes(point.id)) wanted.push(point.id); };
-  for (const id of [fromId, toId]) {
-    const at = byId.get(id);
-    if (at === undefined) continue;
-    push(points[at - 1]); push(points[at + 1]);
-  }
-  for (const point of points) if (point.kind === 'git' || point.kind === 'boundary') push(point);
-  const queue = wanted.slice(0, 140);
-  let active = false;
-  const next = () => {
-    if (seq !== filePrefetchSeq || active || !queue.length) return;
-    if (foregroundFileLoads > 0) { setTimeout(next, 250); return; }
-    const id = queue.shift();
-    active = true;
-    fileSnapshotFor(row, doc, id).catch(() => {}).finally(() => { active = false; setTimeout(next, 40); });
-  };
-  if ('requestIdleCallback' in window) requestIdleCallback(next, { timeout: 1500 }); else setTimeout(next, 300);
-}
-
-function resolveFilePoints(points, selection) {
-  const byId = id => points.find(point => point.id === id);
-  const nearest = value => {
-    const ms = Number(value);
-    if (value === undefined || value === null || value === '' || !Number.isFinite(ms)) return null;
-    return points.reduce((best, point) => !best || Math.abs(point.ms - ms) < Math.abs(best.ms - ms) ? point : best, null);
-  };
-  const last = points[points.length - 1];
-  let to = byId(selection.to) || nearest(selection.toAt) || last;
-  const before = points.filter(point => point.order < to.order);
-  const boundary = points[0] && points[0].kind === 'boundary' ? points[0] : null;
-  const defaultFrom = boundary || [...before].reverse().find(point => point.kind === 'git') || before[before.length - 1] || to;
-  let from = byId(selection.from) || nearest(selection.fromAt) || defaultFrom;
-  if (from.order > to.order) [from, to] = [to, from];
-  return { from, to };
-}
-
-async function loadFocusedFile(row, selection = {}, options = {}) {
-  if (!fileHistoryData || !row || !$('ffMain')) return;
-  focusedFileRow = row;
-  if (!options.keepTree) renderFocusedFileTree($('ffTreeSearch') ? $('ffTreeSearch').value : '');
-  $('ffTitle').textContent = row.relativePath;
-  if (!options.quiet) $('ffCompare').innerHTML = '<div class="ff-loading">loading this file and its keyframes…</div>';
-  const request = ++focusedFileRequest;
-  let compare;
-  foregroundFileLoads++;
-  try {
-    const doc = await filePointsFor(row, !options.quiet, selection);
-    if (request !== focusedFileRequest) return;
-    const { from, to } = resolveFilePoints(doc.points, selection);
-    const [oldSnapshot, newSnapshot] = await Promise.all([fileSnapshotFor(row, doc, from.id), fileSnapshotFor(row, doc, to.id)]);
-    if (request !== focusedFileRequest) return;
-    compare = {
-      scope: doc.scope, key: doc.key, project: doc.project, repoRoot: doc.repoRoot, path: doc.path, relativePath: doc.relativePath,
-      version: doc.version, points: doc.points, from: from.id, to: to.id,
-      old: { ...oldSnapshot, point: from }, new: { ...newSnapshot, point: to }, changes: null, truth: doc.truth,
-    };
-    prefetchFileSnapshots(row, doc, from.id, to.id);
-  } catch (error) {
-    if (request !== focusedFileRequest) return;
-    $('ffCompare').innerHTML = `<div class="ff-loading">${esc(error.message || 'could not load this file')}</div>`;
-    return;
-  } finally { foregroundFileLoads--; }
-  focusedFileCompare = compare;
-  if (!options.keepTimeline) renderFocusedTimeline(compare, row);
-  await renderFocusedComparison(compare, row);
-  if (fileHistoryData.scope === 'git') refreshGitIntervalStats(compare);
-}
-
-function jumpToLatestConversationChanges() {
-  if (!fileHistoryData || fileHistoryData.scope !== 'conversation') return;
-  const candidates = [];
-  for (const row of fileHistoryData.rows || []) for (const event of row.aiEvents || []) {
-    const ms = fileEventMs(event);
-    if (ms !== null && event.outcome !== 'failed') candidates.push({ row, event, ms });
-  }
-  const contentCandidates = candidates.filter(item => item.event.kind !== 'shell');
-  const latest = (contentCandidates.length ? contentCandidates : candidates).sort((a, b) => b.ms - a.ms)[0];
-  if (!latest) return;
-  const rowEvents = (latest.row.aiEvents || []).map(event => ({ event, ms: fileEventMs(event) }))
-    .filter(item => item.ms !== null && item.event.outcome !== 'failed' && item.event.kind !== 'shell')
-    .sort((a, b) => a.ms - b.ms);
-  let at = rowEvents.findIndex(item => item.event.id === latest.event.id);
-  if (at < 0) at = rowEvents.length - 1;
-  let burstStart = at;
-  while (burstStart > 0 && rowEvents[burstStart].ms - rowEvents[burstStart - 1].ms <= 2 * 60 * 1000) burstStart--;
-  const prior = rowEvents[burstStart - 1];
-  const startMs = prior ? prior.ms : (Date.parse(fileHistoryData.firstTs || '') || rowEvents[0].ms - 1);
-  loadFocusedFile(latest.row, { fromAt: startMs, to: `ai:${latest.event.id}` });
-}
-
-function enterFocusedFile(row, selection = {}) {
-  if (!fileHistoryData || !row) return;
-  focusedFileRow = row;
-  const projectCode = !!fileHistoryData.projectCode;
-  if (!projectCode) setRouteKind('file');
-  const conversationScope = fileHistoryData.scope === 'conversation';
-  const gitScope = fileHistoryData.scope === 'git';
-  const head = projectCode
-    ? `<div class="project-code-bar"><b>${esc(fileHistoryData.project)}</b>${projectSwitchHtml('code')}<span class="dim" id="ffTitle">${esc(row.relativePath)}</span></div>`
-    : `<div class="ff-head"><button id="ffBack">${conversationScope ? '← conversation' : gitScope ? (fileHistoryData.backProject ? '← project files' : '← repo files') : '← all files'}</button><button id="ffTreeToggle" class="mobile-only" type="button">files</button><b id="ffTitle">${esc(row.relativePath)}</b>${conversationScope ? '<button id="ffLatest">jump to latest changes</button>' : ''}<span class="dim">${conversationScope ? 'only changes from this conversation · ' : gitScope ? 'Git commits and working tree only · ' : ''}two draggable keyframes · complete file</span></div>`;
-  $('view').innerHTML = `<div class="focused-file-view${projectCode ? ' project-code' : ''}">${head}
-    <div class="ff-layout"><aside class="ff-tree" id="ffTree"><input id="ffTreeSearch" type="search" placeholder="filter all files"><div class="ff-tree-summary" id="ffTreeSummary"></div><div id="ffTreeBody"></div></aside>
-      <main class="ff-main" id="ffMain"><div class="ff-timeline" id="ffTimeline"></div><div class="ff-compare" id="ffCompare"><div class="ff-loading">loading…</div></div><div class="diff-card" id="diffCard" hidden></div></main></div></div>`;
-  if (projectCode) wireProjectSwitch(fileHistoryData.project);
-  const ffBack = $('ffBack');
-  if (ffBack) ffBack.onclick = () => conversationScope
-    ? returnToConversationFile(fileHistoryData.key, fileHistoryData.returnPath, fileHistoryData.returnTs, fileHistoryData.returnCall)
-    : gitScope
-      ? (fileHistoryData.backProject ? showFilesProject(fileHistoryData.backProject) : showGitRepoHistory(fileHistoryData.cwd, true))
-      : showProjectFileHistory(fileHistoryData.project, true);
-  if (phoneLayout() && ffBack) ffBack.textContent = '← back';
-  if ($('ffLatest')) $('ffLatest').onclick = jumpToLatestConversationChanges;
-  if ($('ffTreeToggle')) $('ffTreeToggle').onclick = () => {
-    const root = $('ffTreeToggle').closest('.focused-file-view');
-    const open = root.classList.toggle('show-tree');
-    $('ffTreeToggle').textContent = open ? 'compare' : 'files';
-  };
-  $('ffTreeSearch').oninput = event => renderFocusedFileTree(event.target.value);
-  renderFocusedFileTree();
-  loadFocusedFile(row, selection);
-}
-
 // ---- quick file view (one tool call) ----
 // The default for transcript file links: show ONLY the clicked tool call's
 // change plus a fast editor for the current disk file. The conversation-wide
@@ -6373,7 +4600,7 @@ function enterFocusedFile(row, selection = {}) {
 async function openToolCallFile(key, pathValue, ts, anchor, callId) {
   const hash = 'filecall=' + [key, callId || '', pathValue || '', ts || '', anchor || ''].map(encodeURIComponent).join('&');
   setRoute('file', hash);
-  $('view').innerHTML = `<div class="quick-file-view"><div class="qf-head"><button id="qfBack">← conversation</button><b>${esc(shortFilePath(pathValue || ''))}</b></div><div class="qf-body"><div class="ff-loading">loading this change…</div></div></div>`;
+  $('view').innerHTML = `<div class="quick-file-view"><header class="qf-head"><button id="qfBack" class="cr-quiet">← Conversation</button><h1>${esc(shortFilePath(pathValue || ''))}</h1></header><div class="qf-body"><p class="cr-diff-notice">Loading this change…</p></div></div>`;
   $('qfBack').onclick = () => returnToConversationFile(key, pathValue, anchor || ts, callId);
   lastQuickFile = { key, path: pathValue || '', ts: ts || '', anchor: anchor || '', call: callId || '' };
   let data;
@@ -6383,8 +4610,12 @@ async function openToolCallFile(key, pathValue, ts, anchor, callId) {
   } catch { data = { error: 'network failure' }; }
   if (viewKind !== 'file' || !$('qfBack')) return; // the user already navigated away
   if (data.error) {
-    errToast(data.error);
-    return openConversationFileDiff(key, pathValue, ts, anchor);
+    // Nothing recorded for this call (an old transcript, a failed tool).
+    // Say so where the user is, and offer the file itself.
+    const body = $('view').querySelector('.qf-body');
+    if (body) body.innerHTML = `<div class="empty">${esc(data.error)}<div class="hint"><button id="qfOpenLive">Open the current file</button></div></div>`;
+    if ($('qfOpenLive')) $('qfOpenLive').onclick = () => openLiveFile(pathValue, { project: currentProjectName(), back: key });
+    return;
   }
   renderQuickFileView(data, { key, pathValue: pathValue || data.path, ts, anchor, call: callId || '' });
 }
@@ -6456,19 +4687,19 @@ function renderQuickFileView(data, ctx) {
   const lang = fileHighlightLang(data.relativePath || data.path);
   const editable = data.disk && data.disk.editable;
   const first = data.events[0] || {};
-  view.innerHTML = `<div class="qf-head"><button id="qfBack">← conversation</button><b title="${esc(data.path)}">${esc(data.relativePath || data.path)}</b>
-      <button id="qfEdit" class="primary"${editable ? '' : ' disabled'} title="${esc(editable ? 'Edit the current on-disk file (not a snapshot)' : (data.disk && data.disk.note) || 'the current file is not readable')}">edit file</button>
-      <button id="qfHistory" title="Build the conversation-wide keyframe history. This is the slow, complete view.">keyframe history</button>
-      <span class="dim">this click's change only · highlight ${esc(lang)}${first.ts ? ' · ' + fmtDate(first.ts) : ''}</span></div>
+  view.innerHTML = `<header class="qf-head"><button id="qfBack" class="cr-quiet">← Conversation</button>
+      <h1 title="${esc(data.path)}">${esc(data.relativePath || data.path)} <span>this call's change${first.ts ? ' · ' + fmtDate(first.ts) : ''}</span></h1>
+      <button id="qfHistory" title="Every recorded version of this file">History</button>
+      <button id="qfEdit" class="primary"${editable ? '' : ' disabled'} title="${esc(editable ? 'Edit the current on-disk file (not a snapshot)' : (data.disk && data.disk.note) || 'the current file is not readable')}">Edit file</button></header>
     <div class="qf-body">${quickFileHunksHtml(data, lang)}</div>`;
   $('qfBack').onclick = () => returnToConversationFile(ctx.key, ctx.pathValue, ctx.anchor || ctx.ts, ctx.call);
-  $('qfHistory').onclick = () => openConversationFileDiff(ctx.key, ctx.pathValue, ctx.ts, ctx.anchor);
+  $('qfHistory').onclick = () => openLiveFile(data.path, { project: currentProjectName(), back: currentHash, to: 'current' });
   if (editable) $('qfEdit').onclick = () => renderQuickFileEditor(data, ctx);
 }
 
 function renderQuickFileEditor(data, ctx) {
-  // The file workspace edits; Back returns to this conversation.
-  openFileWorkspace(data.disk.path, { project: currentProjectName(), back: ctx.key });
+  // The live editor; Back returns to this change.
+  openLiveFile(data.disk.path, { project: currentProjectName(), back: currentHash });
 }
 
 // ---- keyboard flow: pick file changes, drive the quick file view ----
@@ -6667,113 +4898,6 @@ function quickFileKeydown(e) {
   return false;
 }
 
-// Opened from a transcript file link: jump straight to this file's
-// whole-file diff, framed on the clicked edit. Back returns to the
-// conversation at the exact message.
-async function openConversationFileDiff(key, pathValue, ts, anchorTs) {
-  const reuse = fileHistoryData && fileHistoryData.scope === 'conversation' && fileHistoryData.key === key;
-  let data = reuse ? fileHistoryData : null;
-  if (!data) {
-    toast('building the file diff view…');
-    data = await (await fetch('/api/conversation/file-history?id=' + encodeURIComponent(key))).json();
-  }
-  if (data.error) return errToast(data.error);
-  const row = (data.rows || []).find(r => r.path === pathValue || r.relativePath === pathValue ||
-    pathValue.endsWith('/' + r.relativePath) || r.path.endsWith('/' + pathValue));
-  if (!row) return errToast('no in-repository edit recorded for this file in this conversation');
-  setRoute('file', 'diffs=' + encodeURIComponent(key));
-  fileHistoryData = data;
-  focusedFileWindow = null;
-  if (!reuse) invalidateFileCaches();
-  diffScope = { scope: 'conversation', key };
-  data.returnTs = anchorTs || ts || null;
-  data.returnPath = pathValue || null;
-  data.returnCall = (conversationFileReturn && conversationFileReturn.key === key &&
-    conversationFileReturn.path === pathValue) ? conversationFileReturn.call : null;
-  // Frame the compare on the clicked edit when one matches the timestamp.
-  let selection = {};
-  const wantMs = Date.parse(ts || '');
-  if (Number.isFinite(wantMs)) {
-    let best = null, bestGap = Infinity;
-    for (const event of row.aiEvents || []) {
-      if (event.kind === 'shell' || event.outcome === 'failed') continue;
-      const ms = fileEventMs(event);
-      if (ms === null) continue;
-      const gap = Math.abs(ms - wantMs);
-      if (gap < bestGap) { best = event; bestGap = gap; }
-    }
-    if (best && bestGap <= 5 * 60 * 1000) selection = { to: `ai:${best.id}` };
-  }
-  enterFocusedFile(row, selection);
-}
-
-async function showGitCommit(repoId, hash) {
-  const data = fileHistoryData;
-  const repo = data && data.repositories.find(item => item.id === repoId);
-  if (!repo) return;
-  const url = data.scope === 'git'
-    ? '/api/git/file-history/commit?repo=' + encodeURIComponent(repo.root) + '&hash=' + encodeURIComponent(hash)
-    : '/api/project/file-history/commit?name=' + encodeURIComponent(data.project) +
-      '&repo=' + encodeURIComponent(repo.root) + '&hash=' + encodeURIComponent(hash);
-  const result = await (await fetch(url)).json();
-  if (result.error) return errToast(result.error);
-  let card = $('diffCard');
-  card.hidden = false;
-  card.className = 'diff-card git-card';
-  card.innerHTML = `<div class="diff-card-head"><b>◆ ${esc(result.shortHash)} · ${esc(result.subject)}</b>
-    <span class="dim">${esc(result.author)} · ${fmtDate(result.ts)} · ${esc((result.branches || []).join(', ') || 'detached')}</span>
-    <button id="gitCopyHash">copy hash</button></div><pre>${esc(result.patch || '')}</pre>`;
-  $('gitCopyHash').onclick = async () => { await navigator.clipboard.writeText(result.hash); flashCopied($('gitCopyHash')); };
-  card.scrollIntoView({ block: 'start' });
-}
-
-async function showProjectFileHistory(name, reuse = false) {
-  if (!name) return;
-  projectOverviewName = name;
-  focusedFileRow = null;
-  focusedFileWindow = null;
-  setRoute('project-files', 'project=' + encodeURIComponent(name) + '&files');
-  let data = reuse && fileHistoryData && fileHistoryData.project === name && !fileHistoryData.light ? fileHistoryData : null;
-  if (!data) {
-    $('view').innerHTML = `<div class="file-gantt-view"><div class="phead"><h2>file history · ${esc(name)}</h2><div class="pmeta">mining AI edits and Git history…</div></div></div>`;
-    data = await (await fetch('/api/project/file-history?name=' + encodeURIComponent(name))).json();
-    invalidateFileCaches();
-  }
-  if (data.error) { $('view').innerHTML = `<div class="empty">could not build file history.<div class="hint">${esc(data.error)}</div></div>`; return; }
-  data.projectCode = false;
-  fileHistoryData = data;
-  fileGanttInitialScroll = true;
-  diffScope = { scope: 'project' };
-  const branches = fileHistoryBranches(data);
-  const totals = data.totals || {};
-  $('view').innerHTML = `<div class="file-gantt-view" id="fgRoot">
-    <div class="phead"><h2>❯ ${esc(data.project)} · file history</h2>
-      <div class="pmeta">${totals.files || 0} files · ${totals.aiEvents || 0} in-repository AI edits (${totals.failed || 0} failed) · ${totals.commits || 0} commits · ${totals.paired || 0} inferred pairs · ${totals.workingTreeFiles || 0} working-tree files${totals.externalAiEvents ? ` · ${totals.externalAiEvents} external file touches excluded` : ''}</div>
-      <div class="pactions"><button id="fgBack">back to code</button></div></div>
-    <div class="fg-toolbar">
-      <input id="fgSearch" type="search" placeholder="filter file path">
-      <select id="fgBranch"><option value="">all branches</option>${branches.map(branch => `<option value="${fgAttr(branch)}">${esc(branch)}</option>`).join('')}</select>
-      <select id="fgMode"><option value="all">AI + Git</option><option value="ai">AI edits</option><option value="commits">Git commits</option><option value="unpaired">unpaired AI</option><option value="working">working tree</option></select>
-      <button data-fg-scale="1440">hrs</button><button data-fg-scale="160">days</button><button data-fg-scale="28">wks</button>
-      <button id="fgMinus">−</button><button id="fgPlus">+</button><button id="fgBegin">beginning</button><button id="fgNow">now</button>
-      <span class="dim" id="fgShown"></span>
-    </div>
-    <div class="fg-legend"><span>■ AI edit</span><span>◆ Git commit</span><span>⋯ inferred pair</span><span class="ok">solid = high confidence</span><span class="warn">right bar = working tree</span><span>click a file name = whole-file time compare</span></div>
-    <div class="fg-scroll" id="fgScroll"><div class="fg-axis"><div class="fg-corner">repository-relative file</div><div class="fg-time-axis" id="fgAxis"></div></div><div id="fgRows"></div></div>
-    <div class="diff-card" id="diffCard" hidden></div>
-  </div>`;
-  $('fgBack').onclick = () => showFilesProject(name);
-  $('fgSearch').oninput = renderFileGanttChart;
-  $('fgBranch').onchange = renderFileGanttChart;
-  $('fgMode').onchange = renderFileGanttChart;
-  $('view').querySelectorAll('[data-fg-scale]').forEach(button => button.onclick = () => { fileGanttScale = Number(button.dataset.fgScale); fileGanttInitialScroll = true; renderFileGanttChart(); });
-  $('fgMinus').onclick = () => { fileGanttScale = Math.max(8, fileGanttScale / 1.6); renderFileGanttChart(); };
-  $('fgPlus').onclick = () => { fileGanttScale = Math.min(3000, fileGanttScale * 1.6); renderFileGanttChart(); };
-  $('fgBegin').onclick = () => { $('fgScroll').scrollLeft = 0; };
-  $('fgNow').onclick = () => { $('fgScroll').scrollLeft = $('fgScroll').scrollWidth; };
-  renderFileGanttChart();
-}
-
 async function loadReposTab() {
   renderReposTab();
 }
@@ -6785,297 +4909,13 @@ async function renderReposTab(refresh = false) {
   gitReposCache = data.repos || [];
   const repos = data.repos || [];
   list.innerHTML = `<div class="item" id="repoRescan" title="Rescan the disk for Git repositories"><b>↻ rescan repositories</b></div>` +
-    (repos.map(repo => `<div class="item" data-git-repo="${esc(repo.root)}">
+    (repos.map(repo => `<div class="item" data-git-repo="${esc(repo.root)}" data-git-project="${esc(repo.project || '')}">
     <b>${esc(repo.name)}</b>
     <span class="dim">${esc(shortDir(repo.root))} · ${esc(repo.branch || 'detached')} · ${esc(repo.subject || '')}</span>
   </div>`).join('') || '<div class="empty">no Git repositories found.</div>');
   const rescan = $('repoRescan');
   if (rescan) rescan.onclick = () => renderReposTab(true);
-  list.querySelectorAll('[data-git-repo]').forEach(el => el.onclick = () => showGitRepoHistory(el.dataset.gitRepo));
-}
-
-async function showGitRepoHistory(root, reuse = false) {
-  if (!root) return;
-  focusedFileRow = null;
-  focusedFileWindow = null;
-  setRoute('repo', 'git=' + encodeURIComponent(root));
-  let data = reuse && fileHistoryData && fileHistoryData.scope === 'git' && fileHistoryData.cwd === root ? fileHistoryData : null;
-  if (!data) {
-    $('view').innerHTML = `<div class="file-gantt-view"><div class="phead"><h2>Git history · ${esc(root)}</h2><div class="pmeta">reading commits and worktrees…</div></div></div>`;
-    data = await (await fetch('/api/git/file-history?repo=' + encodeURIComponent(root))).json();
-    invalidateFileCaches();
-  }
-  if (data.error) { $('view').innerHTML = `<div class="empty">could not build Git history.<div class="hint">${esc(data.error)}</div></div>`; return; }
-  fileHistoryData = data;
-  fileGanttInitialScroll = true;
-  diffScope = { scope: 'git' };
-  const branches = fileHistoryBranches(data);
-  const totals = data.totals || {};
-  $('view').innerHTML = `<div class="file-gantt-view" id="fgRoot">
-    <div class="phead"><h2>❯ ${esc(pathBase(data.cwd))} · Git history</h2>
-      <div class="pmeta">${totals.files || 0} files · ${totals.commits || 0} commits · ${totals.workingTreeFiles || 0} working-tree files · no AI events</div>
-      <div class="pactions"><button id="fgBack">all repos</button></div></div>
-    <div class="fg-toolbar">
-      <input id="fgSearch" type="search" placeholder="filter file path">
-      <select id="fgBranch"><option value="">all branches</option>${branches.map(branch => `<option value="${fgAttr(branch)}">${esc(branch)}</option>`).join('')}</select>
-      <select id="fgMode"><option value="commits">Git commits</option><option value="working">working tree</option><option value="all">commits + working tree</option></select>
-      <button data-fg-scale="1440">hrs</button><button data-fg-scale="160">days</button><button data-fg-scale="28">wks</button>
-      <button id="fgMinus">−</button><button id="fgPlus">+</button><button id="fgBegin">beginning</button><button id="fgNow">now</button>
-      <span class="dim" id="fgShown"></span>
-    </div>
-    <div class="fg-legend"><span>◆ Git commit</span><span class="warn">right bar = working tree</span><span>click a file name = whole-file commit compare · ink and send starts a new conversation</span></div>
-    <div class="fg-scroll" id="fgScroll"><div class="fg-axis"><div class="fg-corner">repository-relative file</div><div class="fg-time-axis" id="fgAxis"></div></div><div id="fgRows"></div></div>
-    <div class="diff-card" id="diffCard" hidden></div>
-  </div>`;
-  $('fgBack').onclick = () => { goHome(); setTab('repos'); };
-  $('fgSearch').oninput = renderFileGanttChart;
-  $('fgBranch').onchange = renderFileGanttChart;
-  $('fgMode').onchange = renderFileGanttChart;
-  $('view').querySelectorAll('[data-fg-scale]').forEach(button => button.onclick = () => { fileGanttScale = Number(button.dataset.fgScale); fileGanttInitialScroll = true; renderFileGanttChart(); });
-  $('fgMinus').onclick = () => { fileGanttScale = Math.max(8, fileGanttScale / 1.6); renderFileGanttChart(); };
-  $('fgPlus').onclick = () => { fileGanttScale = Math.min(3000, fileGanttScale * 1.6); renderFileGanttChart(); };
-  $('fgBegin').onclick = () => { $('fgScroll').scrollLeft = 0; };
-  $('fgNow').onclick = () => { $('fgScroll').scrollLeft = $('fgScroll').scrollWidth; };
-  renderFileGanttChart();
-}
-
-function pathBase(p) {
-  const s = String(p || '').replace(/\\/g, '/');
-  return s.split('/').filter(Boolean).pop() || s;
-}
-
-// ---- agent file diffs (design/15-file-diff-timeline.md) ----
-let diffScope = null;
-
-function diffKindGlyph(kind) { return kind === 'write' ? '+' : kind === 'multi-edit' ? '±' : kind === 'shell' ? '›' : '~'; }
-function diffStats(e) {
-  const oldLines = e.stats && e.stats.oldLines || 0;
-  const newLines = e.stats && e.stats.newLines || 0;
-  return e.kind === 'write' ? `+${newLines}` : e.kind === 'shell' ? 'shell path' : `-${oldLines} +${newLines}`;
-}
-
-function renderDiffTimeline(events) {
-  if (!events || events.length < 2) return '';
-  const width = 720, height = 34, pad = 10;
-  const times = events.map(e => Date.parse(e.ts || '')).filter(Number.isFinite);
-  if (!times.length) return '';
-  const min = Math.min(...times), max = Math.max(...times);
-  const span = Math.max(1, max - min);
-  const x = t => pad + (t - min) / span * (width - 2 * pad);
-  return `<svg width="100%" height="${height}" viewBox="0 0 ${width} ${height}" aria-label="file edit timeline">
-    <line x1="${pad}" y1="${height / 2}" x2="${width - pad}" y2="${height / 2}" stroke="var(--border-strong)"/>
-    ${events.map(e => {
-      const t = Date.parse(e.ts || '');
-      if (!Number.isFinite(t)) return '';
-      const cx = x(t);
-      return `<circle data-diff-jump="${esc(e.id)}" cx="${cx}" cy="${height / 2}" r="4" fill="var(--accent)"><title>${esc(e.relativePath || e.path)} · ${esc(diffStats(e))} · ${fmtDate(e.ts)}</title></circle>`;
-    }).join('')}
-  </svg>`;
-}
-
-function unifiedDiffRows(oldText, newText, context = 3) {
-  const a = String(oldText || '').split('\n');
-  const b = String(newText || '').split('\n');
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--)
-    dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const ops = [];
-  let i = 0, j = 0;
-  while (i < m && j < n) {
-    if (a[i] === b[j]) { ops.push({ type: 'same', text: a[i++] }); j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) ops.push({ type: 'old', text: a[i++] });
-    else ops.push({ type: 'new', text: b[j++] });
-  }
-  while (i < m) ops.push({ type: 'old', text: a[i++] });
-  while (j < n) ops.push({ type: 'new', text: b[j++] });
-  const keep = new Set();
-  ops.forEach((op, idx) => {
-    if (op.type === 'same') return;
-    for (let k = Math.max(0, idx - context); k <= Math.min(ops.length - 1, idx + context); k++) keep.add(k);
-  });
-  const rows = [];
-  let skipping = false;
-  ops.forEach((op, idx) => {
-    if (!keep.has(idx)) { if (!skipping) rows.push({ type: 'gap', text: '…' }); skipping = true; return; }
-    skipping = false;
-    rows.push(op);
-  });
-  return rows;
-}
-
-function diffTableHtml(event, full = false) {
-  if (event.kind === 'shell') return `<pre style="margin:0;padding:10px;white-space:pre-wrap">${esc(event.command || '(shell mutation command unavailable)')}</pre>`;
-  if (event.kind === 'write') {
-    const lines = String(event.newText || '').split('\n');
-    const shown = full ? lines : lines.slice(0, 120);
-    return `<table>${shown.map(line => `<tr><td class="new">+ ${esc(line)}</td></tr>`).join('')}${!full && lines.length > shown.length ? `<tr><td class="gap">… ${lines.length - shown.length} more lines — use full</td></tr>` : ''}</table>`;
-  }
-  const rows = unifiedDiffRows(event.oldText, event.newText, full ? 100000 : 3);
-  return `<table>${rows.map(row => row.type === 'gap'
-    ? `<tr><td class="gap">…</td></tr>`
-    : `<tr><td class="${row.type}">${row.type === 'old' ? '-' : row.type === 'new' ? '+' : ' '} ${esc(row.text)}</td></tr>`).join('')}</table>`;
-}
-
-async function showDiffEvent(id) {
-  const project = diffScope && diffScope.scope === 'project' ? projectOverviewName || $('ganttProject').value : '';
-  const key = diffScope && diffScope.scope === 'conversation' ? activeRel || '' : '';
-  const event = await (await fetch('/api/diff-event?id=' + encodeURIComponent(id) +
-    (project ? '&project=' + encodeURIComponent(project) : '') +
-    (key ? '&key=' + encodeURIComponent(key) : ''))).json();
-  if (event.error) return errToast(event.error);
-  let card = $('diffCard');
-  if (!card) {
-    card = document.createElement('div');
-    card.id = 'diffCard';
-    card.className = 'diff-card';
-    if ($('diffFiles')) $('diffFiles').after(card);
-    else $('view').appendChild(card);
-  }
-  card.className = 'diff-card';
-  const pair = event.commitPair;
-  card.innerHTML = `<div class="diff-card-head"><b>${diffKindGlyph(event.kind)} ${esc(event.relativePath || event.path)}</b>
-    <span class="dim">${esc(event.conversationTitle || '')} · ${esc(event.agent || '')} · ${esc(event.inferredBranch ? `${event.branch || 'HEAD'} → ${event.inferredBranch}` : event.branch || 'branch ?')} · ${esc(event.outcome || 'unknown')} · ${fmtDate(event.ts)}${pair ? ` · ${esc(pair.confidence)} pair → ${esc(pair.shortHash)}` : ''}</span>
-    <button id="diffCompact">compact</button><button id="diffFull">full</button><button id="diffCopy">copy diff</button><button id="diffOpen">open conversation</button>${pair ? '<button id="diffCommit">open commit</button>' : ''}</div>
-    ${event.resultSummary ? `<div class="pmeta" style="padding:6px 10px;margin:0;border-bottom:1px solid var(--border)">tool result: ${esc(event.resultSummary)}</div>` : ''}
-    <div class="diff-body" id="diffBody">${diffTableHtml(event, false)}</div>`;
-  $('diffCompact').onclick = () => $('diffBody').innerHTML = diffTableHtml(event, false);
-  $('diffFull').onclick = () => $('diffBody').innerHTML = diffTableHtml(event, true);
-  $('diffCopy').onclick = async () => {
-    const oldLines = String(event.oldText || '').split('\n').map(l => '-' + l).join('\n');
-    const newLines = String(event.newText || '').split('\n').map(l => '+' + l).join('\n');
-    const text = event.kind === 'shell' ? event.command || '' : `--- ${event.path}\n+++ ${event.path}\n${oldLines}\n${newLines}\n`;
-    await navigator.clipboard.writeText(text);
-    flashCopied($('diffCopy'));
-  };
-  $('diffOpen').onclick = () => open(event.key);
-  if ($('diffCommit')) $('diffCommit').onclick = () => showGitCommit(event.repoId, pair.hash);
-  card.hidden = false;
-  card.scrollIntoView({ block: 'start' });
-}
-
-function renderDiffView(scope, rows, title, meta, related = null) {
-  diffScope = { scope, rows, title, meta, related };
-  const totalEvents = rows.reduce((n, row) => n + row.events.length, 0);
-  $('view').innerHTML = `<div class="diff-view">
-    <div class="phead"><h2>${esc(title)}</h2><div class="pmeta">${esc(meta)} · agent file touches — extracted from edit/write tool calls</div>
-      ${related ? contextNavHtml(related.key, related.related, 'diffs') : ''}</div>
-    <div class="diff-toolbar"><input id="diffSearch" type="search" placeholder="filter files or conversations">
-      <span class="dim">${rows.length} files · ${totalEvents} edits</span></div>
-    ${renderDiffTimeline(rows.flatMap(row => row.events))}
-    <div class="diff-files" id="diffFiles"></div>
-    <div class="diff-card" id="diffCard" hidden></div>
-  </div>`;
-  const renderFiles = filter => {
-    const q = String(filter || '').toLowerCase();
-    const shownRows = rows.map(row => ({ ...row, events: row.events.filter(e => !q || row.path.toLowerCase().includes(q) || (e.conversationTitle || '').toLowerCase().includes(q)) }))
-      .filter(row => row.events.length);
-    $('diffFiles').innerHTML = shownRows.slice(0, 80).map((row, i) => `<div class="diff-file">
-      <div class="diff-file-head" data-diff-file="${i}"><span>▸</span><span class="path">${esc(row.relativePath || row.path)}</span><span class="meta">${row.events.length} edits · latest ${fmtDate(row.latestTs)}</span><button data-blame-file="${esc(row.path)}" title="Line-level agent history for this file">blame</button></div>
-      <div class="diff-events" ${i === 0 ? '' : 'hidden'}>${row.events.map(e => `<div class="diff-event" data-diff-event="${esc(e.id)}"><span>${diffKindGlyph(e.kind)}</span><span class="dtitle">${esc(e.conversationTitle || e.key || '')}</span><span class="dstats">${esc(diffStats(e))} · ${fmtDate(e.ts)}</span></div>`).join('')}</div>
-    </div>`).join('') || '<div class="empty">no file edits match.</div>';
-    $('diffFiles').querySelectorAll('.diff-file-head').forEach(head => head.onclick = e => {
-      if (e.target.closest('[data-blame-file]')) return;
-      const body = head.parentElement.querySelector('.diff-events');
-      body.hidden = !body.hidden;
-      head.firstElementChild.textContent = body.hidden ? '▸' : '▾';
-    });
-    $('diffFiles').querySelectorAll('[data-blame-file]').forEach(b => b.onclick = () => showFileBlame(b.dataset.blameFile));
-    $('diffFiles').querySelectorAll('[data-diff-event]').forEach(el => el.onclick = () => showDiffEvent(el.dataset.diffEvent));
-  };
-  renderFiles('');
-  $('diffSearch').addEventListener('input', e => renderFiles(e.target.value));
-  wireContextNav();
-}
-
-async function showConversationDiffs(key) {
-  activeRel = key;
-  setRoute('diffs', 'diffs=' + encodeURIComponent(key));
-  $('view').innerHTML = '<div class="empty">building the conversation file Gantt…</div>';
-  const data = await (await fetch('/api/conversation/file-history?id=' + encodeURIComponent(key))).json();
-  if (data.error) return errToast(data.error);
-  if (!data.rows || !data.rows.length) {
-    $('view').innerHTML = `<div class="empty">no file changes in this conversation.<div class="hint"><button id="diffsBackEmpty">back to conversation</button></div></div>`;
-    $('diffsBackEmpty').onclick = () => open(key);
-    return;
-  }
-  fileHistoryData = data;
-  focusedFileWindow = null;
-  invalidateFileCaches();
-  diffScope = { scope: 'conversation', key };
-  enterFocusedFile(data.rows[0]);
-}
-
-// ---- agent blame (design/16-agent-blame.md) ----
-let blameParent = null; // { scope, name | key } so back works
-
-function blameAgeClass(ts) {
-  const age = Date.now() - (Date.parse(ts || '') || 0);
-  if (!Number.isFinite(age)) return 'a4';
-  if (age < 3600000) return 'a0';
-  if (age < 86400000) return 'a1';
-  if (age < 7 * 86400000) return 'a2';
-  if (age < 30 * 86400000) return 'a3';
-  return 'a4';
-}
-
-async function showFileBlame(pathValue, scope = null) {
-  blameParent = scope || (diffScope ? { scope: diffScope.scope, name: projectOverviewName, key: activeRel } : null);
-  const project = blameParent && blameParent.scope === 'project' ? blameParent.name || projectOverviewName || '' : '';
-  const key = blameParent && blameParent.scope === 'conversation' ? blameParent.key || activeRel || '' : '';
-  $('view').innerHTML = `<div class="blame-view"><div class="blame-head"><h2>blame</h2><div class="pmeta">replaying recorded edits for ${esc(pathValue)}…</div></div></div>`;
-  const d = await (await fetch('/api/file/blame?path=' + encodeURIComponent(pathValue) +
-    (project ? '&project=' + encodeURIComponent(project) : '') +
-    (key ? '&key=' + encodeURIComponent(key) : ''))).json();
-  if (d.error) { $('view').innerHTML = `<div class="empty">no blame for ${esc(pathValue)}.<div class="hint">${esc(d.error)}</div></div>`; return; }
-  setRoute('blame', 'blame=' + encodeURIComponent(d.path));
-  const disk = d.matchesDisk === false ? ` · <span class="warn">⚠ file changed outside recorded edits (disk: ${d.diskLines} lines)</span>` : '';
-  $('view').innerHTML = `<div class="blame-view">
-    <div class="blame-head"><h2>~ ${esc(d.path.split('/').pop())}</h2>
-      <div class="pmeta"><code>${esc(d.path)}</code> · ${d.lines.length} lines · ${d.applied}/${d.events} events applied${d.skipped ? ` · ${d.skipped} skipped` : ''} · scanned ${d.scanned} conversation${d.scanned === 1 ? '' : 's'}${disk}</div>
-      <div class="blame-tools"><button id="blameBack" class="ghost">← back to diffs</button>
-        <select id="blameAgent"><option value="">all agents</option><option value="claude">claude</option><option value="pi">pi</option></select>
-        <input id="blameFilter" type="search" placeholder="filter lines"></div>
-    </div>
-    <div id="blameLines"></div>
-  </div>`;
-  const renderLines = () => {
-    const q = $('blameFilter').value.toLowerCase();
-    const agent = $('blameAgent').value;
-    const shown = d.lines.filter(l => {
-      if (agent && (!l.event || l.event.agent !== agent)) return false;
-      if (q && !l.text.toLowerCase().includes(q)) return false;
-      return true;
-    });
-    const cap = 3000;
-    let lastDay = '';
-    $('blameLines').innerHTML = shown.slice(0, cap).map(l => {
-      const day = l.event && l.event.ts ? new Date(l.event.ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'unattributed';
-      const sep = day !== lastDay ? `<div class="blame-day">── ${esc(day)} ──</div>` : '';
-      lastDay = day;
-      if (!l.event) return sep + `<div class="blame-line unowned a4"><span class="ln">${l.n}</span><span class="age"></span><span class="glyph"></span><span class="bar"></span><span class="txt">${esc(l.text)}</span></div>`;
-      const tip = `${l.event.conversationTitle || ''}\n${l.event.agent} · ${l.event.kind} · ${fmtDate(l.event.ts)}\nclick for the diff`;
-      return sep + `<div class="blame-line ${blameAgeClass(l.event.ts)}" data-blame-event="${esc(l.event.id)}" title="${esc(tip)}"><span class="ln">${l.n}</span><span class="age">${esc(ago(Date.now() - Date.parse(l.event.ts)))}</span><span class="glyph">${diffKindGlyph(l.event.kind)}</span><span class="bar"></span><span class="txt">${esc(l.text)}</span></div>`;
-    }).join('') + (shown.length > cap ? `<div class="blame-day">showing ${cap} of ${shown.length} lines — use the filter</div>` : '');
-    $('blameLines').querySelectorAll('[data-blame-event]').forEach(el => el.onclick = () => showDiffEvent(el.dataset.blameEvent));
-  };
-  renderLines();
-  $('blameFilter').addEventListener('input', renderLines);
-  $('blameAgent').addEventListener('change', renderLines);
-  $('blameBack').onclick = () => {
-    if (blameParent && blameParent.scope === 'project') showProjectDiffs(blameParent.name);
-    else if (blameParent && blameParent.scope === 'conversation' && blameParent.key) showConversationDiffs(blameParent.key);
-    else history.back();
-  };
-}
-
-async function showProjectDiffs(name) {
-  projectOverviewName = name;
-  setRoute('project-diffs', 'project=' + encodeURIComponent(name) + '&diffs');
-  const d = await (await fetch('/api/project/diffs?name=' + encodeURIComponent(name))).json();
-  if (d.error) return errToast(d.error);
-  const rows = (d.files || []).map(row => ({ ...row, events: row.events.map(e => ({ ...e, path: row.path, relativePath: row.relativePath })) }));
-  renderDiffView('project', rows, `file diffs · ${d.project}`, `${d.files.length} files · scanned ${d.scanned}/${d.totalConversations} recent conversations`);
+  list.querySelectorAll('[data-git-repo]').forEach(el => el.onclick = () => showFilesBrowser(el.dataset.gitProject || '', { root: el.dataset.gitRepo }));
 }
 
 // ---- documents: the MRMD-backed markdown editor ----
@@ -7641,30 +5481,11 @@ function unwrapHardLines(text) {
   return { text: out.join('\n'), joins };
 }
 
-// `#doc=` links (older) open the file workspace; a conversation origin
+// `#doc=` links (older) open the live editor; a conversation origin
 // becomes the way back.
 async function openDocument(docPath, project = null, fromConversation = null) {
   if (!docPath) return;
-  return openFileWorkspace(docPath, { project: project || null, back: fromConversation || null });
-}
-
-// The editor head bar. Ids are shared with the project documents page, so
-// docStatusLine / commitDocument / reloadDocumentFromDisk work in both.
-// back: null, or [label, title] for the leading back control.
-function documentHeadHtml(docPath, back) {
-  if (typeof fileWs !== 'undefined' && fileWs?.focused && fileWs.path === docPath) return liveFileHead(fileWs);
-  const name = String(docPath).split('/').pop();
-  return `<div class="doc-head">
-      ${back ? `<button id="docBack" title="${esc(back[1])}">${esc(back[0])}</button>` : ''}
-      <b class="doc-title" title="${esc(docPath)}">${esc(name)}</b>
-      <span class="dim" id="docStatus">loading…</span>
-      <button id="docReload" hidden title="The disk file changed — reload it (your unsaved edits are lost)">reload from disk</button>
-      <button id="docRun" title="Run the code block at the cursor through rat · Ctrl+Enter (Shift+Enter runs and advances)">▶ run cell</button>
-      <button id="docRunAll" title="Run every code cell, top to bottom, in one kernel — stops at the first error">▶▶ run all</button>
-      <button id="docUnwrap" hidden title="This file has prose hard-wrapped at ~80 columns. Markdown renders those newlines as spaces — join the wrapped lines into full paragraphs (one undo step, Ctrl+Z reverts)">⤶ unwrap lines</button>
-      <button id="docSource" title="Toggle raw markdown source">source</button>
-      <button id="docSave" class="primary" title="Save a named revision (Git commit) · Ctrl+S">save revision</button>
-    </div>`;
+  return openLiveFile(docPath, { project: project || null, back: fromConversation || null });
 }
 
 // Load the bundle and the file, then build the editor into #docEditor.
@@ -7675,7 +5496,7 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   const seq = ++docMountSeq;
   const fail = (label, detail) => {
     const host = $('docEditor');
-    const box = host && host.closest('.doc-view');
+    const box = host && host.closest('.doc-editor-host');
     if (!box || seq !== docMountSeq) return;
     box.innerHTML = `<div class="empty">${label}<div class="hint">${esc(detail)}</div></div>`;
   };
@@ -7727,6 +5548,7 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
     if (!cell || !cell.code.trim()) return toast('put the cursor inside a code block first');
     runDocCell(cell);
   };
+  if ($('docRunMenu')) $('docRunMenu').onclick = $('docRun').onclick;
   $('docRunAll').onclick = runAllDocCells;
   if (!focused) refreshDocRuntimeChip();
   $('docSource').onclick = () => {
@@ -7747,12 +5569,11 @@ async function createProjectDocument(project) {
   catch { out = { error: 'network failure' }; }
   if (out.error) return errToast(out.error);
   toast('✓ created ' + name.trim());
-  openFileWorkspace(out.path, { project });
+  openLiveFile(out.path, { project, back: currentHash });
 }
 
 // One switch joins the two project surfaces: the overview (vision, epics,
-// areas, generated memory) and the files landing (README, tree, ridge —
-// design/33). File history and the whole-file diff live in the workspace.
+// areas, generated memory) and the files browser.
 function projectSwitchHtml(active) {
   const item = (key, label) => `<button type="button" role="tab" data-project-surface="${key}" class="${active === key ? 'on' : ''}" aria-selected="${active === key}">${label}</button>`;
   return `<nav class="project-switch" role="tablist" aria-label="Project view">${item('overview', 'overview')}${item('files', 'files')}</nav>`;
@@ -7763,7 +5584,7 @@ function wireProjectSwitch(name, root = $('view')) {
   root.querySelectorAll('[data-project-surface]').forEach(button => button.onclick = () => {
     const key = button.dataset.projectSurface;
     if (key === 'overview') showProjectOverview(name);
-    else showFilesProject(name);
+    else showFilesBrowser(name);
   });
 }
 
@@ -9172,7 +6993,6 @@ function openMediaLightbox(src, title = 'image') {
 const FILE_IMAGE_PATH = /\.(png|jpe?g|gif|webp)(?::\d+(?::\d+)?)?$/i;
 // Case-sensitive on purpose: the document save endpoint accepts exactly
 // '.md', so anything the editor opens is guaranteed to autosave.
-const FILE_MARKDOWN_PATH = /\.md(?::\d+(?::\d+)?)?$/;
 let fileClickSuppressedUntil = 0;
 
 function fileControlContext(button) {
@@ -9194,23 +7014,9 @@ function viewFileChange(ctx) {
   openToolCallFile(ctx.key, ctx.path, ctx.ts, ctx.anchor, ctx.call);
 }
 
-function openTextFilePreview(data) {
-  document.querySelectorAll('.file-preview').forEach(el => el.remove());
-  const box = document.createElement('div');
-  box.className = 'file-preview';
-  const lang = fileHighlightLang(data.path);
-  const body = lang === 'md'
-    ? `<div class="md">${mdRender(data.text)}</div>`
-    : `<pre class="md-code"><code class="lang-${esc(lang)}">${highlightFileLines(data.text, lang, { eager: true }).join('\n')}</code></pre>`;
-  box.innerHTML = `<div class="file-preview-head"><span>${esc(data.path)}</span><button type="button">close</button></div><div class="file-preview-body">${body}</div>`;
-  const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
-  const onKey = e => { if (e.key === 'Escape') close(); };
-  box.querySelector('button').onclick = close;
-  box.onclick = e => { if (e.target === box) close(); };
-  document.addEventListener('keydown', onKey);
-  document.body.appendChild(box);
-}
-
+// Any file a transcript points at opens in the live editor: editable when
+// the project can edit it, read-only otherwise (a log in /tmp, a file under
+// home). Images open in the lightbox. One surface for reading and editing.
 async function openPathInApp(ctx, quiet = false) {
   const query = new URLSearchParams({ id: ctx.key || '', path: ctx.path });
   let info;
@@ -9232,14 +7038,13 @@ async function openPathInApp(ctx, quiet = false) {
     if (!quiet) errToast('this file has no in-app preview — use the system application');
     return false;
   }
-  let data;
-  try { data = await (await fetch('/api/path/read?' + query)).json(); }
-  catch { data = { error: 'network failure' }; }
-  if (data.error) {
-    if (!quiet) errToast(data.error);
-    return false;
-  }
-  openTextFilePreview(data);
+  const s = sessions.find(x => x.key === ctx.key);
+  // Only a link inside the open conversation carries a return point.
+  // ctx.key is the last active conversation even on project pages.
+  const fromConversation = viewKind === 'conversation' && ctx.key === activeRel ? ctx.key : null;
+  if (fromConversation) rememberConversationFileReturn(ctx.button);
+  const line = Number((String(ctx.path).match(/:(\d+)(?::\d+)?$/) || [])[1]) || null;
+  openLiveFile(info.path, { project: s ? projectOf(s) : currentProjectName(), back: fromConversation || currentHash, line });
   return true;
 }
 
@@ -9259,37 +7064,10 @@ async function copyFullFilePath(ctx) {
   catch { errToast('could not copy the path'); }
 }
 
-// Markdown opens in the MRMD document editor when the server can edit it
-// (any file inside an indexed repository or project). The probe uses the
-// same endpoint the editor itself loads through, so a refusal never
-// navigates away from the current view — callers fall back to the
-// read-only preview instead.
-async function openMarkdownInEditor(ctx, quiet = false) {
-  const clean = ctx.path.replace(/:(\d+)(?::(\d+))?$/, '');
-  // The conversation id lets the server resolve a relative link the same
-  // way the preview and diff views do: against the conversation cwd.
-  const query = new URLSearchParams({ id: ctx.key || '', path: clean });
-  let probe;
-  try { probe = await (await fetch('/api/file/read?' + query)).json(); }
-  catch { probe = { error: 'network failure' }; }
-  if (probe.error) {
-    if (!quiet) errToast(probe.error);
-    return false;
-  }
-  const s = sessions.find(x => x.key === ctx.key);
-  // Only a link inside the open conversation carries a return point.
-  // ctx.key is the last active conversation even on project pages.
-  const fromConversation = viewKind === 'conversation' && ctx.key === activeRel ? ctx.key : null;
-  if (fromConversation) rememberConversationFileReturn(ctx.button);
-  openDocument(probe.path, s ? projectOf(s) : null, fromConversation);
-  return true;
-}
-
 async function primaryFileAction(ctx) {
   // An image change is useful as a picture first. Text changes keep their
   // exact historical diff. The menu always offers the other interpretation.
   if (ctx.change && !FILE_IMAGE_PATH.test(ctx.path)) return viewFileChange(ctx);
-  if (FILE_MARKDOWN_PATH.test(ctx.path) && await openMarkdownInEditor(ctx, true)) return;
   const opened = await openPathInApp(ctx, ctx.change);
   if (!opened && ctx.change) viewFileChange(ctx);
 }
@@ -9309,11 +7087,9 @@ function openFileActionMenu(ctx, x, y) {
   menu.className = 'file-action-menu';
   menu.setAttribute('role', 'menu');
   const image = FILE_IMAGE_PATH.test(ctx.path);
-  const markdown = !image && FILE_MARKDOWN_PATH.test(ctx.path);
   const items = [];
   if (ctx.change && !image) items.push(['View this change', () => viewFileChange(ctx)]);
-  if (markdown) items.push(['Edit in document editor', () => openMarkdownInEditor(ctx)]);
-  items.push([image ? 'Open image in aiconvo' : markdown ? 'Open read-only preview' : 'Open current file in aiconvo', () => openPathInApp(ctx)]);
+  items.push([image ? 'Open image in aiconvo' : 'Open current file in aiconvo', () => openPathInApp(ctx)]);
   if (ctx.change && image) items.push(['View this change', () => viewFileChange(ctx)]);
   items.push(['Open with system application', () => runNativePathAction(ctx, 'open')]);
   items.push(['Show in folder', () => runNativePathAction(ctx, 'reveal')]);
@@ -11244,7 +9020,7 @@ function renderAgentContext() {
     const [lead, rest] = contextChipParts(c);
     return `<span class="agent-ctx-chip${c.type === 'file' ? ' file' : ''}"${c.type === 'file' ? ` data-ctx-file="${esc(c.path)}" title="${esc(c.path)} · click to open the file"` : ''}><b>${esc(lead)}</b> ${esc(rest)}<button type="button" data-rm="${i}" title="Remove this context">x</button></span>`;
   }).join('');
-  box.querySelectorAll('[data-ctx-file]').forEach(el => el.onclick = e => { if (!e.target.closest('[data-rm]')) openFileWorkspace(el.dataset.ctxFile, { project: currentProjectName(), back: activeRel }); });
+  box.querySelectorAll('[data-ctx-file]').forEach(el => el.onclick = e => { if (!e.target.closest('[data-rm]')) openLiveFile(el.dataset.ctxFile, { project: currentProjectName(), back: activeRel }); });
   box.querySelectorAll('[data-rm]').forEach(b => {
     b.onclick = () => {
       window._agentContext.splice(Number(b.dataset.rm), 1);
@@ -13217,8 +10993,7 @@ async function open(rel, scroll, routeHash = null) {
   const seq = ++conversationLoadSeq;
   const navigating = viewKind !== 'conversation' || activeRel !== rel || !current || current.key !== rel;
   if (navigating) {
-    if (window.fileInk && fileInk.teardown) fileInk.teardown();
-    markSettingsClosed();
+      markSettingsClosed();
     if (progressStream) { progressStream.close(); progressStream = null; }
     activeRel = rel;
     markAgentRead(rel);
@@ -14302,9 +12077,7 @@ async function showEpicEvidence(id, focusKey = activeRel) {
 }
 
 function setTab(t) {
-  if (window.fileInk && fileInk.teardown) fileInk.teardown();
   tab = t;
-  if (typeof applyLensChrome === 'function') applyLensChrome();
   delete $('list').dataset.initScroll; // each tab scrolls to "now" on first paint
   document.querySelectorAll('#tabs button[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   $('selShown').hidden = t !== 'conv';
@@ -14420,7 +12193,6 @@ function renderEpicsTab() {
 }
 
 function renderTabList() {
-  if (lens === 'files' && tab !== 'repos') { tab = 'conv'; applyLensChrome(); return render(); }
   if (tab === 'notes') renderNotesTab();
   else if (tab === 'epics') renderEpicsTab();
   else if (tab === 'repos') renderReposTab();
@@ -15497,7 +13269,6 @@ async function refreshSemanticStatus() {
 const settingsPaneOf = h => { const p = String(h || '').split('=')[1] || 'model'; return SETTINGS_PANE_RENDER[p] ? p : 'model'; };
 
 async function showSettings(pane) {
-  if (window.fileInk && fileInk.teardown) fileInk.teardown();
   if (progressStream) { progressStream.close(); progressStream = null; }
   const wasOpen = settingsOpen;
   settingsPane = pane || settingsPane || 'model';
@@ -16202,32 +13973,13 @@ function helpNow() {
       ['→', 'last conversation in this project'],
     ] });
   }
-  if (viewKind === 'file' && fileWs?.focused) {
-    sections.push({ label: 'live file', keys: [
-      ['ctrl+s', 'save to disk'], ['ctrl+f', 'find in this file'], ['ctrl+space', 'completion'],
+  if (viewKind === 'file' && fileWs) {
+    sections.push({ label: 'file', keys: [
+      ['ctrl+s', 'save to disk'], ['ctrl+f', 'find in this file'], ['ctrl+space', 'completion'], ['ctrl+k', 'ask an agent for a change to this file'],
       ...(fileWs.kind === 'md' ? [['ctrl+enter', 'run this cell'], ['shift+enter', 'run and advance']] : []),
     ] });
-  } else if (viewKind === 'file' || viewKind === 'files-project') {
-    sections.push({ label: 'file workspace', keys: [
-      ['w / n', 'write: edit the current file'],
-      ['h', 'history: compare two moments (drag the keyframes)'],
-      ['e', 'focus the editor'],
-      ['c', 'open the newest conversation that touched this file'],
-      ['ctrl+k', 'ask an agent for a change to this file'],
-      ['ctrl+s', 'save (markdown: a Git revision; code: write to disk)'],
-    ] });
   }
-  if (viewKind === 'home' && lens === 'files') {
-    sections.push({ label: 'files chart', keys: [
-      ['click a file name', 'open the file'],
-      ['click a mark', 'open the file at that change · shift+click: the conversation'],
-      ['double click a project', 'the project: README, tree, ridge'],
-      ['+ − 0', 'timeline zoom'],
-      ['n / b / t', 'timeline: now / beginning / date'],
-      ['4', 'repositories'],
-      ['F', 'back to conversations mode'],
-    ] });
-  } else if (viewKind === 'home') {
+  if (viewKind === 'home') {
     const listKeys = [
       ['↑ ↓ / pgup pgdn', 'scroll'],
       ['← →', 'Gantt / last project'],
@@ -16336,7 +14088,6 @@ document.addEventListener('keydown', e => {
   }
   if (e.key === 'Escape') {
     if (searchModalOpenNow()) { searchModalClose(); return; }
-    if (document.body.classList.contains('file-full')) { exitFileDiffFull(); return; }
     if (!$('epicOverlay').hidden) return closeEpicDialog();
     if (!$('helpOverlay').hidden) { $('helpOverlay').hidden = true; return; }
     if (readOverlayOpen()) { closeReadingView(); return; }
@@ -16431,8 +14182,7 @@ document.addEventListener('keydown', e => {
   if (quickFileKeydown(e)) return;
   if (filePickKeydown(e)) return;
   if (treeKeydown(e)) return;
-  if (typeof fileWsKey === 'function' && fileWsKey(e)) { e.preventDefault(); return; }
-  // F flips the lens: conversations ⇄ files (design/33).
+  // F: Conversation ⇄ Files inside a conversation.
   if (e.key === 'F' && !e.ctrlKey && !e.metaKey && !e.altKey && viewKind === 'conversation') { e.preventDefault(); fbConversationFiles(); return; }
   // Brackets and PageUp/PageDown move the transcript by nearly one screen.
   if ($('conversationTranscript') && (e.key === '[' || e.key === ']' || e.key === 'PageUp' || e.key === 'PageDown')) {
@@ -16452,15 +14202,6 @@ document.addEventListener('keydown', e => {
     moveViewLevel(e.key === 'ArrowLeft' ? -1 : 1);
     return;
   }
-  if ($('fgRoot') && ['+', '=', '-', '_', '0', 'n', 'b'].includes(e.key)) {
-    e.preventDefault();
-    if (e.key === '+' || e.key === '=') $('fgPlus').click();
-    else if (e.key === '-' || e.key === '_') $('fgMinus').click();
-    else if (e.key === '0') { fileGanttScale = 160; fileGanttInitialScroll = true; renderFileGanttChart(); }
-    else if (e.key === 'n') $('fgNow').click();
-    else $('fgBegin').click();
-    return;
-  }
   switch (e.key) {
     case '/': e.preventDefault(); searchModalOpen(); break;
     case ' ': {
@@ -16470,14 +14211,7 @@ document.addEventListener('keydown', e => {
       render();
       break;
     }
-    case '1': case '2': case '3': {
-      if (lens === 'files') { // files · docs · code
-        goHome(); filesKind = ['all', 'docs', 'code'][Number(e.key) - 1];
-        try { localStorage.setItem('aiconvo.filesKind', filesKind); } catch {}
-        setTab('conv'); break;
-      }
-      goHome(); setTab(['conv', 'notes', 'epics'][Number(e.key) - 1]); break;
-    }
+    case '1': case '2': case '3': goHome(); setTab(['conv', 'notes', 'epics'][Number(e.key) - 1]); break;
     case '4': goHome(); setTab('repos'); break;
     case 'f': {
       // Filters narrow the home list; away from home the key goes home first.
@@ -16843,9 +14577,6 @@ setInterval(() => {
 // (ETag 304 skips the rebuild when the list did not change).
 setInterval(() => { if (!document.hidden) updateLiveBadges(); }, 60000);
 
-document.addEventListener('fullscreenchange', () => {
-  if (!document.fullscreenElement && document.body.classList.contains('file-full')) exitFileDiffFull();
-});
 updateScaleSeg();
 applyGanttMode();
 loadJobs();

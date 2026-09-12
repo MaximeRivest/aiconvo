@@ -1,5 +1,7 @@
 # 15 — File diff timeline
 
+Status (2026-09-11): superseded — the conversation diffs list is gone; "changes" on a conversation opens the files browser in Changes mode (design/35), and one tool call opens the quick file view.
+
 ## Purpose
 
 Answer three questions without opening every conversation:

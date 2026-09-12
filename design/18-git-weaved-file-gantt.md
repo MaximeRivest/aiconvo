@@ -1,5 +1,7 @@
 # 18 — Git-weaved file Gantt
 
+Status (2026-09-11): superseded — the file Gantt is gone; a project's files live in the files browser (design/35).
+
 ## Purpose
 
 Show how AI work moved through project files and became repository history.

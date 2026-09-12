@@ -20,19 +20,40 @@ function registerLiveFileLanguageService(language, factory) {
 }
 function liveFileLabel(ws) {
   const root = ws.touched?.repoRoot;
-  return root && ws.path.startsWith(root + '/') ? ws.path.slice(root.length + 1) : ws.path.replace(/^\/home\/[^/]+\//, '~/');
+  if (root && ws.path.startsWith(root + '/')) return ws.path.slice(root.length + 1);
+  // No checkout known yet: the path from the project folder is enough.
+  const at = ws.project ? ws.path.indexOf('/' + ws.project + '/') : -1;
+  if (at >= 0) return ws.path.slice(at + ws.project.length + 2);
+  return ws.path.replace(/^\/home\/[^/]+\//, '~/');
 }
+function liveBackLabel(ws) {
+  if (!ws.back) return ws.browserContext || ws.project ? '← Files' : '← Back';
+  if (ws.back.startsWith('review=')) return '← Review';
+  if (typeof fbConversationHash === 'function' && fbConversationHash(ws.back)) return '← Conversation';
+  if (ws.back.startsWith('browse=')) return '← Files';
+  if (ws.back.startsWith('filecall=')) return '← Change';
+  return '← Back';
+}
+// One row: where you came from, the file, its state, and the few actions a
+// file needs. History and Ask live in the row on a wide screen and under
+// ⋯ on a phone, so the row never wraps over the text.
 function liveFileHead(ws) {
   const md = ws.kind === 'md';
   return `<header class="live-file-head">
-    <button id="liveBack" title="Return to the previous view">${ws.back?.startsWith('review=') ? '← Review' : '← Back'}</button>
+    <button id="liveBack" title="${fgAttr(liveBackLabel(ws).slice(2))}: return to the previous view"><span class="lf-back-arrow">←</span><span class="lf-wide">${esc(liveBackLabel(ws).slice(2))}</span></button>
     <b id="ffTitle" title="${fgAttr(ws.path)}">${esc(liveFileLabel(ws))}</b>
     <span id="docStatus" role="status">Opening…</span>
     <span id="liveServiceStatus" title="Built-in language support; no language server connected">${esc(liveLanguage(ws.path))}</span>
     <button id="docReload" hidden title="Reload the current disk file">Reload</button>
-    ${md ? '<button id="docRun" title="Run the cell at the cursor · Ctrl+Enter">▶ Run</button>' : ''}
+    <button id="liveHistory" class="lf-wide" title="Recorded versions of this file: read one, or compare two">History</button>
+    <button id="liveAsk" class="lf-wide" title="Ask an agent for a change to this file · Ctrl+K">Ask</button>
+    ${md ? '<button id="docRun" class="lf-wide" title="Run the cell at the cursor · Ctrl+Enter">▶ Run</button>' : ''}
     <button id="${md ? 'docSave' : 'fwSave'}" ${md ? '' : 'disabled'} title="Save to disk · Ctrl+S">Save</button>
     <details class="live-more"><summary aria-label="Editor options">⋯</summary><div>
+      <button id="liveHistoryMenu" class="lf-narrow">History</button>
+      <button id="liveAskMenu" class="lf-narrow">Ask for a change</button>
+      ${md ? '<button id="docRunMenu" class="lf-narrow">▶ Run this cell</button>' : ''}
+      ${ws.project ? '<button id="liveBrowse">Browse this folder</button>' : ''}
       ${md ? '<button id="docRunAll">Run all cells</button><button id="docSource">Markdown source</button><button id="docUnwrap" hidden>Unwrap prose</button>' : ''}
       <span id="liveAnnotationStatus">Gutter: changes and line attribution</span>
       <span>Ctrl+Space: completion · Ctrl+F: find</span>
@@ -51,13 +72,32 @@ async function openLiveFile(pathValue, opts = {}) {
     reviewRef: opts.reviewRef || null, reviewData: opts.reviewData || null };
   fileWs = ws;
   setRoute('file', fileWsHash(ws));
-  $('view').innerHTML = '<section class="files-ws live-file-view"><div id="ffCompare" class="live-file-body"></div></section>';
+  $('view').innerHTML = '<section class="files-ws live-file-view"><div id="ffCompare" class="live-file-body"></div><div id="fwAsk" class="fw-ask" hidden></div></section>';
+  // A link may name recorded versions (to=, from=): open straight into history.
+  if (opts.to || opts.from) return liveFileHistory(ws, { to: opts.to || null, from: opts.from || null });
   await fileWsMountBody(ws, opts);
+}
+function liveFileGoBack(ws) {
+  if (ws.back) return typeof fbReturnTo === 'function' ? fbReturnTo(ws.back) : dispatchHash(ws.back);
+  if (ws.browserContext) return showFilesBrowser(ws.project, ws.browserContext);
+  return ws.project ? showFilesBrowser(ws.project) : goHome();
+}
+function liveFileBrowseFolder(ws) {
+  const context = ws.browserContext || { conv: (typeof fbConversationHash === 'function' && fbConversationHash(ws.back)) || '' };
+  const root = ws.touched?.repoRoot || '';
+  const dir = root && ws.path.startsWith(root + '/') ? ws.path.slice(root.length + 1).split('/').slice(0, -1).join('/') : '';
+  return showFilesBrowser(ws.project, { ...context, mode: 'browse', root, dir });
 }
 function liveFileAfterMount(ws) {
   if (fileWs !== ws || !ws.editor) return;
-  $('liveBack').onclick = () => ws.back ? (typeof fbReturnTo === 'function' ? fbReturnTo(ws.back) : dispatchHash(ws.back)) : ws.browserContext ? showFilesBrowser(ws.project, ws.browserContext) : ws.project ? showFilesBrowser(ws.project) : goHome();
+  $('liveBack').onclick = () => liveFileGoBack(ws);
+  for (const id of ['liveHistory', 'liveHistoryMenu']) $(id).onclick = () => liveFileHistory(ws);
+  for (const id of ['liveAsk', 'liveAskMenu']) $(id).onclick = () => fileWsToggleAsk(true);
+  if ($('liveBrowse')) $('liveBrowse').onclick = () => liveFileBrowseFolder(ws);
   const editor = ws.editor;
+  if (editor.view?.dom) editor.view.dom.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); fileWsToggleAsk(true); }
+  });
   const savedText = ws.kind === 'md' ? docState.baseText : ws.baseText;
   $('docReload').onclick = () => liveFileReload(ws);
   const state = ws.live = { version: 0, original: savedText, sha: ws.kind === 'md' ? docState.sha : ws.sha,
@@ -185,4 +225,115 @@ function liveFileReload(ws) {
   const dirty = ws.kind === 'md' ? docState?.dirty : ws.dirty;
   if (dirty && !confirm('Discard your unsaved edits and reload the disk file?')) return;
   return ws.kind === 'md' ? reloadDocumentFromDisk() : fileWsReloadCode(ws, { dropDraft: true });
+}
+
+// ---- History: recorded versions of this file, read-only ----
+// The editor makes way for a version list and one version (or the diff of
+// two). Nothing is fetched until History is asked for; the route carries
+// the chosen versions so a refresh or a shared link lands on the same view.
+async function liveHistoryScope(ws) {
+  if (ws.historyScope) return ws.historyScope;
+  const out = await (await fetch('/api/file/history-scope?' + new URLSearchParams({ path: ws.path, project: ws.project || '' }))).json();
+  if (out.error) throw new Error(out.error);
+  ws.historyScope = out;
+  if (!ws.touched.repoRoot && out.root) ws.touched.repoRoot = out.root;
+  if (!ws.project && out.project) ws.project = out.project;
+  return out;
+}
+function liveHistoryParams(scope) {
+  return new URLSearchParams({ scope: 'project', name: scope.project, repo: scope.root, path: scope.relativePath });
+}
+function liveHistoryHead(ws) {
+  return `<header class="live-file-head">
+    <button id="liveBack" title="${fgAttr(liveBackLabel(ws).slice(2))}: return to the previous view"><span class="lf-back-arrow">←</span><span class="lf-wide">${esc(liveBackLabel(ws).slice(2))}</span></button>
+    <b id="ffTitle" title="${fgAttr(ws.path)}">${esc(liveFileLabel(ws))}</b>
+    <span id="docStatus" role="status">History · read-only</span>
+    <button id="liveLive" class="primary" title="Back to the editable file">Return to Live</button>
+  </header>`;
+}
+async function liveFileHistory(ws, selection = {}) {
+  if (fileWs !== ws) return;
+  const ticket = ws.historyRequest = (ws.historyRequest || 0) + 1;
+  if (ws.editor) fileWsCloseEditor();
+  ws.mode = 'history';
+  ws.historySel = selection;
+  const view = $('view').querySelector('.live-file-view');
+  if (!view) return;
+  view.classList.add('history');
+  view.innerHTML = liveHistoryHead(ws) + '<div class="live-history"><aside id="fwHistoryDrawer" class="fw-history-drawer" aria-label="File history">Loading recorded versions…</aside><main id="lfHistoryMain" class="lf-history-main"></main></div>';
+  $('liveBack').onclick = () => liveFileGoBack(ws);
+  $('liveLive').onclick = () => openLiveFile(ws.path, { project: ws.project, root: ws.touched?.repoRoot, back: ws.back, browserContext: ws.browserContext, reviewRef: ws.reviewRef });
+  const host = $('fwHistoryDrawer');
+  try {
+    const scope = await liveHistoryScope(ws);
+    const params = liveHistoryParams(scope);
+    for (const key of ['from', 'to']) if (/^saved:\d+$/.test(selection[key] || '')) params.set(key, selection[key]);
+    const doc = await (await fetch('/api/file-history/points?' + params)).json();
+    if (doc.error) throw new Error(doc.error);
+    if (fileWs !== ws || ws.historyRequest !== ticket) return;
+    const points = doc.points, usable = points.filter(p => p.state !== 'unavailable');
+    if (!usable.length) { host.textContent = 'No readable versions have been saved yet.'; return; }
+    const newest = [...usable].reverse().find(p => p.kind === 'saved') || usable.at(-1);
+    const pick = id => id ? usable.find(p => p.id === id || p.eventId === id) : null;
+    if ((selection.to && !pick(selection.to)) || (selection.from && !pick(selection.from))) throw new Error('The requested version is unavailable. Pick another version.');
+    let to = pick(selection.to) || newest;
+    let from = pick(selection.from) || to;
+    if (from.order > to.order) [from, to] = [to, from];
+    ws.historySel = { from: from.id, to: to.id };
+    const comparing = from.id !== to.id;
+    const label = p => p.kind === 'current' ? 'Live file' : p.kind === 'saved' ? p.label : p.kind === 'ai' ? 'Reconstructed · ' + (p.title || 'agent edit') : p.kind === 'git' ? 'Git · ' + (p.subject || p.shortHash) : p.label || 'Recorded boundary';
+    const when = p => p.kind === 'current' ? 'Now' : esc(new Date(p.ms).toLocaleString());
+    host.innerHTML = `<header><b>History</b></header>
+      <p class="fh-truth">${esc(doc.truth)}</p>
+      <label><input id="fhCompare" type="checkbox" ${comparing ? 'checked' : ''}> Compare two versions</label>
+      <label id="fhFromLabel" ${comparing ? '' : 'hidden'}>From <select id="fhFrom" aria-label="Earlier version"></select></label>
+      <label>To <select id="fhTo" aria-label="Version to read"></select></label>
+      <nav class="fh-step"><button id="fhOlder">← Older</button><button id="fhNewer">Newer →</button></nav>
+      <p class="fh-readonly" role="status">Read-only · ${to.state === 'deleted' ? 'Deletion observed' : to.kind === 'current' ? 'Current disk contents' : 'Recorded ' + new Date(to.ms).toLocaleString()}</p>
+      <div class="fh-versions">${[...points].reverse().map(p => `<button data-fh-point="${esc(p.id)}" ${p.state === 'unavailable' ? 'disabled' : ''} aria-current="${p.id === to.id ? 'true' : 'false'}"><time>${when(p)}</time><span>${esc(label(p))}</span></button>`).join('')}</div>`;
+    const options = [...usable].reverse().map(p => `<option value="${esc(p.id)}">${when(p)} · ${esc(label(p))}</option>`).join('');
+    $('fhFrom').innerHTML = $('fhTo').innerHTML = options;
+    $('fhFrom').value = from.id; $('fhTo').value = to.id;
+    const select = (toId, fromId) => liveFileHistory(ws, { from: fromId || toId, to: toId });
+    const i = usable.findIndex(p => p.id === to.id);
+    $('fhCompare').onchange = () => select(to.id, $('fhCompare').checked ? usable[Math.max(0, i - 1)].id : to.id);
+    $('fhFrom').onchange = () => select(to.id, $('fhFrom').value);
+    $('fhTo').onchange = () => select($('fhTo').value, comparing ? from.id : null);
+    $('fhOlder').disabled = i <= 0; $('fhNewer').disabled = i >= usable.length - 1;
+    $('fhOlder').onclick = () => select(usable[Math.max(0, i - 1)].id, comparing ? from.id : null);
+    $('fhNewer').onclick = () => select(usable[Math.min(usable.length - 1, i + 1)].id, comparing ? from.id : null);
+    host.querySelectorAll('[data-fh-point]').forEach(b => b.onclick = () => select(b.dataset.fhPoint, comparing ? from.id : null));
+    currentHash = fileWsHash(ws);
+    history.replaceState(null, '', location.pathname + location.search + '#' + currentHash);
+    await liveHistoryPaint(ws, scope, doc, from, to, ticket);
+  } catch (e) { if (fileWs === ws && host.isConnected && ws.historyRequest === ticket) host.textContent = 'History unavailable: ' + e.message; }
+}
+async function liveHistorySnapshot(scope, doc, point) {
+  const params = liveHistoryParams(scope);
+  params.set('point', point.id);
+  const snap = await (await fetch('/api/file-history/snapshot?' + params)).json();
+  if (snap.error) throw new Error(snap.error);
+  return snap;
+}
+function liveVersionHtml(snap) {
+  if (snap.state === 'deleted') return '<p class="cr-diff-notice">The file was absent at this point.</p>';
+  const lines = String(snap.content || '').split('\n');
+  return `<pre class="lf-version"><code>${lines.map((line, i) => `<span class="lf-ln">${i + 1}</span>${esc(line)}\n`).join('')}</code></pre>`;
+}
+async function liveHistoryPaint(ws, scope, doc, from, to, ticket) {
+  const main = $('lfHistoryMain');
+  if (!main) return;
+  main.innerHTML = '<p class="cr-diff-notice">Loading the recorded version…</p>';
+  const comparing = from.id !== to.id;
+  const [older, newer] = await Promise.all([comparing ? liveHistorySnapshot(scope, doc, from) : null, liveHistorySnapshot(scope, doc, to)]);
+  if (fileWs !== ws || ws.historyRequest !== ticket || !main.isConnected) return;
+  const note = s => s && !s.exact && s.state !== 'deleted' ? `<p class="cr-diff-notice">${esc(s.method === 'replay' ? 'Reconstructed from recorded edits; divergent edits may have been skipped.' : 'Approximate version.')}</p>` : '';
+  if (!comparing) { main.innerHTML = note(newer) + liveVersionHtml(newer); return; }
+  const side = s => ({ text: String(s.content || ''), absent: s.state === 'deleted' });
+  ws.historyExpanded = ws.historyExpanded || [];
+  const paint = () => {
+    main.innerHTML = note(older) + note(newer) + `<div class="cr-diff">${crDiff(side(older), side(newer), { comments: false, expanded: ws.historyExpanded })}</div>`;
+    main.querySelectorAll('[data-cr-expand]').forEach(b => b.onclick = () => { ws.historyExpanded.push(b.dataset.crExpand.split(':').map(Number)); paint(); });
+  };
+  paint();
 }

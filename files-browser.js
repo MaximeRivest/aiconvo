@@ -25,7 +25,7 @@ function fbConversationFiles() {
   const ta = $('agentText');
   if (ta) readerDrafts.set(current.key, ta.value);
   const saved = filesBrowserPlaces.get(project + '\0' + current.key);
-  if (saved?.file) return openFileWorkspace(saved.file, { project, browserContext: saved.context });
+  if (saved?.file) return openLiveFile(saved.file, { project, root: saved.context?.root || '', browserContext: saved.context });
   return showFilesBrowser(project, { ...saved, conv: current.key });
 }
 function fbContext(s) {
@@ -34,7 +34,7 @@ function fbContext(s) {
 function fbOpenFile(s, file, line) {
   const context = fbContext(s);
   filesBrowserPlaces.set(s.project + '\0' + s.conv, { file, context });
-  return openFileWorkspace(file, { project: s.project, line, browserContext: context });
+  return openLiveFile(file, { project: s.project, root: s.root || '', line, browserContext: context });
 }
 // A route hash that names a conversation (no "view=" grammar, a source
 // prefix). Such a hash as ws.back means the file was opened from that
@@ -52,32 +52,6 @@ function fbReturnTo(hash) {
   return dispatchHash(hash);
 }
 
-function fbFileNavigation(ws) {
-  // The file remembers where it was opened from (ws.back): a conversation,
-  // a review, a browser. That place is what "back" returns to; the folder
-  // browser is only the fallback when nothing is recorded. A conversation
-  // return lands on the very link that opened the file.
-  const fromConversation = fbConversationHash(ws.back);
-  const context = ws.browserContext || { project: ws.project, conv: fromConversation || '' };
-  const host = document.createElement('div'); host.className = 'fb-file-nav';
-  host.innerHTML = `${context.conv ? '<button data-fb-conv>Conversation</button><b>Files</b>' : '<button data-fb-summary>Project summary</button>'}<button data-fb-browse>Browse folders</button><button data-fb-changes>Changes</button><span class="dim">Live edits · History is read-only</span>`;
-  $('view').prepend(host);
-  host.querySelector('[data-fb-conv]')?.addEventListener('click', () => fromConversation && context.conv === fromConversation ? fbReturnTo(fromConversation) : open(context.conv, 'restore'));
-  host.querySelector('[data-fb-summary]')?.addEventListener('click', () => showProjectOverview(ws.project));
-  host.querySelector('[data-fb-browse]').onclick = () => showFilesBrowser(ws.project, { ...context, mode: 'browse' });
-  host.querySelector('[data-fb-changes]').onclick = () => showFilesBrowser(ws.project, { ...context, mode: 'changes' });
-  const back = $('fwBack');
-  if (ws.back && ws.back.startsWith('review=')) {
-    const button = document.createElement('button'); button.textContent = 'Return to review';
-    button.onclick = () => dispatchHash(ws.back); host.prepend(button);
-    back.onclick = button.onclick;
-    back.textContent = '← Review'; back.title = 'Return to the review';
-  } else if (ws.back) {
-    back.onclick = () => fbReturnTo(ws.back);
-    back.textContent = fromConversation ? '← Conversation' : '← Back';
-    back.title = fromConversation ? 'Return to the conversation, at the link that opened this file' : 'Return to where this file was opened from';
-  } else back.onclick = () => showFilesBrowser(ws.project, context);
-}
 
 function fbFinderClose(s) {
   const f = s?.finder;
@@ -381,7 +355,7 @@ function fbPaintChanges(s) {
     card.querySelector('[data-review]').onclick = () => { record.reviewed = record.reviewed === latest ? null : latest; save(); };
     card.querySelector('[data-flag]').onclick = () => { record.flagged = !record.flagged; save(); };
     card.querySelector('[data-open]').onclick = () => fbOpenFile(s, path);
-    card.querySelector('[data-history]').onclick = () => openFileWorkspace(path, { project: s.project, to: 'current', browserContext: fbContext(s) });
+    card.querySelector('[data-history]').onclick = () => openLiveFile(path, { project: s.project, root: s.root || '', to: 'current', browserContext: fbContext(s) });
     card.querySelectorAll('[data-event]').forEach(b => b.onclick = () => { const e = events[Number(b.dataset.event)]; openConversationAtEvent(e.conv_key, e.id); });
     card.ontoggle = () => {
       if (!card.open || card.dataset.loaded) return;

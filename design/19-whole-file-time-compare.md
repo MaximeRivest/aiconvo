@@ -1,5 +1,7 @@
 # 19 — Whole-file time comparison
 
+Status (2026-09-11): superseded — the two-keyframe compare is gone; History inside the live editor lists recorded versions and compares two with the review diff component (design/37).
+
 ## Purpose
 
 Let a user select one file in the file Gantt, read its complete content at two times, compare both states, and trace one line through recorded changes.
