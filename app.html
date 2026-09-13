@@ -2130,9 +2130,18 @@ function setRoute(kind, hash) {
   }
 }
 
+// The route grammar is `#<route>` with no leading slash, but links in the
+// wild — agent-composed URLs, old bookmarks — use the SPA-style `#/` form.
+// Normalize both forms, and never let a literal % inside a path (which makes
+// decodeURIComponent throw) kill the navigation silently.
+function hashRoute() {
+  let h = location.hash.slice(1);
+  try { h = decodeURIComponent(h); } catch {}
+  return h.replace(/^\/+/, '');
+}
 window.addEventListener('hashchange', () => {
   if (suppressHashEvents > 0) { suppressHashEvents--; return; }
-  dispatchHash(decodeURIComponent(location.hash.slice(1)), { restore: true });
+  dispatchHash(hashRoute(), { restore: true });
 });
 window.addEventListener('popstate', () => {
   // pushState('' ) landings (hash cleared = home) do not fire hashchange.
@@ -16818,7 +16827,7 @@ fetch('/api/git/repos').then(r => r.json()).then(d => {
   if (viewKind === 'home' && tab === 'conv') render();
 }).catch(() => {});
 load().then(() => {
-  dispatchHash(decodeURIComponent(location.hash.slice(1)));
+  dispatchHash(hashRoute());
   prefetchDocumentEditor();
 });
 // SSE `update` events patch the list live; this poll only reconciles what a
