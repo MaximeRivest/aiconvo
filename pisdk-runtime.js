@@ -107,10 +107,11 @@ const getSdk = hooks.loadSdk || loadSdk;
 // --prompt-mode into the modes extension, matching pi's unknownFlags map).
 function parseExtraArgs(extraArgs) {
   const args = Array.isArray(extraArgs) ? extraArgs : [];
-  const out = { extensionPaths: [], name: null, appendSystemPrompt: undefined, flags: new Map() };
+  const out = { extensionPaths: [], name: null, appendSystemPrompt: undefined, flags: new Map(), noExtensions: false };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '-e' && args[i + 1]) { out.extensionPaths.push(args[++i]); continue; }
+    if (a === '--no-extensions' || a === '-ne') { out.noExtensions = true; continue; }
     if (a === '--name' && args[i + 1]) { out.name = args[++i]; continue; }
     if (a === '--append-system-prompt' && args[i + 1]) { out.appendSystemPrompt = args[++i]; continue; }
     if (a === '--no-session') continue;
@@ -409,6 +410,10 @@ async function createS(target) {
       resourceLoaderOptions: {
         extensionFactories: [{ name: 'workspace-checkpoints', factory: require('./checkpoint-extension.js').checkpointExtension }],
         additionalExtensionPaths: parsed.extensionPaths.length ? parsed.extensionPaths : undefined,
+        // `--no-extensions`: load ONLY the explicit -e set (see
+        // piProviderExtraArgs). The agent-dir package stack stays out of
+        // headless web sessions.
+        noExtensions: parsed.noExtensions || undefined,
         // pi's resource loader treats appendSystemPromptSource as an array of
         // paths/texts (each resolved through resolvePromptInput).
         appendSystemPrompt: parsed.appendSystemPrompt ? [parsed.appendSystemPrompt] : undefined,

@@ -1928,12 +1928,31 @@ function agentProcsView(running) {
   return out;
 }
 
-// Extension-backed providers (claude-code) exist only when their extension
-// loads inside the RPC process; `--no-extensions` would hide them.
+// Base extension set for every pi launch aiconvo makes: its own
+// delegation/records extensions plus the claude-code provider bridge when
+// present. Extension-backed providers exist only when their extension loads
+// inside the pi process, so they are always passed explicitly.
 function piProviderExtraArgs() {
   return [...(fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : []),
     '-e', path.join(__dirname, 'extensions', 'delegation.ts'),
     '-e', path.join(__dirname, 'extensions', 'records.ts')];
+}
+
+// Headless web sessions may opt into a minimal extension load
+// (settings.json "piExtensions":"minimal"): `--no-extensions` keeps the
+// agent-dir package stack out — fast warm starts, no startup-notice wall,
+// no unrelated extension side effects in headless runs. modes.ts rides
+// along because --prompt-mode is an extension-registered flag and the
+// composer's mode picker depends on it. Terminal launches keep the full
+// user set: they are the user's own TUI. The RPC bridge spawns (pirpc.js)
+// already ran --no-extensions; RPC warm sessions get it from these args.
+function piWebExtraArgs() {
+  if (appSettings.piExtensions !== 'minimal') return piProviderExtraArgs();
+  return ['--no-extensions',
+    ...(fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : []),
+    '-e', path.join(__dirname, 'extensions', 'delegation.ts'),
+    '-e', path.join(__dirname, 'extensions', 'records.ts'),
+    '-e', path.join(__dirname, 'extensions', 'modes.ts')];
 }
 
 // Abort the headless run on a file and wait for it to let go.
@@ -2334,7 +2353,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       // Attached @ context lives in --append-system-prompt on the warm
       // session. Reload when the chip set changed, including a clear.
       if (ctxBundle || ctxChanged) stopAnyWarmSession(sessionPath);
-      const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
+      const extraArgs = [...piWebExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
       if (customMessage) pirpc.stopWarmSession(sessionPath);
       const owner = await assertDelegationLaunch(sessionPath, customMessage);
       if (findRunningConversation(key)) throw new Error('A terminal now owns this conversation.');
@@ -2812,7 +2831,7 @@ async function setConversationThinking(key, level, force) {
     reopen = true;
   }
   if (headlessRuns.has(sessionPath)) throw new Error('A web run is active on this conversation. Wait or abort it.');
-  const out = await withSessionOp(sessionPath, () => piEng().piSetThinking({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, level));
+  const out = await withSessionOp(sessionPath, () => piEng().piSetThinking({ sessionPath, cwd, env: agentEnv(), extraArgs: piWebExtraArgs() }, level));
   await reindexIfChanged(key);
   if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
   return { ok: true, level: out.level, levels: out.levels, reopened: reopen };
@@ -10734,7 +10753,7 @@ async function startProjectConversation(options) {
   const useRpc = kind === 'pi' && options.surface !== 'alacritty';
   let key = null;
   if (useRpc) {
-    const begun = await piEng().piBeginWarm({ cwd, env: agentEnv(), extraArgs: ['--name', label, ...piProviderExtraArgs(), ...piCtxArgs] });
+    const begun = await piEng().piBeginWarm({ cwd, env: agentEnv(), extraArgs: ['--name', label, ...piWebExtraArgs(), ...piCtxArgs] });
     // Pi reports sessionFile before it writes. The first prompt creates the file.
     const job = {
       id: 'run:' + crypto.randomUUID().slice(0, 8),
@@ -10745,7 +10764,7 @@ async function startProjectConversation(options) {
     };
     let handle = null;
     if (text) {
-      handle = piEng().piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(), extraArgs: [...piProviderExtraArgs(), ...piCtxArgs] }, {
+      handle = piEng().piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(), extraArgs: [...piWebExtraArgs(), ...piCtxArgs] }, {
         provider: leadModel && leadModel.provider, modelId: leadModel && leadModel.modelId,
         message: text, onEvent: runEventForwarder(job),
       });
@@ -12623,7 +12642,11 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { error: 'unknown model: ' + parsed.provider + '/' + parsed.model });
       }
       const prevSemTarget = (appSettings.semanticUrl || '') + '|' + semNs();
+      const prevPiExtensions = appSettings.piExtensions;
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
+      // The extension set defines which slash commands exist. Drop the
+      // palette cache so a piExtensions flip is visible before its TTL ends.
+      if (appSettings.piExtensions !== prevPiExtensions) slashCommandsCache.clear();
       saveAppSettings();
       memoryModelHealth.setIdentity(currentModelLabel());
       // A new URL or namespace means a different remote index: re-push all.
@@ -12737,7 +12760,7 @@ const server = http.createServer(async (req, res) => {
       const cached = slashCommandsCache.get(cwd);
       if (cached && Date.now() - cached.at < 5 * 60 * 1000) return json(res, 200, { commands: cached.list, cwd, cached: true });
       try {
-        const list = await piListCommands({ cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() });
+        const list = await piListCommands({ cwd, env: agentEnv(), extraArgs: piWebExtraArgs() });
         slashCommandsCache.set(cwd, { at: Date.now(), list });
         json(res, 200, { commands: list, cwd });
       } catch (e) { json(res, 500, { error: e.message }); }
