@@ -15359,6 +15359,11 @@ function paneAdvanced() {
       { value: 'sdk', name: 'sdk', desc: 'pi runs inside this server. Fast forks, full extension UI. The default.' },
       { value: 'rpc', name: 'rpc', desc: 'pi runs as child processes. Slower, but one bad session cannot take the server down.' },
     ], s.piEngine === 'rpc' ? 'rpc' : 'sdk')}
+    <div class="set-field" style="margin:0"><label>pi extensions (web sessions)</label></div>
+    ${setOptionsHtml('setPiExtensions', [
+      { value: 'all', name: 'all', desc: 'Web sessions load the full agent-dir extension set. The default.' },
+      { value: 'minimal', name: 'minimal', desc: 'Web sessions load only what aiconvo passes explicitly: delegation, records, modes, the claude bridge. Fast warm starts, no startup-notice wall. Terminal sessions keep the full set.' },
+    ], s.piExtensions === 'minimal' ? 'minimal' : 'all')}
     <div class="set-help">Applies to sessions started after the change.</div>
     <div class="set-field">
       <label for="setFile">settings file</label>
@@ -15373,6 +15378,7 @@ function paneAdvanced() {
 
 function bindPaneAdvanced(root) {
   bindOptions(root, 'setPiEngine', v => saveSettings({ piEngine: v }, 'engine: ' + v + ' — for new sessions'));
+  bindOptions(root, 'setPiExtensions', v => saveSettings({ piExtensions: v }, 'pi extensions: ' + v + ' — for new sessions'));
   $('setFileCopy').onclick = async () => {
     try { await navigator.clipboard.writeText($('setFile').value); toast('path copied'); }
     catch { $('setFile').select(); }
