@@ -2388,11 +2388,23 @@ function navRememberScroll() {
   nav.remember(navShownId, { view: view.scrollTop, win: window.scrollY || 0 });
 }
 
+// The address bar's hash as a route. The grammar is `#<route>` with no
+// leading slash, but links in the wild — agent-composed URLs in transcripts,
+// old bookmarks — use the SPA-style `#/route` form; both are accepted. A
+// literal % inside a path (`/50%_done.md`) would make decodeURIComponent
+// throw: the raw hash is used then, never a dead navigation. The stack is
+// fed the normalized route, so its entry, the rewritten address and
+// currentHash agree and a foreign arrival is one entry, not two.
+function hashRoute() {
+  let h = location.hash.slice(1);
+  try { h = decodeURIComponent(h); } catch {}
+  return h.replace(/^\/+/, '');
+}
+
 // Back, forward, a link click, a typed hash: the browser moved, we follow.
 window.addEventListener('popstate', e => {
   navRememberScroll();
-  let hash = location.hash.slice(1);
-  try { hash = decodeURIComponent(hash); } catch {}
+  const hash = hashRoute();
   const arrival = nav.arrive(e.state, hash);
   // A screen we have been on is restored (its scroll, a file's cursor). A
   // foreign entry (a pasted URL, a link) is a first visit: the address says
@@ -16765,8 +16777,7 @@ load().then(() => {
   // The stack finds its place (a reload) or starts here (a new tab); the
   // page then renders from the hash as it always did.
   try { history.scrollRestoration = 'manual'; } catch {}
-  let bootHash = location.hash.slice(1);
-  try { bootHash = decodeURIComponent(bootHash); } catch {}
+  const bootHash = hashRoute();
   const bootEntry = nav.load(bootHash), bootScroll = bootEntry.scroll;
   navShownId = bootEntry.id;
   nav.refresh();
