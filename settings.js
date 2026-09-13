@@ -31,6 +31,12 @@ const DEFAULT_SETTINGS = {
   // Engine for web sends: 'sdk' embeds pi in-process (fast forks, full
   // extension UI); 'rpc' spawns pi child processes (isolation fallback).
   piEngine: 'sdk',
+  // Which pi extensions load inside web sessions. 'all' keeps the user's
+  // full agent-dir set (packages + globals); 'minimal' loads only the
+  // extensions aiconvo passes explicitly (delegation, records, the
+  // claude-code provider bridge) — fast warm starts, no startup-notice
+  // wall, no unrelated extension side effects in headless runs.
+  piExtensions: 'all',
   // pi theme for hosted extension views (custom TUI components rendered
   // in the browser). 'light' matches aiconvo's paper look.
   piTheme: 'light',
@@ -179,13 +185,14 @@ function normalizeSettings(input) {
   const semanticUrl = String(src.semanticUrl || DEFAULT_SETTINGS.semanticUrl).trim().replace(/\/$/, '');
   const semanticNs = String(src.semanticNs || DEFAULT_SETTINGS.semanticNs).trim().replace(/[^\w.-]+/g, '-') || 'default';
   const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
+  const piExtensions = src.piExtensions === 'minimal' ? 'minimal' : 'all';
   const piTheme = typeof src.piTheme === 'string' && src.piTheme.trim() ? src.piTheme.trim() : DEFAULT_SETTINGS.piTheme;
   const usageBilling = normalizeUsageBilling(src.usageBilling);
   const snippetTrigger = normalizeSnippetTrigger(src.snippetTrigger);
   const doneSound = DONE_SOUND_MODES.includes(src.doneSound) ? src.doneSound : DEFAULT_SETTINGS.doneSound;
   const machines = normalizeMachines(src.machines);
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound, machines };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piExtensions, piTheme, usageBilling, snippetTrigger, doneSound, machines };
   }
   return {
     usePiDefault: false,
@@ -194,6 +201,7 @@ function normalizeSettings(input) {
     thinking,
     contextTokens,
     semanticSearch,
+    piExtensions,
     semanticUrl,
     semanticNs,
     piEngine,

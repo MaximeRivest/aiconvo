@@ -1929,11 +1929,17 @@ function agentProcsView(running) {
 }
 
 // Extension-backed providers (claude-code) exist only when their extension
-// loads inside the RPC process; `--no-extensions` would hide them.
+// loads inside the RPC process — they are passed explicitly, so they survive
+// `--no-extensions`. piExtensions:'minimal' (settings.json) loads ONLY this
+// explicit set: fast warm starts, no startup-notice wall from the user's
+// global packages, no unrelated extension side effects in headless runs.
+// The RPC engine (pirpc.js) already runs --no-extensions unconditionally.
 function piProviderExtraArgs() {
-  return [...(fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : []),
+  const args = [...(fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : []),
     '-e', path.join(__dirname, 'extensions', 'delegation.ts'),
     '-e', path.join(__dirname, 'extensions', 'records.ts')];
+  if (appSettings.piExtensions === 'minimal') args.unshift('--no-extensions');
+  return args;
 }
 
 // Abort the headless run on a file and wait for it to let go.
