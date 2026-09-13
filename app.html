@@ -2249,7 +2249,12 @@ function dispatchHash(h, { restore = false } = {}) {
 }
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// esc() must be attribute-safe: its output is interpolated into double-quoted
+// attributes (title="…", data-reader-path="…"). Escaping only & < > let raw
+// quotes terminate the attribute, so JSON tokens were truncated to `{` and
+// their click handlers died on JSON.parse. Tests stub esc with quote escaping
+// (test/conversation-reader.test.js) — this is the production twin of that.
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 // Dev guard: find controls whose content clips its box. Ellipsis truncation
 // is a design choice and does not count. Run uiAudit() in any view, on any
