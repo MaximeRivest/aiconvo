@@ -128,6 +128,12 @@ ExecStart=$NODE_BIN $REPO/server.js
 Environment=PORT=$PORT
 Environment=PATH=$HOME/.local/bin:$NODE_DIR:/usr/local/bin:/usr/bin:/bin$WIN_PATH
 $DISPLAY_LINES
+# Scale with the machine: percentages of total RAM (systemd >= 242), so an
+# 8 GB laptop gets ~800 MB / 1.6 GB and a 62 GB workstation ~6.2 / 12.5 GB.
+# Absolute limits tuned on one machine caused swap thrash on others long
+# before any OOM kill. Override locally: systemctl --user edit aiconvo
+MemoryHigh=10%
+MemoryMax=20%
 Restart=on-failure
 
 [Install]

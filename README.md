@@ -2,7 +2,7 @@
 
 Installed as a system app:
 
-- The server runs as a systemd user service: `systemctl --user status aiconvo`.
+- The server runs as a systemd user service: `systemctl --user status aiconvo`. Its memory limits scale with the machine (`MemoryHigh=10%`, `MemoryMax=20%` of total RAM, systemd >= 242); override locally with a drop-in: `systemctl --user edit aiconvo`.
 - A tray icon sits in the top-right panel (via `yad`). Left click opens the app in a Chromium app window (no tabs, no URL bar). Right click gives Open / Rescan / Restart / Quit. It autostarts at login (`~/.config/autostart/aiconvo-tray.desktop`).
 - "aiconvo" also appears in the app launcher. The launcher uses `open.sh`: it starts the server if needed, focuses an existing window, or opens Chromium `--app`.
 
