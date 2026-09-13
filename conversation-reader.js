@@ -291,6 +291,12 @@ function answerChoices(group) {
     ...(group.merges || (group.merge ? [group.merge] : [])).map((m, i) => ({ ...m.answer, kind: 'merge', label: 'Merged answer' + (i ? ' ' + (i + 1) : '') + ' · ' + (m.answer.model || 'assistant') }))];
 }
 function choiceToken(a) { return JSON.stringify({ key: a.key || current.key, id: a.id }); }
+// Dataset tokens are JSON embedded in double-quoted attributes. A token that
+// does not survive the HTML round-trip must surface as a toast, not die as a
+// console exception behind a dead button.
+function parseChoiceToken(raw, what = 'control') {
+  try { return JSON.parse(raw); } catch { errToast('This ' + what + ' lost its target. Reload the conversation.'); return null; }
+}
 function answerPackageHtml(d, group, answer) {
   const source = answer.key === d.key || !answer.key ? d : readerSessions.get(answer.key);
   if (!source) return `<div class="flow-load-error">This answer’s conversation could not be loaded. <button data-reader-path="${esc(choiceToken(answer))}">Open separate conversation</button></div>`;
@@ -431,7 +437,7 @@ async function prepareConversationReading(d, scroll) {
 
 function wireConversationReader() {
   const view = $('view'), key = current.key;
-  view.querySelectorAll('[data-step-review]').forEach(b => b.onclick = () => openStepReview(JSON.parse(b.dataset.stepReview)));
+  view.querySelectorAll('[data-step-review]').forEach(b => b.onclick = () => { const d = parseChoiceToken(b.dataset.stepReview, 'review button'); if (d) openStepReview(d); });
   const blocked = readerIsBrowsing(current) || !!readerPendingChoice(current);
   for (const id of ['agentRun', 'agentSend']) if ($(id)) $(id).disabled = blocked;
   const group = node => readerFlow.groups.find(g => g.node === node);
@@ -441,20 +447,22 @@ function wireConversationReader() {
     saveReaderState(key); await renderConv('preserve'); restoreReaderAnchor(anchor);
   };
   view.querySelectorAll('[data-reader-continue-at]').forEach(b => b.onclick = async () => {
-    const choice = JSON.parse(b.dataset.readerContinueAt);
+    const choice = parseChoiceToken(b.dataset.readerContinueAt, 'continue button');
+    if (!choice) return;
     if (choice.key !== current?.key) await browseConversationPath(choice.key, choice.id, choice.id, { exact: true });
     if (current?.key === choice.key) await continueReadingPath(choice.key, choice.id, b);
   });
   view.querySelectorAll('[data-reader-fork-at]').forEach(b => b.onclick = () => {
-    const choice = JSON.parse(b.dataset.readerForkAt);
-    forkFrom(choice.key, { id: choice.id }, b);
+    const choice = parseChoiceToken(b.dataset.readerForkAt, 'fork button');
+    if (choice) forkFrom(choice.key, { id: choice.id }, b);
   });
   view.querySelectorAll('[data-reader-path]').forEach(b => b.onclick = () => {
-    const choice = JSON.parse(b.dataset.readerPath); browseConversationPath(choice.key, choice.id, b.dataset.at);
+    const choice = parseChoiceToken(b.dataset.readerPath, 'path button');
+    if (choice) browseConversationPath(choice.key, choice.id, b.dataset.at);
   });
   view.querySelectorAll('[data-reader-answer]').forEach(select => select.onchange = () => {
-    const choice = JSON.parse(select.value);
-    browseConversationPath(choice.key, choice.id, select.dataset.readerAnswer);
+    const choice = parseChoiceToken(select.value, 'answer picker');
+    if (choice) browseConversationPath(choice.key, choice.id, select.dataset.readerAnswer);
   });
   for (const [attr, step] of [['readerPrev', -1], ['readerNext', 1]]) view.querySelectorAll(`[data-${attr.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}]`).forEach(b => {
     const g = group(b.dataset[attr]), choices = g && answerChoices(g), t = computeTrace(current);
@@ -491,7 +499,8 @@ function wireConversationReader() {
   });
   view.querySelectorAll('[data-reader-entry]').forEach(b => b.onclick = () => open(key, 'entry:' + b.dataset.readerEntry));
   view.querySelectorAll('[data-reader-origin]').forEach(b => b.onclick = () => {
-    const origin = JSON.parse(b.dataset.readerOrigin); open(origin.key, origin.entryId ? 'entry:' + origin.entryId : 'top');
+    const origin = parseChoiceToken(b.dataset.readerOrigin, 'fork origin');
+    if (origin) open(origin.key, origin.entryId ? 'entry:' + origin.entryId : 'top');
   });
   view.querySelectorAll('[data-reader-retry]').forEach(b => b.onclick = () => { compareCache.delete(key); renderConv('preserve'); });
   $('readerDestination')?.querySelector('[data-reader-return]')?.addEventListener('click', () => browseConversationPath(key, null, null));

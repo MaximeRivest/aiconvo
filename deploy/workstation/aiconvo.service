@@ -1,0 +1,28 @@
+[Unit]
+Description=AIconvo local conversation browser and Markdown editor
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ai-society/softwareco/contrib/aiconvo
+ExecStart=/usr/bin/node %h/ai-society/softwareco/contrib/aiconvo/server.js
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Environment=TMPDIR=%h/.local/state/aiconvo/tmp
+Environment=AICONVO_HOST=127.0.0.1
+Environment=PORT=7433
+Environment=AICONVO_CACHE_DIR=%h/.cache/aiconvo-all-sessions
+Environment=AICONVO_NO_AUTO_MODELS=1
+Environment=AICONVO_DISABLE_DELEGATION_CALLBACKS=1
+Environment=AICONVO_SPEAK_DONE=0
+Environment=AICONVO_NO_WATCH=1
+Environment=AICONVO_NO_LEDGER=1
+Environment=AICONVO_NO_FILE_HISTORY=1
+Environment=AICONVO_NO_CHECKPOINTS=1
+UMask=0077
+MemoryHigh=768M
+MemoryMax=1G
+KillMode=mixed
+TimeoutStopSec=15
+Restart=no
+
+[Install]
+WantedBy=default.target
