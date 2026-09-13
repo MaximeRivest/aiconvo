@@ -10,7 +10,7 @@
 //    minimal mode and stay identical to terminals in 'all' mode.
 // 3. parseExtraArgs (pisdk-runtime): --no-extensions / -ne set the dedicated
 //    field and do not leak into the extension-flag map.
-const { describe, it } = require('node:test');
+const { describe, it, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -97,4 +97,32 @@ describe('Scenario: parseExtraArgs recognizes the discovery switch', () => {
     assert.equal(out.noExtensions, false);
     assert.equal(out.flags.get('some-flag'), 'yes');
   });
+});
+
+// F8 follow-up: pin the actual SDK wiring (resourceLoaderOptions.noExtensions
+// + additionalExtensionPaths), not just the argument parsing. Skipped where
+// the pi executable (and with it the embedded SDK) is unavailable.
+const { execFileSync } = require('node:child_process');
+let piAvailable = false;
+try { piAvailable = !!execFileSync('which', ['pi'], { encoding: 'utf8' }).trim(); } catch {}
+
+test('real SDK: minimal wiring loads only the explicit extension set', {
+  skip: !piAvailable && 'Pi executable is unavailable; SDK wiring is not validated',
+  timeout: 60000,
+}, async () => {
+  process.env.AICONVO_NO_AUTO_MODELS = '1';
+  const runtime = require(path.join(root, 'pisdk-runtime.js'));
+  const { SDK } = await runtime.loadSdk();
+  const agentDir = SDK.getAgentDir();
+  const extra = ['extensions/delegation.ts', 'extensions/records.ts', 'extensions/modes.ts'].map(f => path.join(root, f));
+  const settingsManager = SDK.SettingsManager.create(root, agentDir, { projectTrusted: false });
+  const services = await SDK.createAgentSessionServices({
+    cwd: root, agentDir, settingsManager,
+    modelRuntimeSignal: AbortSignal.timeout(15000),
+    resourceLoaderOptions: { additionalExtensionPaths: extra, noExtensions: true },
+  });
+  const loaded = services.resourceLoader.getExtensions().extensions.map(e => path.basename(e.path || ''));
+  assert.ok(loaded.length <= extra.length + 1, `unexpected extra extensions loaded: ${loaded.join(', ')}`);
+  for (const want of ['delegation.ts', 'records.ts', 'modes.ts'])
+    assert.ok(loaded.includes(want), `${want} missing from: ${loaded.join(', ')}`);
 });

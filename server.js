@@ -1944,8 +1944,8 @@ function piProviderExtraArgs() {
 // no unrelated extension side effects in headless runs. modes.ts rides
 // along because --prompt-mode is an extension-registered flag and the
 // composer's mode picker depends on it. Terminal launches keep the full
-// user set: they are the user's own TUI. The RPC engine (pirpc.js) already
-// runs --no-extensions unconditionally.
+// user set: they are the user's own TUI. The RPC bridge spawns (pirpc.js)
+// already ran --no-extensions; RPC warm sessions get it from these args.
 function piWebExtraArgs() {
   if (appSettings.piExtensions !== 'minimal') return piProviderExtraArgs();
   return ['--no-extensions',
@@ -12642,7 +12642,11 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { error: 'unknown model: ' + parsed.provider + '/' + parsed.model });
       }
       const prevSemTarget = (appSettings.semanticUrl || '') + '|' + semNs();
+      const prevPiExtensions = appSettings.piExtensions;
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
+      // The extension set defines which slash commands exist. Drop the
+      // palette cache so a piExtensions flip is visible before its TTL ends.
+      if (appSettings.piExtensions !== prevPiExtensions) slashCommandsCache.clear();
       saveAppSettings();
       memoryModelHealth.setIdentity(currentModelLabel());
       // A new URL or namespace means a different remote index: re-push all.
