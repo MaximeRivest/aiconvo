@@ -37,6 +37,11 @@ function fileWsHash(ws) {
   if (ws.browserContext) parts.push('browser=' + encodeURIComponent(encodeURIComponent(JSON.stringify(ws.browserContext))));
   if (ws.back) parts.push('back=' + encodeURIComponent(encodeURIComponent(ws.back)));
   parts.push('focus');
+  // A line a link asked for is part of the route. ws.line holds it until
+  // fileWsAfterMount has moved the cursor, and the hash written on open keeps
+  // it, so a reload or a shared link lands on that line, not the top.
+  const line = Number(ws.line);
+  if (Number.isInteger(line) && line > 0) parts.push('line=' + line);
   if (ws.reviewRef) parts.push('review=' + encodeURIComponent(encodeURIComponent(JSON.stringify(ws.reviewRef))));
   if (ws.mode === 'history' && ws.historySel?.to) parts.push('to=' + encodeURIComponent(ws.historySel.to), 'from=' + encodeURIComponent(ws.historySel.from || ws.historySel.to));
   parts.push('path=' + (ws.path || ''));
