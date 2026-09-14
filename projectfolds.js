@@ -15,6 +15,8 @@
 // never loops. Everything here is pure and synchronous; the server owns
 // file I/O timing and the git probing that fills the auto map.
 
+const os = require('os');
+
 const LOOSE_PROJECT = 'Loose conversations';
 
 // A conversation can have a working directory without belonging to a
@@ -27,7 +29,20 @@ function isLooseCwd(cwd) {
   if (/^[A-Z]:\/Users\/[^/]+(?:\/Projects)?$/i.test(c)) return true;
   if (/^\/(?:tmp|var\/tmp)(?:\/|$)/.test(c)) return true;
   if (/^[A-Z]:\/Users\/[^/]+\/AppData\/Local\/Temp(?:\/|$)/i.test(c)) return true;
+  const tmp = tempRoot();
+  if (tmp && (c === tmp || c.startsWith(tmp + '/'))) return true;
   return false;
+}
+// The temporary directory the platform actually uses: $TMPDIR, or macOS's
+// /var/folders/…/T, which the fixed patterns above never see. It is only a
+// temporary root when it does not contain the home folder; a TMPDIR set to
+// $HOME or / would otherwise make every project loose.
+function tempRoot() {
+  let tmp = '', home = '';
+  try { tmp = String(os.tmpdir() || '').replace(/\\/g, '/').replace(/\/+$/, ''); } catch { return ''; }
+  try { home = String(os.homedir() || '').replace(/\\/g, '/').replace(/\/+$/, ''); } catch {}
+  if (!tmp || tmp === '/' || home === tmp || home.startsWith(tmp + '/')) return '';
+  return tmp;
 }
 
 // The one place the raw name comes from. The segment after /Projects/ wins;
