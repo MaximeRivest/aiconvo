@@ -20,6 +20,15 @@ test('file deep links preserve browser context through whole-hash decoding', () 
   assert.deepEqual(JSON.parse(parsed.browser), browserContext);
   assert.equal(parsed.path, '/tmp/a & b.md');
 });
+test('the line a link asked for survives in the route until the file is mounted', () => {
+  const { context } = workspace();
+  const route = ws => context.parseFileHash(decodeURIComponent(context.fileWsHash({ mode: 'write', path: '/tmp/a & b.md', ...ws })));
+  assert.equal(route({ line: 12 }).line, 12);
+  assert.equal(route({ line: '7' }).line, 7, 'a line parsed from a hash is a string');
+  assert.equal(route({ line: 12 }).path, '/tmp/a & b.md', 'path still comes last');
+  for (const line of [null, undefined, 0, -3, 2.5, 'abc', NaN]) assert.equal(route({ line }).line, undefined, `no line for ${line}`);
+  assert.equal(route({ line: 12, mode: 'history', historySel: { to: 'saved:3' } }).line, 12, 'history keeps a pending line too');
+});
 test('save completion does not discard edits typed while the request was in flight', async () => {
   let resolve, text = 'submitted';
   const elements = { fwSave: {}, docStatus: {} };
