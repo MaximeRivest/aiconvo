@@ -60,6 +60,119 @@ function parseFileHash(h) {
   return out;
 }
 
+// ---- links inside the open document ----
+// The MRMD bundle turns `[text](target)` into a span that swallows the click
+// and dispatches `file-link-navigate` with the raw target; http(s) links are
+// real anchors and never arrive here. A target is document-relative, exactly
+// like an image handed to `assetResolver`: it resolves against the open file,
+// the server checks it (existence and the usual path policy), and it opens in
+// this editor with a way back. `#L12` or `#12` names a line; any other
+// fragment is a heading, matched the way GitHub slugs it.
+function parseFileLinkTarget(target) {
+  let t = String(target || '').trim();
+  if (t.startsWith('<') && t.endsWith('>')) t = t.slice(1, -1); // [x](<a b.md>)
+  t = t.replace(/\s+(?:"[^"]*"|'[^']*'|\([^)]*\))$/, ''); // [x](a.md "title")
+  let fragment = '';
+  const hash = t.indexOf('#');
+  if (hash >= 0) { fragment = t.slice(hash + 1); t = t.slice(0, hash); }
+  t = t.split('?')[0];
+  const decode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+  return { path: decode(t), fragment: decode(fragment) };
+}
+// `..` never climbs above the root; `~/` is left for the server to expand.
+function resolveDocRelative(docPath, target) {
+  if (!target || target.startsWith('~/')) return target || '';
+  const out = target.startsWith('/') ? [] : String(docPath).split('/').slice(0, -1).filter(Boolean);
+  for (const seg of target.split('/')) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') { out.pop(); continue; }
+    out.push(seg);
+  }
+  return '/' + out.join('/');
+}
+function headingSlug(value) {
+  return value.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/<[^>]*>/g, '')
+    .toLowerCase().replace(/[^\p{L}\p{N}\p{M}_\-\s]/gu, '').replace(/\s/g, '-');
+}
+// The 1-based line of the heading a fragment names, or null. YAML front
+// matter and fenced code are skipped; ATX and setext headings count;
+// repeated headings get -1, -2…, the way GitHub numbers duplicate anchors.
+function findHeadingLine(text, fragment) {
+  const seen = new Set(), rows = String(text).split(/\r?\n/);
+  let fence = null, frontmatter = rows[0]?.trim() === '---';
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (frontmatter) { if (i > 0 && /^(---|\.\.\.)\s*$/.test(row)) frontmatter = false; continue; }
+    const fenced = row.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fenced) {
+      const token = fenced[1];
+      if (!fence) fence = token;
+      else if (token[0] === fence[0] && token.length >= fence.length && !fenced[2].trim()) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const atx = row.match(/^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/);
+    const setext = !atx && row.trim() && !/^\s/.test(row) && /^ {0,3}(=+|-+)\s*$/.test(rows[i + 1] || '');
+    const heading = atx?.[1] || (setext ? row : null);
+    if (heading === null) continue;
+    const base = headingSlug(heading);
+    let slug = base, n = 0;
+    while (seen.has(slug)) slug = `${base}-${++n}`;
+    seen.add(slug);
+    if (fragment === slug || fragment === heading) return i + 1;
+  }
+  return null;
+}
+// undefined when the target could not be read; null when it has no such heading.
+async function fileWsHeadingLine(pathValue, fragment) {
+  try {
+    const d = await (await fetch('/api/file/read?' + new URLSearchParams({ path: pathValue }))).json();
+    return d.error ? undefined : findHeadingLine(d.text, fragment);
+  } catch { return undefined; }
+}
+async function fileWsFollowLink(ws, target, { system = false } = {}) {
+  if (fileWs !== ws || !ws.path) return;
+  const link = parseFileLinkTarget(target);
+  if (!link.path) return; // a bare #fragment stays in this document
+  const wanted = resolveDocRelative(ws.path, link.path);
+  let out;
+  try { out = await postJson('/api/path/exists', { paths: [wanted] }); }
+  catch { out = { error: 'could not check the link · ' + link.path }; }
+  if (fileWs !== ws) return;
+  if (out.error) return errToast(out.error);
+  const found = out.found && out.found[wanted];
+  if (!found) return errToast('link target not found · ' + link.path);
+  // Ctrl/Cmd-click means the system application, as it does on every file
+  // control in the app.
+  if (system) return runNativePathAction({ key: '', path: found.path }, 'open');
+  if (found.kind !== 'file') return errToast('folders have no in-app view · ' + link.path);
+  let line = null;
+  const at = link.fragment.match(/^L?(\d+)(?:-L?\d+)?$/);
+  if (at) line = Number(at[1]);
+  else if (link.fragment) {
+    line = await fileWsHeadingLine(found.path, link.fragment);
+    if (fileWs !== ws) return;
+    if (line === null) toast('heading not found · opening ' + link.path);
+    else if (line === undefined) toast('could not read the target for its heading · opening ' + link.path);
+  }
+  return liveFileNavigate(ws, { path: found.path, line: line || 1 });
+}
+function fileWsWireDocLinks(ws) {
+  const host = $('docEditor');
+  if (!host) return;
+  let system = false;
+  // The widget stops propagation of its click, so the modifier is read in
+  // the capture phase, before the widget turns the click into its own event.
+  host.addEventListener('click', e => {
+    system = !!(e.ctrlKey || e.metaKey) && !!(e.target && e.target.closest && e.target.closest('.cm-file-link'));
+  }, true);
+  host.addEventListener('file-link-navigate', e => {
+    const opts = { system };
+    system = false;
+    fileWsFollowLink(ws, e.detail && e.detail.path, opts);
+  });
+}
+
 function fileWsCloseEditor({ keepDraft = true } = {}) {
   if (!fileWs) return;
   fileWs.live?.dispose?.();
@@ -102,6 +215,7 @@ async function fileWsMountMarkdown(ws, opts) {
   if (!docState || docState.path !== ws.path) { ws.kind = 'code'; return fileWsMountCode(ws, opts); }
   ws.editor = docState.editor;
   ws.sha = docState.sha;
+  fileWsWireDocLinks(ws);
   fileWsAfterMount(ws, opts);
 }
 
