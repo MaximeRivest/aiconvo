@@ -73,10 +73,22 @@ const LAN_TOKEN = loadLanToken();
 function requestIp(req) {
   return String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
 }
+// "Local" means the request came from this machine, not through a
+// reverse proxy on it. Tailscale Serve (the https front door) forwards
+// from loopback and marks each hop with X-Forwarded-For; without this
+// check every tailnet device would skip the token and gain the local-only
+// file powers. A genuinely local client that sends the header only
+// demotes itself, so nothing can escalate this way.
 function isLocalRequest(req) {
   const ip = requestIp(req);
-  return ip === '127.0.0.1' || ip === '::1';
+  if (ip !== '127.0.0.1' && ip !== '::1') return false;
+  return !req.headers['x-forwarded-for'] && !req.headers['tailscale-user-login'];
 }
+// A stable https name for this install (Tailscale Serve, a real
+// certificate). Connect links and cross-registration prefer it, so other
+// machines land on a secure page where copy, microphone and offline mode
+// work, instead of the bare http LAN address.
+const PUBLIC_URL = String(process.env.AICONVO_PUBLIC_URL || '').trim().replace(/\/+$/, '');
 function cookieValue(req, name) {
   const raw = String(req.headers.cookie || '');
   for (const part of raw.split(';')) {
@@ -3632,7 +3644,9 @@ function currentModelLabel() { return settingsLib.modelLabel(appSettings, readPi
 // back here, so one paste links both ways.
 function connectLinks() {
   if (!LAN_TOKEN || HOST === '127.0.0.1') return [];
-  return lanAddresses().map(ip => `http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
+  const links = lanAddresses().map(ip => `http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
+  if (PUBLIC_URL) links.unshift(`${PUBLIC_URL}/?token=${LAN_TOKEN}`);
+  return links;
 }
 
 function parseConnectLink(raw) {
@@ -3647,6 +3661,7 @@ function parseConnectLink(raw) {
 // The address the other machine should use to reach us: same network family
 // as theirs (Tailscale 100.x when they are on Tailscale), else the first LAN one.
 function ownUrlFor(remoteUrl) {
+  if (PUBLIC_URL) return PUBLIC_URL;
   const addrs = lanAddresses();
   if (!addrs.length) return '';
   let host = '';
@@ -3656,8 +3671,13 @@ function ownUrlFor(remoteUrl) {
   return `http://${pick}:${PORT}`;
 }
 
+// One entry per machine: a re-paste with a new address (say, http LAN
+// address replaced by the https name) replaces the old row instead of
+// leaving two "lambda" buttons in the switcher.
 function upsertMachine(entry) {
-  const list = (appSettings.machines || []).filter(m => m.url.toLowerCase() !== String(entry.url).toLowerCase());
+  const sameUrl = m => m.url.toLowerCase() === String(entry.url).toLowerCase();
+  const sameName = m => entry.name && m.name.toLowerCase() === String(entry.name).toLowerCase();
+  const list = (appSettings.machines || []).filter(m => !sameUrl(m) && !sameName(m));
   list.push(entry);
   appSettings.machines = settingsLib.normalizeMachines(list);
   saveAppSettings();

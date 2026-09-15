@@ -23,7 +23,7 @@ function crArtifacts(s) {
       folder.onclick = () => showFilesBrowser(s.project, { root: s.root, dir: f.liveDirectory.slice(s.root.length + 1) }); actions.append(folder);
     }
     const copy = document.createElement('button'); copy.textContent = 'Copy location';
-    copy.onclick = () => navigator.clipboard.writeText(f.location.host === 'local' ? f.location.path || f.location.raw : `${f.location.host}:${f.location.path || f.location.raw}`).catch(e => errToast(e.message)); actions.append(copy);
+    copy.onclick = () => copyText(f.location.host === 'local' ? f.location.path || f.location.raw : `${f.location.host}:${f.location.path || f.location.raw}`).catch(e => errToast(e.message)); actions.append(copy);
     host.append(card);
   }
 }

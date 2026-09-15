@@ -199,7 +199,7 @@ async function fileWsSaveCode(ws) {
   if (out.error) {
     $('fwSave').disabled = false;
     if (String(out.error).includes('changed on disk')) {
-      fileWsBanner(ws, 'The disk file changed. Your edits are kept here and were not overwritten.', [['Copy my edits', () => navigator.clipboard.writeText(ws.editor.getContent())], ['Reload disk', () => liveFileReload(ws)]]);
+      fileWsBanner(ws, 'The disk file changed. Your edits are kept here and were not overwritten.', [['Copy my edits', () => copyText(ws.editor.getContent()).catch(e => errToast(e.message))], ['Reload disk', () => liveFileReload(ws)]]);
     }
     return errToast('save failed: ' + out.error);
   }

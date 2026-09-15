@@ -2059,6 +2059,34 @@ function fmtTokens(n) {
 }
 function errToast(msg) { toast('✗ ' + msg, null, 'err'); }
 
+// Put text on the clipboard from any origin. navigator.clipboard only exists
+// on secure contexts (https or localhost); over plain http to another machine
+// it is undefined and every copy button used to throw. The fallback selects
+// the text in an off-screen textarea and issues the classic copy command,
+// which browsers still honor inside a user gesture on insecure pages.
+async function copyText(text) {
+  const value = String(text ?? '');
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(value); return; }
+    catch (e) { if (!(e instanceof DOMException) && !/denied|permission/i.test(String(e?.message))) throw e; }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = value;
+  ta.setAttribute('readonly', '');
+  ta.setAttribute('aria-hidden', 'true');
+  ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+  const active = document.activeElement;
+  document.body.append(ta);
+  ta.focus({ preventScroll: true });
+  ta.select();
+  ta.setSelectionRange(0, value.length);
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  if (active && typeof active.focus === 'function') active.focus({ preventScroll: true });
+  if (!ok) throw new Error(window.isSecureContext ? 'Could not copy.' : 'Could not copy: this page is on plain http, and the browser blocks the clipboard here. Open aiconvo over https to fix it.');
+}
+
 let relatedCache = new Map();
 async function relatedFor(key, fresh = false) {
   if (!key) return { key: null, notePath: null, epics: [] };
@@ -5182,7 +5210,7 @@ async function autosaveDocument() {
   if (out.error) {
     st.dirty = true;
     docStatusLine('⚠ ' + out.error);
-    if (st.focused && fileWs?.path === st.path) fileWsBanner(fileWs, 'Could not save: ' + out.error, [['Copy my edits', () => navigator.clipboard.writeText(st.editor.getContent())]]);
+    if (st.focused && fileWs?.path === st.path) fileWsBanner(fileWs, 'Could not save: ' + out.error, [['Copy my edits', () => copyText(st.editor.getContent()).catch(e => errToast(e.message))]]);
     if (String(out.error).includes('changed on disk')) {
       // The disk moved under us (agent edit, git checkout). Offer a reload.
       if ($('docReload')) $('docReload').hidden = false;
@@ -7060,7 +7088,7 @@ async function copyFullFilePath(ctx) {
   try { info = await (await fetch('/api/path/info?' + query)).json(); }
   catch { info = { error: 'network failure' }; }
   const value = info.error ? ctx.path : info.path;
-  try { await navigator.clipboard.writeText(value); toast('copied path · ' + shortFilePath(value)); }
+  try { await copyText(value); toast('copied path · ' + shortFilePath(value)); }
   catch { errToast('could not copy the path'); }
 }
 
@@ -7579,7 +7607,7 @@ $('view').addEventListener('click', async e => {
     try {
       // Copy the stored source, not rendered or collapsed HTML. This keeps
       // Markdown, code fences, and hidden text exactly as the agent wrote it.
-      await navigator.clipboard.writeText(message.text || '');
+      await copyText(message.text || '');
       copy.textContent = 'copied';
       setTimeout(() => { if (copy.isConnected) copy.textContent = 'copy'; }, 1200);
     } catch (error) { errToast(error.message || 'Could not copy the message.'); }
@@ -11406,8 +11434,8 @@ function noteViewer(text, pathLabel, context = null) {
   const firstRow = $('view').querySelector('.ntree .nrow');
   if (firstRow) firstRow.onclick ? firstRow.onclick() : firstRow.click();
   $('noteCopy').onclick = async () => {
-    await navigator.clipboard.writeText(text);
-    flashCopied($('noteCopy'));
+    try { await copyText(text); flashCopied($('noteCopy')); }
+    catch (e) { errToast(e.message); }
   };
   if (savePath) $('noteEdit').onclick = () => noteFileEditor(text, pathLabel, context, null);
   // Trust: notes are AI-generated until a human vouches for them. The state is
@@ -12580,8 +12608,8 @@ $('selNone').onclick = () => { selected.clear(); render(); renderSelbar(); };
 
 async function copyAsMarkdown(ids, btn) {
   const res = await fetch('/api/export', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ids, mode: 'all' }) });
-  await navigator.clipboard.writeText(await res.text());
-  flashCopied(btn);
+  try { await copyText(await res.text()); flashCopied(btn); }
+  catch (e) { errToast(e.message); }
 }
 
 $('copySel').onclick = () => copyAsMarkdown([...selected], $('copySel'));
@@ -13106,7 +13134,7 @@ function bindPaneMachines(root) {
   };
   $('setMachConnect').onclick = connect;
   link.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); connect(); } };
-  root.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); flashCopied(b); });
+  root.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await copyText(b.dataset.copy); flashCopied(b); } catch (e) { errToast(e.message); } });
   const read = () => [...root.querySelectorAll('.mach-item')].map(el => ({
     name: el.querySelector('[data-f=name]').value,
     url: el.querySelector('[data-f=url]').value,
@@ -13186,7 +13214,7 @@ function paneAdvanced() {
 function bindPaneAdvanced(root) {
   bindOptions(root, 'setPiEngine', v => saveSettings({ piEngine: v }, 'engine: ' + v + ' — for new sessions'));
   $('setFileCopy').onclick = async () => {
-    try { await navigator.clipboard.writeText($('setFile').value); toast('path copied'); }
+    try { await copyText($('setFile').value); toast('path copied'); }
     catch { $('setFile').select(); }
   };
 }
