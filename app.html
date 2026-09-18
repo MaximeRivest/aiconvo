@@ -508,6 +508,13 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .doc-editor-host > div { max-width: var(--read-max); margin: 0 auto; padding: 28px 20px 50vh; min-height: 100%; }
 .doc-editor-host .cm-editor { height: auto; }
 .doc-editor-host .cm-scroller { overflow: visible; }
+/* Reading view: the rendered document (diagram view) replaces the editor.
+   Same reading column, same .md look as a conversation. */
+.doc-preview { outline: none; }
+.doc-preview[hidden] { display: none; }
+.doc-preview .mmd { margin: 14px 0; }
+.doc-preview .mmd-fig { background: var(--surface-1); border: 1px solid var(--border); padding: 12px; overflow-x: auto; text-align: center; }
+.doc-preview .mmd-err { color: var(--danger); font-size: var(--fs-micro); margin-bottom: 4px; }
 /* One voice for markdown: the editor mirrors the conversation .md look.
 
    CodeMirror geometry rules (learned from mrmd-editor's own code-block
@@ -2352,7 +2359,19 @@ let mermaidSeq = 0;
 async function renderMermaids(root) {
   const boxes = [...(root || document).querySelectorAll('.mmd:not([data-done])')];
   if (!boxes.length) return;
-  try { await loadMermaid(); } catch { return; } // sources stay readable as code
+  try { await loadMermaid(); } catch (e) {
+    // Never leave a reader with silently unrendered code: say what failed.
+    for (const box of boxes) {
+      if (box.dataset.done || !box.isConnected) continue;
+      box.dataset.done = '1';
+      box.classList.add('err');
+      const err = document.createElement('div');
+      err.className = 'mmd-err';
+      err.textContent = '⚠ mermaid could not load: ' + String(e.message || 'load failed').split('\n')[0];
+      box.prepend(err);
+    }
+    return; // sources stay readable as code
+  }
   for (const box of boxes) {
     if (box.dataset.done || !box.isConnected) continue;
     box.dataset.done = '1';
@@ -2395,6 +2414,62 @@ new MutationObserver(() => {
   clearTimeout(mermaidT);
   mermaidT = setTimeout(() => renderMermaids(document), 120);
 }).observe(document.body, { childList: true, subtree: true });
+
+// ---- document reading view: diagrams ⇄ code -----------------------------
+// The vendored editor bundle is a markdown *source* surface: it has no
+// mermaid widget and no host hook to add one (see vendor/mrmd-document/
+// README.md). So the host owns the reading view — the same markdown pipeline
+// a conversation uses, where a ```mermaid fence becomes a diagram whose
+// source stays one double-click away. The ⋯ menu and Ctrl+Shift+M flip
+// between the reading view and the editor.
+let docDiagramsOn = false;
+function docDiagramText() {
+  try { return docState?.editor ? docState.editor.getContent() : ''; } catch { return ''; }
+}
+// Relative image paths resolve through the same API the editor's
+// assetResolver uses, so the reading view shows the pictures the editor shows.
+function docAssetUrl(doc, src) {
+  return '/api/doc/asset?doc=' + encodeURIComponent(doc || '') + '&src=' + encodeURIComponent(src);
+}
+function docDiagramImage(url) {
+  const src = String(url || '');
+  if (/^(?:https?:|data:)/i.test(src)) return src;
+  if (!src || src.startsWith('/') || src.startsWith('#') || /[<>&]/.test(src)) return null;
+  return docAssetUrl(docState?.path, src);
+}
+function setDocDiagrams(on) {
+  const editorHost = $('docEditor'), preview = $('docPreview');
+  if (!editorHost || !preview) { docDiagramsOn = false; return false; }
+  docDiagramsOn = !!on;
+  if (docDiagramsOn) {
+    preview.innerHTML = '<div class="md">' + mdRender(docDiagramText(), '', docDiagramImage) + '</div>';
+    preview.hidden = false;
+    editorHost.hidden = true;
+    void renderMermaids(preview);
+    try { preview.focus({ preventScroll: true }); } catch {}
+  } else {
+    preview.hidden = true;
+    preview.innerHTML = '';
+    editorHost.hidden = false;
+    try { docState?.editor?.view?.requestMeasure?.(); } catch {}
+  }
+  const btn = $('docDiagrams');
+  if (btn) { btn.classList.toggle('on', docDiagramsOn); btn.textContent = docDiagramsOn ? 'Reading view ✓' : 'Reading view'; }
+  return docDiagramsOn;
+}
+function toggleDocDiagrams() {
+  const on = setDocDiagrams(!docDiagramsOn);
+  toast(on ? 'reading view · double-click a diagram for its code · Ctrl+Shift+M returns to the editor' : 'editor · markdown source');
+  return on;
+}
+// Ctrl+Shift+M works from either side of the toggle.
+function docDiagramsKey(e) {
+  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
+  if (e.key !== 'M' && e.key !== 'm') return;
+  e.preventDefault();
+  toggleDocDiagrams();
+}
+// ---- end document reading view -------------------------------------------
 // Custom themes: the runtime stylesheet is always loaded; the <select> is
 // painted only while the appearance pane is on screen.
 let customThemeCatalog = { themes: [], invalid: [] };
@@ -5523,7 +5598,7 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
     onLineHoverEnd: () => { if (ws?.live) { ws.live.hover++; ws.live.hoverController?.abort(); } },
     theme: mrmdHostTheme(),
     placeholder: 'Start writing…',
-    assetResolver: url => '/api/doc/asset?doc=' + encodeURIComponent(d.path) + '&src=' + encodeURIComponent(url),
+    assetResolver: url => docAssetUrl(d.path, url),
     onChange: scheduleDocAutosave,
     onSave: focused ? autosaveDocument : commitDocument,
     onRunCell: (cell, o) => runDocCell(cell, o),
@@ -5556,6 +5631,11 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
     st.editor.setSourceMode(st.source);
     $('docSource').classList.toggle('on', st.source);
   };
+  // Reading view: reset on every mount, then wire the menu button and the key
+  // on both sides of the toggle (the editor, and the preview replacing it).
+  setDocDiagrams(false);
+  if ($('docDiagrams')) $('docDiagrams').onclick = toggleDocDiagrams;
+  for (const el of [st.editor.view?.dom, $('docPreview')]) el?.addEventListener?.('keydown', docDiagramsKey);
   st.editor.focus();
 }
 
@@ -11194,7 +11274,7 @@ function relPathCandidate(text) {
 // Small markdown renderer for transcripts and notes. Headings, bold/italic/strike,
 // inline + fenced code, bullet and numbered lists, blockquotes, tables, rules, links.
 // q (optional) wraps search matches in <mark>.
-function mdRender(src, q = '') {
+function mdRender(src, q = '', image = null) {
   // Web-search models wrap citations in private-use markers (U+E200 block):
   // "\ue200cite\ue202turn1search0\ue201". Strip them; they render as tofu.
   src = String(src ?? '')
@@ -11251,11 +11331,25 @@ function mdRender(src, q = '') {
   };
   // Links run last: bold, italic, and code are already tags, so a URL or
   // link after "<b>" still links and a link's own text is never re-linked.
-  const inline = s => linkify(mark(esc(s))
+  // Markdown images render only when the caller supplies a URL resolver (the
+  // document reading view). Transcripts keep their current text behavior.
+  // The syntax is stashed before escaping and restored after linking, so no
+  // link rule can reach inside the generated <img>.
+  const images = [];
+  const stashImages = s => (!image || qr) ? s : String(s).replace(
+    /!\[([^\]\n]*)\]\(\s*([^()\s]+)(?:\s+["'][^"']*["'])?\s*\)/g,
+    (m, alt, url) => {
+      const resolved = image(url);
+      if (!resolved) return m;
+      images.push(`<img src="${esc(resolved)}" alt="${esc(alt)}" loading="lazy" decoding="async">`);
+      return '\u0000img' + (images.length - 1) + '\u0000';
+    });
+  const inline = s => linkify(mark(esc(stashImages(s)))
     .replace(/`([^`]+)`/g, (_, c) => codeSpan(c))
     .replace(/\*\*((?:[^*]|\*(?!\*))+?)\*\*/g, '<b>$1</b>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>')
-    .replace(/~~([^~]+)~~/g, '<s>$1</s>'));
+    .replace(/~~([^~]+)~~/g, '<s>$1</s>'))
+    .replace(/\u0000img(\d+)\u0000/g, (_, i) => images[Number(i)]);
   const out = [];
   // lists is a stack of open lists: nesting follows the source indentation.
   let lists = [], quote = [], table = [];

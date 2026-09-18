@@ -54,7 +54,7 @@ function liveFileHead(ws) {
       <button id="liveAskMenu" class="lf-narrow">Ask for a change</button>
       ${md ? '<button id="docRunMenu" class="lf-narrow">▶ Run this cell</button>' : ''}
       ${ws.project ? '<button id="liveBrowse">Browse this folder</button>' : ''}
-      ${md ? '<button id="docRunAll">Run all cells</button><button id="docSource">Markdown source</button><button id="docUnwrap" hidden>Unwrap prose</button>' : ''}
+      ${md ? '<button id="docRunAll">Run all cells</button><button id="docDiagrams" title="Reading view: the rendered document, with mermaid diagrams · double-click a diagram for its code · Ctrl+Shift+M">Reading view</button><button id="docSource">Markdown source</button><button id="docUnwrap" hidden>Unwrap prose</button>' : ''}
       <span id="liveAnnotationStatus">Gutter: changes and line attribution</span>
       <span>Ctrl+Space: completion · Ctrl+F: find</span>
     </div></details>

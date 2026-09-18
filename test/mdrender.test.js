@@ -147,3 +147,34 @@ test('bare absolute paths still become open buttons and anchors stay text', () =
   assert.match(mdRender('see /home/me/x/y.md.'), /<button[^>]*data-transcript-path="\/home\/me\/x\/y\.md"[^>]*>\/home\/me\/x\/y\.md<\/button>\./);
   assert.strictEqual(squash(mdRender('[top](#top)')), '<p>top</p>');
 });
+
+// The document reading view depends on these two: a mermaid fence must become
+// a .mmd host (not a plain code block), and images must render only when the
+// caller supplies a resolver.
+test('a mermaid fence becomes a diagram host that keeps its source', () => {
+  const h = mdRender('before\n\n```mermaid\ngraph LR\n  A --> B\n```\n\nafter');
+  assert.match(h, /<div class="mmd"><pre class="md-code mmd-src" data-lang="mermaid"><code>graph LR\n  A --&gt; B<\/code><\/pre><\/div>/);
+  assert.ok(!/<pre class="md-code"[^>]*><code class="lang-mermaid"/.test(h), 'the fence is not also a normal code block');
+  assert.match(h, /<p>before<\/p>/);
+  assert.match(h, /<p>after<\/p>/);
+});
+
+test('a search highlight keeps the mermaid fence as code', () => {
+  const h = mdRender('```mermaid\ngraph LR\n```', 'graph');
+  assert.ok(!h.includes('class="mmd"'), 'highlighted text stays readable as source');
+  assert.match(h, /<mark>graph<\/mark>/);
+});
+
+test('markdown images render only with a resolver, and never inside code', () => {
+  const seen = [];
+  const resolve = url => { seen.push(url); return '/api/doc/asset?doc=%2Fv%2Fd.md&src=' + encodeURIComponent(url); };
+  const h = mdRender('![figure](img/f1.png)\n\n```js\n![not an image](x.png)\n```', '', resolve);
+  assert.match(h, /<img src="\/api\/doc\/asset\?doc=%2Fv%2Fd\.md&amp;src=img%2Ff1\.png" alt="figure" loading="lazy" decoding="async">/);
+  assert.deepStrictEqual(seen, ['img/f1.png'], 'fenced code is never scanned for images');
+  // A resolver that declines produces no <img>: the text falls back to the
+  // transcript's link behavior instead.
+  const declined = mdRender('![f](a.png)', '', () => null);
+  assert.ok(!declined.includes('<img'), 'a declined image never becomes an <img>');
+  // Transcripts (no resolver) keep exactly their current behavior.
+  assert.strictEqual(declined, mdRender('![f](a.png)'));
+});

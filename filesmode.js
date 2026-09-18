@@ -94,7 +94,7 @@ async function fileWsMountBody(ws, opts) {
 async function fileWsMountMarkdown(ws, opts) {
   const host = $('ffCompare');
   if (!host) return;
-  host.innerHTML = `<div class="doc-view">${liveFileHead(ws)}<div class="fw-banner" id="fwBanner" hidden></div><div class="doc-editor-host"><div id="docEditor"></div></div></div>`;
+  host.innerHTML = `<div class="doc-view">${liveFileHead(ws)}<div class="fw-banner" id="fwBanner" hidden></div><div class="doc-editor-host"><div id="docEditor"></div><div id="docPreview" class="doc-preview" tabindex="-1" hidden></div></div></div>`;
   $('liveBack').onclick = () => liveFileGoBack(ws);
   await mountDocumentEditor(ws.path, ws.project, { focused: true });
   if (fileWs !== ws) return;
