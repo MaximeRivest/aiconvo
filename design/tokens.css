@@ -89,17 +89,21 @@
   --sp-3: 12px;
   --sp-4: 16px;
   --sp-6: 24px;
-  /* Shared shape vocabulary. Themes can set all four to 0 for square UI. */
-  --r: 6px;
-  --r-sm: 4px;
-  --r-menu: 10px;
-  --r-composer: 18px;
+  /* One scale for decorative shape everywhere: 0 = square, 1 = default.
+     A theme can still override a semantic radius independently. */
+  --roundness: 1;
+  --r: calc(6px * var(--roundness));
+  --r-sm: calc(4px * var(--roundness));
+  --r-menu: calc(10px * var(--roundness));
+  --r-dialog: calc(14px * var(--roundness));
+  --r-composer: calc(18px * var(--roundness));
+  --r-pill: calc(999px * var(--roundness));
   --shadow: none;
   /* The navigation column and the agents tray (design/42): softer than the
      rest of the app by default; themes may flatten it. */
   --panel-bg: var(--surface-1);
-  --panel-r: 8px;
-  --panel-row-r: 6px;
+  --panel-r: var(--r-menu);
+  --panel-row-r: var(--r);
   --panel-border: transparent;
   --list-w: 400px;
   --read-max: 1080px;
@@ -235,12 +239,7 @@
 }
 
 :root[data-theme="eink"] {
-  --panel-r: 0;
-  --panel-row-r: 0;
-  --r: 0px;
-  --r-sm: 0px;
-  --r-menu: 0px;
-  --r-composer: 0px;
+  --roundness: 0;
   --panel-border: #000000;
   --bg: #ffffff;
   --surface-1: #ffffff;

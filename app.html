@@ -14,6 +14,7 @@
 <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/surfaces.css">
 <script>
 // Local font choices use installed fonts only: no network or font downloads.
 window.appFonts = {
@@ -220,13 +221,12 @@ body:not(.side-layout) .ag-files-block { display: none; }
 .ag-sec[aria-expanded="false"]::after { content: "›"; }
 .ag-sec:hover::after, .ag-sec[aria-expanded="false"]::after { opacity: 1; }
 .ag-sub-sec { padding: 8px 10px 2px; color: var(--text-faint); font-size: 10px; letter-spacing: .04em; }
-.ag-scope { display: inline-flex; border-radius: 999px; background: var(--surface-2); padding: 1px; }
-.ag-scope button { height: 16px; min-height: 16px; padding: 0 7px; border: 0; border-radius: 999px; background: transparent; color: var(--text-faint); font-size: 9px; line-height: 1; letter-spacing: 0; }
+.ag-scope { display: inline-flex; border-radius: var(--r-pill); background: var(--surface-2); padding: 1px; }
+.ag-scope button { height: 16px; min-height: 16px; padding: 0 7px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--text-faint); font-size: 9px; line-height: 1; letter-spacing: 0; }
 .ag-scope button.on { background: var(--surface-1); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
 .ag-scope button:hover { color: var(--text); }
 .ag-scope button:disabled { opacity: .5; }
-:root[data-theme-mode="binary"] .ag-scope { border-radius: 0; border: 1px solid var(--border); padding: 0; }
-:root[data-theme-mode="binary"] .ag-scope button { border-radius: 0; }
+:root[data-theme-mode="binary"] .ag-scope { border: 1px solid var(--border); padding: 0; }
 :root[data-theme-mode="binary"] .ag-scope button.on { background: var(--text); color: var(--bg); box-shadow: none; }
 .ag-empty { padding: 3px 10px 4px; color: var(--text-faint); font-size: 10px; }
 .side-foot { display: flex; align-items: center; gap: 4px; padding: var(--sp-1) var(--sp-2); }
@@ -242,7 +242,7 @@ body.side-layout.side-fold > #side.work { background: linear-gradient(180deg, va
 body.side-layout.side-fold > #side.unread::after { content: attr(data-unread); position: absolute; top: 56px; left: 0; width: 14px; text-align: center; font-size: 10px; color: var(--accent); font-weight: 700; }
 body.side-layout > #side { position: relative; }
 /* Pop-ups that hung from the bar's right edge hang from the column's foot. */
-body.side-layout #machinePop { top: auto; bottom: 44px; left: var(--sp-2); right: auto; }
+body.side-layout #machinePop { top: auto; bottom: 44px; left: var(--sp-2); right: auto; z-index: 40; }
 /* Zen hides every chrome, the column included. */
 body.zen:not(.home).side-layout > #side { display: none !important; }
 body.zen:not(.home).side-layout { grid-template-columns: 0 minmax(0, 1fr); }
@@ -446,7 +446,7 @@ body.home #brand { display: none !important; }
 #projSort button { height: 26px; min-width: 26px; padding: 0 7px; border-color: transparent; border-radius: 0; background: transparent; color: var(--text-dim); font: 12px var(--font); }
 #projSort button:hover { color: var(--text); background: var(--surface-2); }
 #projSort button.on { color: var(--accent); }
-#projSort input { height: 26px; width: 120px; border: 1px solid var(--border); border-radius: 0; background: var(--surface-1); color: var(--text); padding: 0 6px; font: 12px var(--font); }
+#projSort input { height: 26px; width: 120px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-1); color: var(--text); padding: 0 6px; font: 12px var(--font); }
 #projSort input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
 /* A home-rooted conversation is not a project. Keep its entry point visible
    on every home layout, including the portrait phone list. */
@@ -966,7 +966,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .qf-head { flex: 0 0 auto; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 42px; padding: 8px 0; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
 .qf-head h1 { flex: 1; min-width: 150px; margin: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qf-head h1 span { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--text-dim); }
-.qf-head button { min-height: 26px; height: auto; padding: 3px 7px; border: 0; border-radius: 3px; background: transparent; color: var(--text-dim); font: 12px/1.4 var(--font); }
+.qf-head button { min-height: 26px; height: auto; padding: 3px 7px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-dim); font: 12px/1.4 var(--font); }
 .qf-head button:hover { background: var(--surface-2); color: var(--text); }
 .qf-head button.primary { padding: 4px 10px; background: var(--accent-strong); color: var(--accent-ink); }
 .qf-head button.primary:disabled { opacity: .5; }
@@ -1184,7 +1184,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .mpick .mp-all.on { background: var(--accent-strong); color: var(--accent-ink); border-color: var(--accent-strong); }
 /* provider filter: one tap scopes the list to one provider */
 .mpick .mp-provs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 0 10px 10px; border-bottom: 1px solid var(--border); }
-.mpick .mp-prov { flex: 0 0 auto; height: 22px; min-height: 22px; padding: 0 8px; font-size: var(--fs-micro); border: 1px solid transparent; background: transparent; color: var(--text-dim); }
+.mpick .mp-prov { flex: 0 0 auto; height: 22px; min-height: 22px; padding: 0 8px; font-size: var(--fs-micro); border: 1px solid transparent; border-radius: var(--r-pill); background: transparent; color: var(--text-dim); }
 .mpick .mp-prov:hover { color: var(--text); background: var(--surface-2); }
 .mpick .mp-prov.on { background: var(--accent-strong); color: var(--accent-ink); font-weight: 700; }
 .mpick .mp-prov.notready { opacity: .55; }
@@ -1203,7 +1203,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .mpick .mp-row.on { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
 .mpick .mp-row.on b { font-weight: 700; }
 .mpick .mp-row.notready { opacity: .5; }
-.mpick .mp-addbtn { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-dim); font-weight: 700; }
+.mpick .mp-addbtn { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); color: var(--text-dim); font-weight: 700; }
 .mpick .mp-addbtn:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .mpick .mp-foot { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--border); background: var(--surface-1); }
 /* the one model control: shows the selection, opens the picker */
@@ -1796,7 +1796,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
   /* branch alternatives list must fit the screen */
   /* the model control sized for touch */
   .model-pick { height: 40px; }
-  .mpick .mp-prov { height: 30px; min-height: 30px; border-radius: 15px; }
+  .mpick .mp-prov { height: 30px; min-height: 30px; }
   /* the open live strip: readable streaming text on the phone */
   .ls-blocks { max-height: 55dvh; font-size: 14px; }
 }
@@ -1871,7 +1871,6 @@ body.side-layout.conv.chrome-min #floatHead > * { pointer-events: none; }
 .msg.user > .msg-actions::before { content: ''; position: absolute; left: 0; right: 0; top: -6px; height: 6px; }
 .msg-actions button { height: auto; min-height: 28px; padding: 4px 7px; border-radius: var(--r-sm); }
 .msg-actions button:hover { background: var(--surface-2); text-decoration: none; }
-.file-action-menu, .mpick, .slash-pop { border-radius: var(--r-menu); }
 .file-action-menu button { border-radius: var(--r-sm); }
 /* A reading-font choice must not turn code or terminal output proportional. */
 .md pre, .md code, .tool-out, .think-body, .ls-blocks pre { font-family: var(--font-mono); }
@@ -14387,6 +14386,9 @@ function applyLayout() {
     side.hidden = false;
     $('sideAgents').appendChild(pop);
     $('sideFootSlot').append($('machineBtn'), $('settingsBtn'));
+    // The switcher pop-up lives in the column with its button, so it paints
+    // above the column instead of behind it.
+    side.appendChild($('machinePop'));
     $('floatHead').append($('chTitle'), $('chMove'), $('convHeadExtra'));
     $('ganttBar').prepend($('projSort'));
     pop.hidden = false;
@@ -14403,6 +14405,7 @@ function applyLayout() {
   } else {
     document.body.classList.remove('side-layout', 'side-fold');
     side.hidden = true;
+    side.before($('machinePop'));
     $('machinePop').before(pop);
     $('barFold').before($('machineBtn'), $('settingsBtn'));
     $('conversationFilesSwitch').before($('chTitle'), $('convHeadExtra'));

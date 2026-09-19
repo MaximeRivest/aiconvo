@@ -3848,15 +3848,18 @@ function parseConnectLink(raw) {
 }
 
 // The address the other machine should use to reach us: same network family
-// as theirs (Tailscale 100.x when they are on Tailscale), else the first LAN one.
+// as theirs. A machine on Tailscale (100.x or a ts.net name) gets our public
+// https name when we have one, else our 100.x address; a machine that is only
+// on the home network gets our LAN address, since it cannot see the tailnet.
 function ownUrlFor(remoteUrl) {
-  if (PUBLIC_URL) return PUBLIC_URL;
-  const addrs = lanAddresses();
-  if (!addrs.length) return '';
   let host = '';
   try { host = new URL(remoteUrl).hostname; } catch {}
   const tail = a => a.startsWith('100.');
-  const pick = (tail(host) ? addrs.find(tail) : addrs.find(a => !tail(a))) || addrs[0];
+  const remoteOnTailnet = tail(host) || /\.ts\.net$/i.test(host);
+  if (remoteOnTailnet && PUBLIC_URL) return PUBLIC_URL;
+  const addrs = lanAddresses();
+  if (!addrs.length) return PUBLIC_URL || '';
+  const pick = (remoteOnTailnet ? addrs.find(tail) : addrs.find(a => !tail(a))) || addrs[0];
   return `http://${pick}:${PORT}`;
 }
 
@@ -12205,6 +12208,7 @@ const server = http.createServer(async (req, res) => {
       '/conversation-draft.js': { file: 'conversation-draft.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-draft.css': { file: 'conversation-draft.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/surfaces.css': { file: 'design/surfaces.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },

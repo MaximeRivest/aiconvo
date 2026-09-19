@@ -47,12 +47,11 @@ motion: full
   --ink: #c0392b;
   --ink-ai: var(--ink);
 
-  /* Shape is part of a theme, not a component-specific preference.
-     Use 0px for these four tokens to make conversation controls square. */
-  --r: 6px;
-  --r-sm: 4px;
-  --r-menu: 10px;
-  --r-composer: 18px;
+  /* Shape applies to all app-owned menus, dialogs, cards and controls.
+     0 = square, 1 = default, 0.5 = subtler. Semantic radii derive from it.
+     Optional independent overrides: --r, --r-sm, --r-menu, --r-dialog,
+     --r-composer, --r-pill, --panel-r, --panel-row-r. */
+  --roundness: 1;
 
   /* Reading/UI font; code remains --font-mono. A browser font preference
      can override --font without changing the theme or code alignment. */

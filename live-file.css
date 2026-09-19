@@ -3,7 +3,7 @@
 .live-file-view .doc-view { height:100%; margin:0; min-height:0; }
 .live-file-head { display:flex; align-items:center; flex-wrap:wrap; gap:9px; min-height:38px; height:auto; padding:5px 8px; border-bottom:1px solid var(--border); background:var(--bg); }
 .live-file-head #ffTitle { flex:1; min-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
-.live-file-head button, .live-file-head summary { height:auto; min-height:26px; padding:3px 7px; border:0; border-radius:3px; background:transparent; color:var(--text-dim); font:12px/1.4 var(--font); }
+.live-file-head button, .live-file-head summary { height:auto; min-height:26px; padding:3px 7px; border:0; border-radius:var(--r-sm); background:transparent; color:var(--text-dim); font:12px/1.4 var(--font); }
 .live-file-head button:hover, .live-file-head summary:hover { background:var(--surface-2); color:var(--text); }
 .live-file-head #docStatus, #liveServiceStatus { font-size:10px; color:var(--text-dim); }
 .live-file-head #docStatus { max-width:38vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

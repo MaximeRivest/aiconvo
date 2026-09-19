@@ -1,0 +1,76 @@
+/* Shared surface shapes. Component CSS owns layout, colours and scrolling;
+   this file owns the common shape contract. New surfaces can use ui-menu,
+   ui-dialog, ui-card, ui-pill, or ui-control. Existing names below are adapters,
+   so dynamically created and server-rendered surfaces follow the same theme.
+
+   :where keeps these defaults overridable without !important. Do not put
+   fixed pixel radii in components: use tokens (design/tokens.css). Circles
+   that encode state and flush joined table/tab edges are structural exceptions.
+
+   Do NOT clip all surfaces: dialogs/cards can own escaping menus or focus
+   rings. Clip only edge-to-edge shells with their own internal scroller. */
+
+/* Floating menus, palettes and previews (not their full-screen backdrops). */
+.ui-menu, :where([popover], [role="menu"],
+  #markPop, #machinePop, #filtersPop, .file-action-menu,
+  .slash-pop, .mpick, .file-completion, .tts-rate-menu,
+  .compose-tools-menu, .msg-more-actions > div, .live-more > div,
+  .fb-finder-popup, .cr-menu-panel) {
+  border-radius: var(--r-menu);
+}
+
+/* Native dialogs inherit this automatically. Non-native modal cards opt in;
+   the overlay that dims the whole screen deliberately stays square. */
+.ui-dialog, :where(dialog, [role="dialog"], [role="alertdialog"],
+  .dialog, .mf-card, .cc-card, .rc-cv-card, .rc-dialog) {
+  border-radius: var(--r-dialog);
+}
+
+/* Standalone bordered cards/panels and their small, inset controls. */
+.ui-card, :where(.sr-group, .job, .evidence-card, .usage-card, .pareacard,
+  .fb-list, #fbReadme, .fb-change, .cr-reference, .cr-file, .cr-comment,
+  .cr-comment-form form, .fp-list, .ps-browser, .ps-choice,
+  .draft-setup .ds-browser, .flow-comparison, .flow-merge-dialog fieldset,
+  .fh-readonly, .doc-run-fix, .agent-thumb, #helpMini, #matchHud, #voicePill,
+  .toast, .reader-destination) {
+  border-radius: var(--r);
+}
+.ui-control, :where(button, input:not([type="radio"]):not([type="range"]),
+  select, textarea, summary) {
+  border-radius: var(--r);
+}
+.ui-pill, :where(.ag-scope, .ag-scope button, .fb-badge, .agent-ctx-chip,
+  .mpick .mp-prov) {
+  border-radius: var(--r-pill);
+}
+:where(.file-action-menu button, .file-completion [role="option"],
+  .tts-rate-menu button, .mpick .mp-addbtn, .mpick .mp-tag) {
+  border-radius: var(--r-sm);
+}
+
+/* These shells have edge-to-edge painted children, and no escaping menus.
+   Their scrollable body remains the scroller. Insets elsewhere protect the
+   outside shape without sacrificing popovers or focus outlines. */
+:where(.mpick, .rc-cv-card, #machinePop, .file-action-menu) {
+  overflow: hidden;
+}
+/* Search-result headers paint up to the border, but the card itself needn't
+   clip a focus ring or a descendant popup. Round only the outer corners. */
+:where(.sr-group > .sr-head) {
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+}
+:where(.fb-change > summary, .cr-file > summary, .evidence-card > summary) {
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+}
+:where(.fb-change:not([open]) > summary, .cr-file:not([open]) > summary,
+  .evidence-card:not([open]) > summary) {
+  border-end-start-radius: inherit;
+  border-end-end-radius: inherit;
+}
+/* Context-preserving messages/drafts join the composer at its top edge. */
+:where(.composer-dock > .reader-destination) {
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
