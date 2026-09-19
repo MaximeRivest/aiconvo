@@ -32,7 +32,7 @@
   .cr-comment-form form, .fp-list, .ps-browser, .ps-choice,
   .draft-setup .ds-browser, .flow-comparison, .flow-merge-dialog fieldset,
   .fh-readonly, .doc-run-fix, .agent-thumb, #helpMini, #matchHud, #voicePill,
-  .toast, .reader-destination) {
+  .toast, .reader-destination, #einkFlash) {
   border-radius: var(--r);
 }
 .ui-control, :where(button, input:not([type="radio"]):not([type="range"]),
@@ -57,17 +57,19 @@
 /* Search-result headers paint up to the border, but the card itself needn't
    clip a focus ring or a descendant popup. Round only the outer corners. */
 :where(.sr-group > .sr-head) {
-  border-start-start-radius: inherit;
-  border-start-end-radius: inherit;
+  border-start-start-radius: max(0px, calc(var(--r) - 1px));
+  border-start-end-radius: max(0px, calc(var(--r) - 1px));
 }
+/* Native details uses an internal slot: inherit on summary can resolve to
+   that slot's square corners. Use the card token, inset by its 1px border. */
 :where(.fb-change > summary, .cr-file > summary, .evidence-card > summary) {
-  border-start-start-radius: inherit;
-  border-start-end-radius: inherit;
+  border-start-start-radius: max(0px, calc(var(--r) - 1px));
+  border-start-end-radius: max(0px, calc(var(--r) - 1px));
 }
 :where(.fb-change:not([open]) > summary, .cr-file:not([open]) > summary,
   .evidence-card:not([open]) > summary) {
-  border-end-start-radius: inherit;
-  border-end-end-radius: inherit;
+  border-end-start-radius: max(0px, calc(var(--r) - 1px));
+  border-end-end-radius: max(0px, calc(var(--r) - 1px));
 }
 /* Context-preserving messages/drafts join the composer at its top edge. */
 :where(.composer-dock > .reader-destination) {

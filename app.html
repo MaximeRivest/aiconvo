@@ -298,6 +298,7 @@ body.conv #convHeadExtra { display: inline-flex; flex-shrink: 0; }
 #machinePop button { display: flex; width: 100%; justify-content: space-between; gap: var(--sp-3); padding: 6px 10px; border: 0; background: transparent; color: var(--text); text-align: left; }
 #machinePop button:hover { background: var(--surface-2); }
 #machinePop button .mach-url { color: var(--text-dim); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#machinePop button .mach-url.mach-down { color: var(--danger, #b00); white-space: normal; }
 .mach-item { display: grid; grid-template-columns: 1fr 2fr 2fr auto; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); }
 .mach-item.shown { grid-template-columns: 1fr 3fr auto auto; padding: 6px 0; }
 .mach-item .mach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2849,7 +2850,19 @@ function toggleMachinePop(show) {
   const list = settingsOf().machines || [];
   pop.innerHTML = `<div class="mach-head">you are on ${esc(host)} · go to</div>` +
     list.map((m, i) => `<button type="button" data-i="${i}"><span>${esc(m.name)}</span><span class="mach-url">${esc(m.url.replace(/^https?:\/\//i, ''))}</span></button>`).join('');
-  pop.querySelectorAll('button[data-i]').forEach(b => b.onclick = () => { location.href = machineUrl(list[Number(b.dataset.i)]); });
+  // Check that the other install answers before leaving this page: a
+  // machine whose aiconvo is off would only give a blank tab.
+  pop.querySelectorAll('button[data-i]').forEach(b => b.onclick = async () => {
+    const i = Number(b.dataset.i), m = list[i];
+    const url = b.querySelector('.mach-url');
+    b.disabled = true; url.textContent = 'checking…';
+    let probe;
+    try { probe = await (await fetch('/api/machines/probe?i=' + i)).json(); } catch { probe = { ok: false, why: 'no answer' }; }
+    if (probe.ok) { location.href = machineUrl(m); return; }
+    b.disabled = false;
+    url.textContent = m.name + ' does not answer — is aiconvo running there? (' + (probe.why || 'no answer') + ')';
+    url.classList.add('mach-down');
+  });
 }
 $('machineBtn').onclick = e => { e.stopPropagation(); toggleMachinePop(); };
 

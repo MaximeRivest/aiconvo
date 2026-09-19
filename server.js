@@ -13238,6 +13238,17 @@ const server = http.createServer(async (req, res) => {
       const { link } = JSON.parse(body || '{}');
       try { json(res, 200, { ...(await connectMachine(link)), ...settingsResponse() }); }
       catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/machines/probe' && req.method === 'GET') {
+      // Before the switcher jumps, ask whether that install answers. The
+      // page cannot ask directly (another origin), so this server does.
+      const m = (appSettings.machines || [])[Number(u.searchParams.get('i'))];
+      if (!m) return json(res, 404, { error: 'no such machine' });
+      try {
+        const remote = await remoteJson(m.url, '/api/settings', m.token);
+        json(res, 200, { ok: true, hostname: remote.hostname || m.name });
+      } catch (e) {
+        json(res, 200, { ok: false, why: /abort|fetch failed|ECONN|ENOTFOUND|EHOSTUNREACH/i.test(e.message) ? 'no answer' : e.message.replace(m.url, '').trim() });
+      }
     } else if (u.pathname === '/api/machines/register' && req.method === 'POST') {
       // Called by another install during its connect step. Reaching this
       // route already required our LAN token, so the caller is trusted.
