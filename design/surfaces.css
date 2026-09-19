@@ -15,7 +15,7 @@
   #markPop, #machinePop, #filtersPop, .file-action-menu,
   .slash-pop, .mpick, .file-completion, .tts-rate-menu,
   .compose-tools-menu, .msg-more-actions > div, .live-more > div,
-  .fb-finder-popup, .cr-menu-panel) {
+  .fb-finder-popup, .cr-menu-panel, .cm-tooltip, .mrmd-language-hover) {
   border-radius: var(--r-menu);
 }
 

@@ -72,8 +72,6 @@ async function openLiveFile(pathValue, opts = {}) {
     reviewRef: opts.reviewRef || null, reviewData: opts.reviewData || null };
   fileWs = ws;
   setRoute('file', fileWsHash(ws));
-  // A person opened this file: it joins the shared recent-files list.
-  if (typeof recordRecentFile === 'function') recordRecentFile(ws.path, ws.project);
   $('view').innerHTML = '<section class="files-ws live-file-view"><div id="ffCompare" class="live-file-body"></div><div id="fwAsk" class="fw-ask" hidden></div></section>';
   // A link may name recorded versions (to=, from=): open straight into history.
   if (opts.to || opts.from) return liveFileHistory(ws, { to: opts.to || null, from: opts.from || null });
@@ -90,8 +88,14 @@ function liveFileBrowseFolder(ws) {
   const dir = root && ws.path.startsWith(root + '/') ? ws.path.slice(root.length + 1).split('/').slice(0, -1).join('/') : '';
   return showFilesBrowser(ws.project, { ...context, mode: 'browse', root, dir });
 }
+function liveFileRememberOpen(ws) {
+  if (fileWs !== ws || ws.recentOpened) return;
+  ws.recentOpened = true;
+  if (typeof recordRecentFile === 'function') recordRecentFile(ws.path, ws.project);
+}
 function liveFileAfterMount(ws) {
   if (fileWs !== ws || !ws.editor) return;
+  liveFileRememberOpen(ws);
   $('liveBack').onclick = () => liveFileGoBack(ws);
   for (const id of ['liveHistory', 'liveHistoryMenu']) $(id).onclick = () => liveFileHistory(ws);
   for (const id of ['liveAsk', 'liveAskMenu']) $(id).onclick = () => fileWsToggleAsk(true);
@@ -307,6 +311,7 @@ async function liveFileHistory(ws, selection = {}) {
     host.querySelectorAll('[data-fh-point]').forEach(b => b.onclick = () => select(b.dataset.fhPoint, comparing ? from.id : null));
     replaceRoute(fileWsHash(ws));
     await liveHistoryPaint(ws, scope, doc, from, to, ticket);
+    if (ws.historyRequest === ticket) liveFileRememberOpen(ws);
   } catch (e) { if (fileWs === ws && host.isConnected && ws.historyRequest === ticket) host.textContent = 'History unavailable: ' + e.message; }
 }
 async function liveHistorySnapshot(scope, doc, point) {

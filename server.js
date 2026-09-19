@@ -169,6 +169,7 @@ const usageIdx = usageLib.openUsageIndex(USAGE_DB_FILE);
 // to every file, from transcripts, Git, the editor, and the watcher. A
 // derived cache too; the boot backfill rebuilds it when it is missing.
 const fileLedgerLib = require('./fileledger.js');
+const recentFilesLib = require('./recent-files.js');
 const fileLedger = process.env.AICONVO_NO_LEDGER === '1' ? null : fileLedgerLib.openFileLedger(path.join(CACHE_DIR, 'files.db'));
 // This archive is durable user data, not part of CACHE_DIR or the note index.
 let fileArchive = null, fileArchiveError = '';
@@ -347,7 +348,7 @@ function cachePathFor(key) {
 }
 
 // Bump when the cached message format changes; forces a re-index.
-const CACHE_VERSION = 16; // v16: lastUserTs (when a person last wrote)
+const CACHE_VERSION = 17; // v17: seed recent file activity from confirmed tool results
 
 // A memory-briefing bootstrap prompt is the same for every launched session; it says
 // nothing about the actual work. Titles must come from the first real request instead.
@@ -490,7 +491,7 @@ function toolEventsOf(content, ts, entry, cwd = null) {
       let t = textOf(b.content) || (typeof b.content === 'string' ? b.content : '');
       if (t.length > 4000) t = t.slice(0, 4000) + '\n… (truncated)';
       const images = directImagesOf(b.content, entry, [bi]);
-      if (t.trim() || images.length) out.push({ role: 'toolresult', text: t, images, paths: pathCandidates(t), tid: b.tool_use_id || null, ts, err: !!b.is_error });
+      if (b.tool_use_id || t.trim() || images.length) out.push({ role: 'toolresult', text: t, images, paths: pathCandidates(t), tid: b.tool_use_id || null, ts, err: !!b.is_error });
     }
   }
   return out;
@@ -565,7 +566,7 @@ async function parseFile(absPath) {
         let t = textOf(content);
         if (t.length > 4000) t = t.slice(0, 4000) + '\n… (truncated)';
         const images = directImagesOf(content, eid);
-        if (t.trim() || images.length) messages.push({ role: 'toolresult', text: t, images, paths: pathCandidates(t), tid: d.message.toolCallId || d.message.toolCallID || null, ts: d.timestamp || null, err: !!(d.message.isError || d.message.is_error), _eid: eid });
+        if (d.message.toolCallId || d.message.toolCallID || t.trim() || images.length) messages.push({ role: 'toolresult', text: t, images, paths: pathCandidates(t), tid: d.message.toolCallId || d.message.toolCallID || null, ts: d.timestamp || null, err: !!(d.message.isError || d.message.is_error), _eid: eid });
         continue;
       }
       if (role !== 'user' && role !== 'assistant') continue;
@@ -732,6 +733,20 @@ async function indexFile(source, relPath, stat) {
     index[key] = entry;
     scheduleProjectFoldRefresh(meta.cwd);
     await writeFileAtomic(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages, entryParents }));
+    // Local transcript tools have explicit paths and completion results.
+    // Remote-only paths must never be offered as local files.
+    if (source === 'pi' || source === 'claude') {
+      const activity = recentFilesLib.fromMessages(messages, {
+        project: projectOfEntry(entry, key), key,
+        resolvePath: p => {
+          if (typeof p !== 'string' || !p || p.includes('\0') || /^[a-zA-Z][\w+.-]*:/.test(p) || p.startsWith('//')) return null;
+          const expanded = expandHomePath(p);
+          if (!path.isAbsolute(expanded) && !meta.cwd) return null;
+          return path.resolve(meta.cwd || '/', expanded);
+        },
+      });
+      if (recentFilesLib.merge(recentFileState, activity)) recentFilesChanged();
+    }
     saveIndexSoon();
     broadcast({ type: 'update', key, ...entry, project: projectNameOf(entry.cwd, key) });
     markLeafDirty(key, prev, entry, stat.mtimeMs);
@@ -3137,42 +3152,42 @@ async function agentReadDelegated(keys) {
   }
   if (any) agentReadApply(merged);
 }
-// ---------- recent files (opened or saved by a person in the editor) ----------
-// The side panel's "recent files" (design/42). Human actions only: an agent
-// edit never enters it. Shared by every device, like the inbox state.
+// ---------- recent files: human visits and confirmed agent activity ----------
+// Keep actors separately so either filter retains its own true recency.
 const RECENT_FILES_FILE = path.join(NOTES_DIR, 'recent-files.json');
-const RECENT_FILES_MAX = 40;
-let recentFiles = [];
-try {
-  const raw = JSON.parse(fs.readFileSync(RECENT_FILES_FILE, 'utf8'));
-  recentFiles = (Array.isArray(raw) ? raw : raw.files || []).filter(f => f && typeof f.path === 'string' && f.path)
-    .map(f => ({ path: f.path, project: String(f.project || ''), at: Number(f.at) || 0, kind: f.kind === 'saved' ? 'saved' : 'opened' }));
-} catch {}
+let recentFileState = recentFilesLib.normalize(null);
+try { recentFileState = recentFilesLib.normalize(JSON.parse(fs.readFileSync(RECENT_FILES_FILE, 'utf8'))); } catch {}
+let recentFilesBroadcastSnapshot = recentFileState.files;
 function saveRecentFilesSoon() {
-  clearTimeout(saveRecentFilesSoon.t);
+  if (saveRecentFilesSoon.t) return;
   saveRecentFilesSoon.t = setTimeout(() => {
+    saveRecentFilesSoon.t = null;
     fs.mkdirSync(path.dirname(RECENT_FILES_FILE), { recursive: true });
-    writeFileAtomic(RECENT_FILES_FILE, JSON.stringify({ files: recentFiles }) + '\n').catch(() => {});
+    writeFileAtomic(RECENT_FILES_FILE, JSON.stringify(recentFileState) + '\n').catch(e => console.error('recent files:', e.message));
   }, 1000);
 }
-function recentFilesTouch(p, { project = '', kind = 'opened' } = {}) {
+function recentFilesChanged() {
+  saveRecentFilesSoon();
+  if (recentFilesChanged.t) return;
+  recentFilesChanged.t = setTimeout(() => {
+    recentFilesChanged.t = null;
+    const delta = recentFilesLib.diff(recentFilesBroadcastSnapshot, recentFileState.files);
+    recentFilesBroadcastSnapshot = recentFileState.files;
+    if (delta.upsert.length || delta.remove.length) broadcast({ type: 'recent-files', delta });
+  }, 250);
+}
+function recentFilesTouch(p, { project = '', kind = 'opened', actor = 'human', key = '' } = {}) {
   const abs = String(p || '');
   if (!abs.startsWith('/')) return;
-  const now = Date.now();
-  const have = recentFiles.find(f => f.path === abs);
-  // Autosave writes every few seconds; a same-file save inside a minute is
-  // the same work session and does not need every device to repaint.
-  if (have && have.kind === kind && now - have.at < 60000 && (!project || have.project === project)) return;
-  recentFiles = [{ path: abs, project: project || (have && have.project) || '', at: now, kind }, ...recentFiles.filter(f => f.path !== abs)].slice(0, RECENT_FILES_MAX);
-  saveRecentFilesSoon();
-  broadcast({ type: 'recent-files', files: recentFiles });
+  const have = recentFileState.files.find(f => f.path === abs && f.actor === actor);
+  const at = Math.max(Date.now(), (recentFileState.files.find(f => f.actor === actor)?.at || 0) + 1);
+  // Update every visit: opening A, then B, then A must put A first even
+  // within a minute. Only disk writes and broadcasts are coalesced.
+  if (recentFilesLib.merge(recentFileState, [{ path: abs, at, actor, kind, key,
+    project: project || have?.project || projectNameOf(path.dirname(abs)) }])) recentFilesChanged();
 }
-function recentFilesForget(p) {
-  const before = recentFiles.length;
-  recentFiles = recentFiles.filter(f => f.path !== String(p || ''));
-  if (recentFiles.length === before) return;
-  saveRecentFilesSoon();
-  broadcast({ type: 'recent-files', files: recentFiles });
+function recentFilesForget(p, actor = 'human') {
+  if (recentFilesLib.forget(recentFileState, p, actor)) recentFilesChanged();
 }
 const MEMORY_DOC_KINDS = ['overview', 'intent', 'environment', 'status'];
 function normalizeContextItems(raw) {
@@ -5619,6 +5634,7 @@ function jobView(job) {
     id: job.id, type: job.type, key: job.key || null, epicId: job.epicId || null,
     project: job.project || null, parentId: job.parentId || null,
     title: job.title, status: job.status, statusText: job.statusText,
+    projects: job.projects || null, // leaf batches span projects: the project view filters on this
     done: job.done || 0, total: job.total || 0,
     startedAt: job.startedAt, finishedAt: job.finishedAt || null,
     result: job.result || null, error: job.error || null,
@@ -5751,6 +5767,7 @@ function startMemoryExtractJob(ids, label = null, options = {}) {
     id: 'memory-extract:' + id, type: 'memory-extract',
     key: keys.length === 1 ? keys[0] : null, sessionIds: keys,
     title: label || `${keys.length} memory ${keys.length === 1 ? 'leaf' : 'leaves'}`,
+    projects: [...new Set(keys.map(k => projectNameOf(index[k].cwd, k)))],
     status: 'running', statusText: 'Extracting memory leaves…', done: 0, total: keys.length,
     startedAt: Date.now(), finished: false, model: currentModelLabel(),
   };
@@ -9479,7 +9496,10 @@ async function fileSaveResponse(body) {
   if (oldText !== text) {
     const delta = docLineDelta(oldText, text);
     ledgerRecordEditorSave(abs, { added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text), actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard', archiveFrom, archiveTo });
-    if (body.actor !== 'ai') recentFilesTouch(abs, { project: String(body.project || ''), kind: 'saved' });
+    if (!body.actor || body.actor === 'human' || ['ai', 'external-agent'].includes(body.actor)) {
+      const actor = ['ai', 'external-agent'].includes(body.actor) ? 'agent' : 'human';
+      recentFilesTouch(abs, { project: String(body.project || ''), kind: actor === 'human' ? 'saved' : 'edited', actor });
+    }
   }
   return { ok: true, path: abs, sha: sha256Hex(text), historyWarning };
 }
@@ -9554,7 +9574,10 @@ async function docSaveResponse(body) {
       actor: DOC_ACTORS.has(body.actor) ? body.actor : 'human', input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
       archiveFrom, archiveTo: historyWarning ? null : fileArchive?.latestId(abs),
     });
-    if (!DOC_ACTORS.has(body.actor) || body.actor === 'human') recentFilesTouch(abs, { project: String(body.project || ''), kind: 'saved' });
+    if (!DOC_ACTORS.has(body.actor) || body.actor !== 'runtime') {
+      const actor = body.actor === 'ai' || body.actor === 'external-agent' ? 'agent' : 'human';
+      recentFilesTouch(abs, { project: String(body.project || ''), kind: actor === 'human' ? 'saved' : 'edited', actor });
+    }
   }
   return { ok: true, path: abs, sha: sha256Hex(text), changed: oldText !== text, historyWarning };
 }
@@ -12209,6 +12232,7 @@ const server = http.createServer(async (req, res) => {
       '/conversation-draft.css': { file: 'conversation-draft.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/surfaces.css': { file: 'design/surfaces.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/recent-files.js': { file: 'recent-files.js', type: 'application/javascript; charset=utf-8', cache: 'no-cache' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
@@ -13458,16 +13482,17 @@ const server = http.createServer(async (req, res) => {
       try { json(res, 200, await actOnConversation(parsed.id, parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/recent-files' && req.method === 'GET') {
-      json(res, 200, { files: recentFiles });
+      json(res, 200, { files: recentFileState.files });
     } else if (u.pathname === '/api/recent-files' && req.method === 'POST') {
       // { path, project } records an open; { remove: path } forgets one.
       let body = '';
       for await (const chunk of req) body += chunk;
       try {
         const p = JSON.parse(body || '{}');
-        if (p.remove) recentFilesForget(p.remove);
+        if (p.actor != null && !['human', 'agent', 'both'].includes(p.actor)) throw new Error('unknown file activity source');
+        if (p.remove) recentFilesForget(p.remove, p.actor || 'human');
         else if (p.path) recentFilesTouch(path.resolve(expandHomePath(String(p.path))), { project: String(p.project || ''), kind: 'opened' });
-        json(res, 200, { files: recentFiles });
+        json(res, 200, { files: recentFileState.files });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/agent-read' && req.method === 'GET') {
       json(res, 200, agentRead);

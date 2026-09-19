@@ -8,7 +8,7 @@ const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
 const root = path.join(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'app.html'), 'utf8');
-const componentFiles = ['conversation-reader.css', 'conversation-draft.css', 'live-file.css', 'files-browser.css', 'change-review.css'];
+const componentFiles = fs.readdirSync(root).filter(file => file.endsWith('.css')).sort();
 
 test('component shapes use tokens, not fixed decorative radii', () => {
   const sources = [['app.html', [...app.matchAll(/<style(?:\s[^>]*)?>([\s\S]*?)<\/style>/g)].map(m => m[1]).join('\n')],
@@ -65,6 +65,8 @@ const specimens = [
   ['editor options', 'menu', '<details class="live-more" open><summary>More</summary><div data-pick><button>History</button></div></details>'],
   ['file finder', 'menu', '<div class="fb-finder-popup"><div class="fb-finder-tools">Find</div><div id="fbFinderList"><div role="option">File</div></div></div>'],
   ['review options', 'menu', '<div class="cr-view"><div class="cr-menu-panel" data-pick><button>Review</button></div></div>'],
+  ['editor tooltip', 'menu', '<div class="cm-tooltip">Completion</div>'],
+  ['language hover', 'menu', '<div class="mrmd-language-hover">Definition</div>'],
   ['generic popup', 'menu', '<div class="ui-menu"><button>Action</button></div>'],
   ['semantic menu', 'menu', '<div role="menu"><button>Action</button></div>'],
   ['generic dialog', 'dialog', '<div class="dialog"><h3>Confirm</h3><button>OK</button></div>'],

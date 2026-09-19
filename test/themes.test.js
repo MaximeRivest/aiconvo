@@ -23,6 +23,15 @@ test('custom theme template passes the full validator', () => {
   for (const token of REQUIRED_COLOR_TOKENS) assert.ok(result.declarations[token], token);
 });
 
+test('themes accept the shared shape scale and independent semantic radii', () => {
+  const square = validateTheme(template.replace('--roundness: 1;', '--roundness: 0;'), 'theme-template');
+  assert.equal(square.valid, true, square.errors.join('\n'));
+  assert.equal(square.declarations['--roundness'], '0');
+  const override = validateTheme(template.replace('--roundness: 1;', '--roundness: 0.5; --r-dialog: 20px; --r-menu: 12px;'), 'theme-template');
+  assert.equal(override.valid, true, override.errors.join('\n'));
+  assert.equal(override.declarations['--r-dialog'], '20px');
+});
+
 test('validator rejects missing tokens, unsafe CSS, and weak contrast', () => {
   const missing = template.replace(/\s*--ansi-15:[^;]+;/, '');
   assert.match(validateTheme(missing, 'theme-template').errors.join('\n'), /missing required token --ansi-15/);

@@ -57,11 +57,12 @@ test('every document format routed to MRMD can save and commit, with stale-write
     assert.ok(revision.hash);
     assert.equal(git(['show', `HEAD:first-request.${extension}`]), text);
     assert.ok(events.some(e => e.path === file && e.source === 'Markdown save'));
-    // A person's save joins the recent-files list; an agent's does not.
+    // Both sources join recents, retaining their distinct actor.
     assert.ok(events.some(e => e.path === file && e.recent && e.kind === 'saved'));
     events.length = 0;
     await ctx.docSaveResponse({ path: file, text: text + '\nagent\n', baseSha: saved.sha, actor: 'ai' });
-    assert.equal(events.some(e => e.recent), false);
+    assert.ok(events.some(e => e.recent && e.actor === 'agent' && e.kind === 'edited'));
+    assert.equal(events.some(e => e.recent && e.actor === 'human'), false);
   }
   for (const extension of ['js', 'mdx.js', 'md.bak', 'txt']) {
     const file = path.join(root, 'not-a-document.' + extension);

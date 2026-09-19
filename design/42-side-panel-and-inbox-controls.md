@@ -53,8 +53,9 @@ gaining the three controls every inbox has: pin, mark unread, remove.
   binary mode keeps solid borders on the scope toggle.
 - **Recent files** are the files a person opened or saved in the editor,
   newest first, shared across devices (`~/notes/aiconvo/recent-files.json`,
-  `/api/recent-files`, SSE `recent-files`). Agent edits never enter it:
-  the list answers "what was I working on", not "what changed".
+  `/api/recent-files`, SSE `recent-files`). This remains the default human
+  view; [design/47](47-recent-file-activity.md) adds an independent source
+  filter for agents or both, without displacing the human visit history.
 - **Pinned, marked unread, removed** live in the shared inbox state
   (`agent-read.json`, logic in `agentread.js`), so every device agrees:
   - `pinned[key] = at` — a section of its own above the inbox. A pinned row

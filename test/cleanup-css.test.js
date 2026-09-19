@@ -14,8 +14,7 @@ function ruleFor(selector) {
 }
 
 test('zen controls keep their own hiding rule after selector cleanup', () => {
-  for (const selector of ['body.zen:not(.home) header', 'body.zen:not(.home) .model-strip',
-    'body.zen:not(.home) .agent-compose .ctxmeter']) {
+  for (const selector of ['body.zen:not(.home) header', 'body.zen:not(.home) .model-strip']) {
     assert.match(ruleFor(selector), /display:\s*none\s*!important/);
   }
   assert.match(ruleFor('body.zen:not(.home) .transcript'), /border:\s*0/);

@@ -158,10 +158,36 @@ body.bar-fold header:has(#activeBtn.work) {
    html[data-layout=side] is set before paint from localStorage; the body
    class follows it only above 700px (the phone keeps the top bar). */
 #side { display: none; }
-body.side-layout { display: grid; grid-template-columns: var(--side-w, 288px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+body.side-layout { --side-w: 344px; display: grid; grid-template-columns: var(--side-w, 344px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
 body.side-layout > header { grid-column: 2; }
 body.side-layout > main { grid-column: 2; grid-row: 2; min-height: 0; }
-body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-direction: column; min-height: 0; background: var(--panel-bg); border-right: 1px solid var(--panel-border); }
+body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-direction: row; min-height: 0; background: var(--panel-bg); border-right: 1px solid var(--panel-border); }
+/* Two levels, Slack-style: a narrow rail chooses a section; the panel shows it. */
+#sideRail { flex: 0 0 var(--rail-w, 56px); display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: var(--sp-2) 4px; border-right: 1px solid var(--border); background: var(--surface-2); min-height: 0; }
+#sidePanel { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+#railMachine { height: 40px; min-height: 40px; padding: 0; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-1); color: var(--text); font-weight: 700; font-size: 12px; letter-spacing: .02em; display: flex; align-items: center; justify-content: center; }
+#railMachine .rail-initials { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+#railMachine:hover { background: var(--surface-3); }
+#railMachine[aria-expanded="true"] { border-color: var(--accent); }
+.rail-sections { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+.rail-sections button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; height: 48px; min-height: 48px; padding: 4px 2px; border: 0; border-radius: var(--r); background: transparent; color: var(--text-dim); }
+.rail-sections button:hover { background: var(--surface-3); color: var(--text); }
+.rail-sections button[aria-pressed="true"] { background: var(--surface-1); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.rail-icon { font-size: 16px; line-height: 1; }
+.rail-label { font-size: 9px; line-height: 1; letter-spacing: .02em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-badge { position: absolute; top: 4px; right: 5px; min-width: 14px; height: 14px; padding: 0 4px; border-radius: var(--r-pill); background: var(--accent-strong); color: var(--accent-ink); font-size: 9px; line-height: 14px; font-weight: 700; text-align: center; }
+.rail-badge[hidden] { display: none; }
+.rail-badge.dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: 7px; right: 8px; font-size: 0; }
+.rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+#railFootSlot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+#railFootSlot > button { width: 36px; height: 32px; min-height: 32px; padding: 0; justify-content: center; }
+:root[data-theme-mode="binary"] .rail-sections button[aria-pressed="true"] { box-shadow: inset 3px 0 0 var(--text); }
+:root[data-theme-mode="binary"] .rail-badge { background: var(--text); color: var(--bg); }
+/* The panel shows one section at a time; the flow/dock split only applies
+   inside "chats". Other sections use the full height, top-aligned. */
+body.side-layout #agentsPop[data-panel]:not([data-panel="conversations"]) #agentsLegacy { margin-top: 0; }
+body.side-layout #agentsPop:not([data-panel="files"]) .ag-files-block { display: none; }
+.panel-title { padding: var(--sp-2) 10px 4px; font-size: var(--fs-label); font-weight: 700; color: var(--text); }
 :root[data-theme-mode="binary"] body.side-layout > #side { border-right-color: var(--border); }
 /* No bar at all. Home's project-ordering buttons move into the timeline
    toolbar; the conversation title floats over the page (#floatHead). */
@@ -182,8 +208,7 @@ body.side-layout.zen:not(.home) #floatHead { display: none; }
 :root[data-theme-motion="none"] #floatHead { transition: none; }
 :root[data-theme-mode="binary"] #floatHead { background: transparent; backdrop-filter: none; box-shadow: none; }
 /* The composer never moves: pinned to the bottom of the page. */
-body.side-layout .composer-dock { position: fixed; left: var(--side-w, 288px); right: 0; bottom: 0; margin: 0 auto; z-index: 45; }
-body.side-layout.side-fold .composer-dock { left: 14px; }
+body.side-layout .composer-dock { position: fixed; left: var(--side-w, 344px); right: 0; bottom: 0; margin: 0 auto; z-index: 45; }
 body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + 16px); }
 body.side-layout .agent-compose { border-bottom: 0; }
 .side-top .side-row { display: flex; gap: 2px; }
@@ -221,6 +246,9 @@ body:not(.side-layout) .ag-files-block { display: none; }
 .ag-sec[aria-expanded="false"]::after { content: "›"; }
 .ag-sec:hover::after, .ag-sec[aria-expanded="false"]::after { opacity: 1; }
 .ag-sub-sec { padding: 8px 10px 2px; color: var(--text-faint); font-size: 10px; letter-spacing: .04em; }
+.ag-files-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 10px 2px; }
+.ag-files-head > .ag-sub-sec { padding: 0; }
+@media (pointer: coarse) { .ag-files-head .ag-scope button { min-height: 28px; } }
 .ag-scope { display: inline-flex; border-radius: var(--r-pill); background: var(--surface-2); padding: 1px; }
 .ag-scope button { height: 16px; min-height: 16px; padding: 0 7px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--text-faint); font-size: 9px; line-height: 1; letter-spacing: 0; }
 .ag-scope button.on { background: var(--surface-1); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
@@ -234,15 +262,13 @@ body:not(.side-layout) .ag-files-block { display: none; }
 #sideFold { height: 26px; min-height: 26px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; margin-left: auto; }
 #sideFold:hover { color: var(--text); background: var(--surface-2); }
 /* Folded: a thin rail, like the folded bar. It keeps the inbox count. */
-body.side-layout.side-fold { grid-template-columns: 14px minmax(0, 1fr); }
-body.side-layout.side-fold > #side { cursor: pointer; overflow: hidden; }
-body.side-layout.side-fold > #side > * { display: none !important; }
-body.side-layout.side-fold > #side:hover { background: var(--surface-2); }
-body.side-layout.side-fold > #side.work { background: linear-gradient(180deg, var(--accent) 0 48px, var(--surface-1) 48px); }
-body.side-layout.side-fold > #side.unread::after { content: attr(data-unread); position: absolute; top: 56px; left: 0; width: 14px; text-align: center; font-size: 10px; color: var(--accent); font-weight: 700; }
+body.side-layout.side-fold { grid-template-columns: var(--rail-w, 56px) minmax(0, 1fr); }
+body.side-layout.side-fold > #side > #sidePanel { display: none !important; }
+body.side-layout.side-fold .composer-dock { left: var(--rail-w, 56px); }
 body.side-layout > #side { position: relative; }
 /* Pop-ups that hung from the bar's right edge hang from the column's foot. */
-body.side-layout #machinePop { top: auto; bottom: 44px; left: var(--sp-2); right: auto; z-index: 40; }
+body.side-layout #machinePop { top: 56px; bottom: auto; left: calc(var(--rail-w, 56px) + 4px); right: auto; z-index: 40; }
+body.side-layout #machineBtn { display: none !important; }
 /* Zen hides every chrome, the column included. */
 body.zen:not(.home).side-layout > #side { display: none !important; }
 body.zen:not(.home).side-layout { grid-template-columns: 0 minmax(0, 1fr); }
@@ -298,7 +324,7 @@ body.conv #convHeadExtra { display: inline-flex; flex-shrink: 0; }
 #machinePop button { display: flex; width: 100%; justify-content: space-between; gap: var(--sp-3); padding: 6px 10px; border: 0; background: transparent; color: var(--text); text-align: left; }
 #machinePop button:hover { background: var(--surface-2); }
 #machinePop button .mach-url { color: var(--text-dim); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#machinePop button .mach-url.mach-down { color: var(--danger, #b00); white-space: normal; }
+#machinePop button .mach-url.mach-down { color: var(--danger); white-space: normal; }
 .mach-item { display: grid; grid-template-columns: 1fr 2fr 2fr auto; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); }
 .mach-item.shown { grid-template-columns: 1fr 3fr auto auto; padding: 6px 0; }
 .mach-item .mach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -753,6 +779,10 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .pfoot { border-top: 1px solid var(--border); padding-top: var(--sp-2); margin: var(--sp-4) 0 var(--sp-3); }
 .pmemline { font-size: var(--fs-micro); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pmemline button { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); }
+.pmemcontrols { display: contents; }
+.pmemjob { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pmemjob .bar { color: var(--accent); letter-spacing: -1px; }
+.pmemjob b { font-weight: 600; color: var(--text); }
 .pfoldbtn { height: auto; min-height: 0; padding: 1px 6px; font-size: var(--fs-micro); margin-left: 6px; }
 /* ---- the live file (live-file.js + filesmode.js) ---- */
 .files-ws .fw-spacer { flex: 1; }
@@ -1726,7 +1756,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
   .agent-compose.compose-min { flex-direction: row; align-items: stretch; padding-top: 6px; }
   .agent-compose.compose-min .model-strip,
 .agent-compose.compose-min .think-pick, .agent-compose.compose-min .mode-pick,
-  .agent-compose.compose-min .ctxmeter,
   .agent-compose.compose-min .agent-thumbs, .agent-compose.compose-min .agent-ctx, .agent-compose.compose-min #agentAttach,
   .agent-compose.compose-min #agentSlash, .agent-compose.compose-min #agentAt, .agent-compose.compose-min #agentSnip, .agent-compose.compose-min #agentTree,
   .agent-compose.compose-min #agentSend:not(.primary) { display: none; }
@@ -1813,8 +1842,7 @@ body.zen:not(.home) .convhead,
 body.zen:not(.home) #cornerStack,
 body.zen:not(.home) .msg .role,
 body.zen:not(.home) .model-strip,
-body.zen:not(.home) .think-pick,
-body.zen:not(.home) .agent-compose .ctxmeter { display: none !important; }
+body.zen:not(.home) .think-pick { display: none !important; }
 body.zen:not(.home) .transcript, body.zen:not(.home) #runCards:not(:empty) { border: 0; }
 body.zen:not(.home) .msg { border-bottom: 0; padding: 14px 0; }
 body.zen:not(.home) .msg.user { border-left: 2px solid var(--border-strong); padding-left: 14px; }
@@ -1829,18 +1857,23 @@ body.zen:not(.home) #zenExit { display: block; position: fixed; top: 6px; right:
 .agent-compose textarea { background: transparent; padding: 8px 4px; border: 0; border-radius: var(--r); min-height: 44px; height: 44px; }
 .agent-compose textarea:focus { outline: none; }
 .composer-dock { min-width: 0; }
-body.side-layout .composer-dock { width: calc(100% - var(--side-w, 288px) - 24px); bottom: 10px; }
-body.side-layout.side-fold .composer-dock { width: calc(100% - 38px); }
+body.side-layout .composer-dock { width: calc(100% - var(--side-w, 344px) - 24px); bottom: 10px; }
+body.side-layout.side-fold .composer-dock { width: calc(100% - var(--rail-w, 56px) - 24px); left: var(--rail-w, 56px); }
 body.side-layout .agent-compose { border-bottom: 1px solid var(--border); }
 body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + 28px); }
-.agent-compose-row { min-width: 0; flex-wrap: nowrap; gap: 6px; overflow: visible; }
-.agent-compose-row > .model-strip { flex: 1 1 0; min-width: 0; margin-left: auto; justify-content: flex-end; }
+/* Equal outer tracks keep usage centered on the composer, independently
+   of the microphone, model name, or Send label widths. */
+.agent-compose-row { display: grid; grid-template-columns: minmax(0, 1fr) fit-content(42%) minmax(0, 1fr); min-width: 0; gap: 6px; align-items: center; overflow: visible; }
+.compose-left, .compose-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.compose-left { grid-column: 1; grid-row: 1; }
+.compose-right { grid-column: 3; grid-row: 1; justify-content: flex-end; }
+.compose-right > .model-strip { flex: 0 1 240px; max-width: none; min-width: 0; margin-left: auto; justify-content: flex-end; }
 .agent-compose-row .model-pick { min-width: 0; max-width: 100%; }
 .agent-compose-row .model-strip > .model-pick { flex: 0 1 auto; }
 .agent-compose-row .model-pick .mname { min-width: 0; max-width: 100%; }
 .agent-compose-row .model-strip .mmore { flex-shrink: 0; }
 .agent-compose-row button, .compose-tools > summary { border-radius: var(--r); }
-.agent-compose-row > button { flex: 0 0 auto; white-space: nowrap; }
+.compose-left > button, .compose-right > button { flex: 0 0 auto; max-width: 100%; white-space: normal; }
 .agent-compose-row .model-pick, .agent-compose-row .agent-mic { border-color: transparent; background: transparent; }
 .agent-compose-row .agent-mic.recording { background: var(--accent-strong); color: var(--accent-ink); }
 .compose-tools { position: relative; flex: 0 0 auto; }
@@ -1853,7 +1886,12 @@ body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var
 .compose-tools-menu > button:hover { background: var(--surface-2); }
 .compose-tools-menu #agentMode::before { content: 'Mode'; color: var(--text-dim); margin-right: auto; }
 .compose-tools-menu #agentThink::before { content: 'Reasoning'; color: var(--text-dim); margin-right: auto; }
-.compose-tools-menu .ctxmeter { white-space: normal; overflow-wrap: anywhere; padding: 8px; border-top: 1px solid var(--border); }
+/* Usage occupies the true center track. It may wrap inside its slot,
+   but its center never shifts to make room for the neighboring controls. */
+.agent-compose-row > .ctxmeter { display: block; grid-column: 2; grid-row: 1; width: 100%; min-width: 0; min-height: 24px; height: auto; margin: 0; padding: 2px 4px; border: 0; background: transparent; color: var(--text-dim); font: var(--fs-micro)/1.4 var(--font); text-align: center; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-wrap: pretty; }
+.agent-compose-row > .ctxmeter:hover { background: transparent; color: var(--text); }
+.agent-compose-row > .ctxmeter:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.agent-compose-row > .ctxmeter.warn { color: var(--text); }
 .compose-tools :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Quiet, transparent title line, outside the scroller: never over the prose. */
 body.side-layout.conv #floatHead { top: 0; left: 0; right: 0; transform: none; max-width: none; padding: 8px 20px; min-height: 36px; justify-content: flex-start; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
@@ -1879,8 +1917,9 @@ body.side-layout.conv.chrome-min #floatHead > * { pointer-events: none; }
   .composer-dock { width: calc(100% - 16px); bottom: 8px; margin: 0 auto; }
   .agent-compose-row { overflow: visible; gap: 4px; }
   .agent-compose-row > * { flex: 0 0 auto; }
-  .agent-compose-row > .model-strip { flex: 1 1 0; min-width: 0; }
-  .agent-compose-row > button, .compose-tools > summary { min-height: 44px; height: 44px; }
+  .compose-left, .compose-right { gap: 4px; }
+  .compose-right > .model-strip { flex: 0 1 180px; min-width: 0; }
+  .compose-left > button, .compose-right > button, .compose-tools > summary { min-height: 44px; height: auto; }
   .agent-compose-row .agent-mic { order: 0; }
   .agent-compose-row .model-pick { padding: 0 6px; }
   .msg.user { margin-bottom: 50px; }
@@ -1940,6 +1979,17 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <div id="agentsPop" hidden><div id="agentsUnread"></div><div id="agentsLegacy"></div></div>
 <div id="machinePop" hidden></div>
 <aside id="side" hidden aria-label="Navigation and agents">
+  <nav id="sideRail" aria-label="Sections">
+    <button id="railMachine" type="button" title="Machine" aria-haspopup="menu"><span class="rail-initials">·</span></button>
+    <div class="rail-sections">
+      <button type="button" data-rail="conversations" aria-pressed="true"><span class="rail-icon">☷</span><span class="rail-label">Chats</span><span class="rail-badge" hidden></span></button>
+      <button type="button" data-rail="files" aria-pressed="false"><span class="rail-icon">▤</span><span class="rail-label">Files</span><span class="rail-badge" hidden></span></button>
+      <button type="button" data-rail="traffic" aria-pressed="false"><span class="rail-icon">⚉</span><span class="rail-label">Agents</span><span class="rail-badge" hidden></span></button>
+      <button type="button" data-rail="notifications" aria-pressed="false"><span class="rail-icon">◔</span><span class="rail-label">Activity</span><span class="rail-badge" hidden></span></button>
+    </div>
+    <div class="rail-foot"><span id="railFootSlot"></span></div>
+  </nav>
+  <div id="sidePanel">
   <div class="side-top">
     <div class="side-row">
       <span class="nav-pair"><button id="sideBack" class="nav-back" disabled aria-label="Back">‹</button><button id="sideFwd" class="nav-fwd" disabled aria-label="Forward">›</button></span>
@@ -1955,6 +2005,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <div class="side-foot">
     <span id="sideFootSlot"></span>
     <button id="sideFold" title="Fold the side panel — click the rail to bring it back (`)">◂</button>
+  </div>
   </div>
 </aside>
 <div id="searchOverlay" class="overlay" hidden>
@@ -2038,6 +2089,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <script src="/notebook-env.js"></script>
 <script src="/streaming-tool.js"></script>
 <script src="/delegation-ui.js"></script>
+<script src="/recent-files.js"></script>
 <script src="/filesmode.js"></script>
 <script src="/files-browser.js"></script>
 <script src="/live-file.js"></script>
@@ -2540,17 +2592,23 @@ async function loadJobs() {
 }
 
 function toggleJobs(show) {
+  if (sideLayoutOn()) {
+    // Notifications are their own rail section in the column.
+    const showing = sidePanel() === 'notifications';
+    const next = show !== undefined ? !!show : !showing;
+    if (next) { setSidePanel('notifications'); if (sideFolded()) setSideFold(false); }
+    else if (showing) setSidePanel('conversations');
+    return;
+  }
   const visible = !$('agentsPop').hidden && agentNotificationsOpen;
   const next = show !== undefined ? !!show : !visible;
   if (!next) {
     agentNotificationsOpen = false;
     if (agentsTrayOpen()) toggleAgents(false);
-    else if (sideLayoutOn()) renderAgentsPop(false);
     return;
   }
   agentNotificationsOpen = true;
   toggleAgents(true);
-  if (sideLayoutOn()) renderAgentsPop(false);
 }
 
 // ---------- voice playback state ----------
@@ -2823,7 +2881,7 @@ try {
 document.addEventListener('click', e => {
   if (!$('filtersPop').hidden && !e.target.closest('#filtersPop')) $('filtersPop').hidden = true;
   if (agentsTrayOpen() && !e.target.closest('#agentsPop')) toggleAgents(false);
-  if (!$('machinePop').hidden && !e.target.closest('#machinePop')) $('machinePop').hidden = true;
+  if (!$('machinePop').hidden && !e.target.closest('#machinePop')) { $('machinePop').hidden = true; $('railMachine')?.setAttribute('aria-expanded', 'false'); }
 });
 
 // ---- machine switcher ----
@@ -2841,6 +2899,7 @@ function renderMachineBtn() {
   btn.hidden = !list.length;
   btn.textContent = '@' + (host || 'this machine');
   btn.title = 'This is ' + (host || 'this machine') + ' — switch to another aiconvo machine';
+  if (typeof paintSideRail === 'function' && $('railMachine')) paintSideRail();
 }
 function toggleMachinePop(show) {
   const pop = $('machinePop');
@@ -3194,6 +3253,7 @@ function updateActiveBtn() {
   side.classList.toggle('work', working);
   side.classList.toggle('unread', unread.length > 0);
   side.dataset.unread = unread.length ? String(unread.length) : '';
+  if (sideLayoutOn()) paintRailBadges({ unread: unread.length, working: activeRuns.size > 0 || sessions.some(isWorking), notifications: runningJobs });
 }
 
 // The panel is built from LIVE client state — sessions (mtimes), runningKeys
@@ -3265,8 +3325,43 @@ try { agentSecState = JSON.parse(localStorage.getItem(AGENT_SEC_KEY) || '{}') ||
 function saveAgentSecState() { try { localStorage.setItem(AGENT_SEC_KEY, JSON.stringify(agentSecState)); } catch {} }
 const agentSecOpen = id => agentSecState['fold:' + id] !== true;
 const agentSecScope = id => agentSecState['scope:' + id] === 'project' ? 'project' : 'all';
+const recentFileActor = () => ['agent', 'both'].includes(agentSecState['files:actor']) ? agentSecState['files:actor'] : 'human';
+// The rail's second level: one section shown at a time in the side panel.
+const SIDE_PANELS = ['conversations', 'files', 'traffic', 'notifications'];
+const sidePanel = () => SIDE_PANELS.includes(agentSecState.panel) ? agentSecState.panel : 'conversations';
+function setSidePanel(id, { remember = true } = {}) {
+  if (!SIDE_PANELS.includes(id)) return;
+  agentSecState.panel = id;
+  if (remember) saveAgentSecState();
+  paintSideRail();
+  renderAgentsPop(false);
+}
+function paintSideRail() {
+  const current = sidePanel();
+  document.querySelectorAll('#sideRail [data-rail]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.rail === current)));
+  const machine = $('railMachine');
+  const host = (settingsState && settingsState.hostname) || '';
+  const others = (settingsOf().machines || []).length;
+  const initials = host.replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase() || '·';
+  machine.querySelector('.rail-initials').textContent = initials;
+  machine.title = (host ? 'This is ' + host : 'This machine') + (others ? ' — switch to another aiconvo machine' : ' — connect other machines under settings → machines');
+  machine.setAttribute('aria-label', machine.title);
+}
+function paintRailBadges({ unread = 0, working = false, traffic = 0, notifications = 0 } = {}) {
+  const set = (id, value, tone) => {
+    const badge = document.querySelector(`#sideRail [data-rail="${id}"] .rail-badge`);
+    if (!badge) return;
+    badge.hidden = !value;
+    badge.classList.toggle('dot', tone === 'dot');
+    badge.textContent = tone === 'dot' ? '' : String(value);
+  };
+  set('conversations', unread, 'count');
+  set('traffic', working ? 1 : 0, 'dot');
+  set('notifications', notifications, 'count');
+}
 function toggleAgentSec(id) { agentSecState['fold:' + id] = agentSecOpen(id); saveAgentSecState(); renderAgentsPop(false); }
-function setAgentSecScope(id, scope) { agentSecState['scope:' + id] = scope; saveAgentSecState(); renderAgentsPop(false); }
+// Chats and files share one project scope: what you are working in.
+function setAgentSecScope(id, scope) { agentSecState['scope:' + (id === 'files' ? 'recent' : id)] = scope; saveAgentSecState(); renderAgentsPop(false); }
 // The project the panel means by "this project": the open conversation's,
 // or the project page's. Empty on home and elsewhere.
 function panelProjectName() {
@@ -3483,6 +3578,7 @@ async function renderAgentsPop(refetch) {
   const focusedRecovery = document.activeElement?.dataset?.recoveryId;
   const focusedAction = document.activeElement?.dataset?.recoveryAction;
   const recoveryToggleFocused = document.activeElement?.id === 'agentAutoResume';
+  const focusedFileActor = document.activeElement?.dataset?.filesActor;
   const interruptedSec = agentsRecovery.interrupted.map(r => `<div class="ag-row ag-interrupted" data-key="${esc(r.key)}">
     <span class="ag-main"><span class="ag-title">${esc(rowTitle(byKey(r.key)) === '(untitled)' ? r.title : rowTitle(byKey(r.key)))}</span>
     <span class="ag-dir">${esc(r.kind === 'network' ? 'Likely connection problem' : r.kind === 'stopped' ? 'Stopped' : 'Needs attention')} · ${esc(secs(now - r.createdAt))} ago</span>
@@ -3495,9 +3591,9 @@ async function renderAgentsPop(refetch) {
     `<label class="ag-recovery-setting"><input id="agentAutoResume" type="checkbox"${agentsRecovery.enabled ? ' checked' : ''}> Resume connection failures automatically</label>` +
     `<div class="ag-recovery-help">${network.checkedAt ? esc(network.host + (network.state === 'reachable' ? ' reachable' : ' not reachable') + ' · checked ' + secs(now - network.checkedAt) + ' ago') + '. ' : ''}Checks run on the host laptop/server, even with this panel closed. Two successful checks before resuming. At most 3 attempts, within 24 hours. Deliberate stops and other errors stay stopped. Continuing can repeat work; check any uncertain results.</div></details>` : '';
   const notificationsSec = jobsNotificationsHtml();
-  // "recent": the conversations a person last wrote in, then the files a
-  // person last opened or saved. One group, one fold, one scope: the
-  // current project, or everything. In project scope rows are one line.
+  // "recent": conversations a person last wrote in, then file activity.
+  // One group/fold/project scope; the file-source filter is independent.
+  // In project scope rows are one line.
   const project = panelProjectName();
   const scope = { value: project && agentSecScope('recent') === 'project' ? 'project' : 'all', project };
   const scoped = scope.value === 'project';
@@ -3506,36 +3602,59 @@ async function renderAgentsPop(refetch) {
     .sort((a, b) => Date.parse(b.lastUserTs) - Date.parse(a.lastUserTs)).slice(0, 8);
   const wroteSec = wrote.map(s => row(s, s.key, tinyAge(now - Date.parse(s.lastUserTs)), null, '', busyNow.has(s.key), { dir: scoped ? false : undefined })).join('');
   const fileProject = f => f.project || projectOf({ cwd: f.path.slice(0, f.path.lastIndexOf('/')) });
-  const files = recentFilesList.filter(f => !scoped || fileProject(f) === project).slice(0, 8);
+  const fileActor = recentFileActor();
+  const files = RecentFiles.select(recentFilesList, { actor: fileActor, project: scoped ? project : '', projectOf: fileProject });
   const filesSec = files.map(f => {
     const name = f.path.split('/').pop();
     const dir = scoped ? '' : fileProject(f) || shortDir(f.path.slice(0, -name.length - 1));
-    const ageHtml = `<span class="ag-age">${esc((f.kind === 'saved' ? 'saved ' : '') + tinyAge(now - f.at))}</span>`;
-    return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(f.project || '')}" title="${esc(f.path)}">` +
+    const verb = f.kind === 'written' ? 'wrote' : f.kind;
+    const actorLabel = f.actor === 'agent' ? 'agent' : 'human';
+    const ageHtml = `<span class="ag-age">${esc((fileActor === 'both' ? actorLabel + ' · ' : '') + verb + ' ' + tinyAge(now - f.at))}</span>`;
+    return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(f.project || '')}" data-file-conv="${esc(f.key || '')}" title="${esc(f.path + '\n' + actorLabel + ' · ' + verb + ' · ' + new Date(f.at).toLocaleString())}">` +
       `<span class="ag-main"><span class="ag-title"><span>${esc(name)}</span>${dir ? '' : ageHtml}</span>` +
       (dir ? `<span class="ag-sub"><span class="ag-dir">${esc(dir)}</span>${ageHtml}</span>` : '') + `</span>` +
       `<span class="ag-acts"><button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
   }).join('');
-  const recentBody = (wroteSec || `<div class="ag-empty">${esc(scoped ? 'nothing written in ' + project + ' yet' : 'nothing written yet')}</div>`) +
-    `<div class="ag-files-block"><div class="ag-sub-sec">files</div>${filesSec || '<div class="ag-empty">none opened yet</div>'}</div>`;
   const readSec = recent.map(s => row(s, s.key, age(s), null, 'read')).join('');
   const traffic = webSec + workSec + writeSec + delegatedSec + idleSec + otherSec;
   const trafficCount = (traffic.match(/class="ag-row/g) || []).length;
   // Sections in order. Open ones flow from the top; folded ones dock at the
   // bottom with traffic and notifications (column only: the tray has no
   // free space to speak of, so there they stay in place).
-  const sections = [
+  const panel = sideLayoutOn() ? sidePanel() : 'tray';
+  pop.dataset.panel = panel;
+  const filesHeading = panel === 'files' ? 'source' : 'files';
+  const filesBody = `<div class="ag-files-block"><div class="ag-files-head"><span class="ag-sub-sec">${filesHeading}</span><span class="ag-scope" role="group" aria-label="File activity source">${[['human', 'human'], ['agent', 'agents'], ['both', 'both']].map(([value, label]) => `<button data-files-actor="${value}" class="${fileActor === value ? 'on' : ''}" aria-pressed="${fileActor === value}" title="${value === 'human' ? 'Files opened or saved by a person in the editor' : value === 'agent' ? 'Files read, written or edited by agents, with successful tool results' : 'Human and agent activity, newest first'}">${label}</button>`).join('')}</span></div>${filesSec || '<div class="ag-empty">no matching file activity yet</div>'}</div>`;
+  const recentConvBody = wroteSec || `<div class="ag-empty">${esc(scoped ? 'nothing written in ' + project + ' yet' : 'nothing written yet')}</div>`;
+  const chatSections = [
     pinnedSec ? ['pinned', 'pinned', pinnedSec, { count: pinned.length, cls: 'ag-pinned' }] : null,
     ['unread', 'unread replies', unreadSec, { count: unread.length, cls: 'ag-unread-tray', empty: 'nothing new' }],
     readSec ? ['read', 'read replies', readSec, { count: recent.length }] : null,
-    ['recent', 'recent', recentBody, { count: wrote.length + (sideLayoutOn() ? files.length : 0), scope }],
-    traffic ? ['traffic', 'traffic', traffic, { count: trafficCount, cls: 'ag-traffic', dock: true }] : null,
+    ['recent', 'recent', panel === 'tray' ? recentConvBody + filesBody : recentConvBody, { count: wrote.length, scope }],
   ].filter(Boolean);
-  const dockFolded = sideLayoutOn();
-  const flow = sections.filter(([id, , , o]) => !o.dock && (agentSecOpen(id) || !dockFolded));
-  const dock = sections.filter(([id, , , o]) => o.dock || (!agentSecOpen(id) && dockFolded));
+  const trafficSection = ['traffic', 'traffic', traffic, { count: trafficCount, cls: 'ag-traffic', dock: true, empty: 'no agent processes right now' }];
+  let flow, dock, tail = '';
+  if (panel === 'files') {
+    flow = [['files', 'recent files', filesBody, { count: files.length, scope }]]; dock = [];
+  } else if (panel === 'traffic') {
+    flow = [trafficSection]; dock = []; tail = recoverySection;
+  } else if (panel === 'notifications') {
+    const list = [...jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
+    flow = []; dock = [];
+    tail = `<div class="panel-title">notifications</div><div class="ag-notification-list">${list.map(jobCardHtml).join('') || '<div class="ag-empty">no background jobs yet</div>'}</div>` + recoverySection;
+  } else {
+    const sections = [...chatSections, ...(traffic ? [trafficSection] : [])];
+    const dockFolded = sideLayoutOn();
+    flow = sections.filter(([id, , , o]) => !o.dock && (agentSecOpen(id) || !dockFolded));
+    dock = sections.filter(([id, , , o]) => o.dock || (!agentSecOpen(id) && dockFolded));
+    // In the tray everything stays in one place; the column's chats section
+    // sends processes and notifications to their own rail entries.
+    if (panel === 'tray') tail = recoverySection + notificationsSec;
+    else { dock = dock.filter(([id]) => id !== 'traffic'); }
+  }
   $('agentsUnread').innerHTML = flow.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('');
-  $('agentsLegacy').innerHTML = dock.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('') + recoverySection + notificationsSec;
+  $('agentsLegacy').innerHTML = dock.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('') + tail;
+
   const recovery = pop.querySelector('.ag-recovery');
   if (recovery) recovery.ontoggle = () => { agentRecoveryOpen = recovery.open; };
   const notifications = pop.querySelector('.ag-notifications:not(.ag-recovery)');
@@ -3548,7 +3667,8 @@ async function renderAgentsPop(refetch) {
   };
   pop.scrollTop = st;
   selectAgentRow(agentsSelectedKey, false);
-  if (recoveryToggleFocused) autoResume?.focus({ preventScroll: true });
+  if (focusedFileActor) [...pop.querySelectorAll('[data-files-actor]')].find(b => b.dataset.filesActor === focusedFileActor)?.focus({ preventScroll: true });
+  else if (recoveryToggleFocused) autoResume?.focus({ preventScroll: true });
   else if (focusedRecovery) [...pop.querySelectorAll('[data-recovery-id]')].find(b => b.dataset.recoveryId === focusedRecovery && b.dataset.recoveryAction === focusedAction)?.focus({ preventScroll: true });
 }
 function agentRows() {
@@ -3695,6 +3815,13 @@ $('agentsPop').addEventListener('contextmenu', e => {
   openAgentRowMenu(row.dataset.key, e.clientX, e.clientY);
 });
 $('agentsPop').onclick = async e => {
+  const actor = e.target.closest('[data-files-actor]');
+  if (actor) {
+    e.stopPropagation();
+    agentSecState['files:actor'] = actor.dataset.filesActor;
+    saveAgentSecState(); renderAgentsPop(false);
+    return;
+  }
   const scope = e.target.closest('[data-scope]');
   if (scope) {
     e.stopPropagation();
@@ -3710,16 +3837,18 @@ $('agentsPop').onclick = async e => {
   const forget = e.target.closest('[data-forget]');
   if (forget) {
     e.stopPropagation();
-    recentFilesList = recentFilesList.filter(f => f.path !== forget.dataset.forget);
-    renderAgentsPop(false);
-    fetch('/api/recent-files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ remove: forget.dataset.forget }) }).catch(() => {});
+    try {
+      const out = await postJson('/api/recent-files', { remove: forget.dataset.forget, actor: recentFileActor() });
+      if (out.error) return errToast(out.error);
+      recentFilesList = out.files || []; renderAgentsPop(false);
+    } catch { errToast('Could not remove this file from the list. Try again when connected.'); }
     return;
   }
   const fileRow = e.target.closest('.ag-file[data-path]');
   if (fileRow) {
     e.stopPropagation();
     if (sideLayoutOn()) setAgentsKbd(false); else toggleAgents(false);
-    openLiveFile(fileRow.dataset.path, { project: fileRow.dataset.project || null });
+    openLiveFile(fileRow.dataset.path, { project: fileRow.dataset.project || null, back: fileRow.dataset.fileConv || null });
     return;
   }
   const more = e.target.closest('.ag-more[data-more]');
@@ -6961,6 +7090,87 @@ async function startReviewedConversation(project, opts = {}) {
 }
 
 // ---- the redesigned project panel (hero gantt · description · docs · epics) ----
+// ---- project memory controls: buttons when idle, live progress while a job runs ----
+// The jobs map (fed by the websocket) is the single source of truth for
+// progress; the /api/project flags only cover the moment before that map is
+// filled. Covers the manual backfill, automatic leaf batches that touch this
+// project, and document regeneration.
+const PROJECT_MEMORY_JOB_TYPES = new Set(['memory-backfill', 'memory-extract', 'memory-docs']);
+function projectMemoryJobTouches(j, project) {
+  if (!j || !project || !PROJECT_MEMORY_JOB_TYPES.has(j.type)) return false;
+  if (j.type === 'memory-docs') return j.project === project && !j.epicId;
+  if (j.type === 'memory-backfill') return j.project === project;
+  if (Array.isArray(j.projects)) return j.projects.includes(project);
+  if (j.key) { const s = sessions.find(x => x.key === j.key); return !!s && projectOf(s) === project; }
+  return false;
+}
+function projectMemoryJobs(project, status = 'running') {
+  return [...jobs.values()].filter(j => j.status === status && projectMemoryJobTouches(j, project)).sort((a, b) => b.startedAt - a.startedAt);
+}
+function projectMemoryJobHtml(j) {
+  const leafJob = j.type !== 'memory-docs';
+  const label = leafJob ? 'extracting leaves' : (j.statusText || 'regenerating docs').replace(/[….]+$/, '');
+  const counted = j.total > 0;
+  const bar = counted ? `<span class="bar">${barFor(j)}</span>` : '<span class="spin">░</span>';
+  const count = counted ? ` <b>${j.done}/${j.total}</b>` : '';
+  return `<span class="pmemjob" data-job-id="${esc(j.id)}" title="${esc(j.title)} · ${esc(j.statusText || '')}">${bar} ${esc(label)}${count}</span>`;
+}
+function projectMemoryControlsHtml(d) {
+  const memory = d.memory || null;
+  const pyramid = d.pyramid || {};
+  const leaves = pyramid.leaves || {};
+  const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
+  const haveLeaves = (leaves.fresh || 0) + (leaves.stale || 0) + (leaves.seeded || 0);
+  const running = projectMemoryJobs(d.project);
+  const leafJobs = running.filter(j => j.type !== 'memory-docs');
+  const docsJobs = running.filter(j => j.type === 'memory-docs');
+  // Several leaf batches can overlap (manual backfill + automatic settle batch):
+  // one merged line reads better than a stack of parallel counters.
+  const leafHtml = leafJobs.length > 1
+    ? projectMemoryJobHtml({ id: leafJobs.map(j => j.id).join(','), type: 'memory-extract', title: `${leafJobs.length} leaf jobs`, statusText: leafJobs.map(j => j.statusText).filter(Boolean).join(' · '), done: leafJobs.reduce((n, j) => n + j.done, 0), total: leafJobs.reduce((n, j) => n + j.total, 0), status: 'running' })
+    : leafJobs.length ? projectMemoryJobHtml(leafJobs[0])
+    : pyramid.backfillRunning ? '<span class="pmemjob"><span class="spin">░</span> extracting leaves…</span>'
+    : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : '';
+  const lastDocs = projectMemoryJobs(d.project, 'error').find(j => j.type === 'memory-docs');
+  const docsHtml = docsJobs.length ? projectMemoryJobHtml(docsJobs[0])
+    : pyramid.docsRunning ? '<span class="pmemjob"><span class="spin">░</span> regenerating docs…</span>'
+    : memory ? `<button id="pDocsRegen" class="ghost"${lastDocs ? ` title="${esc(lastDocs.error || lastDocs.statusText || 'the last regeneration failed')}"` : ''}>${lastDocs ? 'retry doc regeneration' : 'regenerate docs'}</button>`
+    : haveLeaves ? `<button id="pDocsRegen" class="ghost" title="First build: overview, intent, environment, status from ${haveLeaves} memory ${haveLeaves === 1 ? 'leaf' : 'leaves'}">build memory docs</button>` : '';
+  return leafHtml + docsHtml;
+}
+function wireProjectMemoryControls(d) {
+  const memory = d.memory || null;
+  const leaves = (d.pyramid || {}).leaves || {};
+  const needLeaves = (leaves.stale || 0) + (leaves.seeded || 0) + (leaves.missing || 0);
+  const pLeafBackfill = $('pLeafBackfill');
+  if (pLeafBackfill) pLeafBackfill.onclick = async () => {
+    if (needLeaves > 20 && !confirm(`Extract ${needLeaves} memory leaves? Each costs roughly one small model call. The backfill runs in the background; finished leaves are kept.`)) return;
+    pLeafBackfill.disabled = true;
+    const out = await postJson('/api/memory/backfill', { project: d.project });
+    if (out.error) { pLeafBackfill.disabled = false; return errToast('backfill failed to start: ' + out.error); }
+    updateJob(out);
+    toggleJobs(true);
+    refreshProjectMemoryControls(d.project);
+  };
+  const pDocsRegen = $('pDocsRegen');
+  if (pDocsRegen) pDocsRegen.onclick = async () => {
+    pDocsRegen.disabled = true;
+    const out = await postJson('/api/project/memory/regenerate', { project: d.project });
+    if (out.error) { pDocsRegen.disabled = false; return errToast((memory ? 'regeneration' : 'memory build') + ' failed to start: ' + out.error); }
+    updateJob(out);
+    toggleJobs(true);
+    refreshProjectMemoryControls(d.project);
+  };
+}
+// Re-render only the controls slot: a job tick must not rebuild the whole
+// page (that would drop scroll position and any open fold/area form).
+function refreshProjectMemoryControls(project) {
+  const slot = $('pMemControls');
+  if (!slot || viewKind !== 'project' || !projectOverview || projectOverviewName !== project || projectOverview.project !== project) return;
+  slot.innerHTML = projectMemoryControlsHtml(projectOverview);
+  wireProjectMemoryControls(projectOverview);
+}
+
 function renderProjectPanel(d) {
   const color = projectColor(d.project);
   const memory = d.memory || null;
@@ -7010,8 +7220,7 @@ function renderProjectPanel(d) {
       ${projectSwitchHtml('overview')}
       <div class="pmemline dim">
         <span title="${memory ? 'The generated project memory: overview, intent, environment, status' : 'No generated memory yet'}">${memory ? `memory ${fmtDate(memory.builtAt)} · ${pyramid.docs && pyramid.docs.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}</span>
-        ${pyramid.backfillRunning ? '<span><span class="spin">░</span> extracting leaves…</span>' : needLeaves ? `<button id="pLeafBackfill" class="ghost">${memory ? 'update' : 'build'} memory leaves (${needLeaves})</button>` : ''}
-        ${pyramid.docsRunning ? '<span><span class="spin">░</span> regenerating docs…</span>' : memory ? '<button id="pDocsRegen" class="ghost">regenerate docs</button>' : haveLeaves ? `<button id="pDocsRegen" class="ghost" title="First build: overview, intent, environment, status from ${haveLeaves} memory ${haveLeaves === 1 ? 'leaf' : 'leaves'}">build memory docs</button>` : ''}
+        <span id="pMemControls" class="pmemcontrols">${projectMemoryControlsHtml(d)}</span>
         <span class="psep"></span>
         <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">Remove from project list</button>' : ''}
       </div>
@@ -7062,23 +7271,7 @@ function renderProjectPanel(d) {
   });
   if (memory) renderProjectDocs(d);
   $('view').querySelectorAll('[data-p-epic-open]').forEach(b => b.onclick = e => { e.preventDefault(); showEpic(b.dataset.pEpicOpen); });
-  const pLeafBackfill = $('pLeafBackfill');
-  if (pLeafBackfill) pLeafBackfill.onclick = async () => {
-    if (needLeaves > 20 && !confirm(`Extract ${needLeaves} memory leaves? Each costs roughly one small model call. The backfill runs in the background; finished leaves are kept.`)) return;
-    const out = await postJson('/api/memory/backfill', { project: d.project });
-    if (out.error) return errToast('backfill failed to start: ' + out.error);
-    updateJob(out);
-    toggleJobs(true);
-    pLeafBackfill.outerHTML = '<span><span class="spin">░</span> extracting leaves…</span>';
-  };
-  const pDocsRegen = $('pDocsRegen');
-  if (pDocsRegen) pDocsRegen.onclick = async () => {
-    const out = await postJson('/api/project/memory/regenerate', { project: d.project });
-    if (out.error) return errToast((memory ? 'regeneration' : 'memory build') + ' failed to start: ' + out.error);
-    updateJob(out);
-    toggleJobs(true);
-    pDocsRegen.outerHTML = `<span><span class="spin">░</span> ${memory ? 'regenerating' : 'building'} docs…</span>`;
-  };
+  wireProjectMemoryControls(d);
   $('pNew').onclick = () => startReviewedConversation(d.project);
   $('pAreaNew').onclick = () => openNewAreaForm(d.project);
   $('view').querySelectorAll('[data-area-suggest]').forEach(b => b.onclick = () => openNewAreaForm(d.project, { rel: b.dataset.areaSuggest }));
@@ -9425,6 +9618,7 @@ function agentComposerHtml(d) {
     <div class="agent-thumbs" id="agentThumbs"></div>
     <div class="agent-ctx" id="agentCtx"></div>
     <div class="agent-compose-row">
+      <div class="compose-left">
       <details class="compose-tools" id="composeTools">
       <summary aria-label="Attachments and conversation options" title="Attachments and conversation options">+</summary>
       <div class="compose-tools-menu">
@@ -9436,14 +9630,17 @@ function agentComposerHtml(d) {
       <button id="agentTree" type="button" title="Open the conversation tree (shift+T): branches, forks, parallel replies">Conversation tree</button>
       <button id="agentAttach" type="button">Attach image</button>
       <input id="agentFiles" type="file" accept="image/*" multiple hidden>
-      <span id="ctxMeter" class="ctxmeter" hidden></span>
       </div></details>
       <button class="agent-mic" id="agentMic" type="button" title="Start / stop dictation (m, or ctrl+m while typing)" aria-label="Start dictation" aria-pressed="false" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>
       </button>
+      </div>
+      <button id="ctxMeter" class="ctxmeter" type="button" hidden></button>
+      <div class="compose-right">
       ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
       ${d.source === 'claude' ? '<button class="primary" id="agentSend" type="button" title="Open the terminal and send (ctrl+enter)">open &amp; send</button>' : ''}
+      </div>
     </div>
   </div>
   </div>`;
@@ -14398,10 +14595,12 @@ function applyLayout() {
     document.body.classList.add('side-layout');
     side.hidden = false;
     $('sideAgents').appendChild(pop);
-    $('sideFootSlot').append($('machineBtn'), $('settingsBtn'));
+    $('railFootSlot').append($('settingsBtn'));
+    $('sideFootSlot').append($('machineBtn'));
     // The switcher pop-up lives in the column with its button, so it paints
     // above the column instead of behind it.
     side.appendChild($('machinePop'));
+    paintSideRail();
     $('floatHead').append($('chTitle'), $('chMove'), $('convHeadExtra'));
     $('ganttBar').prepend($('projSort'));
     pop.hidden = false;
@@ -14437,7 +14636,19 @@ function setSideFold(fold) {
   try { fold ? localStorage.setItem('aiconvo.sideFold', '1') : localStorage.removeItem('aiconvo.sideFold'); } catch {}
 }
 $('sideFold').onclick = e => { e.stopPropagation(); setSideFold(true); };
-$('side').addEventListener('click', () => { if (sideFolded()) setSideFold(false); });
+// The rail: pick a section (a click on the current one while folded reopens
+// the panel), the machine, and settings. Nothing here navigates by itself.
+document.querySelectorAll('#sideRail [data-rail]').forEach(b => b.onclick = e => {
+  e.stopPropagation();
+  if (sideFolded()) setSideFold(false);
+  setSidePanel(b.dataset.rail);
+});
+$('railMachine').onclick = e => {
+  e.stopPropagation();
+  if (!(settingsOf().machines || []).length) { showSettings('machines'); return; }
+  toggleMachinePop();
+  $('railMachine').setAttribute('aria-expanded', String(!$('machinePop').hidden));
+};
 $('sideHome').onclick = () => $('brand').click();
 // ‹ › in the bar and in the column: one stack, every pair in step.
 const navButtons = Navigation.mount(nav, {
@@ -14482,9 +14693,8 @@ $('sideNewMore').onclick = e => {
 };
 SIDE_LAYOUT_MQ.addEventListener('change', applyLayout);
 
-// ---- recent files: what a person opened or saved in the editor ----
-// Shared across devices (server store, SSE). Rendered in the column only:
-// that is the layout where a standing list has room.
+// ---- recent files: separate human/agent observations, combined on request ----
+// Shared across devices (server store, SSE); filtered before deduplication.
 let recentFilesList = [];
 async function loadRecentFiles() {
   try {
@@ -15534,6 +15744,7 @@ live.addEventListener('delegation-update', () => delegationUI.invalidate());
 // connections may have ended runs without their final run-event.
 let liveConnectedOnce = false;
 live.onopen = () => {
+  loadRecentFiles();
   // Every update sent while the connection was down is gone. Reload the
   // list (it carries each transcript's version) and let load() reconcile
   // the open transcript against it.
@@ -15623,7 +15834,9 @@ live.onmessage = ev => {
     return;
   }
   if (d.type === 'recent-files') {
-    if (Array.isArray(d.files)) { recentFilesList = d.files; renderRecentFiles(); }
+    if (Array.isArray(d.files)) recentFilesList = d.files;
+    else if (d.delta) recentFilesList = RecentFiles.applyDelta(recentFilesList, d.delta);
+    renderRecentFiles();
     return;
   }
   if (d.type === 'voice-state') { voiceMutedState = !!d.muted; voiceMutedUntil = Number(d.mutedUntil) || 0; if (settingsOpen) renderSettings(); return; }
@@ -15700,6 +15913,8 @@ live.onmessage = ev => {
   if (d.type === 'job') {
     const old = jobs.get(d.job.id);
     updateJob(d.job);
+    // Every tick of a memory job moves the project view's progress line in place.
+    if (viewKind === 'project' && projectOverviewName && projectMemoryJobTouches(d.job, projectOverviewName)) refreshProjectMemoryControls(projectOverviewName);
     if (d.job.status === 'done' && (!old || old.status === 'running' || (d.job.type === 'memory-health' && old.status === 'error')) && !d.job.parentId) {
       if (d.job.type === 'epic') relatedCache.clear();
       else if (d.job.key) relatedCache.delete(d.job.key);
@@ -15720,6 +15935,8 @@ live.onmessage = ev => {
       }, 'ok');
       if ((d.job.type === 'project-distill' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && d.job.project && viewKind === 'project' && projectOverviewName === d.job.project) {
         showProjectOverview(d.job.project);
+      } else if (d.job.type === 'memory-extract' && viewKind === 'project' && projectOverviewName && projectMemoryJobTouches(d.job, projectOverviewName)) {
+        showProjectOverview(projectOverviewName); // leaf counts changed: the buttons need fresh numbers
       }
       if (d.job.type === 'memory-docs' && d.job.epicId && viewKind === 'epic' && currentHash === 'epic=' + encodeURIComponent(d.job.epicId)) {
         showEpic(d.job.epicId);
@@ -15727,12 +15944,6 @@ live.onmessage = ev => {
     }
     if (d.job.status === 'error' && (!old || old.status === 'running') && !d.job.parentId) {
       errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'memory-extract' ? 'leaf extraction failed: ' : d.job.type === 'memory-docs' ? 'document regeneration failed: ' : d.job.type === 'memory-backfill' ? 'leaf backfill failed: ' : d.job.type === 'memory-health' ? 'memory model paused: ' : d.job.type === 'agent-run' ? 'model run failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
-      if ((d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && projectOverviewName === d.job.project && viewKind === 'project' && $('pDocsRegen')) {
-        $('pDocsRegen').disabled = false;
-        $('pDocsRegen').textContent = 'retry doc regeneration';
-        const bf = $('pLeafBackfill');
-        if (bf) { bf.disabled = false; }
-      }
     }
     return;
   }

@@ -10,8 +10,15 @@ line to a floating card. Shape belongs to themes, not hard-coded components.
 
 - Always-visible toolbar: **+ options**, microphone (when available), model,
   send. The existing buttons for attachments, Context, commands, snippets,
-  tree, mode, reasoning, and usage are inside a native details menu. Their
+  tree, mode, and reasoning are inside a native details menu. Their
   handlers and keyboard shortcuts remain; no second implementation of them.
+- Context usage and estimated cost stay outside that menu, in the true center
+  of the composer: tools/microphone left, model/Send right. A three-column
+  grid with equal outer tracks keeps the center independent of control widths.
+  There is no extra footer row. The caption wraps within its slot on narrow screens,
+  stays visible in zen mode, and remains a keyboard-accessible button for
+  opening the last sent system prompt. Existing estimate/unknown-cost wording
+  and near-capacity warnings are unchanged; absent data is not invented.
 - Utility actions close the options menu when opening their own surface.
   Mode and reasoning can be adjusted without leaving it. Escape returns
   focus to the summary; clicking elsewhere closes the menu.

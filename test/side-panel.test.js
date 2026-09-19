@@ -109,8 +109,13 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   await until(`document.querySelector('#projSort').closest('#ganttBar') && getComputedStyle(document.querySelector('#projSort')).display === 'flex'`, 'home keeps its project ordering buttons, in the timeline toolbar');
   assert.equal(await evaluate(`document.querySelector('#agentsPop').parentElement.id`), 'sideAgents', 'the tray lives in the column');
   assert.equal(await evaluate(`document.querySelector('#agentsPop').hidden`), false);
-  assert.equal(await evaluate(`document.querySelector('#settingsBtn').closest('#side') !== null`), true, 'settings moved to the column');
-  assert.equal(await evaluate(`getComputedStyle(document.querySelector('#side')).width`), '288px');
+  assert.equal(await evaluate(`document.querySelector('#settingsBtn').closest('#sideRail') !== null`), true, 'settings moved to the rail');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('#side')).width`), '344px');
+  // Two levels: a rail of sections with the machine on top, and one panel at a time.
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('#sideRail [data-rail]')].map(b=>b.dataset.rail+':'+b.getAttribute('aria-pressed'))`), ['conversations:true', 'files:false', 'traffic:false', 'notifications:false']);
+  assert.equal(await evaluate(`$('railMachine').querySelector('.rail-initials').textContent.length>0 && $('railMachine').closest('#sideRail')!==null`), true, 'the machine anchors the rail like a workspace');
+  assert.equal(await evaluate(`$('agentsPop').dataset.panel`), 'conversations');
+  assert.equal(await evaluate(`!!document.querySelector('.ag-files-block')`), false, 'files are not mixed into the chats panel');
 
   // Marks made on the server before the page loaded show up as sections.
   await until(`!!document.querySelector('.ag-pinned .ag-row[data-key=${JSON.stringify(keys.beta)}]')`, 'pinned section');
@@ -164,12 +169,28 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   assert.equal(await evaluate(`$('composeTools').open`), false);
   await evaluate(`$('composeTools').querySelector('summary').click();$('agentText').click()`);
   assert.equal(await evaluate(`$('composeTools').open`), false, 'click outside closes options');
+  // Usage lives in the composer, not behind +, with the original estimates.
+  await evaluate(`window.beforeUsageHeight=$('agentCompose').offsetHeight;window.meterFixture={ctxTokens:1000000,usedTokens:123456,pctLeft:88,leftTokens:876544,model:'fixture',traceCost:1.23,familyCost:1.50};paintCtxMeter($('ctxMeter'),meterFixture)`);
+  assert.equal(await evaluate(`$('ctxMeter').parentElement.classList.contains('agent-compose-row')`), true);
+  assert.equal(await evaluate(`$('agentCompose').offsetHeight<=beforeUsageHeight+1`), true, 'usage adds no extra row at desktop width');
+  assert.equal(await evaluate(`$('ctxMeter').tagName`), 'BUTTON', 'caption remains keyboard-accessible');
+  assert.match(await evaluate(`$('ctxMeter').textContent`), /123.*1M.*used.*est\. \$1\.23/);
+  await evaluate(`document.body.classList.add('zen')`);
+  assert.equal(await evaluate(`$('ctxMeter').checkVisibility()`), true, 'usage stays visible even in zen mode');
+  await evaluate(`document.body.classList.remove('zen')`);
   // A deliberately long model name must yield space to send and microphone.
   await evaluate(`$('modelPick').querySelector('.mname').textContent='provider / very-long-model-name-with-a-million-token-context'`);
-  for (const width of [760, 1000, 390]) {
+  for (const width of [760, 1000, 320, 390]) {
     await size(width, 900);
     await new Promise(r => setTimeout(r, 80));
+    await evaluate(`paintCtxMeter($('ctxMeter'),meterFixture)`);
+    assert.equal(await evaluate(`(()=>{const el=$('ctxMeter'),m=el.getBoundingClientRect(),row=document.querySelector('.agent-compose-row').getBoundingClientRect(),box=$('agentCompose').getBoundingClientRect();return el.checkVisibility() && !$('composeTools').open && m.top>=row.top && m.bottom<=row.bottom && m.left>=box.left && m.right<=$('modelStrip').getBoundingClientRect().left && $('modelPick').getBoundingClientRect().right<=$('agentRun').getBoundingClientRect().left+1 && el.scrollWidth<=el.clientWidth+1 && el.scrollHeight<=el.clientHeight+1 && Math.abs((m.top+m.bottom)-(row.top+row.bottom))<2 && Math.abs((m.left+m.right)-(box.left+box.right))<2 && getComputedStyle(el).textAlign==='center'})()`), true, 'usage shares the controls row without clipping at ' + width);
     assert.equal(await evaluate(`(()=>{const d=$('composerDock').getBoundingClientRect(), row=document.querySelector('.agent-compose-row');return d.left>=0 && d.right<=innerWidth && row.scrollWidth<=row.clientWidth+1 && ['agentRun','modelPick','agentMic'].filter(id=>$(id)?.checkVisibility()).every(id=>{const r=$(id).getBoundingClientRect();return r.left>=d.left && r.right<=d.right})})()`), true, 'composer controls fit at ' + width);
+    // Unequal side controls must never move the middle track.
+    const centerBefore = await evaluate(`(()=>{const r=$('ctxMeter').getBoundingClientRect();return r.left+r.width/2})()`);
+    await evaluate(`window.savedMicHidden=$('agentMic').hidden;$('agentMic').hidden=true;window.savedModelName=$('modelPick').querySelector('.mname').textContent;$('modelPick').querySelector('.mname').textContent='M'`);
+    assert.ok(Math.abs(await evaluate(`(()=>{const r=$('ctxMeter').getBoundingClientRect();return r.left+r.width/2})()`) - centerBefore) < 1, 'model length and microphone visibility do not shift usage at ' + width);
+    await evaluate(`$('agentMic').hidden=savedMicHidden;$('modelPick').querySelector('.mname').textContent=savedModelName`);
     await evaluate(`$('composeTools').querySelector('summary').click()`);
     assert.equal(await evaluate(`(()=>{const r=document.querySelector('.compose-tools-menu').getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && $('agentAttach').checkVisibility()})()`), true, 'menu fits at ' + width);
     if (width === 390) {
@@ -177,6 +198,10 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
       fs.writeFileSync(path.join(os.tmpdir(), 'composer-phone-options.png'), Buffer.from(shot.result.data, 'base64'));
     }
     await evaluate(`$('composeTools').open=false`);
+    if (width === 390) {
+      const shot = await send('Page.captureScreenshot', { format: 'png' }, sid);
+      fs.writeFileSync(path.join(os.tmpdir(), 'composer-phone-usage.png'), Buffer.from(shot.result.data, 'base64'));
+    }
   }
   await size(1440, 1000);
   await evaluate(`renderModelStrip();selectTheme('eink')`);
@@ -273,21 +298,30 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   await until(`viewKind === 'file'`);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('body > header')).display`), 'none', 'no bar at all over a file');
   await until(`recentFilesList.some(f=>f.path===${JSON.stringify(path.join(work, 'README.md'))})`, 'recent file recorded');
-  await until(`document.querySelector('.ag-files-block .ag-row .ag-title span')?.textContent === 'README.md'`, 'recent file listed');
   assert.equal(await evaluate(`document.querySelector('#sideNew span').textContent + '|' + document.querySelector('#sideNewMore').hidden`), 'new|true', 'outside a conversation + new is the plain one');
-  // A folded section docks at the bottom and remembers; the one scope toggle covers conversations and files.
+  // A folded section docks at the bottom and remembers.
   await evaluate(`document.querySelector('[data-sec-head=recent]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-sec=recent] .ag-sec-body').hidden && JSON.parse(localStorage.getItem('aiconvo.agentSections.v1'))['fold:recent'] && document.querySelector('[data-sec=recent]').parentElement.id === 'agentsLegacy'`), true, 'folded, remembered, docked at the bottom');
   await evaluate(`document.querySelector('[data-sec-head=recent]').click()`);
   assert.equal(await evaluate(`!document.querySelector('[data-sec=recent] .ag-sec-body').hidden && document.querySelector('[data-sec=recent]').parentElement.id === 'agentsUnread'`), true, 'open again: back in the flow');
-  await evaluate(`document.querySelector('[data-scope-of=recent] [data-scope=project]').click()`);
+  // Files live in their own rail section; the project scope is shared with chats.
+  await evaluate(`document.querySelector('#sideRail [data-rail=files]').click()`);
+  assert.equal(await evaluate(`$('agentsPop').dataset.panel + '|' + document.querySelector('#sideRail [data-rail=files]').getAttribute('aria-pressed') + '|' + JSON.parse(localStorage.getItem('aiconvo.agentSections.v1')).panel`), 'files|true|files');
+  await until(`document.querySelector('.ag-files-block .ag-row .ag-title span')?.textContent === 'README.md'`, 'recent file listed');
+  assert.equal(await evaluate(`!!document.querySelector('.ag-unread-tray') || !!document.querySelector('[data-sec=recent] .ag-row[data-key]')`), false, 'no conversation lists in the files panel');
+  await evaluate(`document.querySelector('[data-scope-of=files] [data-scope=project]').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('.ag-files-block .ag-row').length + '|' + JSON.parse(localStorage.getItem('aiconvo.agentSections.v1'))['scope:recent']`), '1|project');
   await evaluate(`recentFilesList.push({path:'/tmp/elsewhere/notes.md',project:'other',at:Date.now(),kind:'opened'});renderAgentsPop(false)`);
   assert.equal(await evaluate(`document.querySelectorAll('.ag-files-block .ag-row').length`), 1, 'project scope hides other projects');
-  await evaluate(`document.querySelector('[data-scope-of=recent] [data-scope=all]').click()`);
+  await evaluate(`document.querySelector('[data-scope-of=files] [data-scope=all]').click()`);
   assert.equal(await evaluate(`document.querySelectorAll('.ag-files-block .ag-row').length`), 2);
-  // Traffic and notifications sit at the bottom of the column.
-  assert.equal(await evaluate(`(()=>{const a=document.querySelector('#agentsUnread').getBoundingClientRect(),b=document.querySelector('#agentsLegacy').getBoundingClientRect(),p=document.querySelector('#agentsPop').getBoundingClientRect();return b.top>a.bottom && Math.abs(b.bottom-p.bottom)<12})()`), true, 'traffic pinned to the bottom');
+  // Traffic and notifications are rail sections, not part of the chats panel.
+  await evaluate(`document.querySelector('#sideRail [data-rail=traffic]').click()`);
+  assert.equal(await evaluate(`!!document.querySelector('[data-sec=traffic]') && !document.querySelector('.ag-unread-tray')`), true, 'traffic panel shows processes only');
+  await evaluate(`toggleJobs(true)`);
+  assert.equal(await evaluate(`$('agentsPop').dataset.panel + '|' + !!document.querySelector('.ag-notification-list')`), 'notifications|true', 'j opens the notifications section');
+  await evaluate(`document.querySelector('#sideRail [data-rail=conversations]').click()`);
+  assert.equal(await evaluate(`!!document.querySelector('.ag-unread-tray') && !document.querySelector('[data-sec=traffic]') && !document.querySelector('.ag-notification-list')`), true, 'chats panel holds only conversations');
   assert.equal((await (await fetch(base + '/api/recent-files')).json()).files[0].kind, 'opened');
   const shot = await send('Page.captureScreenshot', { format: 'png' }, sid);
   fs.writeFileSync(path.join(os.tmpdir(), 'side-panel-desktop.png'), Buffer.from(shot.result.data, 'base64'));
@@ -306,12 +340,97 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   await new Promise(r => setTimeout(r, 300));
   const homeShot = await send('Page.captureScreenshot', { format: 'png' }, sid);
   fs.writeFileSync(path.join(os.tmpdir(), 'side-panel-home.png'), Buffer.from(homeShot.result.data, 'base64'));
-  // The fold: a rail with the inbox count; a click on it brings the column back.
+  // The fold keeps the rail: sections and badges stay reachable; a section click reopens the panel.
   await evaluate(`setSideFold(true)`);
-  assert.equal(await evaluate(`getComputedStyle(document.querySelector('#side')).width`), '14px');
-  assert.equal(await evaluate(`document.querySelector('#side').dataset.unread`), '2');
-  await evaluate(`document.querySelector('#side').click()`);
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('#side')).width`), '56px');
+  assert.equal(await evaluate(`document.querySelector('#sideRail [data-rail=conversations] .rail-badge').textContent`), '2');
+  assert.equal(await evaluate(`$('sidePanel').checkVisibility()`), false);
+  await evaluate(`document.querySelector('#sideRail [data-rail=conversations]').click()`);
   assert.equal(await evaluate(`document.body.classList.contains('side-fold')`), false);
+
+  // Drop the synthetic file used for the scope-layout check above.
+  await evaluate(`loadRecentFiles()`);
+  // Recorded agent reads/writes join recents without overwriting human visits.
+  const sharedFile = path.join(work, 'README.md'), agentFile = path.join(work, 'agent-file.js');
+  const otherWork = path.join(home, 'other-work'), otherFile = path.join(otherWork, 'other.txt');
+  fs.mkdirSync(otherWork, { recursive: true });
+  fs.writeFileSync(agentFile, 'const example = 1;\n'); fs.writeFileSync(otherFile, 'Other project\n');
+  const activityAt = Date.now();
+  const toolPair = (id, name, file, tick, error = false, pending = false) => [
+    { type: 'message', id: id + '-call', parentId: 'p', timestamp: new Date(tick).toISOString(), message: { role: 'assistant', content: [{ type: 'toolCall', id, name, arguments: { path: file, content: 'const example = 1;\n' } }] } },
+    ...(pending ? [] : [{ type: 'message', id: id + '-result', parentId: id + '-call', timestamp: new Date(tick + 1).toISOString(), message: { role: 'toolResult', toolCallId: id, toolName: name, isError: error, content: [{ type: 'text', text: '' }] } }]),
+  ];
+  const activitySession = (name, cwd, ops) => fs.writeFileSync(path.join(sessionDir, name + '.jsonl'), [
+    { type: 'session', version: 3, id: name, cwd }, msg('p', null, 'user', 'File activity fixture'), ...ops,
+  ].map(JSON.stringify).join('\n') + '\n');
+  activitySession('files-agent', work, [
+    ...toolPair('read-shared', 'read', sharedFile, activityAt),
+    ...toolPair('write-code', 'write', agentFile, activityAt + 2),
+    ...toolPair('failed', 'read', path.join(work, 'failed.txt'), activityAt + 4, true),
+    ...toolPair('pending', 'write', path.join(work, 'pending.txt'), activityAt + 6, false, true),
+  ]);
+  activitySession('other-agent', otherWork, toolPair('read-other', 'read', otherFile, activityAt + 8));
+  assert.equal((await fetch(base + '/api/rescan', { method: 'POST' })).status, 200);
+  await until(`recentFilesList.filter(f=>f.actor==='agent').length===3`, 'successful reads and writes arrive over the shared event stream');
+  const recentAPI = body => fetch(base + '/api/recent-files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+  let recorded = (await (await fetch(base + '/api/recent-files')).json()).files;
+  assert.equal(recorded.filter(f => f.path === sharedFile).length, 2, 'one human observation and one agent observation');
+  assert.equal(recorded.find(f => f.path === sharedFile && f.actor === 'agent').kind, 'read');
+  assert.equal(recorded.some(f => /failed.txt|pending.txt/.test(f.path)), false, 'failed and pending tools never appear');
+  assert.equal(recorded.find(f => f.path === agentFile).kind, 'written');
+  await evaluate(`openLiveFile(${JSON.stringify(sharedFile)},{project:'work'})`);
+  await until(`fileWs?.editor && fileWs.path===${JSON.stringify(sharedFile)}`);
+  await evaluate(`document.querySelector('#sideRail [data-rail=files]').click();document.querySelector('[data-scope-of=files] [data-scope=all]').click()`);
+  assert.equal(await evaluate(`recentFileActor()`), 'human', 'human-only remains the default');
+  await until(`document.querySelectorAll('.ag-files-block .ag-file').length===1`, 'agent activity does not enter human-only view');
+  const chooseActor = async actor => {
+    await evaluate(`document.querySelector('[data-files-actor=${actor}]').click()`);
+    assert.equal(await evaluate(`recentFileActor()`), actor);
+  };
+  const filePaths = () => evaluate(`[...document.querySelectorAll('.ag-files-block .ag-file')].map(r=>r.dataset.path)`);
+  await chooseActor('agent');
+  assert.deepEqual(await filePaths(), [otherFile, agentFile, sharedFile], 'newest successful operation first');
+  await evaluate(`document.querySelector('[data-scope-of=files] [data-scope=project]').click()`);
+  assert.deepEqual(await filePaths(), [agentFile, sharedFile], 'project filter is independent of source');
+  await chooseActor('both');
+  assert.equal((await filePaths()).filter(p => p === sharedFile).length, 1, 'both shows each path once');
+  assert.equal((await filePaths()).length, 2);
+  await chooseActor('human'); assert.deepEqual(await filePaths(), [sharedFile]);
+  await chooseActor('agent');
+  await evaluate(`[...document.querySelectorAll('.ag-files-block .ag-file')].find(r=>r.dataset.path===${JSON.stringify(agentFile)}).click()`);
+  await until(`fileWs?.path===${JSON.stringify(agentFile)} && !!fileWs.editor`, 'agent-touched file opens in the live editor');
+  assert.equal(await evaluate(`$('agentsPop').dataset.panel`), 'files', 'opening a file keeps the files section');
+  assert.equal(await evaluate(`fileWs.back`), 'pi:fixture/files-agent.jsonl', 'file retains its source conversation');
+  await until(`recentFilesList.some(f=>f.actor==='human'&&f.path===${JSON.stringify(agentFile)})`, 'opening the file records a separate human visit');
+  await chooseActor('human'); assert.deepEqual(await filePaths(), [agentFile, sharedFile]);
+  await chooseActor('both');
+  await evaluate(`document.querySelector('[data-scope-of=files] [data-scope=all]').click()`);
+  assert.equal((await filePaths()).length, 3, 'three unique paths in both/all');
+  const activityShot = await send('Page.captureScreenshot', { format: 'png' }, sid);
+  fs.writeFileSync(path.join(os.tmpdir(), 'recent-files-both.png'), Buffer.from(activityShot.result.data, 'base64'));
+  // Source selection persists through reload, independently of project/all.
+  await chooseActor('agent');
+  await evaluate(`window.beforeRecentReload=true`);
+  await send('Page.reload', {}, sid);
+  await until(`!window.beforeRecentReload && typeof recentFileActor==='function' && recentFileActor()==='agent' && document.querySelectorAll('.ag-files-block .ag-file').length===3`);
+  assert.equal(await evaluate(`agentSecScope('recent')`), 'all');
+  // Forgetting an agent observation must survive rescans, while the human visit remains.
+  await evaluate(`[...document.querySelectorAll('.ag-files-block [data-forget]')].find(b=>b.dataset.forget===${JSON.stringify(agentFile)}).click()`);
+  await until(`!recentFilesList.some(f=>f.actor==='agent'&&f.path===${JSON.stringify(agentFile)})`);
+  await fetch(base + '/api/rescan', { method: 'POST' });
+  recorded = (await (await fetch(base + '/api/recent-files')).json()).files;
+  assert.equal(recorded.some(f => f.path === agentFile && f.actor === 'agent'), false);
+  assert.equal(recorded.some(f => f.path === agentFile && f.actor === 'human'), true);
+  // A rapid A/B/A revisit must put A first, not be suppressed by a one-minute throttle.
+  await recentAPI({ path: sharedFile, project: 'work' });
+  await recentAPI({ path: agentFile, project: 'work' });
+  recorded = (await recentAPI({ path: sharedFile, project: 'work' })).files;
+  assert.equal(recorded.filter(f => f.actor === 'human')[0].path, sharedFile);
+  for (let i=0;i<100;i++) {
+    try { if (JSON.parse(fs.readFileSync(path.join(home,'notes/aiconvo/recent-files.json'),'utf8')).dismissed['agent\0'+agentFile]) break; } catch {}
+    await new Promise(r=>setTimeout(r,30));
+  }
+  assert.ok(JSON.parse(fs.readFileSync(path.join(home,'notes/aiconvo/recent-files.json'),'utf8')).dismissed['agent\0'+agentFile], 'dismissal is durably saved');
 
   // Settings offer the choice; picking the top bar restores everything at once.
   await evaluate(`showSettings('appearance')`);
