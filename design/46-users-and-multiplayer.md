@@ -1,7 +1,8 @@
 # 46 · Users, presence and multiplayer
 
-Status: thinking, nothing built. Written 2026-09-19 after reading the code
-as it stands (`server.js` at 7bc985e).
+Status: built 2026-09-19 (steps 1–6 below; the team-scale seams cut, the
+team-scale features deferred). "As built" at the end records what landed
+and every trade-off taken. The thinking above it is kept as written.
 
 ## What aiconvo is today, seen from the question "who did this?"
 
@@ -309,6 +310,92 @@ Keep it small enough to be enforced in one module.
 - Presence or permissions before identity is real; both would be built on a
   guess.
 
+## Team scale: thirty people, three departments, one server
+
+Asked on the same day: is this the moment to think about admins, managers,
+departments? Yes to think, no to build. The household version and the team
+version differ in one thing that is architectural and in several that are
+not. Decide the architectural one now; leave the rest as data shapes that
+do not close doors.
+
+### The one architectural fact
+
+In a household, the person and the account the agent runs as are the same
+thing, and that is fine: everyone in the house is trusted with the account.
+In a company on one server, they must be different: **who you are**
+(identity) and **what the agent runs as** (the execution principal: a Unix
+user, its home, its groups, its API keys). Today aiconvo collapses the two:
+every agent is spawned as the service's account. That is why the household
+plan can only offer polite walls.
+
+Real walls on a shared server do not need a new permission system. Linux
+already has one that every tool honours: users, groups, directory modes.
+Departments are groups; projects are directories owned by a group; an agent
+spawned as `lilly` in group `eng` can read `/srv/work/eng/*` and nothing in
+`/srv/work/finance/*`, and so can `cat`, `/api/exec`, the records tools and
+anything else. aiconvo then *reflects* the filesystem's answer instead of
+inventing its own. Auditable with `ls -l`. That is what the best sysadmin
+would do, and why an ACL table in JSON would be the wrong choice for a
+company.
+
+What it costs, and why not now: the server would run as a service user with
+the right to spawn as others (`systemd-run --uid` or `sudo -u`), session and
+note files would move from one home to per-user or per-group trees, API keys
+would be per principal (which is also how you bill a department), and the
+indexer would read many trees with different rights. That is a second
+deployment mode of the same program, not a fork. A household does not need
+it; building it now would be building for a customer that does not exist.
+
+The seam to cut now so it stays possible: every place that spawns or resumes
+an agent (`startAgentRun`, `startProjectConversation`, the terminal opener,
+delegation supervisors, `/api/exec`) takes an explicit **principal** from
+the request's identity, even though in the household mode `identify()`
+always maps every user to the one service account. One parameter threaded
+through, resolved in one function. Skipping it means touching every spawn
+site later, which is the rewrite this section exists to prevent.
+
+### Data shapes that cost nothing now and keep the door open
+
+- **Role is a field, not a flag.** `role: owner | admin | member`, not an
+  `owner: true` boolean checked in twelve places. The household has one owner
+  and members; a company has admins who manage the roster and rules without
+  being the account. Same field.
+- **Groups exist from day one**, even if empty: `groups: ["eng"]` on a
+  user, and access-rule subjects are `user:<id>`, `group:<id>` or
+  `everyone`. A manager seeing a department's conversations is then one rule
+  (`group:eng-managers` has `see` on every project in `group:eng`), not a
+  hierarchy feature. Hierarchy is groups plus rules; do not model an org
+  chart.
+- **The roster is loaded through one module** (`users.js: load(), find(),
+  upsert()`), file-backed today. A company has a directory (an IdP, SSO,
+  OIDC) and thirty rosters converging by handoff would be silly; the module
+  boundary lets the source change without touching `identify()`'s callers.
+  The install signing key from the handoff design is already the shape of
+  "trust this issuer's claims"; an OIDC issuer slots into the same place.
+- **Attribution is an audit log.** `authorship.jsonl`, `file_events.user`,
+  `doc-edits.user`, vouches: append-only, per install. In a company it must
+  be unwritable by members (a directory the service owns, not the user's
+  notes). Keep the writer in one place so the location can move.
+- **Per-user settings and keys.** Model choice, thinking level, voice, and
+  later API keys are per user, not per install. The household needs the
+  first three anyway (Jacob's settings vs Maxime's), so this is not extra.
+- **Machines stay islands, conversations stay bound to one.** "Share a
+  conversation so it runs on the computer with the right tools" is a link to
+  that install plus the handoff identity, which the household design already
+  gives. A company adds a directory of machines ("eng builds on
+  build-01"); that is a list, not an architecture.
+
+### What a team needs that a household does not, deferred with no regret
+
+- Roster administration by non-owners; invitation flows; deactivation.
+- Real isolation: spawn-as-principal, per-group trees, per-principal keys.
+- SSO. Central directory. Admin views of usage per person and department
+  (`usageanalytics.js` gains a `user` dimension from attribution for free).
+- Retention and export rules; who may delete.
+
+None of these change step 1. All of them get harder if step 1 hardcodes
+"owner is a boolean", "identity is the account", or "the roster is a file".
+
 ## Order
 
 1. Identity: roster, credentials, `identify`, owner migration, handoff. No
@@ -321,3 +408,110 @@ Keep it small enough to be enforced in one module.
 
 Each step lands as its own change with its own tests, and each is worth
 having if the next one never comes.
+
+## As built (2026-09-19)
+
+Modules: `users.js` (roster, credentials, roles, groups, merge, handoff
+keys), `access.js` (rules and `can`), `presence.js` (who is where),
+`wsserver.js` (RFC 6455, server side), `collab.js` (Yjs documents over the
+y-websocket protocol), `collab-client.js` and `people.js` (browser),
+`people.css`. Vendored: `vendor/yjs-server/13.6.29` (Node) and the editor
+bundle 0.12.0 with `mrmdDocument.collab`. Tests: `users`, `access`,
+`wsserver`, `collab`, `users-server` (real server: sign-in, sharing,
+presence, handoff), `people-app` (two people in a real browser).
+
+### Identity
+- Roster at `~/.config/aiconvo/users.json`, owner made on first run from
+  `git config user.name` (else the account name). Owner credential = the
+  install token, so every signed-in device keeps working. Members get
+  invite links; secrets are stored hashed and shown once (like API tokens).
+- `identify(req)` runs once per request; `req.identity` = `{user, tier}`.
+  Local console = the account. `/logout` drops the cookie.
+- Roles `owner | admin | member`, `groups` on each user, `aliases` for
+  merged ids. Roster management by owner/admin; a member manages only
+  their own links and name.
+- Handoff: Ed25519 install key (`install-key.json`), exchanged at pairing
+  (`publicKey` on machine entries; old pairings fall back to the token
+  link and the switcher says so). `/api/handoff?i=` mints a 30-second
+  claim; `?handoff=` verifies, upserts the person, issues a session
+  credential (six kept per person).
+- Trade-off: bearer credentials, not device keys — one paste per person
+  per machine, mostly replaced by handoff. Stated in the thinking above.
+- Trade-off: settings writes are owner/admin only; members read settings
+  without other machines' tokens. A member cannot change the memory model
+  of a machine that is not theirs; their appearance choices stay local.
+
+### The principal seam
+`principalFor(identity)` → `{user, spawnAs: null, env}`; `agentEnv(principal)`
+threads it into every spawn (`startAgentRun`, fan-out, terminal sends,
+draft starts, delegation resume). Today every principal runs as the
+account with `AICONVO_USER` / `AICONVO_USER_NAME` in the environment.
+
+### Attribution
+- SDK runs: `pisdk-runtime.js` appends an `aiconvo-author` custom entry
+  (user, input, coauthors) right before the user message. `parseFile`
+  attaches it to the message whose parent it is.
+- Bridge and rpc sends: `~/notes/aiconvo/authorship.jsonl`, matched to the
+  next unattributed user message within two minutes (`via: bridge|rpc`).
+  Weaker by design and labelled.
+- Index entries carry `participants` and `createdBy`; `/api/session`
+  returns resolved participants; the home "people" filter offers
+  "mine" (I wrote into it, or nothing recorded and I own the machine).
+- File ledger gains a nullable `user_id` column (migration, rows kept);
+  human sessions group per person. `doc-edits.jsonl` and vouches carry
+  `user`; the trust label says "vouched … by Lilly".
+- Trade-off: a guest's Markdown commit gets `--author "Name <id@aiconvo>"`;
+  the owner keeps their own git identity. Members are not made the git
+  author of the owner's repositories by accident, and the owner's commits
+  do not change.
+
+### Presence
+The `/api/events` stream names each browser (`hello {conn, me, users,
+people}`); the page reports `route`, `kind` (viewing/typing/editing) and
+position to `POST /api/presence`; the server broadcasts the whole book,
+filtered per receiver by what they may see (a hidden conversation's key
+never reaches someone it is hidden from). Bubbles in the header, "Lilly is
+typing…" under the title, marks on conversation rows.
+
+### Permissions (polite walls)
+`access.json`; rules per project or conversation, mode `everyone | listed`,
+subjects `user:` / `group:` with `see` or `act`, owners. Conversation rule
+overrides project rule. Console, owner and admin see everything, always.
+Chokepoints: sessions list (ETag includes the person and the rules
+version), session read, tree, search (both stages), related, project page
+and folds, files browse, file read/save, doc save/commit, vouch, exec
+(cwd), node/send, conversation/send, act, fork, branch, retitle, distill,
+the collab upgrade, presence. Not gated: the `aiconvo` CLI and the Pi
+records tools (they run as the account) — the "polite walls" boundary,
+said in the sharing dialog.
+
+### Shared compose box
+`compose:<key>` and `draft:<id>` are Yjs texts on the server, persisted
+under the cache so a restart keeps what was typed. The composer keeps its
+textarea (dictation, snippets, slash commands, shortcuts all talk to it);
+`collabBindTextarea` keeps it equal to the shared text with the caret
+shifted by remote edits, and other people's carets are drawn over it
+through a mirror element. Sending records co-authors and clears the box
+for everyone. Trade-off: a textarea binding instead of a CodeMirror
+composer — the caret overlay is an approximation (it follows the mirror's
+metrics), while the text itself merges exactly.
+
+### Shared files
+`file:<abs>` documents are created from disk when the first person opens
+the file and dropped when the last leaves; the editor gets
+`yCollab(ytext, awareness)` (cursors and selections for free). The disk
+follows 400 ms after typing stops through the ordinary save path (history,
+ledger, activity; the ledger row names the last person who typed). An
+agent's write on disk becomes one minimal edit in the shared text, so
+cursors survive. The Save button disappears ("Shared · saves as you
+type"); Ctrl+S only refreshes the status. Trade-off: when the WebSocket
+cannot be reached (old server, a proxy without upgrades), the editor falls
+back to the single-player lock-and-save path unchanged. Spectators
+(read-only sharing) see the text and cursors and cannot type.
+
+### Protocol and dependencies
+`wsserver.js` is a small server-side WebSocket implementation (masked
+client frames, fragmentation, ping/pong, close, size limits; no
+extensions) rather than an npm `ws`: the project keeps zero dependencies,
+and the browser talks the stock y-websocket protocol. Yjs is vendored as
+one CommonJS file built from the mrmd editor's toolchain.

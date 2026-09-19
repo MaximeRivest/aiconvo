@@ -62,7 +62,9 @@ function groupSessions(events, { gapMs = SESSION_GAP_MS } = {}) {
       commits.push({ id: ev.id, ts: ev.ts, hash: ev.commit_hash, added: ev.added, removed: ev.removed });
       continue;
     }
-    const groupKey = ev.actor === 'ai' ? 'ai:' + (ev.conv_key || '?') : ev.actor;
+    // Human sessions are per person: two people editing the same file are
+    // two sessions, each with its user.
+    const groupKey = ev.actor === 'ai' ? 'ai:' + (ev.conv_key || '?') : ev.actor === 'human' && ev.user_id ? 'human:' + ev.user_id : ev.actor;
     let session = open.get(groupKey);
     if (session && ev.actor !== 'ai' && ev.ts - session.end > gapMs) session = null;
     if (!session) {
@@ -70,6 +72,7 @@ function groupSessions(events, { gapMs = SESSION_GAP_MS } = {}) {
         id: groupKey + ':' + ev.ts, actor: ev.actor, start: ev.ts, end: ev.ts,
         added: 0, removed: 0, chars: 0, approx: false, n: 0, failed: 0,
         convKey: ev.actor === 'ai' ? ev.conv_key || null : null,
+        userId: ev.actor === 'human' ? ev.user_id || null : null,
         firstEventId: ev.id, lastEventId: ev.id, events: [],
       };
       sessions.push(session);
@@ -160,12 +163,17 @@ class FileLedger {
       `);
       this.db.exec('PRAGMA user_version=' + SCHEMA_VERSION);
     }
+    // Who made a human edit (users.js id). Added as a nullable column so
+    // an existing ledger keeps its rows: editor saves are not rebuildable.
+    if (!this.db.prepare('PRAGMA table_info(file_events)').all().some(c => c.name === 'user_id')) {
+      this.db.exec('ALTER TABLE file_events ADD COLUMN user_id TEXT');
+    }
     this._groupCache = new Map();
     this._projectVersion = new Map();
     this.stmts = {
-      put: this.db.prepare(`INSERT INTO file_events (id, ts, path, repo_root, project, producer, actor, outcome, added, removed, chars, sha_after, conv_key, call_id, commit_hash, input, src_version)
-        VALUES (@id, @ts, @path, @repo_root, @project, @producer, @actor, @outcome, @added, @removed, @chars, @sha_after, @conv_key, @call_id, @commit_hash, @input, @src_version)
-        ON CONFLICT(id) DO UPDATE SET ts=excluded.ts, path=excluded.path, repo_root=excluded.repo_root, project=excluded.project, producer=excluded.producer, actor=excluded.actor, outcome=excluded.outcome, added=excluded.added, removed=excluded.removed, chars=excluded.chars, sha_after=excluded.sha_after, conv_key=excluded.conv_key, call_id=excluded.call_id, commit_hash=excluded.commit_hash, input=excluded.input, src_version=excluded.src_version`),
+      put: this.db.prepare(`INSERT INTO file_events (id, ts, path, repo_root, project, producer, actor, outcome, added, removed, chars, sha_after, conv_key, call_id, commit_hash, input, src_version, user_id)
+        VALUES (@id, @ts, @path, @repo_root, @project, @producer, @actor, @outcome, @added, @removed, @chars, @sha_after, @conv_key, @call_id, @commit_hash, @input, @src_version, @user_id)
+        ON CONFLICT(id) DO UPDATE SET ts=excluded.ts, path=excluded.path, repo_root=excluded.repo_root, project=excluded.project, producer=excluded.producer, actor=excluded.actor, outcome=excluded.outcome, added=excluded.added, removed=excluded.removed, chars=excluded.chars, sha_after=excluded.sha_after, conv_key=excluded.conv_key, call_id=excluded.call_id, commit_hash=excluded.commit_hash, input=excluded.input, src_version=excluded.src_version, user_id=excluded.user_id`),
       near: this.db.prepare(`SELECT id FROM file_events WHERE path = ? AND ts BETWEEN ? AND ? AND actor IN ('ai','human') LIMIT 1`),
       dropWatchNear: this.db.prepare(`DELETE FROM file_events WHERE path = ? AND producer = 'watch' AND ts BETWEEN ? AND ?`),
       convVersion: this.db.prepare('SELECT src_version FROM file_events WHERE conv_key = ? LIMIT 1'),
@@ -375,6 +383,7 @@ function normalizeEvent(raw) {
     commit_hash: raw.commit_hash ? String(raw.commit_hash) : null,
     input: raw.input ? String(raw.input) : null,
     src_version: raw.src_version ? String(raw.src_version) : '',
+    user_id: raw.user_id ? String(raw.user_id).slice(0, 80) : null,
   };
 }
 

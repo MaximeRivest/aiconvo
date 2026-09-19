@@ -28,6 +28,8 @@ function setup(t) {
     sessionPathsFor: () => ({ entry: {}, sessionPath: file, cwd: root }),
     findRunningConversation: () => null, focusWindow: () => false, piBin: () => 'fake',
     releaseHeadless: async () => {}, spawnAlacritty: async () => { box.spawns++; }, spawns: 0,
+    // People (users.js): the account itself drives these runs; nothing recorded.
+    principalFor: () => ({ user: { id: 'owner', name: 'Owner' }, spawnAs: null, env: {} }), recordAuthorship() {},
   });
   load(box, 'async function assertDelegationOwnership(', 'function delegationSessionKey(');
   load(box, 'function withSessionOp(', '// Index a session file');

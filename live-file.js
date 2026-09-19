@@ -159,7 +159,7 @@ function liveFileAfterMount(ws) {
   }
   const beforeUnload = event => {
     liveFileStash(ws);
-    if (editor.getContent() !== state.original) { event.preventDefault(); event.returnValue = ''; }
+    if (!ws.collab && editor.getContent() !== state.original) { event.preventDefault(); event.returnValue = ''; }
   };
   window.addEventListener('beforeunload', beforeUnload);
   state.dispose = () => {
@@ -200,6 +200,10 @@ function liveFileNavigate(ws, location) {
 }
 function liveFileStash(ws) {
   if (!ws?.live || !ws.editor) return;
+  // A shared file has no local draft: the server holds the text and the
+  // disk follows it. A stale stash here would come back as a "draft" the
+  // next time the file opens alone.
+  if (ws.collab || ws.wasShared) { try { sessionStorage.removeItem('aiconvo.draft:' + ws.path); } catch {} return; }
   const text = ws.editor.getContent();
   try {
     const key = 'aiconvo.draft:' + ws.path;

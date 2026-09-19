@@ -507,6 +507,13 @@ function piHeadlessRun(target, opts = {}) {
       }
       if (aborted) throw new Error('Pi run aborted before prompt');
       if (opts.simplifyAnswers && !opts.customMessage) rewrite = captureRewriteRequest(S.session, opts.simplifyPrompt);
+      // Who is sending: one entry in the session tree right before the user
+      // message, so it travels with the file (forks, copies) and the index
+      // reads it back. Not for callbacks: nobody typed those.
+      if (opts.author && opts.author.id && !opts.customMessage) {
+        try { S.session.sessionManager.appendCustomEntry('aiconvo-author', { v: 1, user: { id: String(opts.author.id), name: String(opts.author.name || '') }, input: String(opts.author.input || 'keyboard'), coauthors: Array.isArray(opts.author.coauthors) ? opts.author.coauthors.slice(0, 20) : undefined, at: new Date().toISOString() }); }
+        catch (error) { S.emit({ type: 'run_note', text: 'could not record the author: ' + String(error.message || error) }); }
+      }
       if (opts.customMessage) {
         const { customType, content, details } = opts.customMessage;
         if (typeof customType !== 'string' || !customType) throw new Error('customMessage.customType is required');

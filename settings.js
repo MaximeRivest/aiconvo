@@ -47,7 +47,8 @@ const DEFAULT_SETTINGS = {
   // cost estimate. Rules are provider-scoped and never contain credentials.
   usageBilling: { providerModes: {}, monthlyFees: {} },
   // Other aiconvo installs reachable from the header machine switcher.
-  // Each entry: { name, url, token }. The token is that machine's LAN token.
+  // Each entry: { name, url, token, publicKey? }. The token is that
+  // machine's LAN token; publicKey its handoff signing key, when known.
   machines: [],
   // Reachable from other devices on the network. null: never chosen in the
   // app, so the service environment (AICONVO_LAN=1) decides. Once someone
@@ -70,7 +71,10 @@ function normalizeMachines(raw) {
     const id = url.toLowerCase();
     if (seen.has(id)) continue;
     seen.add(id);
-    out.push({ name, url, token });
+    // The other install's signing key, exchanged at pairing: with it, the
+    // switcher hands a signed-in person over as themselves (users.js).
+    const publicKey = /^[A-Za-z0-9+/=]{20,200}$/.test(String(m.publicKey || '')) ? String(m.publicKey) : '';
+    out.push(publicKey ? { name, url, token, publicKey } : { name, url, token });
   }
   return out;
 }

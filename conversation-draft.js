@@ -223,6 +223,7 @@ async function showDraft(id) {
     ta.placeholder = 'say the word… (nothing runs until you send)';
     ta.addEventListener('input', () => { if (draftState && draftState.d === d) { d.text = ta.value; draftScheduleSave(); } });
     autoGrowCompose(); updateComposeMin();
+    if (typeof composeShareCheck === 'function') composeShareCheck();
   }
   renderAgentThumbs();
   draftWireSetup(d);

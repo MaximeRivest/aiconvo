@@ -297,7 +297,12 @@ header { position: relative; }
 header .count { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 /* Conversation identity in the top bar: ⌂ · project path · title … ✎ ↻.
    The old in-view conversation header is gone. */
-#chProject, #chMove, #chNew, #chTitle, #convHeadExtra { display: none; }
+#chProject, #chMove, #chNew, #chTitle, #convHeadExtra, #shareBtn, #convPresence { display: none; }
+body.conv #shareBtn, body.side-layout.conv #floatHead #shareBtn { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 4px; border: 0; background: transparent; color: var(--text-dim); font-size: 13px; flex-shrink: 0; }
+body.conv #shareBtn:hover { color: var(--accent); background: transparent; }
+body.conv #convPresence:not([hidden]), body.side-layout.conv #floatHead #convPresence:not([hidden]) { display: inline-flex; }
+#shareBtn[hidden], #convPresence[hidden] { display: none !important; }
+body:not(.conv):not(.home) #shareBtn:not([hidden]) { display: inline-flex; align-items: center; height: 20px; padding: 0 4px; border: 0; background: transparent; color: var(--text-dim); font-size: 13px; }
 body.conv #chMove { display: inline-flex; align-items: center; justify-content: center; height: 20px; min-width: 20px; padding: 0 3px; border: 0; background: transparent; color: var(--text-dim); font-size: 13px; line-height: 1; flex-shrink: 0; opacity: .7; }
 body.conv #chMove:hover { color: var(--accent); opacity: 1; background: transparent; }
 body.conv #chProject { display: inline-flex; align-items: center; background: transparent; border: 0; height: 26px; padding: 0 2px; color: var(--text-dim); font-size: var(--fs-meta); font-family: inherit; cursor: pointer; flex-shrink: 0; max-width: 22vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1964,6 +1969,8 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <button id="chMove" title="Move this conversation to another project (P) — its memory follows; tools keep running in the original folder">⇢</button>
   <button id="chNew" title="New conversation in this project — same model and thinking level, the project map in the system prompt, an empty composer">+</button>
   <div id="chTitle"></div>
+  <button id="shareBtn" hidden title="Who can see this"></button>
+  <span id="convPresence" hidden></span>
   <span id="convHeadExtra"></span>
   <nav id="conversationFilesSwitch" aria-label="Conversation view"><button class="on" aria-current="page">Conversation</button><button id="conversationFiles">Files</button></nav>
   <span id="headSpace"></span>
@@ -1971,6 +1978,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <span class="count" id="count"></span>
   <button id="activeBtn" hidden title="Agents, replies, and notifications (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
   <button id="machineBtn" hidden title="Switch to another aiconvo machine"></button>
+  <button id="peopleBtn" hidden title="People on this machine"></button>
   <button id="settingsBtn" title="Settings (,)">⚙</button>
   <button id="barFold" title="Fold the top bar — click the rail to bring it back (`)">▴</button>
 </header>
@@ -2022,6 +2030,8 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <select id="src"><option value="">all sources</option></select>
   <label for="dir">directory</label>
   <select id="dir"><option value="">all directories</option></select>
+  <label for="who">people</label>
+  <select id="who" title="Conversations someone wrote into. “mine” also counts everything unrecorded when you own this machine."><option value="">everyone</option></select>
   <label><input id="densityTools" type="checkbox"> include tool calls in timeline density</label>
   <label title="Fan-out and forks copy a session into linked branch files. Off: one row per conversation family. On: every branch file gets its own row."><input id="showBranches" type="checkbox"> show fork branches as separate rows</label>
 </div>
@@ -2094,6 +2104,11 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <script src="/files-browser.js"></script>
 <script src="/live-file.js"></script>
 <link rel="stylesheet" href="/live-file.css">
+<script src="/collab-client.js"></script>
+<script src="/people.js"></script>
+<link rel="stylesheet" href="/people.css">
+<script src="/file-viewers.js"></script>
+<link rel="stylesheet" href="/file-viewers.css">
 <script src="/change-review-ui.js"></script>
 <script src="/review-locations-ui.js"></script>
 <link rel="stylesheet" href="/change-review.css">
@@ -2917,7 +2932,14 @@ function toggleMachinePop(show) {
     b.disabled = true; url.textContent = 'checking…';
     let probe;
     try { probe = await (await fetch('/api/machines/probe?i=' + i)).json(); } catch { probe = { ok: false, why: 'no answer' }; }
-    if (probe.ok) { location.href = machineUrl(m); return; }
+    if (probe.ok) {
+      // Arrive there as yourself: a short signed note from this install.
+      // Older pairings (no key exchanged) fall back to the token link.
+      let hand = null;
+      try { hand = await (await fetch('/api/handoff?i=' + i)).json(); } catch {}
+      if (hand && hand.url) { if (!hand.handoff && hand.why) toast(hand.why); location.href = hand.url; return; }
+      location.href = machineUrl(m); return;
+    }
     b.disabled = false;
     url.textContent = m.name + ' does not answer — is aiconvo running there? (' + (probe.why || 'no answer') + ')';
     url.classList.add('mach-down');
@@ -3484,7 +3506,7 @@ async function renderAgentsPop(refetch) {
     const sub = dir === false ? '' : (dir || origin(key) || projectLabel(s));
     const ageHtml = `<span class="ag-age">${esc(status)}</span>`;
     return `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}${key && key === activeRel ? ' current' : ''}" data-key="${esc(key || '')}">` +
-      `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}"><span>${esc(rowTitle(s))}</span>${sub || o.badge ? '' : ageHtml}</span>` +
+      `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}"><span>${esc(rowTitle(s))}</span>${key ? presenceSlotHtml(key) : ''}${s ? participantsHtml(s) : ''}${sub || o.badge ? '' : ageHtml}</span>` +
       (sub || o.badge ? `<span class="ag-sub"><span class="ag-dir">${esc(sub)}</span>${o.badge}${ageHtml}</span>` : '') + `</span>` +
       (acts ? `<span class="ag-acts">${acts}</span>` : '') + `</div>` + o.children;
   };
@@ -3654,6 +3676,7 @@ async function renderAgentsPop(refetch) {
   }
   $('agentsUnread').innerHTML = flow.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('');
   $('agentsLegacy').innerHTML = dock.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('') + tail;
+  renderPresenceMarks();
 
   const recovery = pop.querySelector('.ag-recovery');
   if (recovery) recovery.ontoggle = () => { agentRecoveryOpen = recovery.open; };
@@ -3978,13 +4001,15 @@ function refreshFilterOptions() {
   $('src').innerHTML = '<option value="">all sources</option>' +
     srcs.map(d => `<option>${esc(d)}</option>`).join('');
   $('src').value = keepSrc;
+  if ($('who')) { const keepWho = $('who').value; $('who').innerHTML = whoFilterOptions(); $('who').value = keepWho; if ($('who').value !== keepWho) $('who').value = ''; }
 }
 
 function applyFilter() {
-  const dir = $('dir').value, src = $('src').value, project = $('ganttProject').value;
+  const dir = $('dir').value, src = $('src').value, project = $('ganttProject').value, who = $('who') ? $('who').value : '';
   shown = sessions.filter(s =>
     (!dir || shortDir(s.cwd) === dir) &&
     (!src || (s.source || 'claude') === src) &&
+    (!who || sessionInvolves(s, who)) &&
     (!project || projectOf(s) === project));
   render();
 }
@@ -5769,10 +5794,10 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal aiconvo startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
-const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js';
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -5990,15 +6015,15 @@ function closeDocument() {
 // is destroyed), then the editor goes away.
 function flushAndCloseDocument() {
   if (!docState) return;
-  if (docState.focused) liveFileStash(fileWs);
-  if (docState.dirty) autosaveDocument();
+  if (docState.focused && !docState.collab) liveFileStash(fileWs);
+  if (docState.dirty && !docState.collab) autosaveDocument();
   closeDocument();
 }
 
 function docStatusLine(text) {
   const el = $('docStatus');
   if (el) { el.textContent = text; el.title = text; }
-  if (docState?.focused && $('docSave')) $('docSave').disabled = !docState.dirty || docState.saving;
+  if (docState?.focused && $('docSave')) $('docSave').disabled = docState.collab ? false : (!docState.dirty || docState.saving);
 }
 
 // Autosave after a 2 s pause. Autosave writes to disk (with the SHA conflict
@@ -6517,14 +6542,20 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   } catch (e) { return fail('could not open the document.', e.message); }
   if (seq !== docMountSeq || !$('docEditor')) return; // user navigated away during load
   if (d.error) return fail('could not read the document.', d.error);
+  // In the file workspace the document is shared when the server answers
+  // (filesmode.js): one text for everyone, saved as people type.
+  const shared = focused && fileWs && d.canAct !== false ? await fileWsJoinShared(fileWs) : null;
+  if (seq !== docMountSeq || !$('docEditor')) return;
   let draft = null;
-  if (focused) try { draft = JSON.parse(sessionStorage.getItem('aiconvo.draft:' + d.path) || 'null'); } catch {}
+  if (focused && !shared) try { draft = JSON.parse(sessionStorage.getItem('aiconvo.draft:' + d.path) || 'null'); } catch {}
   if (draft?.text === d.text) { try { sessionStorage.removeItem('aiconvo.draft:' + d.path); } catch {} draft = null; }
   const st = { path: d.path, project, sha: draft?.sha || d.sha, baseText: d.text, dirty: !!draft, saveTimer: 0, saving: false, source: false, focused };
   const ws = focused ? fileWs : null;
   st.reviewId = ws?.reviewRef?.id || null;
+  st.collab = shared;
   st.editor = bundle.createDocumentEditor($('docEditor'), {
-    doc: draft?.text ?? d.text,
+    doc: shared ? shared.ytext.toString() : draft?.text ?? d.text,
+    extensions: shared ? collabEditorExtension(shared) : [],
     filename: d.path, lineGutter: focused,
     onLineHover: focused ? line => liveFileHover(ws, line) : undefined,
     onNavigateLocation: focused ? location => liveFileNavigate(ws, location) : undefined,
@@ -6532,13 +6563,15 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
     theme: mrmdHostTheme(),
     placeholder: 'Start writing…',
     assetResolver: url => '/api/doc/asset?doc=' + encodeURIComponent(d.path) + '&src=' + encodeURIComponent(url),
-    onChange: scheduleDocAutosave,
-    onSave: focused ? autosaveDocument : commitDocument,
+    onChange: shared ? () => fileWsSharedStatus(fileWs) : scheduleDocAutosave,
+    onSave: shared ? () => fileWsSharedSave(fileWs) : focused ? autosaveDocument : commitDocument,
     onRunCell: (cell, o) => runDocCell(cell, o),
   });
   docState = st;
+  if (shared) { fileWs.wasShared = true; fileWs.collabUnsub = collabOnPeople(shared, () => fileWsSharedStatus(fileWs)); $('docSave').disabled = false; $('docSave').title = 'Shared: the disk follows as you type. Save writes it right now · Ctrl+S'; }
   docStatusLine(focused ? draft ? 'Recovered unsaved draft' : 'Saved · autosaves' : 'autosaves after a 2 s pause · save revision = Git commit');
-  $('docSave').onclick = focused ? autosaveDocument : commitDocument;
+  if (shared) fileWsSharedStatus(fileWs);
+  $('docSave').onclick = shared ? () => fileWsSharedSave(fileWs) : focused ? autosaveDocument : commitDocument;
   if (focused && draft && draft.sha !== d.sha) fileWsBanner(ws, 'This draft predates the disk file. Your text is preserved; saving will not overwrite newer disk changes.', [['Reload disk', () => liveFileReload(ws)]]);
   // The unwrap affordance appears only when the file actually looks
   // machine-wrapped (2+ joinable pairs), so hand-written docs stay quiet.
@@ -7407,6 +7440,7 @@ async function showProjectOverview(name) {
     return;
   }
   projectOverview = d;
+  refreshShareControl();
   return renderProjectPanel(d);
 }
 
@@ -9109,6 +9143,9 @@ function convHead(d) {
   $('chTitle').textContent = title;
   $('chTitle').title = chTitleHint(title);
   $('convHeadExtra').innerHTML = '';
+  // Who else is here, and how this conversation is shared (people.js).
+  renderConversationPresence();
+  refreshShareControl();
   return '';
 }
 
@@ -11526,6 +11563,7 @@ async function renderConv(scroll) {
     autoGrowCompose(); updateComposeMin();
   }
   if (keepCompose && newTa && keepCompose.focused) newTa.focus({ preventScroll: true });
+  composeShareCheck();
   $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
   $('view').querySelectorAll('[data-media-src]').forEach(b => b.onclick = e => {
     e.stopPropagation(); e.preventDefault();
@@ -14009,6 +14047,7 @@ const SETTINGS_PANES = [
   ['search', 'search', 'Meaning-based search on the GPU server.'],
   ['snippets', 'snippets', 'Sentences you type often.'],
   ['machines', 'machines', 'Other aiconvo installs to switch to.'],
+  ['people', 'people', 'Who is admitted on this machine, and their links.'],
   ['appearance', 'appearance', 'Colors for the app and for pi views.'],
   ['advanced', 'advanced', 'Engine, settings file, overrides.'],
 ];
@@ -14450,6 +14489,7 @@ const SETTINGS_PANE_RENDER = {
   search: [paneSearch, bindPaneSearch],
   snippets: [paneSnippets, bindPaneSnippets],
   machines: [paneMachines, bindPaneMachines],
+  people: [panePeople, bindPanePeople],
   appearance: [paneAppearance, bindPaneAppearance],
   advanced: [paneAdvanced, bindPaneAdvanced],
 };
@@ -14463,7 +14503,7 @@ function renderSettings() {
       <div class="sep"></div>
       <button type="button" data-go="usage" title="Tokens, cost estimates, and subscription value">usage and cost →</button>
     </nav>
-    <section class="settings-pane">${settingsState ? paint() : '<div class="empty">loading settings…</div>'}</section>
+    <section class="settings-pane">${settingsState && settingsState.canEditSettings === false && !['people', 'appearance'].includes(settingsPane) ? `<div class="set-readonly hint">These are ${esc((settingsState.hostname || 'this machine'))}'s settings; only its owner or an admin can change them. Your appearance choices stay yours.</div>` : ''}${settingsState ? paint() : '<div class="empty">loading settings…</div>'}</section>
   </div>`;
   const root = $('settingsRoot');
   root.querySelectorAll('.settings-nav [data-pane]').forEach(b => b.onclick = () => showSettingsPane(b.dataset.pane));
@@ -14558,6 +14598,8 @@ function closeSettings() {
 }
 
 $('settingsBtn').onclick = () => settingsOpen ? closeSettings() : showSettings();
+$('peopleBtn').onclick = () => showSettingsPane('people');
+$('shareBtn').onclick = () => openShareDialog();
 
 // ---- collapsible top bar: ` toggles; the thin rail is the handle ----
 const barFolded = () => document.body.classList.contains('bar-fold');
@@ -14596,12 +14638,12 @@ function applyLayout() {
     side.hidden = false;
     $('sideAgents').appendChild(pop);
     $('railFootSlot').append($('settingsBtn'));
-    $('sideFootSlot').append($('machineBtn'));
+    $('sideFootSlot').append($('machineBtn'), $('peopleBtn'));
     // The switcher pop-up lives in the column with its button, so it paints
     // above the column instead of behind it.
     side.appendChild($('machinePop'));
     paintSideRail();
-    $('floatHead').append($('chTitle'), $('chMove'), $('convHeadExtra'));
+    $('floatHead').append($('chTitle'), $('chMove'), $('shareBtn'), $('convPresence'), $('convHeadExtra'));
     $('ganttBar').prepend($('projSort'));
     pop.hidden = false;
     agentsSelectedKey = null;
@@ -14619,8 +14661,8 @@ function applyLayout() {
     side.hidden = true;
     side.before($('machinePop'));
     $('machinePop').before(pop);
-    $('barFold').before($('machineBtn'), $('settingsBtn'));
-    $('conversationFilesSwitch').before($('chTitle'), $('convHeadExtra'));
+    $('barFold').before($('machineBtn'), $('peopleBtn'), $('settingsBtn'));
+    $('conversationFilesSwitch').before($('chTitle'), $('shareBtn'), $('convPresence'), $('convHeadExtra'));
     $('chNew').before($('chMove'));
     $('newLoose').before($('projSort'));
     pop.hidden = true;
@@ -14835,6 +14877,7 @@ $('searchOverlay').addEventListener('click', e => { if (e.target.id === 'searchO
 // ---- filter wiring ----
 $('dir').addEventListener('change', refreshCurrentTab);
 $('src').addEventListener('change', refreshCurrentTab);
+$('who').addEventListener('change', refreshCurrentTab);
 $('ganttProject').addEventListener('change', refreshCurrentTab);
 
 function refreshCurrentTab() {
@@ -15755,6 +15798,7 @@ live.onopen = () => {
 };
 live.onmessage = ev => {
   const d = JSON.parse(ev.data);
+  if (peopleLiveEvent(d)) return;
   if (d.type === 'agent-recovery') { applyAgentRecovery(d.recovery); return; }
   if (d.type === 'delegation-update') { delegationUI.invalidate(); return; }
   if (d.type === 'timeline-titles') {

@@ -62,13 +62,14 @@ function parseFileHash(h) {
 
 function fileWsCloseEditor({ keepDraft = true } = {}) {
   if (!fileWs) return;
+  fileWsLeaveShared(fileWs);
   fileWs.live?.dispose?.();
   if (fileWs.editor && fileWs.editor.selection) {
     try { localStorage.setItem('aiconvo.cursor:' + fileWs.path, String(fileWs.editor.selection().line)); } catch {}
   }
   if (fileWs.kind === 'md') { flushAndCloseDocument(); }
   else if (fileWs.editor) {
-    if (keepDraft && fileWs.dirty) {
+    if (keepDraft && fileWs.dirty && !fileWs.wasShared) {
       // Code never autosaves (design §5.3). An unsaved draft survives a
       // navigation in sessionStorage and comes back with a banner.
       try { sessionStorage.setItem('aiconvo.draft:' + fileWs.path, JSON.stringify({ sha: fileWs.sha, text: fileWs.editor.getContent(), at: Date.now() })); } catch {}
@@ -83,6 +84,47 @@ function closeFileWorkspace() {
   fileWsCloseEditor();
   clearInterval(fileWs.runTick);
   fileWs = null;
+}
+// The shared copy of a file (collab-client.js). When the server answers,
+// the editor edits the shared text: everyone's cursors show, an agent's
+// write merges in, and the disk follows as people type. When it does not
+// (old server, no WebSockets), the single-player lock-and-save path runs.
+async function fileWsJoinShared(ws) {
+  if (typeof collabJoin !== 'function' || !window.aiconvoMe || ws.reviewRef) return null;
+  try { const s = await collabJoin('file:' + ws.path); if (fileWs !== ws) { collabLeave(s); return null; } ws.collab = s; return s; }
+  catch { return null; }
+}
+function fileWsLeaveShared(ws) {
+  if (!ws || !ws.collab) return;
+  if (ws.collabUnsub) { try { ws.collabUnsub(); } catch {} ws.collabUnsub = null; }
+  collabLeave(ws.collab);
+  ws.collab = null;
+}
+function fileWsSharedStatus(ws, note = '') {
+  const el = $('docStatus');
+  if (!el || !ws.collab) return;
+  const others = ws.collab.people;
+  el.innerHTML = (note || 'Shared · saves as you type') + (others.length ? ' · ' + collabPeopleHtml(others, { verb: 'is here' }) : '');
+  el.title = 'Everyone who opens this file edits the same text. It lands on disk moments after typing stops; Save (Ctrl+S) writes it right now.';
+}
+// Save on a shared file: the disk follows by itself, but a person who
+// presses Ctrl+S means "now". Same text, same save path, no version check
+// (the shared text is the version).
+async function fileWsSharedSave(ws) {
+  if (!ws.collab || !ws.editor || ws.sharedSaving) return;
+  ws.sharedSaving = true;
+  fileWsSharedStatus(ws, 'Saving…');
+  const text = ws.editor.getContent();
+  const md = ws.kind === 'md';
+  let out;
+  try { out = await postJson(md ? '/api/doc/save' : '/api/file/save', { path: ws.path, text, actor: 'human', input: 'keyboard', fromCollab: true, project: ws.project || '' }); }
+  catch { out = { error: 'network failure' }; }
+  ws.sharedSaving = false;
+  if (fileWs !== ws) return;
+  if (out.error) { fileWsSharedStatus(ws, '⚠ ' + out.error); return; }
+  if (md && docState && docState.path === ws.path) { docState.sha = out.sha; docState.baseText = text; docState.dirty = false; }
+  ws.sha = out.sha; ws.baseText = text;
+  fileWsSharedStatus(ws, 'Saved · shared');
 }
 
 async function fileWsMountBody(ws, opts) {
@@ -143,12 +185,16 @@ async function fileWsMountCode(ws, opts) {
   ws.dirty = false;
   let text = d.text;
   let draft = null;
-  try { draft = JSON.parse(sessionStorage.getItem('aiconvo.draft:' + ws.path) || 'null'); } catch {}
+  const shared = d.readOnly || d.canAct === false ? null : await fileWsJoinShared(ws);
+  if (fileWs !== ws || !$('codeEditor')) return;
+  if (shared) { text = shared.ytext.toString(); ws.wasShared = true; }
+  else try { draft = JSON.parse(sessionStorage.getItem('aiconvo.draft:' + ws.path) || 'null'); } catch {}
   if (draft && draft.text !== d.text) text = draft.text;
   else draft = null;
   const status = t => { const el = $('docStatus'); if (el) el.textContent = t; };
   const markDirty = () => {
     if (fileWs !== ws) return;
+    if (ws.collab) return fileWsSharedStatus(ws);
     ws.dirty = ws.editor.getContent() !== ws.baseText;
     $('fwSave').disabled = !ws.dirty;
     status(ws.dirty ? 'Unsaved' : 'Saved');
@@ -156,14 +202,22 @@ async function fileWsMountCode(ws, opts) {
   ws.baseText = d.text;
   ws.editor = bundle.createCodeEditor($('codeEditor'), {
     doc: text, filename: ws.path, theme: mrmdHostTheme(),
+    extensions: shared ? collabEditorExtension(shared) : [],
     onChange: markDirty,
-    onSave: () => fileWsSaveCode(ws),
+    onSave: () => shared ? fileWsSharedSave(ws) : fileWsSaveCode(ws),
     onLineHover: line => liveFileHover(ws, line),
     onNavigateLocation: location => liveFileNavigate(ws, location),
     onLineHoverEnd: () => { if (ws.live) { ws.live.hover++; ws.live.hoverController?.abort(); } },
   });
   $('fwSave').onclick = () => fileWsSaveCode(ws);
   $('docReload').onclick = () => fileWsReloadCode(ws);
+  if (shared) {
+    $('fwSave').disabled = false;
+    $('fwSave').title = 'Shared: the disk follows as you type. Save writes it right now · Ctrl+S';
+    $('fwSave').onclick = () => fileWsSharedSave(ws);
+    ws.collabUnsub = collabOnPeople(shared, () => fileWsSharedStatus(ws));
+    fileWsSharedStatus(ws);
+  }
   if (d.readOnly) {
     ws.readOnly = true;
     try { ws.editor.setReadonly(true); } catch {}
@@ -440,6 +494,7 @@ function fileWsFileActivity(d) {
   fbActivity(d);
   const ws = fileWs;
   if (!ws || !ws.path || d.path !== ws.path) return;
+  if (ws.collab) return; // the shared text already carries the disk change
   if (ws.run) return; // the run's own settle handles the reload
   if (ws.mode === 'write' && ws.editor) liveFileActivity(ws);
 }

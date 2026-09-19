@@ -48,7 +48,7 @@ function statusFor(records, absPath, content) {
       : matchVouchLines(String(r.text || '').split('\n'), contentLines);
     const state = m.missing === 0 ? 'fresh' : m.matched.length ? 'partial' : 'stale';
     for (const n of m.matched) mark(n, r.action === 'dispute' ? 'd' : 'v');
-    return { id: r.id, ts: r.ts, action: r.action, range: r.range || null, note: r.note || '', state, matchedCount: m.matched.length };
+    return { id: r.id, ts: r.ts, action: r.action, range: r.range || null, note: r.note || '', state, matchedCount: m.matched.length, user: r.user && r.user.id ? { id: r.user.id, name: r.user.name || '' } : undefined };
   });
   let vouched = 0, disputed = 0;
   for (const m of Object.values(lines)) m === 'd' ? disputed++ : vouched++;
@@ -69,15 +69,18 @@ function trustLabelFrom(status) {
   const day = ts => String(ts || '').slice(0, 10);
   const v = status.records.filter(r => r.action === 'vouch');
   const d = status.records.filter(r => r.action === 'dispute');
+  // Whose word it is: a vouch is one person's check, and the label says
+  // whose when the record names them (records before users have no name).
+  const by = list => { const names = [...new Set(list.map(r => r.user && r.user.name).filter(Boolean))]; return names.length ? ' by ' + names.join(', ') : ''; };
   let label = '';
   if (v.length) {
     const when = day(status.summary.lastVouchTs);
     const whole = status.summary.vouched + status.summary.disputed >= status.summary.total && v.every(r => r.state === 'fresh');
-    label = whole ? `[vouched ${when}]`
-      : status.summary.vouched ? `[partly vouched ${when}${v.some(r => r.state !== 'fresh') ? ', changed since review' : ''}]`
-      : `[vouched ${when}, changed since review]`;
+    label = whole ? `[vouched ${when}${by(v)}]`
+      : status.summary.vouched ? `[partly vouched ${when}${by(v)}${v.some(r => r.state !== 'fresh') ? ', changed since review' : ''}]`
+      : `[vouched ${when}${by(v)}, changed since review]`;
   }
-  if (d.length) label += `${label ? ' ' : ''}[disputed ${day(status.summary.lastDisputeTs)}]`;
+  if (d.length) label += `${label ? ' ' : ''}[disputed ${day(status.summary.lastDisputeTs)}${by(d)}]`;
   return label || '[unverified]';
 }
 

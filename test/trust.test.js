@@ -73,3 +73,11 @@ test('trustLabelFrom: the four label families', () => {
 
   assert.strictEqual(trustLabelFrom(statusFor([], P, text)), '[unverified]');
 });
+
+test('the label names who vouched when the record says', () => {
+  const rec = { id: 'r1', ts: '2026-09-19T10:00:00Z', action: 'vouch', path: '/x', contentSha: sha256Hex('a\nb\n'), text: 'a\nb\n', user: { id: 'u_l', name: 'Lilly' } };
+  const st = statusFor([rec], '/x', 'a\nb\n');
+  assert.equal(trustLabelFrom(st), '[vouched 2026-09-19 by Lilly]');
+  const anon = statusFor([{ ...rec, user: undefined }], '/x', 'a\nb\n');
+  assert.equal(trustLabelFrom(anon), '[vouched 2026-09-19]');
+});

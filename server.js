@@ -109,22 +109,10 @@ function cookieValue(req, name) {
   }
   return '';
 }
-function hasLanToken(req) {
-  if (!LAN_TOKEN) return false;
-  if (cookieValue(req, 'aiconvo') === LAN_TOKEN) return true;
-  const hdr = String(req.headers.authorization || '');
-  if (hdr.startsWith('Bearer ') && hdr.slice(7) === LAN_TOKEN) return true;
-  if (hdr.startsWith('Basic ')) {
-    const decoded = Buffer.from(hdr.slice(6), 'base64').toString('utf8');
-    const pass = decoded.includes(':') ? decoded.slice(decoded.indexOf(':') + 1) : decoded;
-    return pass === LAN_TOKEN;
-  }
-  return false;
-}
 function lanLoginPage(error = '') {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo</title>
 <style>html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:28rem;margin:12vh auto;padding:1rem}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}</style></head>
-<body><main><p>Enter the LAN token from the laptop. After this, the tablet stays signed in.</p>
+<body><main><p>Enter your token for this aiconvo (your invite link, or the install token from settings → machines). After this, the device stays signed in as you.</p>
 ${error ? `<p class="err">${error.replace(/</g, '&lt;')}</p>` : ''}
 <form method="post" action="/login"><label for="token">token</label><input id="token" name="token" autocomplete="off" autofocus><button type="submit">open aiconvo</button></form></main></body></html>`;
 }
@@ -519,6 +507,9 @@ async function parseFile(absPath) {
   // they get off:true so the transcript can fold them.
   const parents = new Map();
   let leafId = null;
+  // Who sent each user message: an aiconvo-author entry sits right before
+  // it in the tree (pisdk-runtime.js writes it for web sends).
+  const authorEntries = new Map(); // entry id → { id, name, input, coauthors }
   const stream = fs.createReadStream(absPath, { encoding: 'utf8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   for await (const line of rl) {
@@ -552,6 +543,9 @@ async function parseFile(absPath) {
       if (!meta.sessionId && d.id) meta.sessionId = d.id;
       if (!meta.cwd && d.cwd) meta.cwd = d.cwd;
       if (d.parentSession) meta.parentSession = d.parentSession; // pi fork origin
+      continue;
+    } else if (d.type === 'custom' && d.customType === 'aiconvo-author' && d.data && d.data.user && typeof d.data.user.id === 'string') {
+      if (eid) authorEntries.set(eid, { id: d.data.user.id, name: String(d.data.user.name || ''), input: d.data.input || undefined, coauthors: Array.isArray(d.data.coauthors) ? d.data.coauthors : undefined, via: 'entry' });
       continue;
     } else if (d.type === 'custom_message' && d.display !== false &&
       ['delegation-complete', 'delegation-review-pending', 'orchestrator-event'].includes(d.customType)) {
@@ -605,6 +599,10 @@ async function parseFile(absPath) {
       if (role === 'assistant' && d.message) {
         if (d.message.model) msg.model = d.message.model;
         if (d.message.provider) msg.provider = d.message.provider;
+      }
+      if (role === 'user' && eid) {
+        const a = authorEntries.get(parents.get(eid));
+        if (a) msg.author = a;
       }
       messages.push(msg);
     }
@@ -681,6 +679,12 @@ async function indexFile(source, relPath, stat) {
       const kickoff = messages.find(m => m.role === 'user');
       if (kickoff) kickoff.origin = 'delegation';
     }
+    applySidecarAuthorship(key, messages);
+    const participants = [];
+    for (const m of messages) if (m.role === 'user' && m.author) {
+      for (const who of [m.author, ...(m.author.coauthors || [])]) if (who && who.id && !participants.some(p => p.id === who.id)) participants.push({ id: who.id, name: who.name || '' });
+    }
+    const firstAuthored = messages.find(m => m.role === 'user' && m.author);
     const firstUser = titleSourceMessage(messages);
     const fullTitle = delegated ? delegated.title : firstUser ? firstUser.text.slice(0, 200).replace(/\s+/g, ' ').trim() : '(no user message)';
     const titleHash = crypto.createHash('sha256').update('v2\x00' + fullTitle).digest('hex').slice(0, 16);
@@ -699,6 +703,10 @@ async function indexFile(source, relPath, stat) {
       rootId: meta.rootId,
       parentSession: meta.parentSession,
       delegationId: delegated?.id || null,
+      // People who wrote into this conversation (explicit records only; an
+      // unrecorded message is the install owner's, shown as such).
+      participants: participants.length ? participants : undefined,
+      createdBy: firstAuthored && messages.indexOf(firstAuthored) === messages.findIndex(m => m.role === 'user') ? firstAuthored.author.id : undefined,
       delegationParentPath: delegated?.parentSessionPath || null,
       delegationParentEntryId: delegated?.parentEntryId || null,
       // Parallel generation forks are implementation storage, not standalone
@@ -2310,8 +2318,12 @@ function runEventForwarder(job) {
 
 // Start one headless run on a conversation. node (optional): continue from
 // that entry — an in-file pi branch anchor moves the leaf there first.
-async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf, expectedVersion, recoveryAttempts = 0 }) {
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf, expectedVersion, recoveryAttempts = 0, principal = null, input = 'keyboard', coauthors = null }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
+  principal = principal || principalFor(null);
+  // Who typed this. The SDK engine writes it into the session tree; the
+  // rpc engine cannot, so the sidecar remembers it for the indexer.
+  const author = customMessage ? null : { id: principal.user.id, name: principal.user.name, input, coauthors: coauthors || undefined };
   if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
   if (!customMessage && !String(message || '').trim()) throw new Error('empty prompt');
   const delegatedOwner = await assertDelegationLaunch(sessionPath, customMessage);
@@ -2352,6 +2364,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       const queuedOk = await pisdk.piQueuePrompt({ sessionPath }, message, null, images).catch(() => false)
         || await pirpc.piQueuePrompt({ sessionPath }, message, null, images).catch(() => false);
       if (queuedOk) {
+        if (author) recordAuthorship(key, author, { via: 'queued', chars: String(message || '').length, input, coauthors });
         const job = agentRunJobs.get(record.jobId);
         if (job) { job.statusText = 'follow-up queued'; jobChanged(job); }
         return { queued: true, job };
@@ -2447,7 +2460,9 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       if (owner) pisdk.stopWarmSession(sessionPath);
       record.launchStarted = true;
       job.recoveryEligible = !fanout && !customMessage && !owner;
-      const handle = (customMessage ? pisdk : piEng()).piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(), ...sessionEnv }, sessionEnv, extraArgs }, { provider, modelId, message, images, customMessage, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
+      const engine = customMessage ? pisdk : piEng();
+      if (author && engine !== pisdk) recordAuthorship(key, author, { via: 'rpc', chars: String(message || '').length, input, coauthors });
+      const handle = engine.piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(principal), ...sessionEnv }, sessionEnv, extraArgs }, { provider, modelId, message, images, customMessage, author, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
       appliedContextBySession.set(path.resolve(sessionPath), { sig: nextCtxSig, hash: bundleHash });
       record.handle = handle;
       await handle.done;
@@ -2670,7 +2685,7 @@ function markFanoutFork(key, fanout) {
   broadcast({ type: 'update', key, ...e, project: projectNameOf(e.cwd, key) });
 }
 
-async function startFanOut(key, { node, models, message, images, force, context }) {
+async function startFanOut(key, { node, models, message, images, force, context, principal = null, input = 'keyboard', coauthors = null }) {
   if (!Array.isArray(models) || models.length < 2) throw new Error('fan-out needs two or more models');
   const runs = [];
   const fanoutId = 'fan:' + crypto.randomUUID().slice(0, 8);
@@ -2682,7 +2697,7 @@ async function startFanOut(key, { node, models, message, images, force, context 
     if (contextItems.length) saveConversationContext(forked.key, contextItems);
     const fanout = { id: fanoutId, rootKey: key, node: node || null, index, count: models.length };
     markFanoutFork(forked.key, fanout);
-    const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force, fanout, context: contextItems });
+    const job = await startAgentRun(forked.key, { provider: m.provider, modelId: m.modelId, message, images, force, fanout, context: contextItems, principal, input, coauthors });
     runs.push({ key: forked.key, jobId: job.id, model: m.provider + '/' + m.modelId,
       fanoutId, fanoutRootKey: key, fanoutNode: node || null, fanoutIndex: index, fanoutCount: models.length });
   }
@@ -3754,6 +3769,148 @@ function saveAppSettings() {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(appSettings, null, 2) + '\n', { mode: 0o600 });
 }
+
+// ---- users: who is typing, editing, vouching (design/46) ----
+// The roster names the people admitted on this install; the owner is the
+// person whose account it is and signs in with the install token, so every
+// device already signed in keeps working. Members get their own invite
+// links. The local console is the account itself.
+const usersLib = require('./users.js');
+const accessLib = require('./access.js');
+const { PresenceBook } = require('./presence.js');
+const USERS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'users.json');
+const INSTALL_KEY_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'install-key.json');
+const ACCESS_FILE = path.join(NOTES_DIR, 'access.json');
+const AUTHORSHIP_FILE = path.join(NOTES_DIR, 'authorship.jsonl');
+function accountPersonName() {
+  try { const n = String(execFileSync('git', ['config', '--global', 'user.name'], { encoding: 'utf8', timeout: 2000 })).trim(); if (n) return n; } catch {}
+  try { const u = os.userInfo().username; return u ? u[0].toUpperCase() + u.slice(1) : 'Owner'; } catch { return 'Owner'; }
+}
+let roster = usersLib.loadRoster(USERS_FILE, { ownerName: accountPersonName() }).roster;
+function saveRoster() { try { usersLib.saveRoster(USERS_FILE, roster); } catch (e) { console.error('[users] save:', e.message); } }
+try { if (!fs.existsSync(USERS_FILE)) saveRoster(); } catch {}
+const installKey = usersLib.loadInstallKey(INSTALL_KEY_FILE);
+let accessRules = accessLib.loadRules(ACCESS_FILE);
+let accessRulesVersion = 0;
+function saveAccessRules() { accessRulesVersion++; try { accessLib.saveRules(ACCESS_FILE, accessRules); } catch (e) { console.error('[access] save:', e.message); } }
+const presence = new PresenceBook();
+// Shared documents (compose boxes, drafts, files under edit): collab.js.
+const yjsLib = require('./vendor/yjs-server/13.6.29/yjs-server.cjs');
+const { createCollab } = require('./collab.js');
+const collab = createCollab({ ...yjsLib, persistDir: path.join(CACHE_DIR, 'collab'), log: msg => console.error(msg) });
+const ownerIdentity = () => ({ user: usersLib.ownerOf(roster), tier: 'console', via: 'console' });
+// What a request proves. With no install token the server answers only
+// this computer, so every request is the account itself (as before).
+function identifyRequest(req) {
+  if (!LAN_TOKEN) return ownerIdentity();
+  return usersLib.identify({ roster, installToken: LAN_TOKEN, isLocal: isLocalRequest(req), cookie: cookieValue(req, 'aiconvo'), authorization: req.headers.authorization });
+}
+const publicUsers = () => roster.users.map(usersLib.publicUser);
+const userById = id => usersLib.publicUser(usersLib.findUser(roster, id));
+// The execution principal: what the agent runs as. In this deployment
+// mode every person runs as the account (a household shares it); the
+// person still rides along in the environment, so agents, extensions and
+// the ledger know who is driving. A team deployment resolves a Unix user
+// here instead, and nothing else changes. See design/46, "Team scale".
+function principalFor(identity) {
+  const user = usersLib.publicUser((identity && identity.user) || usersLib.ownerOf(roster));
+  return { user, spawnAs: null, env: { AICONVO_USER: user.id, AICONVO_USER_NAME: user.name } };
+}
+// Attribution for sends that cannot write into the session file (the
+// terminal bridge owns it; the rpc engine has no session manager): one
+// sidecar line, matched to the next user message by time when indexing.
+let authorshipRecords = [];
+let pendingNewSessionAuthor = null;
+try { authorshipRecords = fs.readFileSync(AUTHORSHIP_FILE, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch {}
+function recordAuthorship(key, user, { via, chars = 0, input = 'keyboard', coauthors } = {}) {
+  if (!user || !user.id) return;
+  const rec = { key, ts: new Date().toISOString(), user: { id: user.id, name: user.name }, via, chars, input, coauthors: coauthors && coauthors.length ? coauthors : undefined };
+  authorshipRecords.push(rec);
+  if (authorshipRecords.length > 5000) authorshipRecords = authorshipRecords.slice(-4000);
+  fs.mkdir(NOTES_DIR, { recursive: true }, () => fs.appendFile(AUTHORSHIP_FILE, JSON.stringify(rec) + '\n', () => {}));
+}
+// Sidecar records name the next user message after their time that has no
+// author of its own (two minutes of slack: the terminal paste is slow).
+function applySidecarAuthorship(key, messages) {
+  const recs = authorshipRecords.filter(r => r.key === key);
+  if (!recs.length) return;
+  const used = new Set();
+  for (const m of messages) {
+    if (m.role !== 'user' || m.author || !m.ts) continue;
+    const t = Date.parse(m.ts);
+    const hit = recs.find(r => !used.has(r) && t >= Date.parse(r.ts) - 5000 && t <= Date.parse(r.ts) + 120000);
+    if (!hit) continue;
+    used.add(hit);
+    m.author = { id: hit.user.id, name: hit.user.name || '', input: hit.input || undefined, coauthors: hit.coauthors || undefined, via: hit.via || 'sidecar' };
+  }
+}
+// Access chokepoint helpers. `target` is { key, project, creator }.
+function targetOf(key) {
+  const e = key && index[key];
+  return { key: key || null, project: e ? projectNameOf(e.cwd, key) : null, creator: e && e.createdBy ? usersLib.resolveId(roster, e.createdBy) : null };
+}
+function canDo(identity, right, target) { return accessLib.can(accessRules, identity, right, target); }
+function assertCan(identity, right, target, what = 'this') {
+  if (canDo(identity, right, target)) return;
+  const err = new Error(right === 'own' ? 'Only the owner of ' + what + ' can change how it is shared.' : right === 'act' ? 'You can read ' + what + ' but not act on it here.' : 'This is not shared with you.');
+  err.status = 403;
+  throw err;
+}
+const visibleKeysFor = identity => accessLib.visibleTo(accessRules, identity);
+function keyVisible(identity, key) { return visibleKeysFor(identity)(targetOf(key)); }
+function projectCreatorOf(name) {
+  const rec = name && typeof createdRecordFor === 'function' ? createdRecordFor(name) : null;
+  return rec && rec.createdBy ? usersLib.resolveId(roster, rec.createdBy) : null;
+}
+function projectVisible(identity, name) { return canDo(identity, 'see', { project: name, creator: projectCreatorOf(name) }); }
+// The project a file belongs to: the folder of a registered project, else
+// the working folder of a conversation, whichever is the deepest prefix;
+// else the /Projects/<name> convention. Files outside every project are
+// judged by the household default.
+function projectOfPath(abs) {
+  const p = String(abs || '');
+  let best = '', bestName = null;
+  const consider = (cwd, name) => { if (cwd && (p === cwd || p.startsWith(cwd.replace(/\/$/, '') + '/')) && cwd.length > best.length) { best = cwd; bestName = name; } };
+  for (const [name, rec] of Object.entries(createdProjects)) consider(rec.cwd, canonicalProjectName(name));
+  for (const [key, e] of Object.entries(index)) if (e.cwd) consider(e.cwd, projectNameOf(e.cwd, key));
+  if (bestName) return bestName;
+  const m = p.match(/\/Projects\/([^/]+)/i);
+  return m ? canonicalProjectName(m[1]) : null;
+}
+function assertPathAccess(identity, abs, right) {
+  const project = projectOfPath(abs);
+  assertCan(identity, right, { project, creator: projectCreatorOf(project) }, project ? 'project ' + project : 'this file');
+}
+// Co-authors of a shared compose box: everyone who typed into it besides
+// the person sending. Written into the author entry with the message.
+function composeCoauthorsOf(keyOrName, who) {
+  const name = String(keyOrName).startsWith('draft:') ? String(keyOrName) : 'compose:' + keyOrName;
+  const me = who && who.user ? who.user.id : who && who.id;
+  return collab.contributors(name).filter(c => c.id !== me && c.chars > 0).map(c => ({ id: c.id, name: c.name, chars: c.chars }));
+}
+// An invite link: this install's best address plus the person's secret.
+function inviteLinkFor(secret) {
+  const base = PUBLIC_URL || (lanAddresses()[0] ? `http://${lanAddresses()[0]}:${PORT}` : `http://127.0.0.1:${PORT}`);
+  return base + '/?token=' + encodeURIComponent(secret);
+}
+// Presence goes to each live browser filtered by what that person may see:
+// a private conversation's key never reaches someone it is hidden from.
+const sseByConn = new Map(); // conn id → { res, identity, conn }
+function presenceFor(identity, exceptConn = null) {
+  const see = visibleKeysFor(identity);
+  return presence.snapshot().filter(r => r.conn !== exceptConn).filter(r => {
+    const m = /^conversation:(.+)$/.exec(r.route);
+    if (m) return see(targetOf(m[1]));
+    const pm = /^project:(.+)$/.exec(r.route);
+    if (pm) return projectVisible(identity, pm[1]);
+    return true;
+  }).map(r => ({ conn: r.conn, user: r.user, route: r.route, kind: r.kind, position: r.position, at: r.at }));
+}
+function broadcastPresence() {
+  for (const client of sseByConn.values()) {
+    try { client.res.write('data: ' + JSON.stringify({ type: 'presence', people: presenceFor(client.identity, client.conn) }) + '\n\n'); } catch {}
+  }
+}
 function readPiDefault() {
   try {
     const raw = JSON.parse(fs.readFileSync(PI_SETTINGS_FILE, 'utf8'));
@@ -3912,7 +4069,9 @@ async function connectMachine(link) {
   const remote = await remoteJson(parsed.url, '/api/settings', parsed.token);
   const name = String(remote.hostname || '').trim() || parsed.url.replace(/^https?:\/\//, '');
   if (name === os.hostname() && parsed.url.includes('127.0.0.1')) throw new Error('that link points at this machine');
-  upsertMachine({ name, url: parsed.url, token: parsed.token });
+  // Its signing key comes back with its settings: from now on a person
+  // signed in here arrives there as themselves (handoff), no paste.
+  upsertMachine({ name, url: parsed.url, token: parsed.token, publicKey: String(remote.publicKey || '') });
   let registeredBack = false, why = '';
   const myUrl = ownUrlFor(parsed.url);
   if (!LAN_TOKEN || isLoopback(HOST)) why = 'this machine is not reachable from other devices (settings → machines), so it cannot be reached back';
@@ -3920,7 +4079,7 @@ async function connectMachine(link) {
   else {
     try {
       await remoteJson(parsed.url, '/api/machines/register', parsed.token, {
-        method: 'POST', body: JSON.stringify({ name: os.hostname(), url: myUrl, token: LAN_TOKEN }),
+        method: 'POST', body: JSON.stringify({ name: os.hostname(), url: myUrl, token: LAN_TOKEN, publicKey: installKey.publicKey }),
       });
       registeredBack = true;
     } catch (e) { why = e.message; }
@@ -3928,10 +4087,21 @@ async function connectMachine(link) {
   return { name, url: parsed.url, registeredBack, why, myUrl };
 }
 
-function settingsResponse() {
+function settingsResponse(identity = ownerIdentity()) {
   const piDefault = readPiDefault();
+  const manages = usersLib.canManageUsers(identity);
   return {
-    settings: appSettings,
+    // Members see the settings without the secrets: another machine's
+    // token is the owner's to hold.
+    settings: manages ? appSettings : { ...appSettings, machines: (appSettings.machines || []).map(m => ({ name: m.name, url: m.url, token: '', publicKey: m.publicKey || '', hasToken: !!m.token })) },
+    me: usersLib.publicUser(identity.user),
+    tier: identity.tier,
+    users: publicUsers(),
+    groups: roster.groups,
+    // The handoff signing key of this install, exchanged at pairing.
+    publicKey: installKey.publicKey,
+    canManageUsers: manages,
+    canEditSettings: manages,
     resolved: {
       provider: appSettings.usePiDefault ? piDefault.provider : appSettings.provider,
       model: appSettings.usePiDefault ? piDefault.model : appSettings.model,
@@ -6229,7 +6399,11 @@ function claudeBin() {
     || 'claude';
 }
 
-function agentEnv() {
+// The environment an agent starts with. `principal` says who is driving
+// (principalFor); absent, the account's owner. In a team deployment this
+// is also where the spawn changes user; today every principal runs as the
+// account, and only the AICONVO_USER* variables differ.
+function agentEnv(principal = null) {
   const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
   const xauthority = process.env.XAUTHORITY
     || firstExisting([
@@ -6243,6 +6417,7 @@ function agentEnv() {
     ...(xauthority ? { XAUTHORITY: xauthority } : {}),
     PATH: agentPath(process.env.PATH),
     PI_DELEGATION_ROOT: DELEGATION_ROOT,
+    ...((principal || principalFor(null)).env),
   };
 }
 
@@ -6740,8 +6915,9 @@ async function confirmSubmit(title, body) {
   return false;
 }
 
-async function sendToConversation(key, payload) {
+async function sendToConversation(key, payload, principal = null) {
   await assertDelegationOwnership(absPathForKey(key));
+  principal = principal || principalFor(null);
   let text = payload && payload.text != null ? String(payload.text) : '';
   const rawImages = Array.isArray(payload && payload.images) ? payload.images : [];
   const images = rawImages.map(decodeImagePayload).filter(Boolean).slice(0, 8);
@@ -6793,6 +6969,7 @@ async function sendToConversation(key, payload) {
     await assertDelegationLaunch(absPathForKey(key));
     await bridgeRequest(title, { op: 'enter' });
     const submitted = body ? await confirmSubmit(title, body) : true;
+    if (submitted) recordAuthorship(key, principal.user, { via: 'bridge', chars: text.length, input: payload && payload.input });
     return { ok: true, sent: true, submitted, via: 'bridge', images: files.length, files, chars: text.length, ...opened };
   }
   const wid = await waitForWindow(title);
@@ -7986,6 +8163,11 @@ function broadcastFileActivity(ev) {
   const timer = setTimeout(() => {
     ledgerBroadcastPending.delete(key);
     broadcast({ type: 'file-activity', path: ev.path, project: ev.project || '', ts: ev.ts, actor: ev.actor, producer: ev.producer, convKey: ev.conv_key || null });
+    // People have this file open as a shared text: an agent's (or git's)
+    // write on disk becomes one minimal edit in it, cursors kept.
+    if (collab.has('file:' + ev.path)) {
+      fsp.readFile(ev.path, 'utf8').then(text => { if (!text.includes('\0')) collab.setText('file:' + ev.path, text); }).catch(() => {});
+    }
   }, 250);
   ledgerBroadcastPending.set(key, { timer });
 }
@@ -8059,7 +8241,7 @@ async function ledgerIngestRepo(root, repo, project = '') {
 }
 
 // Editor producer.
-function ledgerRecordEditorSave(abs, { added, removed, chars, sha, actor = 'human', input = 'keyboard', commitHash = null, project = '', archiveFrom = null, archiveTo = null }) {
+function ledgerRecordEditorSave(abs, { added, removed, chars, sha, actor = 'human', input = 'keyboard', commitHash = null, project = '', archiveFrom = null, archiveTo = null, user = null }) {
   if (!fileLedger) {
     gitRootForCwd(path.dirname(abs)).then(root => scheduleWorkspaceCheckpoint(root || (project && projectMetaFor(project)?.cwd), 'editor-observation')).catch(() => {});
     return;
@@ -8074,6 +8256,7 @@ function ledgerRecordEditorSave(abs, { added, removed, chars, sha, actor = 'huma
       id, ts, path: abs, repo_root: root || '', project: project || projectNameOf(root || path.dirname(abs)),
       producer: commitHash ? 'editor-commit' : 'editor-save', actor: actor === 'ai' || actor === 'external-agent' ? 'ai' : actor === 'human' ? 'human' : 'external', outcome: 'applied',
       added, removed, chars, sha_after: sha || null, input, commit_hash: commitHash,
+      user_id: user && user.id ? user.id : null,
     };
     fileLedger.put(row);
     broadcastFileActivity(row);
@@ -9478,7 +9661,7 @@ async function fileReadResponse(pathValue, key = '', reviewId = '') {
   return { path: abs, text, sha: sha256Hex(text), historyWarning };
 }
 
-async function fileSaveResponse(body) {
+async function fileSaveResponse(body, user = null) {
   const { path: p, baseSha, text } = body;
   if (typeof text !== 'string') throw new Error('missing text');
   const abs = await editableReviewFile(p || '', body.reviewId);
@@ -9495,12 +9678,14 @@ async function fileSaveResponse(body) {
   const archiveTo = historyWarning ? null : fileArchive?.latestId(abs);
   if (oldText !== text) {
     const delta = docLineDelta(oldText, text);
-    ledgerRecordEditorSave(abs, { added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text), actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard', archiveFrom, archiveTo });
+    ledgerRecordEditorSave(abs, { added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text), actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard', archiveFrom, archiveTo, user: body.actor === 'ai' ? null : user });
     if (!body.actor || body.actor === 'human' || ['ai', 'external-agent'].includes(body.actor)) {
       const actor = ['ai', 'external-agent'].includes(body.actor) ? 'agent' : 'human';
       recentFilesTouch(abs, { project: String(body.project || ''), kind: actor === 'human' ? 'saved' : 'edited', actor });
     }
   }
+  // The shared copy, if anyone has this file open, follows the disk.
+  if (!body.fromCollab && collab.has('file:' + abs)) collab.setText('file:' + abs, text);
   return { ok: true, path: abs, sha: sha256Hex(text), historyWarning };
 }
 
@@ -9547,7 +9732,7 @@ function docLineDelta(oldText, newText) {
 
 // Autosave: write the markdown, refuse stale writes, record provenance.
 // This is NOT a Git commit — explicit save commits (docCommitResponse).
-async function docSaveResponse(body) {
+async function docSaveResponse(body, user = null) {
   const { path: p, baseSha, text } = body;
   if (typeof text !== 'string') throw new Error('missing text');
   const abs = await editableReviewFile(p || '', body.reviewId);
@@ -9566,14 +9751,16 @@ async function docSaveResponse(body) {
       actor: DOC_ACTORS.has(body.actor) ? body.actor : 'human',
       input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
       added: delta.added, removed: delta.removed, sha: sha256Hex(text),
+      user: user && body.actor !== 'ai' ? user.id : undefined,
     });
     // The 24h activity index (code tree badges) hears about editor saves
     // directly — no dependency on a watcher being attached yet.
     ledgerRecordEditorSave(abs, {
       added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text),
       actor: DOC_ACTORS.has(body.actor) ? body.actor : 'human', input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
-      archiveFrom, archiveTo: historyWarning ? null : fileArchive?.latestId(abs),
+      archiveFrom, archiveTo: historyWarning ? null : fileArchive?.latestId(abs), user: body.actor === 'ai' ? null : user,
     });
+    if (!body.fromCollab && collab.has('file:' + abs)) collab.setText('file:' + abs, text);
     if (!DOC_ACTORS.has(body.actor) || body.actor !== 'runtime') {
       const actor = body.actor === 'ai' || body.actor === 'external-agent' ? 'agent' : 'human';
       recentFilesTouch(abs, { project: String(body.project || ''), kind: actor === 'human' ? 'saved' : 'edited', actor });
@@ -9605,7 +9792,7 @@ function scheduleDocCommitTitle(root, hash, diffText) {
 }
 
 // Explicit save = a real Git commit of this one document.
-async function docCommitResponse(body) {
+async function docCommitResponse(body, user = null) {
   const abs = await editableFilePath(body.path || '');
   if (!DOCUMENT_EXT.test(abs)) throw new Error('only Markdown-family documents (including .mdx) commit here');
   let sha = null;
@@ -9623,9 +9810,12 @@ async function docCommitResponse(body) {
   const [addedRaw, removedRaw] = staged.split('\t');
   const subject = `doc: ${path.basename(abs)} (+${Number(addedRaw) || 0} −${Number(removedRaw) || 0})`;
   const diffText = await gitText(root, ['diff', '--cached', '--', rel]).catch(() => '');
-  await gitText(root, ['commit', '--no-verify', '-m', subject, '--', rel]);
+  // A guest on this machine is the commit's author (git is the one identity
+  // carrier every tool reads); the owner keeps their own git identity.
+  const guest = user && user.id !== usersLib.ownerOf(roster).id ? user : null;
+  await gitText(root, ['commit', '--no-verify', ...(guest ? ['--author', `${guest.name} <${guest.id}@aiconvo>`] : []), '-m', subject, '--', rel]);
   const hash = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
-  await recordDocEdit({ ts: Date.now(), path: abs, action: 'commit', hash, subject });
+  await recordDocEdit({ ts: Date.now(), path: abs, action: 'commit', hash, subject, user: user ? user.id : undefined });
   ledgerRecordEditorSave(abs, { added: Number(addedRaw) || 0, removed: Number(removedRaw) || 0, chars: null, sha, commitHash: hash });
   scheduleDocCommitTitle(root, hash, diffText);
   return { ok: true, path: abs, hash, subject, sha };
@@ -9725,7 +9915,7 @@ loadVouches();
 const activeVouches = () => trustLib.activeRecords(vouchRecords);
 const vouchStatusFor = (absPath, content) => trustLib.statusFor(vouchRecords, absPath, content);
 
-async function vouchApply(body) {
+async function vouchApply(body, user = null) {
   const action = body.action === 'dispute' ? 'dispute' : body.action === 'retract' ? 'retract' : 'vouch';
   let record;
   if (action === 'retract') {
@@ -9745,6 +9935,8 @@ async function vouchApply(body) {
       source: String(body.source || '').slice(0, 40) || undefined,
     };
   }
+  // Who checked: a vouch is one person's word, and the label can say whose.
+  if (user && user.id) record.user = { id: user.id, name: user.name };
   await fsp.mkdir(NOTES_DIR, { recursive: true });
   await fsp.appendFile(VOUCH_LEDGER, JSON.stringify(record) + '\n');
   vouchRecords.push(record);
@@ -11039,13 +11231,16 @@ function draftDefaults() {
 // draftId makes the call idempotent for one hour: a retry after a lost
 // connection returns the conversation already created instead of a twin.
 const draftStarts = new Map(); // draftId → { at, promise }
-async function startConversationFromDraft(p) {
+async function startConversationFromDraft(p, principal = null) {
+  principal = principal || principalFor(null);
   const draftId = typeof p.draftId === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(p.draftId) ? p.draftId : null;
   if (draftId && draftStarts.has(draftId)) return draftStarts.get(draftId).promise;
   const work = (async () => {
     const items = normalizeContextItems(p.context);
     const models = normalizePickedModels(p.models);
     const prompt = typeof p.prompt === 'string' ? p.prompt.trim() : '';
+    // Who else typed into the draft's shared box, read before it is cleared.
+    const draftCoauthors = draftId ? composeCoauthorsOf('draft:' + draftId, principal.user) : null;
     const images = rpcImagesOf(p.images);
     if (images.length && !prompt) throw new Error('write a few words with the image');
     const thinking = typeof p.thinking === 'string' && settingsLib.THINKING_LEVELS.includes(p.thinking) ? p.thinking : null;
@@ -11053,11 +11248,12 @@ async function startConversationFromDraft(p) {
     const bundle = items.length ? await writeAttachedContextFile(items) : null;
     const started = await startProjectConversation({
       project: LOOSE_PROJECT, projectless: true, folder: p.folder, agent: 'pi', surface: 'rpc',
-      models, mode, include: { map: false }, silent: true, context: bundle ? bundle.text : undefined,
+      models, mode, include: { map: false }, silent: true, context: bundle ? bundle.text : undefined, principal,
     });
     const key = started.key;
     if (!key) throw new Error('no conversation came back');
     const { sessionPath } = sessionPathsFor(key);
+    if (draftId && collab.has('draft:' + draftId)) { collab.clear('draft:' + draftId); collab.close('draft:' + draftId); }
     if (bundle) {
       // The warm process already loaded this exact bundle: the first send
       // must not restart it to load the same text again.
@@ -11074,7 +11270,7 @@ async function startConversationFromDraft(p) {
         if (models.length >= 2) out.runs = await startFanOut(key, { node: null, models, message: prompt, images, force: false });
         else out.job = jobView(await startAgentRun(key, {
           node: null, provider: models[0] && models[0].provider, modelId: models[0] && models[0].modelId,
-          message: prompt, images, force: false, allowQueue: false,
+          message: prompt, images, force: false, allowQueue: false, principal, input: p.input, coauthors: draftCoauthors,
         }));
       } catch (e) { out.runError = e.message; }
     }
@@ -11205,7 +11401,8 @@ async function startProjectConversation(options) {
   const useRpc = kind === 'pi' && options.surface !== 'alacritty';
   let key = null;
   if (useRpc) {
-    const begun = await piEng().piBeginWarm({ cwd, env: agentEnv(), extraArgs: ['--name', label, ...piProviderExtraArgs(), ...piCtxArgs] });
+    const principal = options.principal || principalFor(null);
+    const begun = await piEng().piBeginWarm({ cwd, env: agentEnv(principal), extraArgs: ['--name', label, ...piProviderExtraArgs(), ...piCtxArgs] });
     // Pi reports sessionFile before it writes. The first prompt creates the file.
     const job = {
       id: 'run:' + crypto.randomUUID().slice(0, 8),
@@ -11217,10 +11414,12 @@ async function startProjectConversation(options) {
     };
     let handle = null;
     if (text) {
-      handle = piEng().piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(), extraArgs: [...piProviderExtraArgs(), ...piCtxArgs] }, {
+      const author = { id: principal.user.id, name: principal.user.name, input: options.input || 'keyboard', coauthors: options.coauthors || undefined };
+      handle = piEng().piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(principal), extraArgs: [...piProviderExtraArgs(), ...piCtxArgs] }, {
         provider: leadModel && leadModel.provider, modelId: leadModel && leadModel.modelId,
-        message: text, simplifyAnswers: appSettings.simplifyAnswers, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job),
+        message: text, author, simplifyAnswers: appSettings.simplifyAnswers, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job),
       });
+      pendingNewSessionAuthor = piEng() === pisdk ? null : { author, chars: text.length };
     }
     const t0 = Date.now();
     while (Date.now() - t0 < 20000) {
@@ -11235,6 +11434,7 @@ async function startProjectConversation(options) {
     }
     key = await indexNewSessionFile(begun.file);
     job.key = key;
+    if (pendingNewSessionAuthor) { recordAuthorship(key, pendingNewSessionAuthor.author, { via: 'rpc', chars: pendingNewSessionAuthor.chars, input: options.input, coauthors: options.coauthors }); pendingNewSessionAuthor = null; }
     if (handle) {
       agentRunJobs.set(job.id, job);
       jobChanged(job);
@@ -12171,27 +12371,57 @@ function sendValidated(req, res, type, cacheControl, text) {
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   try {
+    // Who is asking. A credential in the URL (an invite link, the install
+    // token) or a signed handoff from a paired install becomes a cookie;
+    // after that the cookie names the person on every request.
+    const setSignInCookie = (secret, next) => {
+      res.writeHead(302, {
+        Location: next || '/',
+        'Set-Cookie': `aiconvo=${encodeURIComponent(secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`,
+      });
+      res.end();
+    };
     if (LAN_TOKEN && !isLocalRequest(req)) {
-      const setLanCookie = (next) => {
-        res.writeHead(302, {
-          Location: next || '/',
-          'Set-Cookie': `aiconvo=${encodeURIComponent(LAN_TOKEN)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`,
-        });
-        res.end();
-      };
-      if (u.searchParams.get('token') === LAN_TOKEN) return setLanCookie(u.pathname === '/' ? '/' : u.pathname);
+      const landing = u.pathname === '/' ? '/' : u.pathname;
+      const tokenParam = u.searchParams.get('token');
+      if (tokenParam) {
+        const who = usersLib.userForSecret(roster, tokenParam, LAN_TOKEN);
+        if (who && !who.disabled) { saveRoster(); return setSignInCookie(tokenParam, landing); }
+      }
+      const handoff = u.searchParams.get('handoff');
+      if (handoff) {
+        try {
+          const claim = usersLib.verifyHandoff(handoff, { trustedPublicKeys: (appSettings.machines || []).map(m => m.publicKey).filter(Boolean) });
+          const { user } = usersLib.upsertHandoffUser(roster, claim.user);
+          if (user.disabled) throw new Error('this person is disabled here');
+          const { secret } = usersLib.issueCredential(roster, user.id, { kind: 'session', label: 'handoff' });
+          saveRoster();
+          return setSignInCookie(secret, landing);
+        } catch (e) {
+          res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+          return res.end(lanLoginPage('Could not sign you in from the other machine: ' + e.message + '. Enter a token instead.'));
+        }
+      }
       if (req.method === 'POST' && u.pathname === '/login') {
         let body = '';
         for await (const chunk of req) body += chunk;
         const posted = new URLSearchParams(body).get('token') || '';
-        if (posted === LAN_TOKEN) return setLanCookie('/');
+        const who = usersLib.userForSecret(roster, posted, LAN_TOKEN);
+        if (who && !who.disabled) { saveRoster(); return setSignInCookie(posted, '/'); }
         res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
         return res.end(lanLoginPage('That token is wrong. Try again.'));
       }
-      if (!hasLanToken(req)) {
-        res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
-        return res.end(lanLoginPage());
-      }
+    }
+    const identity = identifyRequest(req);
+    if (!identity) {
+      if (u.pathname.startsWith('/api/')) return json(res, 401, { error: 'sign in first' });
+      res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(lanLoginPage());
+    }
+    req.identity = identity;
+    if (u.pathname === '/logout' && req.method === 'POST') {
+      res.writeHead(302, { Location: '/', 'Set-Cookie': 'aiconvo=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
+      return res.end();
     }
     if (u.pathname === '/manifest.webmanifest') {
       const manifest = JSON.parse(await fsp.readFile(path.join(__dirname, 'manifest.webmanifest'), 'utf8'));
@@ -12218,6 +12448,14 @@ const server = http.createServer(async (req, res) => {
       '/files-browser.js': { file: 'files-browser.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.js': { file: 'live-file.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.css': { file: 'live-file.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/collab-client.js': { file: 'collab-client.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/people.js': { file: 'people.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/people.css': { file: 'people.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/file-viewers.js': { file: 'file-viewers.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/file-viewers.css': { file: 'file-viewers.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/html-preview.js': { file: 'html-preview.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/pdf-viewer-config.js': { file: 'pdf-viewer-config.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/pdf-viewer.css': { file: 'pdf-viewer.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/live-file-marks.js': { file: 'live-file-marks.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file-marks-worker.js': { file: 'live-file-marks-worker.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/change-review-ui.js': { file: 'change-review-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
@@ -12241,6 +12479,7 @@ const server = http.createServer(async (req, res) => {
       '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
@@ -12277,14 +12516,19 @@ const server = http.createServer(async (req, res) => {
       // Temporary fan-out files do not enlarge the visible fork family.
       let n = 0, last = '', mt = 0;
       const visibleEntries = [];
+      const see = visibleKeysFor(identity);
+      const all = accessLib.seesAll(identity);
       for (const pair of Object.entries(index)) {
         if (pair[1].hiddenFanout) continue;
+        if (!all && !see(targetOf(pair[0]))) continue;
         visibleEntries.push(pair);
         n++;
         if ((pair[1].lastTs || '') > last) last = pair[1].lastTs || '';
         if ((pair[1].mtimeMs || 0) > mt) mt = pair[1].mtimeMs || 0;
       }
-      const etag = '"' + n + '-' + last + '-' + mt + '"';
+      // The rules and the person are part of the list's identity: a
+      // sharing change must not answer 304 with the old list.
+      const etag = '"' + n + '-' + last + '-' + mt + '-' + (identity.user ? identity.user.id : '') + '-' + accessRulesVersion + '"';
       if (req.headers['if-none-match'] === etag) {
         res.writeHead(304, { ETag: etag });
         return res.end();
@@ -12301,7 +12545,10 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/session') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
+      if (!keyVisible(identity, key)) return json(res, 403, { error: 'This is not shared with you.' });
       const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+      data.canAct = canDo(identity, 'act', targetOf(key));
+      data.participants = (index[key].participants || []).map(p => userById(usersLib.resolveId(roster, p.id)) || p);
       data.project = projectNameOf(index[key].cwd, key);
       data.selectedModels = await inferredConversationModels(key, data);
       data.attachedContext = conversationContextOf(key);
@@ -12314,7 +12561,11 @@ const server = http.createServer(async (req, res) => {
         res.end(media.body);
       } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/path/info' && req.method === 'GET') {
-      try { json(res, 200, await pathInfoResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
+      try {
+        const info = await pathInfoResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req));
+        assertPathAccess(identity, info.path, 'see');
+        json(res, 200, info);
+      }
       catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/path/read' && req.method === 'GET') {
       try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
@@ -12349,6 +12600,7 @@ const server = http.createServer(async (req, res) => {
     } else if ((u.pathname === '/api/path/content' || u.pathname === '/api/conversation/file-content') && req.method === 'GET') {
       try {
         const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'), 32 * 1024 * 1024, isLocalRequest(req));
+        assertPathAccess(identity, found.abs, 'see');
         const mime = imageMimeForPath(found.abs);
         if (!mime) throw new Error('this file is not a supported image');
         res.writeHead(200, { 'Content-Type': mime, 'Content-Length': found.stat.size,
@@ -12383,6 +12635,7 @@ const server = http.createServer(async (req, res) => {
           })
         : await legacySearch(q);
       // Conversation groups carry fresh index metadata (titles can change).
+      out.groups = out.groups.filter(g => !g.key || keyVisible(identity, g.key));
       for (const g of out.groups) {
         if (g.key && index[g.key]) {
           const e = index[g.key];
@@ -12400,7 +12653,7 @@ const server = http.createServer(async (req, res) => {
       const t0 = Date.now();
       try {
         const r = await semFetch('/search', { ns: semNs(), q, limit: 30 }, 8000);
-        json(res, 200, { q, semantic: true, tookMs: Date.now() - t0, groups: semanticGroups(r.hits || []) });
+        json(res, 200, { q, semantic: true, tookMs: Date.now() - t0, groups: semanticGroups(r.hits || []).filter(g => !g.key || keyVisible(identity, g.key)) });
       } catch (e) {
         json(res, 200, { q, semantic: true, groups: [], error: 'semantic stage unreachable' });
       }
@@ -12416,6 +12669,7 @@ const server = http.createServer(async (req, res) => {
       const key = u.searchParams.get('id');
       const entry = index[key];
       if (!entry) return json(res, 404, { error: 'not found' });
+      if (!keyVisible(identity, key)) return json(res, 403, { error: 'This is not shared with you.' });
       const relatedEpics = Object.values(epics)
         .filter(epic => epic.sessionIds.includes(key))
         .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -12430,7 +12684,10 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/project') {
       const project = u.searchParams.get('name') || '';
       try {
+        if (!projectVisible(identity, project)) return json(res, 403, { error: 'This project is not shared with you.' });
         const data = await projectResponse(project);
+        for (const list of ['recent', 'sessions']) if (Array.isArray(data[list])) data[list] = data[list].filter(r => !r || !r.key || keyVisible(identity, r.key));
+        data.canAct = canDo(identity, 'act', { project, creator: projectCreatorOf(project) });
         // Fire-and-forget: opening a project usually precedes opening its
         // file Gantt. Warm the diff cache now so that click is not a cold
         // 2-minute parse of every session file.
@@ -12586,6 +12843,7 @@ const server = http.createServer(async (req, res) => {
         const params = Object.fromEntries(u.searchParams);
         const meta = projectMetaFor(params.name || '');
         if (!meta) throw new Error('project not found');
+        if (!projectVisible(identity, params.name || '')) return json(res, 403, { error: 'This project is not shared with you.' });
         const browser = require('./files-browser-server.js');
         if (u.pathname.endsWith('/activity')) {
           if (!fileLedger) throw new Error('File activity is unavailable');
@@ -12688,23 +12946,27 @@ const server = http.createServer(async (req, res) => {
         }
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/file/read' && req.method === 'GET') {
-      try { json(res, 200, await fileReadResponse(u.searchParams.get('path') || '', u.searchParams.get('id') || '', u.searchParams.get('reviewId') || '')); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try {
+        const out = await fileReadResponse(u.searchParams.get('path') || '', u.searchParams.get('id') || '', u.searchParams.get('reviewId') || '');
+        assertPathAccess(identity, out.path, 'see');
+        out.canAct = canDo(identity, 'act', { project: projectOfPath(out.path), creator: projectCreatorOf(projectOfPath(out.path)) });
+        json(res, 200, out);
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/file/save' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      try { json(res, 200, await fileSaveResponse(JSON.parse(body || '{}'))); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try { const p = JSON.parse(body || '{}'); assertPathAccess(identity, path.resolve(expandHomePath(String(p.path || ''))), 'act'); json(res, 200, await fileSaveResponse(p, identity.user)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/doc/save' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      try { json(res, 200, await docSaveResponse(JSON.parse(body || '{}'))); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try { const p = JSON.parse(body || '{}'); assertPathAccess(identity, path.resolve(expandHomePath(String(p.path || ''))), 'act'); json(res, 200, await docSaveResponse(p, identity.user)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/doc/commit' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      try { json(res, 200, await docCommitResponse(JSON.parse(body || '{}'))); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try { const p = JSON.parse(body || '{}'); assertPathAccess(identity, path.resolve(expandHomePath(String(p.path || ''))), 'act'); json(res, 200, await docCommitResponse(p, identity.user)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/doc/create' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -12727,8 +12989,8 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/vouch' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      try { json(res, 200, await vouchApply(JSON.parse(body || '{}'))); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try { const p = JSON.parse(body || '{}'); if (p.path) assertPathAccess(identity, path.resolve(expandHomePath(String(p.path))), 'act'); json(res, 200, await vouchApply(p, identity.user)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/vouch/status' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -12808,8 +13070,11 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
       parsed.projectless = false; // only the dedicated route can choose home
-      try { json(res, 200, await startProjectConversation(parsed)); }
-      catch (e) { json(res, 500, { error: e.message }); }
+      parsed.principal = principalFor(identity);
+      try {
+        if (parsed.project && !projectVisible(identity, parsed.project)) throw Object.assign(new Error('This project is not shared with you.'), { status: 403 });
+        json(res, 200, await startProjectConversation(parsed));
+      } catch (e) { json(res, e.status || 500, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/start-loose' && req.method === 'POST') {
       // A draft's first send. The folder is the user's explicit choice,
       // validated as an existing directory and reported back; it decides
@@ -12818,7 +13083,7 @@ const server = http.createServer(async (req, res) => {
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 48 * 1024 * 1024) return json(res, 413, { error: 'request too large' }); }
       try {
-        json(res, 200, await startConversationFromDraft(JSON.parse(body || '{}')));
+        json(res, 200, await startConversationFromDraft(JSON.parse(body || '{}'), principalFor(identity)));
       } catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/draft-defaults' && req.method === 'GET') {
       try { json(res, 200, draftDefaults()); }
@@ -12965,7 +13230,9 @@ const server = http.createServer(async (req, res) => {
       try { fs.unlinkSync(file); json(res, 200, { ok: true }); }
       catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/project-folds') {
-      json(res, 200, await projectFoldsResponse());
+      const folds = await projectFoldsResponse();
+      if (!accessLib.seesAll(identity) && Array.isArray(folds.created)) folds.created = folds.created.filter(c => projectVisible(identity, c.name));
+      json(res, 200, folds);
     } else if (u.pathname === '/api/project/fold' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -12987,7 +13254,10 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/tree') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
+      if (!keyVisible(identity, key)) return json(res, 403, { error: 'This is not shared with you.' });
       const tree = await sessionTreeFor(key);
+      const see = visibleKeysFor(identity);
+      tree.nodes = tree.nodes.filter(n => !n.key || see(targetOf(n.key)));
       // Parallel opinions belong in the comparison stage, not as durable
       // fork branches in the navigation tree.
       tree.nodes = tree.nodes.filter(n => !(index[n.key] && index[n.key].hiddenFanout));
@@ -13031,8 +13301,9 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       try {
         const p = JSON.parse(body || '{}');
+        assertCan(identity, 'act', targetOf(p.id), 'this conversation');
         json(res, 200, await retitleConversation(p.id));
-      } catch (e) { json(res, 400, { error: e.message }); }
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/title' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -13113,17 +13384,23 @@ const server = http.createServer(async (req, res) => {
         const models = normalizePickedModels(p.models);
         if (models.length) saveConversationModels(p.id, models);
         const images = rpcImagesOf(p.images);
+        assertCan(identity, 'act', targetOf(p.id), 'this conversation');
+        const principal = principalFor(identity);
+        const coauthors = composeCoauthorsOf(p.id, identity);
         if (models.length >= 2) {
-          json(res, 202, { ok: true, runs: await startFanOut(p.id, { node: p.node || null, models, message: p.prompt, images, force: !!p.force, context: p.context }) });
+          json(res, 202, { ok: true, runs: await startFanOut(p.id, { node: p.node || null, models, message: p.prompt, images, force: !!p.force, context: p.context, principal, input: p.input, coauthors }) });
         } else {
           const out = await startAgentRun(p.id, {
             node: p.node || null, provider: models[0] && models[0].provider, modelId: models[0] && models[0].modelId,
             message: p.prompt, images, force: !!p.force, allowQueue: true, context: p.context, expectedLeaf: p.expectedLeaf,
+            principal, input: p.input, coauthors,
           });
           if (out && out.queued) json(res, 202, { ok: true, queued: true, job: out.job ? jobView(out.job) : null });
           else json(res, 202, { ok: true, job: jobView(out) });
         }
-      } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+        // The shared box empties for everyone who was writing in it.
+        if (p.clearCompose !== false && collab.has('compose:' + p.id)) collab.clear('compose:' + p.id);
+      } catch (e) { json(res, e.needsForce ? 409 : e.status || 400, { error: e.message, needsForce: !!e.needsForce }); }
     } else if (u.pathname === '/api/node/aggregate' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -13193,15 +13470,15 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body);
       if (!parsed.id || !index[parsed.id]) return json(res, 404, { error: 'not found' });
-      try { json(res, 200, await branchSession(parsed.id, parsed.node, parsed.expectedLeaf)); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try { assertCan(identity, 'act', targetOf(parsed.id), 'this conversation'); json(res, 200, await branchSession(parsed.id, parsed.node, parsed.expectedLeaf)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/fork' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body);
       if (!parsed.id || !index[parsed.id]) return json(res, 404, { error: 'not found' });
-      try { json(res, 200, await forkSession(parsed.id, parsed.node)); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try { assertCan(identity, 'act', targetOf(parsed.id), 'this conversation'); json(res, 200, await forkSession(parsed.id, parsed.node)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/fork-edit' && req.method === 'POST') {
       // pi only: fork BEFORE a user message; the response carries the message
       // text so the UI can prefill the composer for edit-and-resubmit.
@@ -13254,13 +13531,127 @@ const server = http.createServer(async (req, res) => {
       appSettings = settingsLib.normalizeSettings({ ...appSettings, usageBilling: parsed });
       saveAppSettings();
       json(res, 200, { usageBilling: appSettings.usageBilling });
+    } else if (u.pathname === '/api/users' && req.method === 'GET') {
+      json(res, 200, { users: publicUsers(), groups: roster.groups, me: usersLib.publicUser(identity.user), tier: identity.tier, canManage: usersLib.canManageUsers(identity), aliases: roster.aliases || {} });
+    } else if (u.pathname.startsWith('/api/users/') && req.method === 'POST') {
+      // Roster management: the owner and admins. A member may only make
+      // invite links for their own devices.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let p = {};
+      try { p = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const op = u.pathname.slice('/api/users/'.length);
+      const manages = usersLib.canManageUsers(identity);
+      const ownerTier = usersLib.isOwnerTier(identity);
+      const self = p.id && identity.user && p.id === identity.user.id;
+      const isOwnerTarget = p.id && (usersLib.findUser(roster, p.id) || {}).role === 'owner';
+      try {
+        let out;
+        if (op === 'add') {
+          if (!manages) throw Object.assign(new Error('only the owner or an admin can add people'), { status: 403 });
+          const user = usersLib.addUser(roster, { name: p.name, role: p.role === 'admin' && ownerTier ? 'admin' : 'member', groups: p.groups });
+          const { secret } = usersLib.issueCredential(roster, user.id, { label: p.label || 'first device' });
+          out = { user: usersLib.publicUser(user), inviteLink: inviteLinkFor(secret) };
+        } else if (op === 'update') {
+          if (!(manages && (!isOwnerTarget || ownerTier)) && !self) throw Object.assign(new Error('you cannot change that person'), { status: 403 });
+          const patch = self && !manages ? { name: p.name, glyph: p.glyph, color: p.color } : p;
+          if (patch.role !== undefined && !ownerTier) delete patch.role;
+          out = { user: usersLib.publicUser(usersLib.updateUser(roster, p.id, patch)) };
+        } else if (op === 'invite') {
+          if (!manages && !self) throw Object.assign(new Error('you can only make links for yourself'), { status: 403 });
+          if (isOwnerTarget && !ownerTier) throw Object.assign(new Error('only the owner makes their own links'), { status: 403 });
+          const { secret, credential } = usersLib.issueCredential(roster, p.id, { label: p.label });
+          out = { inviteLink: inviteLinkFor(secret), credential: { id: credential.id, label: credential.label, createdAt: credential.createdAt } };
+        } else if (op === 'revoke') {
+          if (!manages && !self) throw Object.assign(new Error('not yours to revoke'), { status: 403 });
+          out = { revoked: usersLib.revokeCredential(roster, p.id, p.credentialId).id };
+        } else if (op === 'remove') {
+          if (!manages || (isOwnerTarget)) throw Object.assign(new Error('only the owner or an admin can remove people'), { status: 403 });
+          out = { removed: usersLib.removeUser(roster, p.id).id };
+        } else if (op === 'transfer') {
+          if (!ownerTier) throw Object.assign(new Error('only the owner can hand over the machine'), { status: 403 });
+          out = { owner: usersLib.publicUser(usersLib.transferOwnership(roster, p.id)) };
+        } else if (op === 'merge') {
+          if (!manages) throw Object.assign(new Error('only the owner or an admin can merge people'), { status: 403 });
+          const kept = usersLib.mergeUsers(roster, p.keep, p.drop);
+          accessLib.rewriteUser(accessRules, p.drop, kept.id); saveAccessRules();
+          out = { user: usersLib.publicUser(kept) };
+        } else if (op === 'group') {
+          if (!manages) throw Object.assign(new Error('only the owner or an admin can manage groups'), { status: 403 });
+          const gid = String(p.id || '').trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 40);
+          if (!gid) throw new Error('a group needs a short name');
+          roster.groups = roster.groups.filter(g => g.id !== gid);
+          if (!p.remove) roster.groups.push({ id: gid, name: String(p.name || gid).trim().slice(0, 60) || gid });
+          else for (const usr of roster.users) usr.groups = usr.groups.filter(g => g !== gid);
+          out = { groups: roster.groups };
+        } else throw Object.assign(new Error('unknown users operation'), { status: 404 });
+        saveRoster();
+        broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
+        json(res, 200, { ...out, users: publicUsers(), groups: roster.groups });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/handoff' && req.method === 'GET') {
+      // The switcher asks for the address that lands the current person on
+      // another install as themselves. Without that install's key (paired
+      // before keys existed), the old token link is the fallback, which
+      // signs in as that machine's owner: the answer says so.
+      const m = (appSettings.machines || [])[Number(u.searchParams.get('i'))];
+      if (!m) return json(res, 404, { error: 'no such machine' });
+      if (m.publicKey && identity.user) {
+        const token = usersLib.mintHandoff(installKey, identity.user, { ttlMs: 30000 });
+        return json(res, 200, { url: m.url + '/?handoff=' + encodeURIComponent(token), as: usersLib.publicUser(identity.user), handoff: true });
+      }
+      json(res, 200, { url: m.url + '/' + (m.token ? '?token=' + encodeURIComponent(m.token) : ''), handoff: false, why: m.publicKey ? 'not signed in' : 'that machine was paired before keys existed — pair it again to arrive as yourself' });
+    } else if (u.pathname === '/api/presence' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const client = sseByConn.get(String(p.conn || ''));
+        if (!client) return json(res, 410, { error: 'that live connection is gone — reconnecting' });
+        if (client.identity.user.id !== identity.user.id) return json(res, 403, { error: 'not your connection' });
+        const changed = presence.set(client.conn, { user: usersLib.publicUser(identity.user), route: p.route, kind: p.kind, position: p.position });
+        if (changed) broadcastPresence();
+        json(res, 200, { ok: true, people: presenceFor(identity, client.conn) });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/access' && req.method === 'GET') {
+      // How a conversation or a project is shared, and whether the asker may change it.
+      const key = u.searchParams.get('id') || '';
+      const project = u.searchParams.get('project') || '';
+      const target = key ? targetOf(key) : { project, creator: projectCreatorOf(project) };
+      if (key && !index[key]) return json(res, 404, { error: 'not found' });
+      if (!canDo(identity, 'see', target)) return json(res, 403, { error: 'This is not shared with you.' });
+      const eff = accessLib.effectiveRule(accessRules, target);
+      json(res, 200, { target: { key: target.key || null, project: target.project || null }, object: eff.object, rule: eff.rule,
+        own: canDo(identity, 'own', target), seesAll: accessLib.seesAll(identity),
+        summary: accessLib.describe(eff.object ? eff.rule : null, { users: publicUsers(), me: identity.user }),
+        conversationRule: key ? accessRules.rules['conversation:' + key] || null : null,
+        projectRule: target.project ? accessRules.rules['project:' + target.project] || null : null });
+    } else if (u.pathname === '/api/access' && (req.method === 'PUT' || req.method === 'POST')) {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const key = String(p.id || ''), project = String(p.project || '');
+        if (key && !index[key]) return json(res, 404, { error: 'not found' });
+        const target = key ? targetOf(key) : { project, creator: projectCreatorOf(project) };
+        if (!key && !project) throw new Error('name a conversation or a project');
+        assertCan(identity, 'own', target, key ? 'this conversation' : 'this project');
+        const object = key ? 'conversation:' + key : 'project:' + project;
+        // A rule always names at least one owner, so it can be undone.
+        const owners = Array.isArray(p.owners) && p.owners.length ? p.owners : (accessRules.rules[object]?.owners?.length ? accessRules.rules[object].owners : [identity.user.id]);
+        const rule = accessLib.setRule(accessRules, object, { mode: p.mode, listed: p.listed, owners: p.mode === 'everyone' && p.owners === undefined ? [] : owners });
+        saveAccessRules();
+        broadcast({ type: 'access', object });
+        json(res, 200, { object, rule, summary: accessLib.describe(rule, { users: publicUsers(), me: identity.user }) });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/settings' && req.method === 'GET') {
-      json(res, 200, settingsResponse());
+      json(res, 200, settingsResponse(identity));
     } else if (u.pathname === '/api/machines/connect' && req.method === 'POST') {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin can connect machines' });
       let body = '';
       for await (const chunk of req) body += chunk;
       const { link } = JSON.parse(body || '{}');
-      try { json(res, 200, { ...(await connectMachine(link)), ...settingsResponse() }); }
+      try { json(res, 200, { ...(await connectMachine(link)), ...settingsResponse(identity) }); }
       catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/machines/probe' && req.method === 'GET') {
       // Before the switcher jumps, ask whether that install answers. The
@@ -13281,8 +13672,9 @@ const server = http.createServer(async (req, res) => {
       const entry = settingsLib.normalizeMachines([JSON.parse(body || '{}')])[0];
       if (!entry) return json(res, 400, { error: 'name, url and token are required' });
       upsertMachine(entry);
-      json(res, 200, { ok: true, name: os.hostname() });
+      json(res, 200, { ok: true, name: os.hostname(), publicKey: installKey.publicKey });
     } else if (u.pathname === '/api/settings' && (req.method === 'PUT' || req.method === 'POST')) {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin can change this machine\'s settings' });
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
@@ -13307,7 +13699,7 @@ const server = http.createServer(async (req, res) => {
         searchIdx.semanticResetSync();
       }
       if (semanticEnabled()) scheduleSemanticSync(500); // backfill starts now
-      json(res, 200, settingsResponse());
+      json(res, 200, settingsResponse(identity));
     } else if (u.pathname === '/api/models') {
       const listed = await listPiModels(u.searchParams.get('refresh') === '1');
       json(res, 200, {
@@ -13470,17 +13862,17 @@ const server = http.createServer(async (req, res) => {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
-      try { json(res, 200, await sendToConversation(parsed.id, parsed)); }
+      try { assertCan(identity, 'act', targetOf(parsed.id), 'this conversation'); json(res, 200, await sendToConversation(parsed.id, parsed, principalFor(identity))); }
       catch (e) {
         if (e.blocked) json(res, 409, { error: e.message, blocked: true, ...e.blocked });
-        else json(res, 500, { error: e.message });
+        else json(res, e.status || 500, { error: e.message });
       }
     } else if (u.pathname === '/api/conversation/act' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
-      try { json(res, 200, await actOnConversation(parsed.id, parsed)); }
-      catch (e) { json(res, 500, { error: e.message }); }
+      try { assertCan(identity, 'act', targetOf(parsed.id), 'this conversation'); json(res, 200, await actOnConversation(parsed.id, parsed)); }
+      catch (e) { json(res, e.status || 500, { error: e.message }); }
     } else if (u.pathname === '/api/recent-files' && req.method === 'GET') {
       json(res, 200, { files: recentFileState.files });
     } else if (u.pathname === '/api/recent-files' && req.method === 'POST') {
@@ -13560,6 +13952,7 @@ const server = http.createServer(async (req, res) => {
       let body = '';
       for await (const chunk of req) body += chunk;
       const { cmd, cwd } = JSON.parse(body || '{}');
+      if (cwd && typeof cwd === 'string') { try { assertPathAccess(identity, cwd, 'act'); } catch (e) { return json(res, e.status || 400, { error: e.message }); } }
       if (!cmd || typeof cmd !== 'string') return json(res, 400, { error: 'cmd required' });
       const t0 = Date.now();
       const result = await new Promise(resolve => {
@@ -13736,6 +14129,7 @@ const server = http.createServer(async (req, res) => {
     } else if (u.pathname === '/api/distill/start' && req.method === 'POST') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
+      if (!canDo(identity, 'act', targetOf(key))) return json(res, 403, { error: 'You can read this conversation but not act on it here.' });
       const force = u.searchParams.get('force') === '1';
       let job = distillJobs.get(key);
       if (!job || (job.finished && (force || job.status === 'error'))) {
@@ -13774,6 +14168,11 @@ const server = http.createServer(async (req, res) => {
       });
       res.write(': connected\n\n');
       sseClients.add(res);
+      // This stream names the browser for presence: the page reports where
+      // it is under this id, and the row goes when the stream closes.
+      const conn = crypto.randomBytes(8).toString('hex');
+      sseByConn.set(conn, { res, identity, conn });
+      try { res.write('data: ' + JSON.stringify({ type: 'hello', conn, me: usersLib.publicUser(identity.user), tier: identity.tier, users: publicUsers(), people: presenceFor(identity, conn) }) + '\n\n'); } catch {}
       // Seed the working-agent set right away: the periodic diff below only
       // broadcasts on change, so a fresh client would otherwise start blind.
       // boot + runs let a reconnecting client drop stale run cards and notice
@@ -13785,7 +14184,7 @@ const server = http.createServer(async (req, res) => {
         }) + '\n\n');
       } catch {}
       const beat = setInterval(() => res.write(': ping\n\n'), 30000);
-      req.on('close', () => { clearInterval(beat); sseClients.delete(res); });
+      req.on('close', () => { clearInterval(beat); sseClients.delete(res); sseByConn.delete(conn); if (presence.remove(conn)) broadcastPresence(); });
     } else if (u.pathname.startsWith('/api/records/') && req.method === 'GET') {
       // The agent-facing read API: same text the CLI and the Pi tools print.
       // Failures are plain text too, so a shell or a tool call reads them as is.
@@ -13914,7 +14313,7 @@ process.on('SIGINT', () => { shutdownGracefully(); });
 function speechStreamUpgrade(req, socket, head) {
   const u = new URL(req.url, 'http://x');
   if (u.pathname !== '/api/speech/stream') { socket.destroy(); return; }
-  if (LAN_TOKEN && !isLocalRequest(req) && !hasLanToken(req)) {
+  if (!identifyRequest(req)) {
     socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
     socket.destroy();
     return;
@@ -13944,7 +14343,65 @@ function speechStreamUpgrade(req, socket, head) {
   socket.setNoDelay(true);
   upstream.setNoDelay(true);
 }
-server.on('upgrade', speechStreamUpgrade);
+// ---------- shared documents (collab.js) ----------
+// ws(s)://host/api/collab/<name>. The person is the cookie's; the right to
+// write is the same `act` right the send and save routes check, so a
+// spectator on a read-only conversation sees the box and cursors but
+// cannot type into it.
+const { acceptWebSocket, refuseUpgrade } = require('./wsserver.js');
+async function collabUpgrade(req, socket, head) {
+  const u = new URL(req.url, 'http://x');
+  const identity = identifyRequest(req);
+  if (!identity) return refuseUpgrade(socket, 401, 'Unauthorized');
+  const name = decodeURIComponent(u.pathname.slice('/api/collab/'.length));
+  const m = /^(compose|draft|file):(.+)$/.exec(name);
+  if (!m) return refuseUpgrade(socket, 404, 'Not Found');
+  let canWrite = true, initialText = '';
+  try {
+    if (m[1] === 'compose') {
+      const key = m[2];
+      if (!index[key]) return refuseUpgrade(socket, 404, 'Not Found');
+      if (!canDo(identity, 'see', targetOf(key))) return refuseUpgrade(socket, 403, 'Forbidden');
+      canWrite = canDo(identity, 'act', targetOf(key));
+    } else if (m[1] === 'draft') {
+      if (!/^[A-Za-z0-9_-]{6,64}$/.test(m[2])) return refuseUpgrade(socket, 400, 'Bad Request');
+    } else {
+      const abs = path.resolve(expandHomePath(m[2]));
+      const project = projectOfPath(abs);
+      const target = { project, creator: projectCreatorOf(project) };
+      if (!canDo(identity, 'see', target)) return refuseUpgrade(socket, 403, 'Forbidden');
+      canWrite = canDo(identity, 'act', target);
+      if (!collab.has(name)) {
+        try { initialText = await fsp.readFile(await editableFilePath(abs), 'utf8'); }
+        catch (e) { return refuseUpgrade(socket, 404, 'Not Found'); }
+      }
+    }
+  } catch (e) { return refuseUpgrade(socket, 400, 'Bad Request'); }
+  const conn = acceptWebSocket(req, socket, head);
+  if (!conn) return;
+  collab.join(conn, name, { user: usersLib.publicUser(identity.user), canWrite, initialText });
+}
+// A shared file lands on disk through the ordinary save path (history,
+// ledger, activity) shortly after people stop typing; the ledger row names
+// the last person who typed. Ctrl+S in the editor only hurries this.
+collab.on('change', ev => {
+  const m = /^file:(.+)$/.exec(ev.name);
+  if (!m) return;
+  const abs = m[1];
+  const last = (ev.contributors || []).sort((a, b) => (b.at || 0) - (a.at || 0))[0] || null;
+  const who = last ? { id: last.id, name: last.name } : null;
+  const body = { path: abs, text: ev.text, actor: 'human', input: 'keyboard', fromCollab: true };
+  (DOCUMENT_EXT.test(abs) ? docSaveResponse(body, who) : fileSaveResponse(body, who))
+    .catch(e => console.error('[collab] save ' + abs + ': ' + e.message));
+});
+collab.on('awareness', ev => broadcast({ type: 'collab-people', name: ev.name, people: ev.people }));
+collab.on('join', ev => broadcast({ type: 'collab-people', name: ev.name, people: ev.people }));
+collab.on('leave', ev => broadcast({ type: 'collab-people', name: ev.name, people: ev.people }));
+server.on('upgrade', (req, socket, head) => {
+  const u = new URL(req.url, 'http://x');
+  if (u.pathname.startsWith('/api/collab/')) return collabUpgrade(req, socket, head).catch(() => { try { socket.destroy(); } catch {} });
+  return speechStreamUpgrade(req, socket, head);
+});
 // A failed bind at startup (port taken) ends the process as before, so the
 // service manager reports it. A failed re-bind after a reach flip must not
 // take down the agent runs living in this process: report it and keep the

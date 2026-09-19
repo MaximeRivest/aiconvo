@@ -5,13 +5,21 @@ markdown writing experience: blur→render / focus→source editing,
 tables, images, task lists, math, alerts, syntax-highlighted code
 blocks, and MRMD themes.
 
-It excludes: Yjs networking, runtimes, terminals, linked tables, AI
-panels, collaboration UI, and MRP clients. Aiconvo owns files, saves,
-Git commits, and provenance; MRMD owns the editing surface.
+It excludes: runtimes, terminals, linked tables, AI panels, and MRP
+clients. Aiconvo owns files, saves, Git commits, and provenance; MRMD
+owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.11.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.12.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.12.0: collaboration primitives under `mrmdDocument.collab` (`Y`,
+  `Awareness`, `WebsocketProvider`, `yCollab`, `yUndoManagerKeymap`), and
+  both `createDocumentEditor` and `createCodeEditor` accept `extensions`
+  (extra CodeMirror extensions), so a host can make an editor shared with
+  `extensions: [collab.yCollab(ytext, provider.awareness)]`. Nothing is
+  wired by the bundle: the host owns document identity, the endpoint and
+  who is who. Aiconvo's `collab.js` speaks the y-websocket protocol on the
+  server side. The bundle grows from 1.6 MB to 1.7 MB.
 - 0.11.0: shared host services for both document and code editors: an opt-in
   Markdown marker gutter, `onLineHover`, version-checked `setLineMarks`,
   `setDiagnostics`, `setLanguageServices`, and `openSearch`. Code editors retain

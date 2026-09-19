@@ -31,6 +31,8 @@ async function harness(t) {
     gitTrackedPaths: async () => git(['ls-files', '-z']).split('\0').filter(Boolean),
     projectMetaFor: () => ({ cwd: root }), projectGitRepositories: async () => [root],
     recentProjectFileActivity: () => null,
+    // Shared documents and people: not exercised here.
+    collab: { has: () => false, setText: () => false }, usersLib: { ownerOf: () => ({ id: 'owner' }) }, roster: {},
   });
   vm.runInContext(source, ctx);
   // Revision naming is unrelated to saving formats; never start background model calls.
