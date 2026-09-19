@@ -49,6 +49,10 @@ const DEFAULT_SETTINGS = {
   // Other aiconvo installs reachable from the header machine switcher.
   // Each entry: { name, url, token }. The token is that machine's LAN token.
   machines: [],
+  // Reachable from other devices on the network. null: never chosen in the
+  // app, so the service environment (AICONVO_LAN=1) decides. Once someone
+  // flips the switch in settings → machines, that choice wins and persists.
+  lan: null,
 };
 
 // Keep only well-formed machine entries: a name, an http(s) URL without a
@@ -192,8 +196,9 @@ function normalizeSettings(input) {
   const snippetTrigger = normalizeSnippetTrigger(src.snippetTrigger);
   const doneSound = DONE_SOUND_MODES.includes(src.doneSound) ? src.doneSound : DEFAULT_SETTINGS.doneSound;
   const machines = normalizeMachines(src.machines);
+  const lan = src.lan === true ? true : src.lan === false ? false : null;
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, simplifyAnswers, simplifyPrompt, autoResumeNetwork, piTheme, usageBilling, snippetTrigger, doneSound, machines };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, simplifyAnswers, simplifyPrompt, autoResumeNetwork, piTheme, usageBilling, snippetTrigger, doneSound, machines, lan };
   }
   return {
     usePiDefault: false,
@@ -213,6 +218,7 @@ function normalizeSettings(input) {
     snippetTrigger,
     doneSound,
     machines,
+    lan,
   };
 }
 

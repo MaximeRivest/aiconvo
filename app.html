@@ -29,14 +29,17 @@ window.setAppFont = function (id) {
   else document.documentElement.style.removeProperty('--font');
   document.documentElement.dataset.appFont = window.appFonts[id] ? id : 'theme';
 };
+// Apply defaults even when browser storage is unavailable.
+window.setAppFont('sans');
+document.documentElement.dataset.layout = 'side';
 // Apply saved appearance before first paint. '' theme = follow the OS.
 try {
-  window.setAppFont(localStorage.getItem('aiconvo.font') || 'theme');
+  window.setAppFont(localStorage.getItem('aiconvo.font') || 'sans');
   const t = localStorage.getItem('aiconvo.theme');
   if (t) document.documentElement.dataset.theme = t;
   // The side-panel layout (design/42) is a device choice; the class lands
   // before first paint so the column never flashes in or out.
-  if (localStorage.getItem('aiconvo.layout') === 'side') document.documentElement.dataset.layout = 'side';
+  document.documentElement.dataset.layout = localStorage.getItem('aiconvo.layout') === 'top' ? '' : 'side';
   const manifestTheme = t || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.getElementById('appManifest').href = `/manifest.webmanifest?theme=${encodeURIComponent(manifestTheme)}`;
 } catch {}
@@ -296,6 +299,9 @@ body.conv #convHeadExtra { display: inline-flex; flex-shrink: 0; }
 #machinePop button:hover { background: var(--surface-2); }
 #machinePop button .mach-url { color: var(--text-dim); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mach-item { display: grid; grid-template-columns: 1fr 2fr 2fr auto; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.mach-item.shown { grid-template-columns: 1fr 3fr auto auto; padding: 6px 0; }
+.mach-item .mach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mach-item .mach-url { color: var(--text-dim); font-size: var(--fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mach-item input { min-width: 0; }
 .mach-item .row, .set-field .row { display: flex; gap: var(--sp-2); align-items: center; }
 .set-field .row input { flex: 1 1 auto; min-width: 0; }
@@ -1855,8 +1861,14 @@ body.side-layout.conv #floatHead #chTitle { flex: 0 1 auto; font-size: var(--fs-
 body.side-layout.conv.chrome-min #floatHead > * { pointer-events: none; }
 /* No negative margins: actions sit below the bubble, with their own air. */
 .msg.user { position: relative; border-radius: var(--r); margin-bottom: 44px; }
-.msg-actions { height: auto; min-height: 30px; margin: 8px 0 0; gap: 4px; opacity: 1; visibility: visible; }
+.msg-actions { height: auto; min-height: 30px; margin: 8px 0 0; gap: 4px; opacity: 0; visibility: hidden; }
+/* Preserve the spacing, not the visual noise. Focus and tap-reveal keep
+   actions reachable without a mouse. An open menu must not vanish. */
+.msg:hover > .msg-actions, .msg:focus-within > .msg-actions,
+.msg.actions-open > .msg-actions, .msg:has(.msg-more-actions[open]) > .msg-actions { opacity: 1; visibility: visible; }
 .msg.user > .msg-actions { position: absolute; top: 100%; right: 8px; margin: 6px 0 0; }
+/* Bridge the visual gap so moving from a bubble to its buttons keeps hover. */
+.msg.user > .msg-actions::before { content: ''; position: absolute; left: 0; right: 0; top: -6px; height: 6px; }
 .msg-actions button { height: auto; min-height: 28px; padding: 4px 7px; border-radius: var(--r-sm); }
 .msg-actions button:hover { background: var(--surface-2); text-decoration: none; }
 .file-action-menu, .mpick, .slash-pop { border-radius: var(--r-menu); }
@@ -14040,39 +14052,57 @@ function bindPaneSnippets(root) {
 function paneMachines() {
   const list = settingsOf().machines || [];
   const host = (settingsState && settingsState.hostname) || 'this machine';
-  const row = (m, i) => `<div class="mach-item" data-i="${i}">
+  const lan = (settingsState && settingsState.lan) || { on: false, fixed: false, addresses: [] };
+  const links = (settingsState && settingsState.connectLinks) || [];
+  // A saved machine shows as one line; "edit" opens its fields in place.
+  const row = (m, i, editing) => editing
+    ? `<div class="mach-item editing" data-i="${i}">
       <input type="text" data-f="name" value="${esc(m.name)}" placeholder="name" spellcheck="false">
       <input type="text" data-f="url" value="${esc(m.url)}" placeholder="http://host:7433" spellcheck="false">
       <input type="password" data-f="token" value="${esc(m.token)}" placeholder="LAN token" spellcheck="false" autocomplete="off">
       <button type="button" class="ghost" data-del title="Remove">✕</button>
+    </div>`
+    : `<div class="mach-item shown" data-i="${i}">
+      <b class="mach-name">${esc(m.name)}</b>
+      <span class="mach-url" title="${esc(m.url)}">${esc(m.url)}</span>
+      <button type="button" class="ghost" data-edit>edit</button>
+      <button type="button" class="ghost" data-del title="Remove">✕</button>
     </div>`;
-  const links = (settingsState && settingsState.connectLinks) || [];
   return `<h2>machines</h2>
     <p class="lead">This page is talking to <b>${esc(host)}</b>. Connected machines appear in the header switcher; each one keeps its own conversations, agents, and notes.</p>
     <div class="set-group">
+      <h3>reach this machine from other devices</h3>
+      <label class="set-check"><input id="setLan" type="checkbox"${lan.on ? ' checked' : ''}${lan.fixed ? ' disabled' : ''}> let phones, tablets and other aiconvo installs on my network open this one</label>
+      ${lan.fixed ? '<div class="set-help">The service configuration pins the address (AICONVO_HOST), so this switch cannot change it.</div>' : ''}
+      ${lan.on
+        ? `<div class="set-help">Takes effect at once, no restart. Open one of these links on the other device, or paste it into that device's settings → machines to connect both ways:</div>
+           ${links.length
+             ? `<div class="set-field">${links.map(l => `<div class="row"><code class="mach-link">${esc(l)}</code><button type="button" class="ghost" data-copy="${esc(l)}">copy</button></div>`).join('')}</div>`
+             : '<span class="hint">no network address found on this machine yet — connect to Wi‑Fi or a cable and reopen this page.</span>'}
+           <div class="set-help">Anyone with a link can open this aiconvo. Share it only with your own devices.</div>`
+        : '<div class="set-help">Off: only this computer can open it. Turn it on to get a link for your other devices. If you are reading this from another device, turning it off will cut you off.</div>'}
+    </div>
+    <div class="set-group">
       <h3>connect to another machine</h3>
       <div class="set-field">
-        <label for="setMachLink">paste its connect link</label>
+        <label for="setMachLink">paste its link</label>
         <div class="row"><input id="setMachLink" type="text" placeholder="http://192.168.2.24:7433/?token=…" spellcheck="false" autocomplete="off"><button type="button" id="setMachConnect">connect</button></div>
-        <div class="set-help">Found on that machine under settings → machines, or in its <code>journalctl --user -u aiconvo</code> log. One paste links both ways: it is added here, and this machine is registered there.</div>
+        <div class="set-help">Found on that machine under settings → machines, once its switch above is on. One paste links both ways.</div>
       </div>
       <div class="set-status" id="setMachStatus"></div>
     </div>
     <div class="set-group">
-      <h3>this machine's connect link</h3>
-      ${links.length
-        ? links.map(l => `<div class="row"><code class="mach-link">${esc(l)}</code><button type="button" class="ghost" data-copy="${esc(l)}">copy</button></div>`).join('')
-        : '<span class="hint">not reachable from other machines — this server listens on localhost only. Start it with AICONVO_LAN=1 to get a link.</span>'}
-      <div class="set-help">Anyone with this link can open this aiconvo. Share it only with your own machines.</div>
-    </div>
-    <div class="set-group">
-      <div class="set-group-head"><h3>connected machines</h3><button type="button" id="setMachNew">add by hand</button></div>
-      <div id="setMachList">${list.length ? list.map(row).join('') : '<span class="hint">none yet — the header button stays hidden</span>'}</div>
-      <div class="set-help">URL as the browser reaches it (LAN or Tailscale address, port 7433) and that machine's LAN token. Stored in this machine's settings file.</div>
+      <div class="set-group-head"><h3>connected machines</h3><button type="button" class="ghost" id="setMachNew">add by hand</button></div>
+      <div id="setMachList">${list.length ? list.map((m, i) => row(m, i, false)).join('') : '<span class="hint">none yet — the header switcher stays hidden</span>'}</div>
     </div>`;
 }
 
 function bindPaneMachines(root) {
+  const lanBox = $('setLan');
+  if (lanBox) lanBox.onchange = () => {
+    lanBox.disabled = true;
+    saveSettings({ lan: lanBox.checked }, lanBox.checked ? 'reachable from your other devices' : 'reachable from this computer only');
+  };
   const link = $('setMachLink');
   const connect = async () => {
     const v = link.value.trim();
@@ -14094,32 +14124,42 @@ function bindPaneMachines(root) {
   $('setMachConnect').onclick = connect;
   link.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); connect(); } };
   root.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await copyText(b.dataset.copy); flashCopied(b); } catch (e) { errToast(e.message); } });
-  const read = () => [...root.querySelectorAll('.mach-item')].map(el => ({
-    name: el.querySelector('[data-f=name]').value,
-    url: el.querySelector('[data-f=url]').value,
-    token: el.querySelector('[data-f=token]').value,
-  }));
-  root.querySelectorAll('.mach-item input').forEach(inp => inp.onchange = () => {
-    const list = read();
-    const bad = list.find(m => m.url.trim() && !/^https?:\/\/[^\s/]+/i.test(m.url.trim()));
-    if (bad) return errToast('URL must start with http:// or https://');
-    saveSettings({ machines: list }, 'machines saved');
-  });
-  root.querySelectorAll('.mach-item [data-del]').forEach(b => b.onclick = () => {
-    const i = Number(b.closest('.mach-item').dataset.i);
-    saveSettings({ machines: read().filter((_, j) => j !== i) }, 'machine removed');
-  });
-  $('setMachNew').onclick = () => {
-    const list = read();
-    const wrap = $('setMachList');
-    if (!list.length) wrap.innerHTML = '';
-    wrap.insertAdjacentHTML('beforeend', `<div class="mach-item" data-i="${list.length}">
-      <input type="text" data-f="name" value="" placeholder="name" spellcheck="false">
+  const saved = settingsOf().machines || [];
+  const read = () => [...root.querySelectorAll('.mach-item')].map((el, i) => el.classList.contains('editing')
+    ? { name: el.querySelector('[data-f=name]').value, url: el.querySelector('[data-f=url]').value, token: el.querySelector('[data-f=token]').value }
+    : saved[Number(el.dataset.i)] || saved[i]);
+  const fields = `<input type="text" data-f="name" value="" placeholder="name" spellcheck="false">
       <input type="text" data-f="url" value="" placeholder="http://host:7433" spellcheck="false">
       <input type="password" data-f="token" value="" placeholder="LAN token" spellcheck="false" autocomplete="off">
-      <button type="button" class="ghost" data-del title="Remove">✕</button>
-    </div>`);
-    bindPaneMachines(root);
+      <button type="button" class="ghost" data-del title="Remove">✕</button>`;
+  const wire = () => {
+    root.querySelectorAll('.mach-item.editing input').forEach(inp => inp.onchange = () => {
+      const list = read();
+      const bad = list.find(m => m.url.trim() && !/^https?:\/\/[^\s/]+/i.test(m.url.trim()));
+      if (bad) return errToast('URL must start with http:// or https://');
+      saveSettings({ machines: list }, 'machines saved');
+    });
+    root.querySelectorAll('.mach-item [data-del]').forEach(b => b.onclick = () => {
+      const el = b.closest('.mach-item');
+      saveSettings({ machines: read().filter((_, j) => j !== [...root.querySelectorAll('.mach-item')].indexOf(el)) }, 'machine removed');
+    });
+    root.querySelectorAll('.mach-item [data-edit]').forEach(b => b.onclick = () => {
+      const el = b.closest('.mach-item'), m = saved[Number(el.dataset.i)] || { name: '', url: '', token: '' };
+      el.classList.replace('shown', 'editing');
+      el.innerHTML = fields;
+      el.querySelector('[data-f=name]').value = m.name;
+      el.querySelector('[data-f=url]').value = m.url;
+      el.querySelector('[data-f=token]').value = m.token;
+      wire();
+      el.querySelector('[data-f=name]').focus();
+    });
+  };
+  wire();
+  $('setMachNew').onclick = () => {
+    const wrap = $('setMachList');
+    if (!root.querySelectorAll('.mach-item').length) wrap.innerHTML = '';
+    wrap.insertAdjacentHTML('beforeend', `<div class="mach-item editing" data-i="new">${fields}</div>`);
+    wire();
     wrap.lastElementChild.querySelector('[data-f=name]').focus();
   };
 }
@@ -14325,9 +14365,9 @@ if (localStorage.getItem('aiconvo.barFold')) setBarFold(true);
 // keeps the top bar whatever the choice says. The same #agentsPop element
 // moves into the column and stays open; the bar's global controls move too.
 const SIDE_LAYOUT_MQ = matchMedia('(min-width: 701px)');
-function layoutPref() { try { return localStorage.getItem('aiconvo.layout') === 'side' ? 'side' : 'top'; } catch { return 'top'; } }
+function layoutPref() { try { return localStorage.getItem('aiconvo.layout') === 'top' ? 'top' : 'side'; } catch { return 'side'; } }
 function setLayoutPref(v) {
-  try { v === 'side' ? localStorage.setItem('aiconvo.layout', 'side') : localStorage.removeItem('aiconvo.layout'); } catch {}
+  try { localStorage.setItem('aiconvo.layout', v === 'side' ? 'side' : 'top'); } catch {}
   document.documentElement.dataset.layout = v === 'side' ? 'side' : '';
   applyLayout();
 }

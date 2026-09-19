@@ -100,8 +100,9 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   await size(1440, 1000);
   await send('Page.navigate', { url: base + '/' }, sid);
   await until(`typeof applyLayout === 'function'`);
-  await evaluate(`localStorage.setItem('aiconvo.layout','side')`);
-  await send('Page.navigate', { url: base + '/' }, sid);
+  assert.equal(await evaluate(`localStorage.getItem('aiconvo.layout')`), null, 'fresh browser has no layout override');
+  assert.equal(await evaluate(`document.documentElement.dataset.appFont`), 'sans', 'system sans is the default');
+  assert.match(await evaluate(`getComputedStyle(document.body).fontFamily`), /system-ui/);
   await until(`document.body.classList.contains('side-layout') && sessions.length >= 3`, 'side layout on');
   assert.equal(await evaluate(`document.documentElement.dataset.layout`), 'side', 'the class is set before paint');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('body > header')).display`), 'none', 'no top bar on home');
@@ -135,6 +136,26 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   // Quiet title, balanced action placement, and theme-controlled shapes.
   assert.deepEqual(await evaluate(`(()=>{const s=getComputedStyle($('floatHead'));return [s.backgroundColor,s.boxShadow,s.borderTopWidth]})()`), ['rgba(0, 0, 0, 0)', 'none', '0px']);
   assert.equal(await evaluate(`(()=>{const m=document.querySelector('.msg.user'),a=m.querySelector('.msg-actions');return a.getBoundingClientRect().top-m.getBoundingClientRect().bottom >= 6})()`), true, 'actions sit outside the bubble, not against its bottom edge');
+  // Actions are quiet at rest, but accessible by mouse, keyboard and tap.
+  await evaluate(`document.activeElement.blur();document.querySelectorAll('.msg.actions-open').forEach(m=>m.classList.remove('actions-open'))`);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 3, y: 3 }, sid);
+  const actionVisibility = `getComputedStyle(document.querySelector('.msg.user > .msg-actions')).visibility`;
+  assert.equal(await evaluate(actionVisibility), 'hidden');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('.msg.assistant > .msg-actions')).visibility`), 'hidden', 'assistant actions are hidden too');
+  const bubble = await evaluate(`(()=>{const r=document.querySelector('.msg.user').getBoundingClientRect();return {x:r.left+20,y:r.top+10,height:r.height}})()`);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: bubble.x, y: bubble.y }, sid);
+  assert.equal(await evaluate(actionVisibility), 'visible', 'hover reveals actions');
+  const gap = await evaluate(`(()=>{const r=document.querySelector('.msg.user > .msg-actions').getBoundingClientRect();return {x:r.left+10,y:r.top-3}})()`);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...gap }, sid);
+  assert.equal(await evaluate(actionVisibility), 'visible', 'crossing the gap does not hide actions');
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 3, y: 3 }, sid);
+  assert.equal(await evaluate(actionVisibility), 'hidden');
+  assert.equal(await evaluate(`document.querySelector('.msg.user').getBoundingClientRect().height`), bubble.height, 'hover causes no layout shift');
+  await evaluate(`document.querySelector('.msg.user').focus()`);
+  assert.equal(await evaluate(actionVisibility), 'visible', 'keyboard focus reveals actions');
+  await evaluate(`document.activeElement.blur();document.querySelector('.msg.user').classList.add('actions-open')`);
+  assert.equal(await evaluate(actionVisibility), 'visible', 'touch reveal remains supported');
+  await evaluate(`document.querySelector('.msg.user').classList.remove('actions-open')`);
   assert.equal(await evaluate(`getComputedStyle($('agentCompose')).borderTopLeftRadius`), '18px');
   assert.equal(await evaluate(`$('agentAt').checkVisibility()`), false, 'secondary controls are hidden until requested');
   await evaluate(`$('composeTools').querySelector('summary').click()`);
@@ -307,7 +328,10 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   assert.equal(await evaluate(`document.documentElement.style.getPropertyValue('--font')`), '', 'theme default removes the override');
   await evaluate(`const r=document.querySelector('input[name=setLayout][value=top]'); r.checked=true; r.onchange()`);
   assert.equal(await evaluate(`document.body.classList.contains('side-layout')`), false);
-  assert.equal(await evaluate(`localStorage.getItem('aiconvo.layout')`), null);
+  assert.equal(await evaluate(`localStorage.getItem('aiconvo.layout')`), 'top', 'top bar is now an explicit saved preference');
+  await send('Page.reload', {}, sid);
+  await until(`typeof settingsOpen !== 'undefined' && settingsOpen && !!document.querySelector('#setAppFont')`);
+  assert.equal(await evaluate(`sideLayoutOn()`), false, 'explicit top preference survives reload');
   assert.equal(await evaluate(`document.querySelector('#agentsPop').hidden && document.querySelector('#agentsPop').parentElement.tagName === 'BODY'`), true);
   assert.equal(await evaluate(`document.querySelector('#chTitle').closest('header') !== null && document.querySelector('#projSort').closest('header') !== null && document.querySelector('#chMove').nextElementSibling.id === 'chNew'`), true, 'the bar gets its pieces back');
   await evaluate(`goHome()`);

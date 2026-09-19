@@ -56,12 +56,20 @@ const INTERNAL_USAGE_FILE = path.join(CACHE_DIR, 'internal-usage.jsonl');
 const MODEL_HEALTH_FILE = path.join(CACHE_DIR, 'memory-model-health.json');
 const MODEL_ACTIVITY_TIMEOUT_MS = Math.max(30000, Number(process.env.AICONVO_MODEL_ACTIVITY_TIMEOUT_MS) || 2 * 60 * 1000);
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7433;
-const HOST = process.env.AICONVO_HOST || (process.env.AICONVO_LAN === '1' ? '0.0.0.0' : '127.0.0.1');
+// Where the server listens. AICONVO_HOST pins an exact address (rare, for
+// operators). Otherwise the switch in settings → machines decides, and
+// until someone has flipped it, AICONVO_LAN=1 in the service unit does.
+// HOST and LAN_TOKEN change at runtime when the switch is flipped; see
+// applyLanMode().
+const ENV_HOST = String(process.env.AICONVO_HOST || '').trim();
+const LAN_BY_ENV = process.env.AICONVO_LAN === '1';
+let HOST = ENV_HOST || (LAN_BY_ENV ? '0.0.0.0' : '127.0.0.1');
+const isLoopback = host => host === '127.0.0.1' || host === '::1' || host === 'localhost';
 const TLS_PORT = process.env.AICONVO_TLS_PORT ? Number(process.env.AICONVO_TLS_PORT) : 7443;
 const LAN_TOKEN_FILE = path.join(CACHE_DIR, 'lan-token');
 function loadLanToken() {
   if (process.env.AICONVO_TOKEN) return String(process.env.AICONVO_TOKEN);
-  if (HOST === '127.0.0.1' || HOST === '::1') return '';
+  if (isLoopback(HOST)) return '';
   try {
     const existing = fs.readFileSync(LAN_TOKEN_FILE, 'utf8').trim();
     if (existing) return existing;
@@ -71,7 +79,7 @@ function loadLanToken() {
   fs.writeFileSync(LAN_TOKEN_FILE, created + '\n', { mode: 0o600 });
   return created;
 }
-const LAN_TOKEN = loadLanToken();
+let LAN_TOKEN = loadLanToken();
 function requestIp(req) {
   return String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
 }
@@ -3807,7 +3815,7 @@ function currentModelLabel() { return settingsLib.modelLabel(appSettings, readPi
 // another install adds this machine there, and that install registers itself
 // back here, so one paste links both ways.
 function connectLinks() {
-  if (!LAN_TOKEN || HOST === '127.0.0.1') return [];
+  if (!LAN_TOKEN || isLoopback(HOST)) return [];
   const links = lanAddresses().map(ip => `http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
   if (PUBLIC_URL) links.unshift(`${PUBLIC_URL}/?token=${LAN_TOKEN}`);
   return links;
@@ -3872,7 +3880,7 @@ async function connectMachine(link) {
   upsertMachine({ name, url: parsed.url, token: parsed.token });
   let registeredBack = false, why = '';
   const myUrl = ownUrlFor(parsed.url);
-  if (!LAN_TOKEN || HOST === '127.0.0.1') why = 'this machine is not on the LAN (AICONVO_LAN=1), so it cannot be reached back';
+  if (!LAN_TOKEN || isLoopback(HOST)) why = 'this machine is not reachable from other devices (settings → machines), so it cannot be reached back';
   else if (!myUrl) why = 'no LAN address found for this machine';
   else {
     try {
@@ -3902,7 +3910,17 @@ function settingsResponse() {
     // Which install the page is talking to; the header machine switcher shows it.
     hostname: os.hostname(),
     connectLinks: connectLinks(),
+    // The reach switch as it stands right now (after any runtime flip), and
+    // whether the operator pinned the address so the switch cannot move it.
+    lan: { on: lanWanted(), fixed: Boolean(ENV_HOST), addresses: lanAddresses() },
   };
+}
+
+// The state the settings ask for: an explicit choice wins, else the service
+// environment. AICONVO_HOST pins the address and ignores both.
+function lanWanted() {
+  if (ENV_HOST) return !isLoopback(ENV_HOST);
+  return appSettings.lan === null || appSettings.lan === undefined ? LAN_BY_ENV : appSettings.lan;
 }
 
 function usageRange(searchParams) {
@@ -13218,8 +13236,10 @@ const server = http.createServer(async (req, res) => {
         return json(res, 400, { error: 'unknown model: ' + parsed.provider + '/' + parsed.model });
       }
       const prevSemTarget = (appSettings.semanticUrl || '') + '|' + semNs();
+      const prevLan = lanWanted();
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
       saveAppSettings();
+      if (lanWanted() !== prevLan) applyLanMode(lanWanted());
       broadcast({ type: 'agent-recovery', recovery: agentRecovery.snapshot() });
       memoryModelHealth.setIdentity(currentModelLabel());
       // A new URL or namespace means a different remote index: re-push all.
@@ -13864,6 +13884,16 @@ function speechStreamUpgrade(req, socket, head) {
   upstream.setNoDelay(true);
 }
 server.on('upgrade', speechStreamUpgrade);
+// A failed bind at startup (port taken) ends the process as before, so the
+// service manager reports it. A failed re-bind after a reach flip must not
+// take down the agent runs living in this process: report it and keep the
+// connections that are open.
+let everListened = false;
+server.on('listening', () => { everListened = true; });
+server.on('error', e => {
+  console.error('aiconvo listener: ' + e.message);
+  if (!everListened) process.exit(1);
+});
 
 let recoveryReady = false;
 const recoveryTimer = setInterval(() => {
@@ -13880,23 +13910,42 @@ function restoreInterruptedRuns() {
   recoveryReady = true;
 }
 
-server.listen(PORT, HOST, () => {
-  console.log(`aiconvo → http://localhost:${PORT}`);
-  if (HOST !== '127.0.0.1' && HOST !== '::1') {
-    for (const ip of lanAddresses()) console.log(`aiconvo LAN → http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
-    console.log(`aiconvo LAN token file → ${LAN_TOKEN_FILE}`);
-    try {
-      const tls = ensureLanTls();
-      const tlsServer = https.createServer(tls, (req, res) => server.emit('request', req, res));
-      tlsServer.on('upgrade', speechStreamUpgrade);
-      tlsServer.listen(TLS_PORT, HOST, () => {
-        for (const ip of lanAddresses()) console.log(`aiconvo PWA → https://${ip}:${TLS_PORT}/?token=${LAN_TOKEN}`);
-        console.log('Install the tablet icon from the HTTPS URL: browser menu → Add to Home screen.');
-      });
-    } catch (error) {
-      console.log('aiconvo TLS skipped: ' + error.message);
-    }
+// Bind (or re-bind) the listeners for the reach switch. Flipping it in
+// settings must not restart the process: agent runs and warm pi sessions
+// live here, so the plain-http listener closes and reopens on the new
+// address in place. Connections already open (this page's event stream,
+// an ongoing run) are untouched; only new connections see the change. The
+// self-signed https listener for tablets exists only while reachable.
+let tlsServer = null;
+function applyLanMode(on, onListening) {
+  HOST = ENV_HOST || (on ? '0.0.0.0' : '127.0.0.1');
+  LAN_TOKEN = loadLanToken();
+  if (server.listening) server.close();
+  server.listen(PORT, HOST, () => {
+    console.log(`aiconvo → http://localhost:${PORT}`);
+    if (!isLoopback(HOST)) {
+      for (const ip of lanAddresses()) console.log(`aiconvo LAN → http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
+      console.log(`aiconvo LAN token file → ${LAN_TOKEN_FILE}`);
+    } else console.log('aiconvo reachable from this computer only');
+    if (onListening) onListening();
+  });
+  if (tlsServer) { try { tlsServer.close(); } catch {} tlsServer = null; }
+  if (isLoopback(HOST)) return;
+  try {
+    const tls = ensureLanTls();
+    tlsServer = https.createServer(tls, (req, res) => server.emit('request', req, res));
+    tlsServer.on('upgrade', speechStreamUpgrade);
+    tlsServer.on('error', e => console.log('aiconvo TLS listener: ' + e.message));
+    tlsServer.listen(TLS_PORT, HOST, () => {
+      for (const ip of lanAddresses()) console.log(`aiconvo PWA → https://${ip}:${TLS_PORT}/?token=${LAN_TOKEN}`);
+      console.log('Install the tablet icon from the HTTPS URL: browser menu → Add to Home screen.');
+    });
+  } catch (error) {
+    console.log('aiconvo TLS skipped: ' + error.message);
   }
+}
+
+applyLanMode(lanWanted(), () => {
   fullScan().then(() => {
     restoreInterruptedRuns();
     watch(); watchNotes();

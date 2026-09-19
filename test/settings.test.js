@@ -56,6 +56,15 @@ test('normalizeSettings keeps the built-in default', () => {
   assert.strictEqual(normalizeSettings({ thinking: 'nope' }).thinking, 'off');
 });
 
+test('the reach switch is unset until chosen, then a plain boolean', () => {
+  for (const usePiDefault of [false, true]) {
+    assert.strictEqual(normalizeSettings({ usePiDefault }).lan, null);
+    assert.strictEqual(normalizeSettings({ usePiDefault, lan: true }).lan, true);
+    assert.strictEqual(normalizeSettings({ usePiDefault, lan: false }).lan, false);
+    assert.strictEqual(normalizeSettings({ usePiDefault, lan: 'yes' }).lan, null);
+  }
+});
+
 test('semantic search defaults to Tailscale without replacing custom servers', () => {
   for (const usePiDefault of [false, true]) {
     assert.strictEqual(normalizeSettings({ usePiDefault }).semanticUrl, 'http://100.86.49.54:8090');

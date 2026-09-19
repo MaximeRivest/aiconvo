@@ -46,7 +46,7 @@ access to that server. Voice URLs can be overridden with environment
 variables in the service unit; the search URL can be changed in settings.
 Restart Aiconvo after changing voice URLs.
 
-To use it from a tablet on the same local network, set `AICONVO_LAN=1` (the user service already does). The laptop still opens terminals and agent windows. The tablet only needs the printed LAN URL with `?token=…`. The token is stored in `~/.cache/aiconvo/lan-token`. After the first open, a cookie keeps the tablet signed in. On the e-paper tablet, pick the **e-ink** theme.
+To use it from a phone or tablet on the same local network, open settings → machines and turn on **reach this machine from other devices**. It takes effect at once (no restart) and shows the links to open on the other device; the choice is saved in settings. `AICONVO_LAN=1` in the service unit only sets the starting position until someone uses the switch; `AICONVO_HOST` pins the address and disables the switch. The laptop still opens terminals and agent windows. The tablet only needs the link with `?token=…`. The token is stored in `~/.cache/aiconvo/lan-token`. After the first open, a cookie keeps the tablet signed in. On the e-paper tablet, pick the **e-ink** theme.
 
 Over the tailnet, lambda is served at `https://lambda.tail69222b.ts.net` by Tailscale Serve (a real certificate, so copy, microphone and offline mode work on every device). Tailscale forwards to the local HTTP port and marks each request with `X-Forwarded-For`; the server treats such requests as remote, so the token still applies. `AICONVO_PUBLIC_URL` names that address so connect links and machine registration hand it out first.
 
@@ -87,8 +87,9 @@ Conversations started from a project get a short "Looking things up" section in 
 
 ## Custom themes
 
-Appearance also offers instant, per-browser font choices (theme default, sans,
-humanist, serif, monospace). These use installed fonts; code stays monospace.
+System sans and the sidebar are the defaults (narrow screens keep the top bar).
+Appearance offers instant, per-browser font choices (theme default, sans,
+humanist, serif, monospace), and the top bar remains an option. These use installed fonts; code stays monospace.
 Conversation shapes use `--r`, `--r-sm`, `--r-menu`, and `--r-composer`:
 rounded by default, square in the built-in e-ink theme. See
 [conversation surfaces](design/43-conversation-surfaces.md). The composer keeps

@@ -33,8 +33,10 @@ line to a floating card. Shape belongs to themes, not hard-coded components.
 - Copy/read/more sit **below** a user bubble, 6px away, outside its tinted
   background. The bubble stays compact. The gap below reserves room for
   these controls, without negative margins or overlap with the next message.
-- Assistant actions stay in normal document flow. Actions are visible rather
-  than hover-only; touch users do not need to discover hidden controls.
+- Assistant actions stay in normal document flow. Actions are hidden at rest
+  and appear on message hover, keyboard focus, or touch reveal. An open action
+  menu remains visible. Their space stays reserved so nothing jumps; a hover
+  bridge across the 6px user-bubble gap keeps buttons reachable.
 
 ## Appearance
 
@@ -42,11 +44,18 @@ line to a floating card. Shape belongs to themes, not hard-coded components.
   actions, menus and composer. Default: 6/4/10/18px. Built-in e-ink sets all
   to zero. The theme template documents the same tokens.
 - Appearance offers Theme default, System sans, Humanist sans, Book serif,
-  Monospace. Applies immediately; `aiconvo.font` persists per browser and is
+  Monospace. System sans is the default. Applies immediately; `aiconvo.font` persists per browser and is
   restored before paint. These use installed font stacks, not remote assets;
   the exact face can vary by device. Theme default removes the override.
 - Code and editor/terminal text retain `--font-mono`; a reading-font change
   does not disturb column alignment.
+
+## Defaults
+
+Sidebar is the desktop default; narrow screens still use the top bar.
+`aiconvo.layout=top` now stores an explicit opt-out, instead of removing the
+preference. Existing explicit layout/font choices are kept. System sans and
+sidebar apply before paint, including when browser storage is unavailable.
 
 ## Verification
 

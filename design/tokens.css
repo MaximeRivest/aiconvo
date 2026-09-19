@@ -78,7 +78,7 @@
   --theme-motion: 1;
 
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
-  --font: var(--font-mono);
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
   --fs-title: 15px;
   --fs-body: 13px;
   --fs-label: 12px;
