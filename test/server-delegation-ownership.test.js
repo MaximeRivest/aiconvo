@@ -44,6 +44,7 @@ function runSetup(t) {
     runEventForwarder: () => () => {}, inspectDeliverySession: async () => ({ deliveries: new Set(), branch: new Set(['launch']) }),
     pisdk: { stopWarmSession() {}, piHeadlessRun(target) { b.targets.push(target); return { done: Promise.resolve() }; } }, targets: [],
     stopRunningAgent: async () => { b.stops++; }, waitFileQuiet: async () => {}, stops: 0,
+    appSettings: { simplifyAnswers: false, simplifyPrompt: '' },
   });
   b.piEng = () => b.pisdk;
   load(b, 'async function startAgentRun(', '// Idle extension callbacks');

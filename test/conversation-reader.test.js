@@ -17,6 +17,7 @@ function fixture() {
   const code = [
     fs.readFileSync(path.join(root, 'conversation-flow.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'conversation-reader.js'), 'utf8'),
+    fs.readFileSync(path.join(root, 'navigation.js'), 'utf8'),
     extract('function setRoute(kind, hash)', '\nfunction goHome()'),
     extract('function dispatchHash(h, { restore = false } = {}) {', '\nconst $ = id => document.getElementById'),
     extract('async function open(rel, scroll,', '// ---- distillation ----'),
@@ -30,7 +31,8 @@ function fixture() {
   const css = app.match(/<style>([\s\S]*?)<\/style>/)[1] + fs.readFileSync(path.join(root, 'conversation-reader.css'), 'utf8');
   return `<!doctype html><html data-theme="light"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${tokens}\n${css}</style><body><div id="view" style="overflow:auto;flex:1"></div><script>
   const $=id=>document.getElementById(id), noop=()=>{};
-  let current=null, activeRel=null, viewKind='home', conversationLoadSeq=0, transcriptQuery='', matchIdx=-1, currentHash='', suppressHashEvents=0;
+  let current=null, activeRel=null, viewKind='home', conversationLoadSeq=0, transcriptQuery='', matchIdx=-1, currentHash='';
+  const TRANSIENT_KINDS=new Set(); let nav=null, navShownId=null, navTraversalSeq=0, navHold=null;
   let progressStream=null,lastNavProject=null,liveOpen=false;
   const lastNavConversation=new Map(), modelTouchAt=new Map(),traceLeaves=new Map(),fanoutFocus=new Map(),toolGroupOpen=new Map(),compareCache=new Map(),runLedgers=new Map(),activeRuns=new Map();
   const sessions=[], writes=[], errors=[], copied=[];
@@ -48,6 +50,7 @@ function fixture() {
   const fanModels=()=>[{provider:'test',modelId:'Model A'}],attachedContext=()=>[],autoGrowCompose=noop,renderAgentThumbs=noop,updateComposeMin=noop,echoUserPrompt=noop,clearSendPending=noop,agentRunLabel=()=> 'Send',ledgerAbsorb=noop;
   const readAloudMessage=b=>copied.push(readerMessage(b)?.text), openTranscriptEditor=noop, regenerateMessage=noop,openSnippetForm=noop;
   Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>copied.push(text)}});
+  const copyText=async text=>{copied.push(text);};
   const long='An answer needs a comfortable reading width and complete text. '.repeat(500)+'END OF COMPLETE ANSWER';
   const messages=[
     {eid:'p',role:'user',text:'Which approach should we use?'},
@@ -81,6 +84,7 @@ function fixture() {
   }
   function setRouteKind(kind){rememberConversationPosition();stopReaderLanding();viewKind=kind;$('view').scrollTop=0;}
   ${code.replace(/<\/script/gi, '<\\/script')}
+  nav=Navigation.createStack({history,location,describe:()=>null}); nav.load('');
   function check(ok,message){if(!ok)throw Error(message);}
   const pause=()=>new Promise(r=>setTimeout(r,30));
   const text=()=>document.getElementById('conversationTranscript').textContent;
@@ -238,6 +242,40 @@ function fixture() {
     check(Math.abs($('view').scrollTop-200)<3,'late layout pulled a reader back after scrolling away');
     flow=priorFlow;await open(priorKey,'top');return {passed:true};
   };
+  window.runRewriteAudit=async()=>{
+    const priorFlow=flow, priorKey=current.key; flow={groups:[],branches:[]};
+    const q={eid:'q',role:'user',text:'Explain it fully.'};
+    const a={eid:'a',role:'assistant',text:'Original technical explanation.',provider:'test',model:'one'};
+    const s={eid:'s',role:'assistant',text:'Full explanation in everyday words.',provider:'test',model:'one',rewriteOf:'a'};
+    store['rewrite-live']={key:'rewrite-live',source:'pi',mtimeMs:1,entryParents:[['q',null],['a','q']],messages:[q,a]};
+    answerRewriteChoices.delete('rewrite-live|a');
+    await open('rewrite-live','top');
+    store['rewrite-live'].messages.push(s);store['rewrite-live'].entryParents.push(['hidden','a'],['s','hidden']);store['rewrite-live'].mtimeMs++;
+    await open('rewrite-live','preserve');
+    const original=$('view').querySelector('[data-answer-pane="original"]'), simple=$('view').querySelector('[data-answer-pane="simple"]');
+    check(original&&!original.hidden&&simple.hidden,'rewrite replaced the answer already being read');
+    check(!$('view').querySelector('.answer-version-tabs'),'bulky version toolbar returned');
+    const switcher=original.querySelector('.msg-actions [data-answer-version="simple"]');
+    check(switcher&&switcher.textContent==='simpler','version switch is not a quiet message action');
+    const actionStyle=getComputedStyle(switcher),copyStyle=getComputedStyle(original.querySelector('.msg-copy'));
+    check(actionStyle.fontSize===copyStyle.fontSize&&actionStyle.height===copyStyle.height&&actionStyle.backgroundColor===copyStyle.backgroundColor,'version action does not match copy/read styling');
+    original.querySelector('.msg').focus();switcher.focus();switcher.click();
+    check(original.hidden&&!simple.hidden&&document.activeElement===simple.querySelector('[data-answer-version="original"]'),'version switch lost focus or visibility');
+    simple.querySelector('.msg-copy').click();await pause();check(copied.at(-1)===s.text,'copy used the original instead of the visible simpler answer');
+    $('view').querySelector('[data-answer-version="original"]').click();
+    original.querySelector('.msg-copy').click();await pause();check(copied.at(-1)===a.text,'original was not preserved for copy');
+    await open('rewrite-live','preserve');check(!$('view').querySelector('[data-answer-pane="original"]').hidden,'refresh lost version choice');
+    store['rewrite-fresh']={...store['rewrite-live'],key:'rewrite-fresh'};answerRewriteChoices.delete('rewrite-fresh|a');
+    await open('rewrite-fresh','top');
+    check(!$('view').querySelector('[data-answer-pane="simple"]').hidden,'fresh visit did not default to simpler version');
+    const freshMessage=$('view').querySelector('[data-answer-pane="simple"] .msg');
+    check(getComputedStyle(freshMessage.querySelector('.msg-actions')).visibility==='hidden','version actions are visible before hover/focus/tap');
+    freshMessage.querySelector('.md').click();
+    check(getComputedStyle(freshMessage.querySelector('[data-answer-version]')).visibility==='visible','tapping the answer did not reveal its version action');
+    check($('view').querySelectorAll('.msg.user').length===1,'automatic request appeared as a user message');
+    check(document.documentElement.scrollWidth<=innerWidth,'answer version controls overflowed');
+    flow=priorFlow;await open(priorKey,'top');return {passed:true};
+  };
   const renderParallelStage=noop;
   window.prepareScreenshot=async()=>{readerGroup('chat','p').compare=false;await renderConv('top');$('view').scrollTop=0;};
   </script></body></html>`;
@@ -292,6 +330,7 @@ test('real browser: path fidelity, nested branches, full answers, safe actions, 
   await evaluate('prepareScreenshot()');
   for (const [name, width, height] of [['desktop', 1440, 1000], ['phone', 390, 844]]) {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }, sid);
+    assert.equal((await evaluate('runRewriteAudit()')).passed, true, name + ' rewrite controls');
     assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true, name + ' overflows horizontally');
     const shot = await send('Page.captureScreenshot', { format: 'png' }, sid);
     fs.writeFileSync(path.join(os.tmpdir(), 'conversation-reader-' + name + '.png'), Buffer.from(shot.result.data, 'base64'));

@@ -1,0 +1,59 @@
+/* A conversation before its first message: the ordinary composer under a
+   short empty state, with one quiet setup line above the box. Tokens only;
+   nothing here depends on colour alone. */
+.draft-view { display: flex; flex-direction: column; min-height: 100%; }
+.draft-empty { max-width: var(--read-max); width: 100%; margin: 12vh auto 0; padding: 0 var(--sp-3); flex: 1 1 auto; }
+.draft-empty-title { font-size: var(--fs-title); font-weight: 700; margin-bottom: var(--sp-2); }
+.draft-empty p { margin: 0 0 var(--sp-2); max-width: 64ch; line-height: 1.5; }
+.draft-others a { color: var(--cyan); }
+
+.draft-setup { width: 100%; max-width: var(--read-max); margin: 0 auto; font-size: var(--fs-meta); color: var(--text-dim); }
+.draft-setup .ds-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 2px 4px; }
+.draft-setup .ds-state { font-weight: 700; color: var(--text); text-transform: lowercase; }
+.draft-setup .ds-folder { color: var(--text); font-weight: 700; }
+.draft-setup .ds-implies { white-space: nowrap; }
+.draft-setup .ds-toggle { margin-left: auto; min-height: 26px; height: 26px; padding: 0 8px; font-size: var(--fs-meta); }
+.draft-setup .ds-toggle[aria-expanded="true"] { color: var(--text); }
+.draft-setup .ds-panel { display: grid; gap: 8px; padding: 8px 2px 12px; border-top: 1px solid var(--border); }
+.draft-setup .ds-cap { display: block; color: var(--text-dim); line-height: 1.45; }
+.draft-setup .ds-cap code, .draft-setup .ds-folder-status code { font-size: inherit; }
+.draft-setup .ds-row { display: flex; gap: 6px; align-items: stretch; }
+.draft-setup .ds-folder-input { flex: 1 1 auto; min-width: 0; font-family: var(--font); }
+.draft-setup .ds-folder-status { line-height: 1.5; min-height: 1.5em; }
+.draft-setup .ds-folder-status.warn { color: var(--warn, var(--yellow, var(--text))); font-weight: 700; }
+.draft-setup .ds-browser { border: 1px solid var(--border); padding: 6px; max-height: 32vh; overflow: auto; }
+.draft-setup .ds-browser-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.draft-setup .ds-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.draft-setup .ds-folders { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+.draft-setup .ds-folders button { min-height: 28px; height: 28px; padding: 0 8px; }
+.draft-setup .ds-instr { width: 100%; resize: vertical; font-family: var(--font); font-size: var(--fs-label); }
+.draft-setup .ds-hint { line-height: 1.45; }
+.draft-setup .ds-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.draft-setup .ds-foot .ds-done { margin-left: auto; }
+.draft-setup .ds-volatile { flex: 1 1 100%; }
+.mpick.draft-think { width: 280px; }
+.mpick.draft-think .mp-foot .hint { font-size: var(--fs-micro); }
+
+/* The header in draft mode: the folder crumb and the title; nothing that
+   needs a started conversation (move, sibling, files). */
+body.draft #chMove, body.draft #chNew, body.draft #conversationFilesSwitch,
+body.draft #agentSlash, body.draft #agentTree { display: none !important; }
+
+/* The global new-conversation control: visible everywhere, quiet. */
+#newLoose { display: inline-flex; align-items: center; height: 26px; padding: 0 7px; border-color: transparent; background: transparent; color: var(--text-dim); font-size: var(--fs-meta); white-space: nowrap; flex-shrink: 0; }
+#newLoose:hover { color: var(--accent); background: var(--surface-2); }
+#tabsNew { display: none; }
+
+.draft-list-block { margin: 0 0 18px; }
+.draft-list-block h3 { margin: 0 0 6px; font-size: var(--fs-label); }
+
+@media (max-width: 700px), (max-height: 700px) and (pointer: coarse) {
+  #newLoose { height: 44px; min-width: 44px; padding: 0 8px; font-size: var(--fs-label); }
+  #newLoose .nl-long { display: none; }
+  /* The phone home hides the header: the floating tab pill carries "new". */
+  body.home #tabsNew { display: inline-flex; align-items: center; height: 34px; min-height: 34px; padding: 0 9px; font-size: 11px; font-weight: 700; }
+  .draft-empty { margin-top: 6vh; }
+  .draft-setup .ds-toggle { min-height: 36px; height: 36px; }
+  .draft-setup .ds-panel { max-height: 55dvh; overflow: auto; }
+}
+:root[data-theme-mode="binary"] .draft-setup .ds-panel, :root[data-theme-mode="binary"] .draft-setup .ds-browser { border-color: var(--text); }

@@ -257,6 +257,14 @@ async function parseUsageFile(file, context = {}, catalog = new PricingCatalog()
         if (d.aiconvoCategory === 'internal') category = 'internal';
         currentProvider = provider || currentProvider;
         currentModel = model || currentModel;
+      } else if (d.type === 'custom' && d.customType === 'aiconvo-answer-rewrite' && d.data?.response?.usage) {
+        const response = d.data.response;
+        rawUsage = response.usage;
+        provider = response.provider || provider;
+        model = response.model || model;
+        api = response.api || null;
+        stopReason = response.stopReason || null;
+        category = 'internal';
       } else if ((d.type === 'compaction' || d.type === 'branch_summary') && d.usage) {
         rawUsage = d.usage;
         category = d.type === 'compaction' ? 'compaction' : 'branch-summary';

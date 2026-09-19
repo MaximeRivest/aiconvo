@@ -26,6 +26,8 @@ const foldsLib = require('./projectfolds.js');
 const areasLib = require('./areas.js');
 const gitmeta = require('./gitmeta.js');
 const lineDiff = require('./linediff.js');
+const notebookEnv = require('./notebook-env.js');
+const notebookDerive = require('./notebook-derive.js');
 const { agentPath } = require('./agentpath.js');
 const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
@@ -320,7 +322,7 @@ function cachePathFor(key) {
 }
 
 // Bump when the cached message format changes; forces a re-index.
-const CACHE_VERSION = 14; // v14: explicit conversation operation provenance
+const CACHE_VERSION = 16; // v16: lastUserTs (when a person last wrote)
 
 // A memory-briefing bootstrap prompt is the same for every launched session; it says
 // nothing about the actual work. Titles must come from the first real request instead.
@@ -569,7 +571,8 @@ async function parseFile(absPath) {
     }
     if ((text.trim() || turnImages.length) && !(role === 'user' && isNoise(text))) {
       const msg = { role, text, images: turnImages, ts: d.timestamp || null, _eid: eid,
-        operation: d.aiconvo || conversationFlow.operation({ text, role }) || undefined };
+        operation: d.aiconvo || conversationFlow.operation({ text, role }) || undefined,
+        rewriteOf: role === 'assistant' ? d.message?.aiconvoRewrite?.sourceEntryId : undefined };
       // Both formats store the generating model on the assistant entry
       // (pi also stores the provider). Kept per message: models can change
       // mid-conversation and per branch.
@@ -695,6 +698,8 @@ async function indexFile(source, relPath, stat) {
       toolCount: messages.filter(m => m.role === 'tool').length,
       fileCount: new Set(messages.flatMap(m => m.role !== 'tool' ? [] : [...(m.path && /^(write|edit|multiedit|multi_edit|notebookedit|notebook_edit|str_replace_editor)$/i.test(m.name || '') ? [m.path] : []), ...(m.writes || [])])).size,
       realUserCount: messages.filter(m => m.role === 'user' && m.origin !== 'delegation' && String(m.text || '').trim() && !isBootstrapMessage(m.text)).length,
+      // When a person last wrote here (the side panel's "recent" list).
+      lastUserTs: [...messages].reverse().find(m => m.role === 'user' && !m.off && m.origin !== 'delegation' && String(m.text || '').trim() && !isBootstrapMessage(m.text))?.ts || null,
       assistantCount: messages.filter(m => m.role === 'assistant').length,
       densityChat: densityProfile(messages, meta.firstTs, meta.lastTs, false),
       densityAll: densityProfile(messages, meta.firstTs, meta.lastTs, true),
@@ -1622,7 +1627,15 @@ function contextSig(items) {
   return normalizeContextItems(items).map(i => i.type === 'chat'
     ? 'chat/' + i.key + (i.i == null ? '' : '/' + i.i)
     : i.type === 'file' ? 'file/' + i.path + '/' + JSON.stringify([i.range, i.line])
+    : i.type === 'note' ? 'note/' + crypto.createHash('sha256').update(i.text).digest('hex').slice(0, 16)
     : i.project + '/' + i.kind).sort().join('|');
+}
+// The same chips can render to different text later (memory documents
+// regenerate, a file changes). A warm process is reused only when the text
+// it loaded is byte-identical to what a fresh start would load now. The
+// generation timestamp line is the one part that always differs.
+function contextBundleHash(text) {
+  return crypto.createHash('sha256').update(String(text || '').replace(/^- Generated: .*$/m, '')).digest('hex');
 }
 function stopAnyWarmSession(sessionPath) {
   let stopped = false;
@@ -2023,6 +2036,7 @@ function endLiveRunTail(jobId) {
 // to the event stream (the phone app's notification service) can show a
 // useful notice without a second request.
 function broadcastRunFinal(job, key) {
+  captureInterruptedRun(job, key);
   const finishedAt = job.finishedAt || Date.now();
   agentReadFinished(job.fanoutRootKey || key, finishedAt);
   const entry = key && index[key];
@@ -2087,7 +2101,13 @@ function runEventForwarder(job) {
   const toolBlock = callId => blocks.find(b => b.kind === 'tool' && b.callId === callId);
   return event => {
     try {
-      if (event.type === 'message_start' && event.message && event.message.role === 'assistant') {
+      if (event.type === 'answer_rewrite') {
+        if (event.state === 'ready' && event.text) job.lastAssistantText = event.text;
+        job.statusText = event.state === 'running' ? 'preparing simpler version'
+          : event.state === 'ready' ? 'simpler version ready' : 'original answer kept · simpler version unavailable';
+        if (event.state === 'failed') addRunNotice(job, 'The simpler version was not completed. Your original answer is safe.');
+        push(true);
+      } else if (event.type === 'message_start' && event.message && event.message.role === 'assistant') {
         blocks.push({ id: ++blockSeq, kind: 'text', text: '', think: '', parts: new Map(), tools: new Map() });
         job.statusText = 'streaming';
         push(true);
@@ -2149,6 +2169,8 @@ function runEventForwarder(job) {
         t.t0 = Date.now(); // true execution start — the browser ticks elapsed from this
         job.statusText = 'tool · ' + (event.toolName || '?');
         push(true);
+      } else if (event.type === 'message_end' && event.message?.role === 'user') {
+        job.recoveryPromptSaved = true;
       } else if (event.type === 'tool_execution_update') {
         const t = toolBlock(event.toolCallId);
         if (t) { t.out = toolResultTail(event.partialResult); push(false); }
@@ -2169,9 +2191,13 @@ function runEventForwarder(job) {
           if (think) cur.think = think;
           cur.done = true;
         }
-        if (event.message.stopReason === 'error') {
-          job.errorMessage = String(event.message.errorMessage || 'model error').split('\n')[0].slice(0, 300);
+        if (event.message.provider && event.message.model) job.model = event.message.provider + '/' + event.message.model;
+        if (event.message.stopReason === 'error' || event.message.stopReason === 'aborted') {
+          job.errorMessage = String(event.message.errorMessage || (event.message.stopReason === 'aborted' ? 'aborted' : 'model error')).slice(0, 1000);
           job.statusText = 'model error';
+        } else {
+          // A successful retry supersedes its earlier transport error.
+          job.errorMessage = null;
         }
         push(true);
       } else if (event.type === 'auto_retry_start') {
@@ -2244,7 +2270,7 @@ function runEventForwarder(job) {
 
 // Start one headless run on a conversation. node (optional): continue from
 // that entry — an in-file pi branch anchor moves the leaf there first.
-async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf }) {
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf, expectedVersion, recoveryAttempts = 0 }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
   if (!customMessage && !String(message || '').trim()) throw new Error('empty prompt');
@@ -2258,7 +2284,8 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
   const contextItems = context !== undefined ? normalizeContextItems(context) : conversationContextOf(key);
   if (context !== undefined) saveConversationContext(key, contextItems);
   const nextCtxSig = contextSig(contextItems);
-  const prevCtxSig = appliedContextBySession.get(path.resolve(sessionPath)) || '';
+  const prevApplied = appliedContextBySession.get(path.resolve(sessionPath)) || null;
+  const prevCtxSig = prevApplied ? prevApplied.sig : '';
   const ctxChanged = prevCtxSig !== nextCtxSig;
   const running = findRunningConversation(key);
   if (running) {
@@ -2299,6 +2326,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     type: 'agent-run', key,
     title: (provider && modelId ? modelId + ' · ' : '') + (images && images.length ? '[' + images.length + ' img] ' : '') + String(message).replace(/\s+/g, ' ').slice(0, 60),
     status: 'running', statusText: 'starting', startedAt: Date.now(),
+    recoveryAttempts,
     model: provider && modelId ? provider + '/' + modelId : null,
     ...(fanout ? {
       fanoutId: fanout.id, fanoutRootKey: fanout.rootKey, fanoutNode: fanout.node,
@@ -2330,6 +2358,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
   record.completion = withSessionOp(sessionPath, async () => {
     try {
       if (record.yielded) return await finish('done', 'stopped — ' + record.yielded);
+      if (expectedVersion && recoveryLib.fileVersion(sessionPath) !== expectedVersion) throw new Error('The conversation changed. Open it before continuing.');
       if (expectedLeaf && !node && !await conversationSnapshotMatches(sessionPath, expectedLeaf)) throw new Error('The conversation advanced on another screen. Reload before sending.');
       if (customMessage?.customType === 'delegation-complete') {
         // Recheck under the mutation lock: the branch can change between
@@ -2361,8 +2390,12 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       job.statusText = 'running';
       jobChanged(job);
       // Attached @ context lives in --append-system-prompt on the warm
-      // session. Reload when the chip set changed, including a clear.
-      if (ctxBundle || ctxChanged) stopAnyWarmSession(sessionPath);
+      // session. Reload when the chip set changed (including a clear), or
+      // when the same chips now render to different text. Identical text
+      // keeps the warm process: a restart would load the very same prompt.
+      const bundleHash = ctxBundle ? contextBundleHash(ctxBundle.text) : '';
+      const sameBundle = !!prevApplied && prevApplied.sig === nextCtxSig && prevApplied.hash === bundleHash;
+      if (ctxChanged || (ctxBundle && !sameBundle)) stopAnyWarmSession(sessionPath);
       const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
       if (customMessage) pirpc.stopWarmSession(sessionPath);
       const owner = await assertDelegationLaunch(sessionPath, customMessage);
@@ -2373,8 +2406,9 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       // Existing warm sessions may have been opened without delegation identity.
       if (owner) pisdk.stopWarmSession(sessionPath);
       record.launchStarted = true;
-      const handle = (customMessage ? pisdk : piEng()).piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(), ...sessionEnv }, sessionEnv, extraArgs }, { provider, modelId, message, images, customMessage, onEvent: runEventForwarder(job) });
-      appliedContextBySession.set(path.resolve(sessionPath), nextCtxSig);
+      job.recoveryEligible = !fanout && !customMessage && !owner;
+      const handle = (customMessage ? pisdk : piEng()).piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(), ...sessionEnv }, sessionEnv, extraArgs }, { provider, modelId, message, images, customMessage, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
+      appliedContextBySession.set(path.resolve(sessionPath), { sig: nextCtxSig, hash: bundleHash });
       record.handle = handle;
       await handle.done;
       if (record.yielded) await finish('done', 'stopped — ' + record.yielded);
@@ -2841,7 +2875,13 @@ async function setConversationThinking(key, level, force) {
     reopen = true;
   }
   if (headlessRuns.has(sessionPath)) throw new Error('A web run is active on this conversation. Wait or abort it.');
-  const out = await withSessionOp(sessionPath, () => piEng().piSetThinking({ sessionPath, cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() }, level));
+  // This may create the warm process (none alive yet, or the file moved on).
+  // A process created here must carry the conversation's attached context
+  // like one created by a send, or a later send could reuse it without it.
+  const contextItems = conversationContextOf(key);
+  const ctxBundle = contextItems.length ? await writeAttachedContextFile(contextItems) : null;
+  const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
+  const out = await withSessionOp(sessionPath, () => piEng().piSetThinking({ sessionPath, cwd, env: agentEnv(), extraArgs }, level));
   await reindexIfChanged(key);
   if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
   return { ok: true, level: out.level, levels: out.levels, reopened: reopen };
@@ -3021,6 +3061,38 @@ function agentReadMark(keys) {
   // own read must never wait on delegation records.
   agentReadDelegated(keys).catch(e => console.error('[agent-read delegated]', e.message));
 }
+// Explicit inbox marks (design/42): each is one click, applied at once.
+function agentReadMarkUnread(keys) {
+  const merged = { flagged: {}, dismissed: {} };
+  let any = false;
+  for (const key of keys) {
+    if (!key || !index[key]) continue;
+    const d = agentReadLib.markUnread(agentRead, key);
+    if (d) { Object.assign(merged.flagged, d.flagged); Object.assign(merged.dismissed, d.dismissed || {}); any = true; }
+  }
+  if (any) agentReadApply(merged);
+}
+function agentReadDismiss(keys) {
+  const merged = { read: {}, flagged: {}, dismissed: {} };
+  let any = false;
+  for (const key of keys) {
+    if (!key || !index[key]) continue;
+    const d = agentReadLib.dismiss(agentRead, key, { mtimeMs: index[key].mtimeMs });
+    if (d) { Object.assign(merged.read, d.read); Object.assign(merged.flagged, d.flagged || {}); Object.assign(merged.dismissed, d.dismissed); any = true; }
+  }
+  if (any) agentReadApply(merged);
+}
+function agentReadPin(pins) {
+  const merged = { pinned: {} };
+  let any = false;
+  for (const [key, on] of Object.entries(pins)) {
+    // Unpinning a deleted conversation must still work; pinning needs a real one.
+    if (!key || (on && !index[key])) continue;
+    const d = agentReadLib.setPinned(agentRead, key, !!on);
+    if (d) { Object.assign(merged.pinned, d.pinned); any = true; }
+  }
+  if (any) agentReadApply(merged);
+}
 async function agentReadDelegated(keys) {
   const merged = { read: {} };
   let any = false;
@@ -3040,6 +3112,43 @@ async function agentReadDelegated(keys) {
   }
   if (any) agentReadApply(merged);
 }
+// ---------- recent files (opened or saved by a person in the editor) ----------
+// The side panel's "recent files" (design/42). Human actions only: an agent
+// edit never enters it. Shared by every device, like the inbox state.
+const RECENT_FILES_FILE = path.join(NOTES_DIR, 'recent-files.json');
+const RECENT_FILES_MAX = 40;
+let recentFiles = [];
+try {
+  const raw = JSON.parse(fs.readFileSync(RECENT_FILES_FILE, 'utf8'));
+  recentFiles = (Array.isArray(raw) ? raw : raw.files || []).filter(f => f && typeof f.path === 'string' && f.path)
+    .map(f => ({ path: f.path, project: String(f.project || ''), at: Number(f.at) || 0, kind: f.kind === 'saved' ? 'saved' : 'opened' }));
+} catch {}
+function saveRecentFilesSoon() {
+  clearTimeout(saveRecentFilesSoon.t);
+  saveRecentFilesSoon.t = setTimeout(() => {
+    fs.mkdirSync(path.dirname(RECENT_FILES_FILE), { recursive: true });
+    writeFileAtomic(RECENT_FILES_FILE, JSON.stringify({ files: recentFiles }) + '\n').catch(() => {});
+  }, 1000);
+}
+function recentFilesTouch(p, { project = '', kind = 'opened' } = {}) {
+  const abs = String(p || '');
+  if (!abs.startsWith('/')) return;
+  const now = Date.now();
+  const have = recentFiles.find(f => f.path === abs);
+  // Autosave writes every few seconds; a same-file save inside a minute is
+  // the same work session and does not need every device to repaint.
+  if (have && have.kind === kind && now - have.at < 60000 && (!project || have.project === project)) return;
+  recentFiles = [{ path: abs, project: project || (have && have.project) || '', at: now, kind }, ...recentFiles.filter(f => f.path !== abs)].slice(0, RECENT_FILES_MAX);
+  saveRecentFilesSoon();
+  broadcast({ type: 'recent-files', files: recentFiles });
+}
+function recentFilesForget(p) {
+  const before = recentFiles.length;
+  recentFiles = recentFiles.filter(f => f.path !== String(p || ''));
+  if (recentFiles.length === before) return;
+  saveRecentFilesSoon();
+  broadcast({ type: 'recent-files', files: recentFiles });
+}
 const MEMORY_DOC_KINDS = ['overview', 'intent', 'environment', 'status'];
 function normalizeContextItems(raw) {
   const out = [], seen = new Set();
@@ -3055,6 +3164,19 @@ function normalizeContextItems(raw) {
       if (idx != null) row.i = idx;
       if (item.title) row.title = String(item.title).replace(/\s+/g, ' ').trim().slice(0, 80);
       out.push(row);
+      continue;
+    }
+    if (item && item.type === 'note') {
+      // Instructions the user wrote for this one conversation. They ride in
+      // the same system-prompt bundle as the other context on every send,
+      // so they survive a warm-process restart, and they preview like any
+      // attached item. Not a saved mode: nothing here is reusable elsewhere.
+      const text = String(item.text || '').replace(/\r\n?/g, '\n').trim().slice(0, 20000);
+      if (!text) continue;
+      const id = 'note\0' + text;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({ type: 'note', text });
       continue;
     }
     if (item && item.type === 'file') {
@@ -3546,6 +3668,48 @@ const CLAUDE_CODE_EXT = path.join(os.homedir(), '.pi', 'agent', 'extensions', 'c
 let appSettings = settingsLib.normalizeSettings(settingsLib.DEFAULT_SETTINGS);
 try { appSettings = settingsLib.normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch {}
 memoryModelHealth.setIdentity(currentModelLabel());
+const recoveryLib = require('./agent-recovery.js');
+const agentRecovery = new recoveryLib.AgentRecovery({
+  file: path.join(CACHE_DIR, 'agent-interruptions.json'),
+  enabled: () => appSettings.autoResumeNetwork && !shuttingDown && process.env.AICONVO_DISABLE_NETWORK_RECOVERY !== '1',
+  changed: recovery => broadcast({ type: 'agent-recovery', recovery }),
+  endpoint: r => {
+    let custom = {};
+    try { custom = JSON.parse(fs.readFileSync(PI_MODELS_FILE, 'utf8')); } catch {}
+    return recoveryLib.probeOrigin(r.model, custom);
+  },
+  validate: async r => {
+    if (shuttingDown) return 'The server is stopping.';
+    if (!index[r.key]) return 'Conversation unavailable. Open it to check its saved history.';
+    const file = absPathForKey(r.key);
+    if (headlessRuns.has(file) || findRunningConversation(r.key)) return 'This conversation is already running or open in a terminal.';
+    if (await delegationOwnerForFile(file)) return 'Continue delegated work from its parent conversation.';
+    try { if (recoveryLib.fileVersion(file) !== r.version) return 'The conversation changed since it stopped. Open it before continuing.'; }
+    catch { return 'The saved conversation is no longer available.'; }
+    return null;
+  },
+  launch: (r, attempts) => {
+    const slash = String(r.model || '').indexOf('/');
+    return startAgentRun(r.key, {
+      ...(slash > 0 ? { provider: r.model.slice(0, slash), modelId: r.model.slice(slash + 1) } : {}),
+      expectedVersion: r.version, recoveryAttempts: attempts,
+      message: 'Continue the interrupted task from the saved conversation. First check the latest tool results and current state; do not repeat actions that already succeeded. If an action may have completed but its result is missing, verify its effects before retrying. If the task is already complete, report that instead.',
+    });
+  },
+});
+function captureInterruptedRun(job, key, historical = false) {
+  if (!key || !index[key]) return;
+  if (historical && [...agentRecovery.records.values()].some(r => r.key === key && r.id !== job.id && r.createdAt > (job.finishedAt || job.startedAt))) return;
+  const interrupted = job.status === 'error' || /^stopped\b/.test(job.statusText || '');
+  if (!interrupted) return;
+  try {
+    agentRecovery.observe({ id: job.id, key, title: index[key].title || job.title, model: job.model,
+      reason: job.error || job.statusText, version: recoveryLib.fileVersion(absPathForKey(key)),
+      eligible: !job.fanoutId && (job.recoveryEligible === true || historical),
+      historical: historical || job.recoveryPromptSaved !== true,
+      attempts: job.recoveryAttempts || 0 });
+  } catch (e) { console.error('[agent recovery record]', e.message); }
+}
 function saveAppSettings() {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(appSettings, null, 2) + '\n', { mode: 0o600 });
@@ -5421,6 +5585,8 @@ function jobView(job) {
     startedAt: job.startedAt, finishedAt: job.finishedAt || null,
     result: job.result || null, error: job.error || null,
     model: job.model || null,
+    recoveryEligible: job.recoveryEligible === true, recoveryAttempts: job.recoveryAttempts || 0,
+    recoveryPromptSaved: job.recoveryPromptSaved === true,
     fanoutId: job.fanoutId || null, fanoutRootKey: job.fanoutRootKey || null,
     fanoutNode: job.fanoutNode || null, fanoutIndex: job.fanoutIndex ?? null,
     fanoutCount: job.fanoutCount || null,
@@ -5432,7 +5598,10 @@ function jobView(job) {
 
 function jobChanged(job) {
   job.updatedAt = Date.now();
-  if (job.type === 'agent-run') saveAgentRuns();
+  if (job.type === 'agent-run') {
+    if (job.status === 'running' && typeof agentRecovery !== 'undefined') agentRecovery.advance(job.key);
+    saveAgentRuns();
+  }
   broadcast({ type: 'job', job: jobView(job) });
 }
 
@@ -9272,6 +9441,7 @@ async function fileSaveResponse(body) {
   if (oldText !== text) {
     const delta = docLineDelta(oldText, text);
     ledgerRecordEditorSave(abs, { added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text), actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard', archiveFrom, archiveTo });
+    if (body.actor !== 'ai') recentFilesTouch(abs, { project: String(body.project || ''), kind: 'saved' });
   }
   return { ok: true, path: abs, sha: sha256Hex(text), historyWarning };
 }
@@ -9282,6 +9452,8 @@ async function fileSaveResponse(body) {
 // editing surface only. The ledger is durable append-only JSONL: it records
 // who changed a document (human/ai) and through which input, outside the
 // markdown itself — files stay ordinary markdown.
+// Keep aligned with filesmode.js's MD_EXT; document-format tests enforce parity.
+const DOCUMENT_EXT = /\.(md|markdown|qmd|rmd|mdx)$/i;
 const DOC_EDITS_FILE = path.join(NOTES_DIR, 'doc-edits.jsonl');
 const DOC_ACTORS = new Set(['human', 'ai', 'runtime', 'external-agent']);
 const DOC_INPUTS = new Set(['keyboard', 'voice', 'pen', 'paste', 'ai-edit', 'filesystem']);
@@ -9321,7 +9493,7 @@ async function docSaveResponse(body) {
   const { path: p, baseSha, text } = body;
   if (typeof text !== 'string') throw new Error('missing text');
   const abs = await editableReviewFile(p || '', body.reviewId);
-  if (!abs.endsWith('.md')) throw new Error('only markdown documents save here');
+  if (!DOCUMENT_EXT.test(abs)) throw new Error('only Markdown-family documents (including .mdx) save here');
   const oldText = await fsp.readFile(abs, 'utf8');
   if (baseSha && sha256Hex(oldText) !== baseSha) throw new Error('the file changed on disk after you loaded it');
   let historyWarning = '';
@@ -9344,6 +9516,7 @@ async function docSaveResponse(body) {
       actor: DOC_ACTORS.has(body.actor) ? body.actor : 'human', input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
       archiveFrom, archiveTo: historyWarning ? null : fileArchive?.latestId(abs),
     });
+    if (!DOC_ACTORS.has(body.actor) || body.actor === 'human') recentFilesTouch(abs, { project: String(body.project || ''), kind: 'saved' });
   }
   return { ok: true, path: abs, sha: sha256Hex(text), changed: oldText !== text, historyWarning };
 }
@@ -9373,7 +9546,7 @@ function scheduleDocCommitTitle(root, hash, diffText) {
 // Explicit save = a real Git commit of this one document.
 async function docCommitResponse(body) {
   const abs = await editableFilePath(body.path || '');
-  if (!abs.endsWith('.md')) throw new Error('only markdown documents commit here');
+  if (!DOCUMENT_EXT.test(abs)) throw new Error('only Markdown-family documents (including .mdx) commit here');
   let sha = null;
   if (typeof body.text === 'string') {
     sha = (await docSaveResponse({ path: abs, baseSha: body.baseSha, text: body.text, actor: body.actor, input: body.input })).sha;
@@ -9405,13 +9578,15 @@ async function docCreateResponse(body) {
   if (!meta || !meta.cwd) throw new Error('project not found');
   const rawName = String(body.name || '').trim();
   if (!rawName) throw new Error('document name is required');
-  const base = rawName.replace(/\.md$/i, '').replace(/[^\p{L}\p{N}._ -]/gu, '').trim().replace(/\s+/g, '-');
+  const extension = rawName.match(DOCUMENT_EXT)?.[0] || '.md';
+  const title = rawName.replace(DOCUMENT_EXT, '');
+  const base = title.replace(/[^\p{L}\p{N}._ -]/gu, '').trim().replace(/\s+/g, '-');
   if (!base) throw new Error('document name has no usable characters');
   const dir = path.join(path.resolve(meta.cwd), 'documents');
-  const abs = path.join(dir, base + '.md');
+  const abs = path.join(dir, base + extension);
   if (fs.existsSync(abs)) throw new Error('a document with this name already exists');
   await fsp.mkdir(dir, { recursive: true });
-  const text = `# ${rawName.replace(/\.md$/i, '')}\n\n`;
+  const text = `# ${title}\n\n`;
   await writeFileAtomic(abs, text);
   await recordDocEdit({ ts: Date.now(), path: abs, action: 'create', actor: 'human', input: 'keyboard', added: text.split('\n').length, removed: 0, sha: sha256Hex(text) });
   return { ok: true, path: abs, project };
@@ -9428,9 +9603,9 @@ async function projectDocsResponse(project) {
   const docs = [];
   for (const root of roots) {
     const rels = new Set();
-    for (const rel of await gitTrackedPaths(root).catch(() => [])) if (rel.endsWith('.md')) rels.add(rel);
-    const untracked = String(await gitText(root, ['ls-files', '--others', '--exclude-standard', '--', '*.md']).catch(() => ''));
-    for (const rel of untracked.split('\n')) if (rel.trim()) rels.add(rel.trim());
+    for (const rel of await gitTrackedPaths(root).catch(() => [])) if (DOCUMENT_EXT.test(rel)) rels.add(rel);
+    const untracked = String(await gitText(root, ['ls-files', '-z', '--others', '--exclude-standard']).catch(() => ''));
+    for (const rel of untracked.split('\0')) if (DOCUMENT_EXT.test(rel)) rels.add(rel);
     for (const rel of rels) {
       const abs = path.join(root, rel);
       let st; try { st = await fsp.stat(abs); } catch { continue; }
@@ -10640,9 +10815,10 @@ async function fileContextBlock(item) {
 
 async function writeAttachedContextFile(items, { preview = false } = {}) {
   const normalized = normalizeContextItems(items);
-  const maps = normalized.filter(i => i.type !== 'chat' && i.type !== 'file');
+  const maps = normalized.filter(i => i.type !== 'chat' && i.type !== 'file' && i.type !== 'note');
   const chats = normalized.filter(i => i.type === 'chat');
   const files = normalized.filter(i => i.type === 'file');
+  const notes = normalized.filter(i => i.type === 'note');
   const chatByKey = new Map();
   for (const c of chats) {
     if (chats.some(other => other.key === c.key && other.i == null) && c.i != null) continue;
@@ -10654,6 +10830,12 @@ async function writeAttachedContextFile(items, { preview = false } = {}) {
   parts.push('- Generated: ' + new Date().toISOString());
   parts.push('');
   parts.push('Added by the user for this conversation. Project memory is AI-generated — a map, not verified truth. Conversation excerpts are the original user and assistant messages.');
+  // Instructions first: they shape how everything below is used.
+  let noteCount = 0;
+  if (notes.length) {
+    parts.push('', '## Instructions for this conversation', '', 'Written by the user for this conversation. Follow them in every reply.', '', notes.map(n => n.text).join('\n\n---\n\n'));
+    noteCount = notes.length;
+  }
   let docCount = 0;
   const seen = new Set();
   const byProject = new Map();
@@ -10694,12 +10876,12 @@ async function writeAttachedContextFile(items, { preview = false } = {}) {
       'The user is reading or editing these files in aiconvo and watches them live. When asked for a change, edit the file in place with your tools; do not rewrite unrelated parts; keep the author\'s formatting.', '',
       blocks.join('\n\n---\n\n'));
   }
-  if (!docCount && !chatCount && !fileCount) throw new Error('none of those context items exist yet');
+  if (!docCount && !chatCount && !fileCount && !noteCount) throw new Error('none of those context items exist yet');
   const text = parts.join('\n') + '\n';
   const file = path.join(BRIEFINGS_DIR,
     new Date().toISOString().replace(/[:.]/g, '-') + '-attached-context.md');
   if (!preview) await fsp.writeFile(file, text);
-  return { file: preview ? null : file, text, tokens: estimateInputTokens(text), docs: docCount, chats: chatCount, files: fileCount };
+  return { file: preview ? null : file, text, tokens: estimateInputTokens(text), docs: docCount, chats: chatCount, files: fileCount, notes: noteCount };
 }
 
 // Wait for the session file the just-spawned agent creates. `existing` is a
@@ -10730,6 +10912,121 @@ async function waitForNewConversation(kind, cwd, sinceMs, existing, timeoutMs = 
   return null;
 }
 
+// What a start folder means, before anything runs: does it exist, which
+// project it implies (the same cwd rule the index applies to every
+// conversation), which AGENTS.md files pi would read from it, and the
+// default model that project sets. The draft shows this next to the folder
+// so the choice is made with its consequences visible.
+function describeStartFolder(raw) {
+  const text = String(raw == null ? '' : raw).trim();
+  const home = os.homedir();
+  const abs = text ? path.resolve(expandHomePath(text)) : home;
+  let st = null;
+  try { st = fs.statSync(abs); } catch {}
+  const exists = !!(st && st.isDirectory());
+  const project = projectNameOf(abs);
+  const loose = project === LOOSE_PROJECT;
+  const display = abs === home ? '~' : abs.startsWith(home + path.sep) ? '~' + abs.slice(home.length) : abs;
+  const contextFiles = [];
+  if (exists) {
+    // pi's DefaultResourceLoader: AGENTS.md walking up from cwd, then the
+    // global one under the agent directory.
+    let dir = abs;
+    for (;;) {
+      const f = path.join(dir, 'AGENTS.md');
+      if (fs.existsSync(f)) contextFiles.push(f);
+      const up = path.dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+  }
+  const globalAgents = path.join(path.dirname(PI_SETTINGS_FILE), 'AGENTS.md');
+  if (fs.existsSync(globalAgents) && !contextFiles.includes(globalAgents)) contextFiles.push(globalAgents);
+  const meta = loose ? null : projectMetaFor(project);
+  const area = !loose && meta && meta.cwd ? areaOfCwdIn(project, abs) : null;
+  const model = resolvedProjectDefaultModel(loose ? LOOSE_PROJECT : project);
+  return {
+    path: abs, display, exists, loose,
+    project: loose ? null : project, known: !!meta, area: area || null,
+    contextFiles,
+    defaultModel: model ? { provider: model.provider, modelId: model.modelId, source: model.source } : null,
+  };
+}
+
+// What a fresh draft starts from: home as the folder, pi's own defaults
+// for reasoning and mode. The client shows these until the user changes
+// them; nothing here is stored anywhere.
+function draftDefaults() {
+  let thinking = null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(PI_SETTINGS_FILE, 'utf8'));
+    if (settingsLib.THINKING_LEVELS.includes(raw.defaultThinkingLevel)) thinking = raw.defaultThinkingLevel;
+  } catch {}
+  const modes = listPromptModes();
+  const coding = modes.find(m => m.key === 'coding') || null;
+  return {
+    folder: describeStartFolder(''),
+    thinking, thinkingLevels: settingsLib.THINKING_LEVELS,
+    mode: coding ? { key: coding.key, label: coding.label } : { key: 'coding', label: 'Coding' },
+  };
+}
+
+// The first send of a draft. The session does not exist before this call:
+// folder, mode, models, reasoning, and context are all still choices, so
+// the file (whose header fixes the cwd) is created only now, with every
+// choice applied, and the first prompt runs through the ordinary send path.
+// draftId makes the call idempotent for one hour: a retry after a lost
+// connection returns the conversation already created instead of a twin.
+const draftStarts = new Map(); // draftId → { at, promise }
+async function startConversationFromDraft(p) {
+  const draftId = typeof p.draftId === 'string' && /^[A-Za-z0-9_-]{6,64}$/.test(p.draftId) ? p.draftId : null;
+  if (draftId && draftStarts.has(draftId)) return draftStarts.get(draftId).promise;
+  const work = (async () => {
+    const items = normalizeContextItems(p.context);
+    const models = normalizePickedModels(p.models);
+    const prompt = typeof p.prompt === 'string' ? p.prompt.trim() : '';
+    const images = rpcImagesOf(p.images);
+    if (images.length && !prompt) throw new Error('write a few words with the image');
+    const thinking = typeof p.thinking === 'string' && settingsLib.THINKING_LEVELS.includes(p.thinking) ? p.thinking : null;
+    const mode = typeof p.mode === 'string' && /^[a-z][a-z0-9_-]*$/.test(p.mode) ? p.mode : null;
+    const bundle = items.length ? await writeAttachedContextFile(items) : null;
+    const started = await startProjectConversation({
+      project: LOOSE_PROJECT, projectless: true, folder: p.folder, agent: 'pi', surface: 'rpc',
+      models, mode, include: { map: false }, silent: true, context: bundle ? bundle.text : undefined,
+    });
+    const key = started.key;
+    if (!key) throw new Error('no conversation came back');
+    const { sessionPath } = sessionPathsFor(key);
+    if (bundle) {
+      // The warm process already loaded this exact bundle: the first send
+      // must not restart it to load the same text again.
+      saveConversationContext(key, items);
+      appliedContextBySession.set(path.resolve(sessionPath), { sig: contextSig(items), hash: contextBundleHash(bundle.text) });
+    }
+    const out = { key, cwd: started.cwd, project: projectNameOf(started.cwd, key), models: started.models, mode: started.mode, warnings: [] };
+    if (thinking) {
+      try { out.thinking = (await setConversationThinking(key, thinking, false)).level; }
+      catch (e) { out.warnings.push('reasoning “' + thinking + '” not applied: ' + e.message); }
+    }
+    if (prompt) {
+      try {
+        if (models.length >= 2) out.runs = await startFanOut(key, { node: null, models, message: prompt, images, force: false });
+        else out.job = jobView(await startAgentRun(key, {
+          node: null, provider: models[0] && models[0].provider, modelId: models[0] && models[0].modelId,
+          message: prompt, images, force: false, allowQueue: false,
+        }));
+      } catch (e) { out.runError = e.message; }
+    }
+    return out;
+  })();
+  if (draftId) {
+    draftStarts.set(draftId, { at: Date.now(), promise: work });
+    work.catch(() => draftStarts.delete(draftId)); // a failed start may be retried
+    for (const [id, rec] of draftStarts) if (Date.now() - rec.at > 3600000) draftStarts.delete(id);
+  }
+  return work;
+}
+
 async function startProjectConversation(options) {
   // A loose conversation is deliberately rooted at the user's home. It has
   // no project registry entry, project model, memory, briefing, or Git root.
@@ -10743,6 +11040,15 @@ async function startProjectConversation(options) {
   // conversation rooted at home would index as Loose, not as the project.
   let cwd = os.homedir();
   let areaRel = null;
+  if (projectless && options.folder != null && String(options.folder).trim()) {
+    // A draft chose its folder. This is the same choice as `cd X && pi`:
+    // tools run there, and the folder decides which project the
+    // conversation joins (a project root or area joins that project; home,
+    // ~/Projects, and temp folders stay loose). Only an existing directory.
+    const folder = describeStartFolder(options.folder);
+    if (!folder.exists) throw new Error('folder not found: ' + folder.display);
+    cwd = folder.path;
+  }
   if (!projectless) {
     if (!meta.cwd || !fs.existsSync(meta.cwd)) {
       throw new Error(`the project folder is missing: ${meta.cwd || '(unknown)'} — re-create or adopt it first`);
@@ -10765,13 +11071,16 @@ async function startProjectConversation(options) {
     }
   }
   const kind = options.agent === 'claude' ? 'claude' : 'pi';
-  const label = String(options.name || (projectless ? 'Loose conversation' : 'Project: ' + project)).slice(0, 80);
+  const impliedProject = projectless ? projectNameOf(cwd) : project;
+  const label = String(options.name || (impliedProject === LOOSE_PROJECT ? 'Loose conversation' : 'Project: ' + impliedProject)).slice(0, 80);
   const name = 'aiconvo-' + (projectless ? 'loose-' : 'project-') + crypto.createHash('sha256').update(project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
   const mode = kind === 'pi' && typeof options.mode === 'string' && options.mode.trim() ? options.mode.trim() : null;
   // Lead model for the kickoff run; any further models stay in the project's
   // composer strip for later fan-out sends.
   const requestedModels = normalizePickedModels(options.models);
-  const inheritedModel = kind === 'pi' && !projectless ? resolvedProjectDefaultModel(project) : null;
+  // The folder's project sets the default model, also for a loose start
+  // whose folder sits inside a project (it indexes as that project).
+  const inheritedModel = kind === 'pi' ? resolvedProjectDefaultModel(projectless ? projectNameOf(cwd) : project) : null;
   const launchModels = requestedModels.length
     ? requestedModels
     : inheritedModel ? [{ provider: inheritedModel.provider, modelId: inheritedModel.modelId }] : [];
@@ -10843,12 +11152,13 @@ async function startProjectConversation(options) {
       title: (leadModel ? leadModel.modelId + ' · ' : '') + (text || label).replace(/\s+/g, ' ').slice(0, 60),
       status: 'running', statusText: text ? 'starting' : 'ready',
       startedAt: Date.now(), model: leadModel ? leadModel.provider + '/' + leadModel.modelId : null,
+      recoveryEligible: !!text,
     };
     let handle = null;
     if (text) {
       handle = piEng().piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(), extraArgs: [...piProviderExtraArgs(), ...piCtxArgs] }, {
         provider: leadModel && leadModel.provider, modelId: leadModel && leadModel.modelId,
-        message: text, onEvent: runEventForwarder(job),
+        message: text, simplifyAnswers: appSettings.simplifyAnswers, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job),
       });
     }
     const t0 = Date.now();
@@ -10919,10 +11229,180 @@ const TTS_DIR = path.join(CACHE_DIR, 'tts');
 // Document cell runs in flight, keyed by client runId — the cancel
 // endpoint interrupts the kernel and ends the matching subprocess.
 const activeDocRuns = new Map();
-const KOKORO_URL = process.env.KOKORO_URL || 'http://192.168.2.24:8880';
-const SPEECH_URL = process.env.SPEECH_URL || 'http://192.168.2.24:8078';
+
+// ---------- rat: notebook cells run on rat kernels ----------
+// Design boundary (deliberately thin — no MCP client, no kernel state
+// here): rat owns kernels, project resolution, environments and their
+// lifecycle. This server locates rat, passes the notebook path through
+// (`--doc`) so every command resolves the same kernel the notebook
+// declares, and shows what rat reports. Same trust surface as /api/exec:
+// this server already runs code on this machine at the user's request.
+
+// Where rat is. Re-probed on every call (cheap: a few stat calls) so that
+// installing rat while the server runs is picked up without a restart.
+function ratBinary() {
+  return notebookEnv.findRat({
+    env: process.env, platform: process.platform, homedir: os.homedir(),
+    exists: p => { try { return fs.statSync(p).isFile(); } catch { return false; } },
+    pathSep: path.delimiter,
+  });
+}
+
+const RAT_MISSING = 'rat is not installed on this server (or not on its PATH). Install it — https://runanything.dev — then run the cell again.';
+
+// Run one rat command; resolves { out, code } and never rejects. `onChild`
+// receives the process so a caller can register it for cancellation.
+function ratExec(args, { cwd, timeoutMs, capBytes = 200000, onChild } = {}) {
+  const rat = ratBinary();
+  if (!rat.path) return Promise.resolve({ out: RAT_MISSING, code: -1, missing: true });
+  return new Promise(resolve => {
+    const child = spawn(rat.path, args, { cwd: cwd || os.homedir(), env: process.env });
+    if (onChild) onChild(child);
+    let buf = '';
+    let timer = null;
+    const cap = s => { buf += s; if (buf.length > capBytes) { buf = buf.slice(0, capBytes) + '\n… (truncated — output capped at ' + Math.round(capBytes / 1000) + ' KB)'; child.kill('SIGKILL'); } };
+    child.stdout.on('data', d => cap(String(d)));
+    child.stderr.on('data', d => cap(String(d)));
+    if (timeoutMs) timer = setTimeout(() => { cap('\n… (stopped after ' + Math.round(timeoutMs / 1000) + ' s)'); child.kill('SIGKILL'); }, timeoutMs);
+    child.on('close', code => { if (timer) clearTimeout(timer); resolve({ out: buf, code }); });
+    child.on('error', e => { if (timer) clearTimeout(timer); resolve({ out: e.code === 'ENOENT' ? RAT_MISSING : String(e.message), code: -1, missing: e.code === 'ENOENT' }); });
+  });
+}
+
+// rat's JSON reports (doctor/ensure/resolve) go to stdout; progress and
+// errors to stderr — both arrive in `out`. Take the JSON object.
+function ratJson(out) {
+  const start = out.indexOf('{');
+  if (start < 0) return null;
+  try { return JSON.parse(out.slice(start, out.lastIndexOf('}') + 1)); } catch { return null; }
+}
+
+// Markdown fence languages → rat runtimes. rat resolves aliases itself;
+// this covers the common fence spellings of rat's built-in runtimes.
+const RAT_LANGS = { python: 'py', py: 'py', python3: 'py', r: 'r', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', julia: 'jl', jl: 'jl', javascript: 'js', js: 'js', node: 'js' };
+
+// The notebook a request refers to: an existing file path.
+function notebookPath(p) {
+  if (!p || typeof p !== 'string') return null;
+  try { return fs.statSync(p).isFile() ? p : null; } catch { return null; }
+}
+
+// Where a conversation's project keeps its notebooks (design/41).
+// A real project keeps them at its root (a conversation started in a
+// subfolder still files them with the project). A loose conversation has
+// only the folder it ran in; the home folder is not a project.
+function notebookRootFor(key) {
+  const entry = index[key];
+  if (!entry) throw new Error('not found');
+  const project = projectOfEntry(entry, key);
+  if (project && project !== LOOSE_PROJECT && project !== '?') {
+    const meta = projectMetaFor(project);
+    if (meta && meta.cwd && fs.existsSync(meta.cwd)) return { project, root: path.resolve(meta.cwd) };
+  }
+  const cwd = entry.cwd ? path.resolve(entry.cwd) : '';
+  if (!cwd || cwd === path.resolve(os.homedir()) || !fs.existsSync(cwd)) throw new Error('this conversation has no project folder to keep notebooks in (it ran in the home folder)');
+  return { project: project || LOOSE_PROJECT, root: cwd };
+}
+
+// Derive a notebook from one answer: a private fork of the conversation at
+// that answer, one raw completion (same prepared context as the real
+// conversation, no tool runner), then a stamped file in the project.
+// Returns { path, project, title, dropped } — `dropped` names `after`
+// entries the model invented and were removed.
+const derivingNotebooks = new Set();
+async function deriveNotebookFromAnswer(key, entryId) {
+  const { entry, sessionPath, cwd } = sessionPathsFor(key);
+  if (entry.source === 'claude') throw new Error('Deriving a notebook needs pi. Claude conversations cannot be replayed.');
+  const lockKey = key + '#' + entryId;
+  if (derivingNotebooks.has(lockKey)) throw new Error('A notebook is already being written from this answer.');
+  derivingNotebooks.add(lockKey);
+  try {
+    await assertDelegationOwnership(sessionPath);
+    const { project, root } = notebookRootFor(key);
+    const notebooksDir = path.join(root, notebookDerive.NOTEBOOKS_DIR);
+    const existing = notebookDerive.listNotebooks(root, { conversation: key });
+    // What the project's environment says about its own packages (rat's
+    // doctor on a throwaway probe notebook pinned to this project).
+    const env = await probeProjectPython(root, notebooksDir);
+    const prompt = notebookDerive.buildPrompt({ projectRoot: root, notebooksDir, existing, editable: env.editable, projectPackage: env.projectPackage });
+    // The same attached context and provider flags as a send from this
+    // conversation, so the prepared request matches the real one.
+    const contextItems = conversationContextOf(key);
+    const ctxBundle = contextItems.length ? await writeAttachedContextFile(contextItems) : null;
+    const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
+    const stage = await fsp.mkdtemp(path.join(os.tmpdir(), 'aiconvo-derive-'));
+    let result;
+    try {
+      const forked = await pisdk.piForkAt({ sessionPath, cwd }, entryId, { dir: stage });
+      result = await pisdk.piDeriveAt({ sessionPath: forked.file, cwd, env: agentEnv(), extraArgs }, { prompt });
+    } finally {
+      await fsp.rm(stage, { recursive: true, force: true }).catch(() => {});
+    }
+    if (result.usage) {
+      // Same ledger as the other no-session model calls, so cost reports see it.
+      const record = { type: 'message', id: crypto.randomUUID(), parentId: null, timestamp: new Date(result.timestamp || Date.now()).toISOString(),
+        aiconvoCategory: 'internal', aiconvoPurpose: 'notebook', message: { role: 'assistant', content: [], usage: result.usage, model: result.model.split('/').slice(1).join('/'), provider: result.model.split('/')[0] } };
+      try { fs.appendFileSync(INTERNAL_USAGE_FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); } catch {}
+    }
+    let text = notebookDerive.shapeReply(result.text);
+    const title = notebookEnv.readScalar(text, ['title']) || 'notebook';
+    const repaired = notebookDerive.repairLocalLines(text, env.editable);
+    text = repaired.text;
+    const { kept, dropped } = notebookDerive.checkAfter(text, existing);
+    if (dropped.length) {
+      // Rewrite `after` to the verified list. A prerequisite that does not
+      // exist would break the chain later, quietly.
+      text = text.replace(/^( *after:)[^\n]*\n(?:(?: +- [^\n]*| *)\n)*/m, kept.length ? '$1\n' + kept.map(k => '    - ' + k).join('\n') + '\n' : '');
+    }
+    await fsp.mkdir(notebooksDir, { recursive: true });
+    const relProject = path.relative(notebooksDir, root) || '.';
+    text = notebookDerive.stamp(text, { project: relProject.split(path.sep).join('/'), source: { conversation: key, entry: entryId, model: result.model, created: new Date().toISOString() } });
+    const abs = notebookDerive.freshPath(notebooksDir, notebookDerive.slugFor(title));
+    // rat is the authority on the header: validate before publishing.
+    const draft = path.join(notebooksDir, '.draft-' + crypto.randomUUID() + '.md');
+    await fsp.writeFile(draft, text, { mode: 0o644 });
+    try {
+      const rat = ratBinary();
+      if (rat.path) {
+        const check = await ratExec(['doctor', draft, '--json'], { cwd: notebooksDir, timeoutMs: 60000 });
+        if (!check.missing && !ratJson(check.out)) throw new Error('The model wrote a header rat cannot read: ' + check.out.trim().split('\n').at(-1));
+      }
+      await fsp.rename(draft, abs);
+    } finally {
+      await fsp.rm(draft, { force: true }).catch(() => {});
+    }
+    await recordDocEdit({ ts: Date.now(), path: abs, action: 'create', actor: 'model', input: 'notebook-from-answer', source: { conversation: key, entry: entryId }, added: text.split('\n').length, removed: 0, sha: sha256Hex(text) });
+    return { path: abs, project, root, title, dropped, fixed: repaired.fixed, model: result.model };
+  } finally {
+    derivingNotebooks.delete(lockKey);
+  }
+}
+
+// rat doctor on a probe notebook pinned to root: the editable local
+// packages of the project's venv (as "-e" lines) and the root package name.
+async function probeProjectPython(root, notebooksDir) {
+  const out = { editable: [], projectPackage: null };
+  if (!ratBinary().path) return out;
+  await fsp.mkdir(notebooksDir, { recursive: true });
+  const rel = (path.relative(notebooksDir, root) || '.').split(path.sep).join('/');
+  const probe = path.join(notebooksDir, '.probe-' + crypto.randomUUID() + '.md');
+  try {
+    await fsp.writeFile(probe, '---\nrat:\n  project: ' + rel + '\n---\n```python\npass\n```\n', { mode: 0o600 });
+    const r = await ratExec(['doctor', probe, '--json'], { cwd: notebooksDir, timeoutMs: 60000 });
+    const report = ratJson(r.out);
+    if (report) {
+      out.editable = (report.python && report.python.editable) || [];
+      out.projectPackage = report.project_package || null;
+    }
+  } catch {}
+  finally { await fsp.rm(probe, { force: true }).catch(() => {}); }
+  return out;
+}
+// Lambda's Tailscale address works both on the home LAN and while travelling.
+const KOKORO_URL = process.env.KOKORO_URL || 'http://100.86.49.54:8880';
+const SPEECH_URL = process.env.SPEECH_URL || 'http://100.86.49.54:8078';
 const KOKORO_VOICE = process.env.KOKORO_VOICE || 'bm_george';
-const REWRITE_URL = process.env.REWRITE_URL || 'http://192.168.2.24:8000/v1/chat/completions';
+const REWRITE_URL = process.env.REWRITE_URL || 'http://100.86.49.54:8000/v1/chat/completions';
 const REWRITE_MODEL = process.env.REWRITE_MODEL || 'qwen/qwen3.8-27b';
 const REWRITE_API_KEY = process.env.REWRITE_API_KEY || 'inktype-local';
 const ttsJobs = new Map();
@@ -11670,8 +12150,10 @@ const server = http.createServer(async (req, res) => {
       '/context-panel.js': { file: 'context-panel.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/file-completion-ui.js': { file: 'file-completion-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/notebook-env.js': { file: 'notebook-env.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/navigation.js': { file: 'navigation.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/files-browser.js': { file: 'files-browser.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.js': { file: 'live-file.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.css': { file: 'live-file.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
@@ -11685,6 +12167,8 @@ const server = http.createServer(async (req, res) => {
       '/streaming-tool.js': { file: 'streaming-tool.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-reader.js': { file: 'conversation-reader.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-reader.css': { file: 'conversation-reader.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/conversation-draft.js': { file: 'conversation-draft.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/conversation-draft.css': { file: 'conversation-draft.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
@@ -12264,15 +12748,21 @@ const server = http.createServer(async (req, res) => {
       try { json(res, 200, await startProjectConversation(parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/start-loose' && req.method === 'POST') {
-      // This endpoint accepts no cwd. A loose web start always uses the
-      // server user's home, which prevents clients from choosing an
-      // unexpected process directory.
+      // A draft's first send. The folder is the user's explicit choice,
+      // validated as an existing directory and reported back; it decides
+      // the project the conversation joins exactly as `cd X && pi` would.
+      // An empty body keeps the old meaning: a blank home-rooted session.
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 48 * 1024 * 1024) return json(res, 413, { error: 'request too large' }); }
       try {
-        json(res, 200, await startProjectConversation({
-          project: LOOSE_PROJECT, projectless: true, agent: 'pi', surface: 'rpc',
-          models: [], include: { map: false }, silent: true,
-        }));
+        json(res, 200, await startConversationFromDraft(JSON.parse(body || '{}')));
       } catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/draft-defaults' && req.method === 'GET') {
+      try { json(res, 200, draftDefaults()); }
+      catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/conversation/folder-info' && req.method === 'GET') {
+      try { json(res, 200, describeStartFolder(u.searchParams.get('path') || '')); }
+      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/project/model' && req.method === 'PUT') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -12535,7 +13025,9 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) { body += chunk; if (body.length > 64000) return json(res, 413, { error: 'Selection too large' }); }
       try {
         const p = JSON.parse(body || '{}');
-        if (!index[p.id]) throw new Error('conversation not found');
+        // A preview renders the same text for any conversation, including
+        // a draft that has no session yet (id 'draft:…').
+        if (p.id && !index[p.id] && !String(p.id).startsWith('draft:')) throw new Error('conversation not found');
         const items = normalizeContextItems(p.context);
         json(res, 200, items.length ? await writeAttachedContextFile(items, { preview: true }) : { text: '', tokens: 0 });
       } catch (e) { json(res, 400, { error: e.message }); }
@@ -12728,6 +13220,7 @@ const server = http.createServer(async (req, res) => {
       const prevSemTarget = (appSettings.semanticUrl || '') + '|' + semNs();
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
       saveAppSettings();
+      broadcast({ type: 'agent-recovery', recovery: agentRecovery.snapshot() });
       memoryModelHealth.setIdentity(currentModelLabel());
       // A new URL or namespace means a different remote index: re-push all.
       if (searchIdx && (appSettings.semanticUrl || '') + '|' + semNs() !== prevSemTarget) {
@@ -12768,6 +13261,17 @@ const server = http.createServer(async (req, res) => {
         const task = await resumeDelegationFromHost(p.id, { model: p.model, thinking: p.thinking, instructions: p.instructions, by: 'user' });
         json(res, 200, { ok: true, task: delegationView(task) });
       } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/agents/recovery' && req.method === 'GET') {
+      json(res, 200, agentRecovery.snapshot());
+    } else if (u.pathname === '/api/agents/recovery' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 4096) return json(res, 413, { error: 'Request too large.' }); }
+      try {
+        const p = JSON.parse(body || '{}');
+        if (p.action === 'dismiss') { agentRecovery.dismiss(p.id); json(res, 200, { ok: true }); }
+        else if (p.action === 'resume') { const job = await agentRecovery.resume(p.id); json(res, 200, { ok: true, job: jobView(job) }); }
+        else throw new Error('Unknown recovery action.');
+      } catch (e) { json(res, 409, { error: e.message }); }
     } else if (u.pathname === '/api/agents/active') {
       // running: a live pi/claude process. writing: file changed in 5 min.
       // recent: file changed in the last hour and not already listed.
@@ -12792,7 +13296,7 @@ const server = http.createServer(async (req, res) => {
       }
       writing.sort((a, b) => a.ageMs - b.ageMs);
       recent.sort((a, b) => a.ageMs - b.ageMs);
-      json(res, 200, { running, writing, recent: recent.slice(0, 15), procs: agentProcsView(running) });
+      json(res, 200, { running, writing, recent: recent.slice(0, 15), procs: agentProcsView(running), recovery: agentRecovery.snapshot() });
     } else if (u.pathname === '/api/snippets' && req.method === 'GET') {
       // Snippets and prompt templates visible from this conversation's cwd:
       // pi's own prompt folders, read from disk each time (a handful of
@@ -12897,6 +13401,18 @@ const server = http.createServer(async (req, res) => {
       const parsed = JSON.parse(body || '{}');
       try { json(res, 200, await actOnConversation(parsed.id, parsed)); }
       catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/recent-files' && req.method === 'GET') {
+      json(res, 200, { files: recentFiles });
+    } else if (u.pathname === '/api/recent-files' && req.method === 'POST') {
+      // { path, project } records an open; { remove: path } forgets one.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        if (p.remove) recentFilesForget(p.remove);
+        else if (p.path) recentFilesTouch(path.resolve(expandHomePath(String(p.path))), { project: String(p.project || ''), kind: 'opened' });
+        json(res, 200, { files: recentFiles });
+      } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/agent-read' && req.method === 'GET') {
       json(res, 200, agentRead);
     } else if (u.pathname === '/api/agent-read' && req.method === 'POST') {
@@ -12908,6 +13424,11 @@ const server = http.createServer(async (req, res) => {
         const p = JSON.parse(body || '{}');
         if (p.import && typeof p.import === 'object') agentReadApply(agentReadLib.importState(agentRead, p.import));
         if (p.read && typeof p.read === 'object') agentReadMark(Object.keys(p.read));
+        // { unread: [keys] } marks by hand; { dismiss: [keys] } removes from the
+        // inbox; { pin: { key: true|false } } pins and unpins.
+        if (Array.isArray(p.unread)) agentReadMarkUnread(p.unread.map(String));
+        if (Array.isArray(p.dismiss)) agentReadDismiss(p.dismiss.map(String));
+        if (p.pin && typeof p.pin === 'object') agentReadPin(p.pin);
         json(res, 200, agentRead);
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/voice/state' && req.method === 'GET') {
@@ -12973,54 +13494,33 @@ const server = http.createServer(async (req, res) => {
       });
       json(res, 200, { ...result, cwd: cwd || '~', ms: Date.now() - t0 });
     } else if (u.pathname === '/api/doc/run-cell' && req.method === 'POST') {
-      // Run one fenced code block from a document through the rat CLI.
-      // Design boundary (deliberately thin — no MCP client, no kernel
-      // state here): rat owns kernels, project resolution, venvs, and
-      // lifecycle; aiconvo passes {lang, code, cwd} and shows the output.
-      // Same trust surface as /api/exec above: this server already runs
-      // arbitrary shell blocks on this machine at the user's request.
+      // Run one fenced code block through `rat run --doc <notebook>`. The
+      // notebook path decides the kernel (its folder, or the project it
+      // pins in front matter) — exactly as it would from a terminal.
       let body = '';
       for await (const chunk of req) body += chunk;
       let parsed;
       try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
-      const { lang, code, cwd: reqCwd } = parsed;
-      // rat resolves language aliases itself; this map only covers the
-      // common markdown fence spellings of rat's built-in runtimes.
-      const RAT_LANGS = { python: 'py', py: 'py', python3: 'py', r: 'r', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', julia: 'jl', jl: 'jl', javascript: 'js', js: 'js', node: 'js' };
+      const { lang, code } = parsed;
       const runtime = RAT_LANGS[String(lang || '').toLowerCase()];
       if (!runtime) return json(res, 400, { error: 'no rat runtime for language "' + lang + '"' });
       if (!code || typeof code !== 'string' || !code.trim()) return json(res, 400, { error: 'code required' });
+      const doc = notebookPath(parsed.doc);
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
       const t0run = Date.now();
-      // cwd decides which project kernel rat resolves to (py@<project>).
-      const dir = reqCwd && typeof reqCwd === 'string' && fs.existsSync(reqCwd) ? reqCwd : os.homedir();
-      // No hard timeout here: long runs are legitimate (training, big
-      // queries). The client shows elapsed time and offers cancel, which
-      // interrupts the KERNEL (rat cancel) — killing this subprocess alone
-      // would leave the kernel computing. runId lets /api/doc/cancel-run
-      // find the pending child.
+      // No hard timeout: long runs are legitimate (training, big queries).
+      // The client shows elapsed time and offers cancel, which interrupts
+      // the KERNEL (rat cancel) — killing this subprocess alone would leave
+      // the kernel computing. runId lets /api/doc/cancel-run find it.
       const runId = String(parsed.runId || '') || ('run-' + Date.now());
-      const result = await new Promise(resolve => {
-        const ratHome = path.join(os.homedir(), '.local', 'bin', 'rat');
-        const ratBin = fs.existsSync(ratHome) ? ratHome : 'rat';
-        const child = spawn(ratBin, ['run', runtime, code], { cwd: dir, env: process.env });
-        let buf = '';
-        const cap = s => { buf += s; if (buf.length > 200000) { buf = buf.slice(0, 200000) + '\n… (truncated — output capped at 200 KB)'; child.kill('SIGKILL'); } };
-        child.stdout.on('data', d => cap(String(d)));
-        child.stderr.on('data', d => cap(String(d)));
-        activeDocRuns.set(runId, { child, runtime, dir, cancelled: false });
-        child.on('close', codeNum => {
-          const entry = activeDocRuns.get(runId);
-          activeDocRuns.delete(runId);
-          if (entry && entry.cancelled) buf += (buf ? '\n' : '') + '■ cancelled — the kernel was interrupted; its variables are intact';
-          resolve({ out: buf, code: codeNum, cancelled: !!(entry && entry.cancelled) });
-        });
-        child.on('error', e => {
-          activeDocRuns.delete(runId);
-          const why = e.code === 'ENOENT' ? 'the rat CLI is not installed (or not on the PATH of this server)' : String(e.message);
-          resolve({ out: why, code: -1 });
-        });
+      const result = await ratExec(['run', '--doc', doc, runtime, code], {
+        cwd: path.dirname(doc),
+        onChild: child => activeDocRuns.set(runId, { child, runtime, doc, cancelled: false }),
       });
-      json(res, 200, { ...result, runtime, ms: Date.now() - t0run });
+      const entry = activeDocRuns.get(runId);
+      activeDocRuns.delete(runId);
+      if (entry && entry.cancelled) result.out += (result.out ? '\n' : '') + '■ cancelled — the kernel was interrupted; its variables are intact';
+      json(res, 200, { ...result, runtime, cancelled: !!(entry && entry.cancelled), ms: Date.now() - t0run });
     } else if (u.pathname === '/api/doc/cancel-run' && req.method === 'POST') {
       // Cancel a running cell: interrupt the kernel first (rat cancel —
       // keeps the namespace), then end the pending run subprocess.
@@ -13031,134 +13531,79 @@ const server = http.createServer(async (req, res) => {
       const entry = activeDocRuns.get(String(parsed.runId || ''));
       if (!entry) return json(res, 404, { error: 'no such run (it may have finished already)' });
       entry.cancelled = true;
-      const ratHome = path.join(os.homedir(), '.local', 'bin', 'rat');
-      const ratBin = fs.existsSync(ratHome) ? ratHome : 'rat';
-      const out = await new Promise(resolve => {
-        const c = spawn(ratBin, ['cancel', entry.runtime], { cwd: entry.dir, env: process.env });
-        let buf = '';
-        c.stdout.on('data', d => buf += String(d));
-        c.stderr.on('data', d => buf += String(d));
-        const timer = setTimeout(() => c.kill('SIGKILL'), 15000);
-        c.on('close', code => { clearTimeout(timer); resolve({ out: buf.trim(), code }); });
-        c.on('error', e => { clearTimeout(timer); resolve({ out: String(e.message), code: -1 }); });
-      });
+      const out = await ratExec(['cancel', '--doc', entry.doc, entry.runtime], { cwd: path.dirname(entry.doc), timeoutMs: 15000 });
       // The interrupt normally makes `rat run` return on its own; the kill
       // is a fallback for a wedged pipe.
       setTimeout(() => { try { entry.child.kill('SIGKILL'); } catch {} }, 3000);
-      json(res, 200, { ok: out.code === 0, ratCancel: out });
-    } else if (u.pathname === '/api/doc/runtime-info' && req.method === 'GET') {
-      // What kernel would this document use? Pure passthrough of rat's own
-      // resolution — aiconvo adds no logic, so it can never disagree.
-      const dir = String(u.searchParams.get('cwd') || '');
-      if (!dir || !fs.existsSync(dir)) return json(res, 400, { error: 'cwd required' });
-      const lang = /^[a-z0-9]{1,12}$/.test(String(u.searchParams.get('lang') || 'py')) ? String(u.searchParams.get('lang') || 'py') : 'py';
-      const ratHome = path.join(os.homedir(), '.local', 'bin', 'rat');
-      const ratBin = fs.existsSync(ratHome) ? ratHome : 'rat';
-      const out = await new Promise(resolve => {
-        const c = spawn(ratBin, ['resolve', lang, '--json'], { cwd: dir, env: process.env });
-        let buf = '';
-        c.stdout.on('data', d => buf += String(d));
-        const timer = setTimeout(() => c.kill('SIGKILL'), 15000);
-        c.on('close', () => { clearTimeout(timer); resolve(buf); });
-        c.on('error', () => { clearTimeout(timer); resolve(''); });
-      });
-      try {
-        const info = JSON.parse(out);
-        // Enrich with what the fix bar needs to be honest: the venv path
-        // rat's kernel binds to, and the name of the project's own package
-        // (pyproject.toml) — so a failed import of the project itself can
-        // offer `uv pip install -e .` instead of a wrong PyPI fetch.
-        const root = info.cwd || dir;
-        info.venv = fs.existsSync(path.join(root, '.venv')) ? path.join(root, '.venv') : null;
-        try {
-          const toml = await fsp.readFile(path.join(root, 'pyproject.toml'), 'utf8');
-          const m = toml.match(/^\s*name\s*=\s*["']([A-Za-z0-9._-]+)["']/m);
-          if (m) info.selfPackage = m[1];
-        } catch {}
-        json(res, 200, info);
-      } catch { json(res, 502, { error: 'rat resolve failed' }); }
-    } else if (u.pathname === '/api/doc/install-pkg' && req.method === 'POST') {
-      // Install one Python package into the document's project venv, so a
-      // failed `import` in a rat cell is one click from working. Facts this
-      // design rests on (verified): a live rat kernel imports packages
-      // installed into its venv from outside — no restart, no state loss.
-      // Boundary: uv does the installing, rat owns the kernel; this server
-      // only sequences them. Explicit user click — never automatic.
+      json(res, 200, { ok: out.code === 0, ratCancel: { out: out.out.trim(), code: out.code } });
+    } else if (u.pathname === '/api/doc/doctor' && req.method === 'GET') {
+      // Can this notebook run as it is? Pure passthrough of `rat doctor
+      // <notebook> --json`: project, environment, declared requirements,
+      // kernel, and the plan `ensure` would carry out. Nothing changes.
+      const doc = notebookPath(u.searchParams.get('doc'));
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const rat = ratBinary();
+      if (!rat.path) return json(res, 200, { ratMissing: true, error: RAT_MISSING });
+      const r = await ratExec(['doctor', doc, '--json'], { cwd: path.dirname(doc), timeoutMs: 60000 });
+      const report = ratJson(r.out);
+      if (!report) return json(res, 502, { error: 'rat doctor failed', detail: r.out.trim().slice(-2000) });
+      json(res, 200, { ...report, ratPath: rat.path, ratNote: rat.note || null });
+    } else if (u.pathname === '/api/doc/ensure' && req.method === 'POST') {
+      // Make the notebook runnable: `rat ensure <notebook> --json`. Creates
+      // the environment, installs what the notebook declares, restarts the
+      // kernel only when rat says it must. Explicit user click — never
+      // automatic. Options pass through by name so the UI can say exactly
+      // what it asked for (--recreate deletes an environment).
       let body = '';
       for await (const chunk of req) body += chunk;
       let parsed;
       try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
-      const pkg = String(parsed.pkg || '').trim();
-      // One PyPI requirement — or the project itself, editable ('-e .').
-      // Nothing else: no other flags, no URLs, no spaces.
-      const editableSelf = pkg === '-e .';
-      if (!editableSelf && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}(==[A-Za-z0-9._*+!-]{1,32})?$/.test(pkg)) {
-        return json(res, 400, { error: 'not a valid package name' });
-      }
-      const docDir = parsed.cwd && typeof parsed.cwd === 'string' && fs.existsSync(parsed.cwd) ? parsed.cwd : null;
-      if (!docDir) return json(res, 400, { error: 'cwd required' });
-      const homeBin = name => { const p = path.join(os.homedir(), name); return fs.existsSync(p) ? p : null; };
-      const uvBin = homeBin('.nix-profile/bin/uv') || homeBin('.local/bin/uv') || homeBin('.cargo/bin/uv') || 'uv';
-      const ratBin = homeBin('.local/bin/rat') || 'rat';
-      const sh = (bin, args, cwd, timeoutMs) => new Promise(resolve => {
-        const child = spawn(bin, args, { cwd, env: process.env });
-        let buf = '';
-        const cap = s => { buf += s; if (buf.length > 100000) { buf = buf.slice(0, 100000); child.kill('SIGKILL'); } };
-        child.stdout.on('data', d => cap(String(d)));
-        child.stderr.on('data', d => cap(String(d)));
-        const timer = setTimeout(() => { cap('\n… (timed out)'); child.kill('SIGKILL'); }, timeoutMs);
-        child.on('close', code => { clearTimeout(timer); resolve({ out: buf, code }); });
-        child.on('error', e => { clearTimeout(timer); resolve({ out: String(e.message), code: -1 }); });
-      });
-      // 1. The project root — rat's own resolution, so the venv lands where
-      //    the kernel looks for it (rat walks up from the doc's directory).
-      const resolved = await sh(ratBin, ['resolve', 'py', '--json'], docDir, 20000);
-      let root = docDir;
-      try { root = JSON.parse(resolved.out).cwd || docDir; } catch {}
-      const venv = path.join(root, '.venv');
-      const steps = [];
-      // 2. No venv yet? Create it. The kernel (if any) was running on some
-      //    other python — it must restart to bind to the new venv. That
-      //    resets kernel variables; the client says so honestly.
-      let created = false;
-      if (!fs.existsSync(venv)) {
-        const mk = await sh(uvBin, ['venv'], root, 60000);
-        steps.push({ step: 'uv venv', code: mk.code, out: mk.out.slice(-2000) });
-        if (mk.code !== 0) return json(res, 200, { error: 'could not create a venv', steps });
-        created = true;
-      }
-      // 3. Install into that exact interpreter — never into system python.
-      //    '-e .' installs the project's own package from the project root.
-      const args = ['pip', 'install', '--python', path.join(venv, 'bin', 'python'), ...(editableSelf ? ['-e', '.'] : [pkg])];
-      const inst = await sh(uvBin, args, root, 180000);
-      steps.push({ step: 'uv pip install ' + (editableSelf ? '-e . (this project, editable)' : pkg), code: inst.code, out: inst.out.slice(-4000) });
-      if (inst.code !== 0) return json(res, 200, { error: 'install failed', steps });
-      // 4a. Editable installs land as a .pth finder hook, and .pth files
-      //     are processed only at interpreter STARTUP — a live kernel
-      //     cannot see them (verified). Normal wheels need no restart.
-      let restarted = false;
-      if (editableSelf && !created) {
-        let name = 'py';
-        try { name = JSON.parse(resolved.out).name || 'py'; } catch {}
-        const rs = await sh(ratBin, ['restart', name], docDir, 60000);
-        steps.push({ step: 'rat restart ' + name + ' (editable installs need a fresh interpreter)', code: rs.code, out: rs.out.slice(-1000) });
-        restarted = rs.code === 0;
-      }
-      // 4b. Fresh venv: rebind the kernel. `rat restart` is NOT enough
-      //     here — the runtime entry in rat's state remembers its old
-      //     (no-venv) binding. Stop + remove clears the entry; the next
-      //     run re-resolves and picks up the new .venv. (Verified; an
-      //     existing venv never reaches this branch.)
-      if (created) {
-        let name = 'py';
-        try { name = JSON.parse(resolved.out).name || 'py'; } catch {}
-        const stop = await sh(ratBin, ['stop', name], docDir, 30000);
-        steps.push({ step: 'rat stop ' + name, code: stop.code, out: stop.out.slice(-1000) });
-        const rm = await sh(ratBin, ['remove', name, '--yes'], docDir, 30000);
-        steps.push({ step: 'rat remove ' + name, code: rm.code, out: rm.out.slice(-1000) });
-        restarted = rm.code === 0;
-      }
-      json(res, 200, { ok: true, pkg, venv, created, restarted, steps });
+      const doc = notebookPath(parsed.doc);
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const args = ['ensure', doc, '--json'];
+      if (parsed.recreate === true) args.push('--recreate');
+      if (parsed.force === true) args.push('--force');
+      const rat = ratBinary();
+      if (!rat.path) return json(res, 200, { ratMissing: true, error: RAT_MISSING });
+      // Installs can legitimately take minutes (torch, editable builds).
+      const r = await ratExec(args, { cwd: path.dirname(doc), timeoutMs: 30 * 60 * 1000, capBytes: 400000 });
+      const report = ratJson(r.out);
+      if (!report) return json(res, 502, { error: 'rat ensure failed', detail: r.out.trim().slice(-4000) });
+      json(res, 200, { ...report, ratPath: rat.path });
+    } else if (u.pathname === '/api/doc/notebook-from-answer' && req.method === 'POST') {
+      // One answer → one self-standing notebook in the project (design/41).
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const key = String(parsed.key || ''), entryId = String(parsed.entryId || '');
+      if (!index[key] || !entryId) return json(res, 400, { error: 'key and entryId are required' });
+      try { json(res, 200, await deriveNotebookFromAnswer(key, entryId)); }
+      catch (e) { json(res, 200, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/notebooks' && req.method === 'GET') {
+      // The notebooks a conversation produced: read from the files' own
+      // front matter, so the disk is the index.
+      const key = String(u.searchParams.get('key') || '');
+      if (!index[key]) return json(res, 404, { error: 'not found' });
+      let root;
+      try { ({ root } = notebookRootFor(key)); } catch { return json(res, 200, { notebooks: [] }); }
+      const notebooks = notebookDerive.listNotebooks(root, { conversation: key }).map(n => ({ path: n.path, title: n.title, entry: n.source.entry, created: n.source.created, after: n.after, root }));
+      json(res, 200, { notebooks, root });
+    } else if (u.pathname === '/api/doc/play-prerequisites' && req.method === 'POST') {
+      // Run the notebook's `rat.after` chain (each once per kernel) before
+      // its own cells run here. Pure passthrough of `rat play --prerequisites`.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const doc = notebookPath(parsed.doc);
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const rat = ratBinary();
+      if (!rat.path) return json(res, 200, { ratMissing: true, error: RAT_MISSING });
+      const r = await ratExec(['play', doc, '--prerequisites', '--json'], { cwd: path.dirname(doc), timeoutMs: 60 * 60 * 1000, capBytes: 400000 });
+      const report = ratJson(r.out);
+      if (!report) return json(res, 502, { error: 'rat play failed', detail: r.out.trim().slice(-4000) });
+      json(res, 200, report);
     } else if (u.pathname === '/api/tts' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -13348,6 +13793,7 @@ async function shutdownGracefully() {
   if (shuttingDown) return;
   shuttingDown = true;
   clearInterval(delegationTimer);
+  clearInterval(recoveryTimer);
   delegationCoordinator.stop();
   const hardExit = setTimeout(() => process.exit(0), 8000);
   try {
@@ -13367,6 +13813,7 @@ async function shutdownGracefully() {
         job.statusText = 'stopped — aiconvo restarted';
         job.finishedAt = Date.now();
       }
+      captureInterruptedRun(job, job.key);
     }
   } catch {}
   try { stopAllEngineSessions(); } catch {}
@@ -13418,6 +13865,21 @@ function speechStreamUpgrade(req, socket, head) {
 }
 server.on('upgrade', speechStreamUpgrade);
 
+let recoveryReady = false;
+const recoveryTimer = setInterval(() => {
+  if (recoveryReady && !shuttingDown && process.env.AICONVO_DISABLE_NETWORK_RECOVERY !== '1') agentRecovery.tick().catch(e => console.error('[agent recovery]', e.message));
+}, 15000);
+recoveryTimer.unref();
+function restoreInterruptedRuns() {
+  const latest = new Map();
+  for (const job of [...restoredRunJobs.values()].sort((a, b) => a.startedAt - b.startedAt)) latest.set(job.key, job);
+  for (const job of latest.values()) {
+    if (job.status === 'error' || /^stopped\b/.test(job.statusText || '')) captureInterruptedRun(job, job.key, true);
+    else agentRecovery.advance(job.key, job.finishedAt || job.startedAt);
+  }
+  recoveryReady = true;
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`aiconvo → http://localhost:${PORT}`);
   if (HOST !== '127.0.0.1' && HOST !== '::1') {
@@ -13436,6 +13898,7 @@ server.listen(PORT, HOST, () => {
     }
   }
   fullScan().then(() => {
+    restoreInterruptedRuns();
     watch(); watchNotes();
     startDelegationMonitor();
     sweepOrphanFanouts();

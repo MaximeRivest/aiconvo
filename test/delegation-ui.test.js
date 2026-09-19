@@ -416,11 +416,11 @@ test('app scripts parse and integration uses separate task hosts and read-only n
   assert.ok(html.includes('<script src="/delegation-ui.js"></script>'));
   assert.ok(html.includes("live.addEventListener('delegation-update'"));
   assert.ok(html.includes("d.type === 'delegation-update'"));
-  assert.ok(html.includes("$('agentsUnread').innerHTML = unreadTray"));
+  assert.ok(html.includes("$('agentsUnread').innerHTML ="));
   // The agents panel is an attention list. Delegated conversations are
   // normal rows there (parent named on the second line). Task cards live in
   // the parent transcript, the origin line in the child, nodes in the tree.
-  assert.ok(html.includes('<div id="agentsUnread"></div><div id="agentsLegacy"></div>'));
+  assert.ok(html.includes('<div id="agentsUnread"></div>') && html.includes('<div id="agentsLegacy"></div>'));
   assert.ok(!html.includes('agentDelegations'));
   assert.ok(!html.includes("mountDelegationView('agents')"));
   assert.ok(!html.includes("mountDelegationView('tree')"));
@@ -430,7 +430,7 @@ test('app scripts parse and integration uses separate task hosts and read-only n
   new vm.Script(reader, { filename: 'conversation-reader.js' });
   assert.ok(reader.includes('class="dg-card" data-dg-key='));
   assert.ok(html.includes('<script src="/conversation-reader.js"></script>'));
-  assert.ok(html.includes("origin(key) || shortDir"));
+  assert.ok(html.includes("origin(key) || projectLabel(s)"));
   assert.ok(html.includes("d.messages.findIndex(m => m.eid === entryId)"));
   assert.ok(html.includes("if (h.startsWith('read='))"));
 });

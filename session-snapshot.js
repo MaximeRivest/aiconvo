@@ -49,7 +49,10 @@ async function publishSession(file, text) {
 
 // SessionManager.open can migrate old files in place. Open only a private
 // snapshot: no source manager, active runtime, model, or mutation queue is used.
-async function forkPiSnapshot(SessionManager, target, nodeId, { before = false } = {}) {
+// `dir` publishes the fork somewhere other than the source's session
+// directory (a private staging area for a derivation), so no watcher
+// mistakes it for a conversation.
+async function forkPiSnapshot(SessionManager, target, nodeId, { before = false, dir = null } = {}) {
   const source = path.resolve(target.sessionPath);
   const snapshot = await readSessionSnapshot(source);
   const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'aiconvo-fork-'));
@@ -78,7 +81,7 @@ async function forkPiSnapshot(SessionManager, target, nodeId, { before = false }
     // Correct only the origin link, which must not name our temporary snapshot.
     const header = { ...sm.getHeader(), parentSession: source };
     const text = [header, ...sm.getEntries()].map(e => JSON.stringify(e)).join('\n') + '\n';
-    const file = path.join(path.dirname(source), path.basename(stagedFile));
+    const file = path.join(dir || path.dirname(source), path.basename(stagedFile));
     await publishSession(file, text);
     const result = { file, sessionId: sm.getSessionId() };
     if (before) {

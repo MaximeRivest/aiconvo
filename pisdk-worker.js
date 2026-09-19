@@ -109,6 +109,14 @@ function createWorkerController({ send, exit, engineFactory = createRuntimeEngin
       }
     }
     if (method === 'begin') return engine.piBeginWarm(...args);
+    if (method === 'derive') {
+      // An explicit lifecycle like 'run': the snapshot session's events must
+      // not be mistaken for an autonomous extension turn (which the host
+      // may cancel).
+      active = { id, kind: 'explicit', handle: null };
+      try { return await engine.piDeriveAt(...args); }
+      finally { active = null; }
+    }
     if (method === 'thinking') return engine.piSetThinking(...args);
     throw new Error('Unknown Pi worker method: ' + method);
   }

@@ -33,14 +33,26 @@ class SpeechBridge(
 ) {
     companion object {
         private const val TARGET_RATE = 16000
-        private const val SPEECH_BASE = "http://192.168.2.24:8078"
         private const val MAX_BYTES = TARGET_RATE * 2 * 600
     }
 
     private val audioExecutor = Executors.newSingleThreadExecutor()
-    private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .build()
+    // Speech goes through the aiconvo server's own relay (/api/speech/*),
+    // so it reaches the GPU stage from wherever the page itself is reachable
+    // instead of needing a second, LAN-only address.
+    private var clientBase = ""
+    private var cachedClient: OkHttpClient? = null
+    private val client: OkHttpClient
+        get() {
+            val base = activity.serverBase
+            return cachedClient?.takeIf { clientBase == base }
+                ?: ServerReach.httpClient(base).also { cachedClient = it; clientBase = base }
+        }
+
+    private fun authed(builder: Request.Builder): Request.Builder {
+        val token = activity.serverToken
+        return if (token.isEmpty()) builder else builder.header("Authorization", "Bearer $token")
+    }
 
     @Volatile private var recording = false
     @Volatile private var streamReady = false
@@ -133,7 +145,8 @@ class SpeechBridge(
     private fun openStream() {
         closeStream()
         streamReady = false
-        val request = Request.Builder().url("ws://192.168.2.24:8078/stream").build()
+        val request = authed(Request.Builder()
+            .url(ServerReach.webSocketBase(activity.serverBase) + "/api/speech/stream")).build()
         lateinit var opened: WebSocket
         opened = client.newWebSocket(request, object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -254,9 +267,9 @@ class SpeechBridge(
                 .build()
             val media = MediaType.parse("audio/L16;rate=16000;channels=1")
             val body = RequestBody.create(media, pcm)
-            val request = Request.Builder()
-                .url("$SPEECH_BASE/transcribe")
-                .post(body)
+            val request = authed(Request.Builder()
+                .url(activity.serverBase + "/api/speech/transcribe")
+                .post(body))
                 .build()
             finalClient.newCall(request).execute().use { response ->
                 val text = response.body()?.string()?.trim().orEmpty()
@@ -278,8 +291,11 @@ class SpeechBridge(
         audioRecord = null
         closeStream()
         audioExecutor.shutdownNow()
-        client.dispatcher().executorService().shutdownNow()
-        client.connectionPool().evictAll()
+        cachedClient?.let {
+            it.dispatcher().executorService().shutdownNow()
+            it.connectionPool().evictAll()
+        }
+        cachedClient = null
     }
 
     private fun emit(type: String, text: String? = null, message: String? = null) {

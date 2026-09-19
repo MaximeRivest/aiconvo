@@ -21,6 +21,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   const code = [
     fs.readFileSync(path.join(__dirname, '../conversation-flow.js'), 'utf8'),
     fs.readFileSync(path.join(__dirname, '../conversation-reader.js'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '../navigation.js'), 'utf8'),
     extract('function setRoute(kind, hash)', '\nfunction goHome()'),
     extract('function dispatchHash(h, { restore = false } = {}) {', '\nconst $ = id => document.getElementById'),
     extract('async function open(rel, scroll,', '// ---- distillation ----'),
@@ -31,7 +32,8 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   const fixture = `<!doctype html><meta charset="utf-8"><div id="view"></div><pre id="result">PENDING</pre><script>
   const $ = id => document.getElementById(id);
   let current = null, activeRel = null, viewKind = 'home', conversationLoadSeq = 0;
-  let progressStream = null, currentHash = '', suppressHashEvents = 0, lastNavProject = null, matchIdx = -1;
+  let progressStream = null, currentHash = '', lastNavProject = null, matchIdx = -1;
+  const TRANSIENT_KINDS = new Set(); let nav = null, navShownId = null, navTraversalSeq = 0, navHold = null;
   const lastNavConversation = new Map(), modelTouchAt = new Map(), traceLeaves = new Map(), fanoutFocus = new Map(), toolGroupOpen = new Map(), compareCache = new Map(), runLedgers = new Map();
   const sessions = [], calls = [], errors = [];
   let transcriptQuery = '';
@@ -68,6 +70,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
   const mdRender=esc, toolTextHtml=esc, messageMediaHtml=()=>'';
   ${code}
+  nav = Navigation.createStack({ history, location, describe: () => null }); nav.load('');
   function check(ok, why) { if (!ok) throw Error(why); }
   function landed(index) {
     const node = document.querySelector('#conversationTranscript [data-i="'+index+'"]');

@@ -137,6 +137,19 @@
     return (d.messages || []).filter(m => ids.has(m.eid) && !transport(m));
   }
 
+  // Match only inside the chosen reading path/package, never across branches.
+  function rewritePairs(messages) {
+    const originals = new Map(), pairs = new Map();
+    for (const m of messages) {
+      if (m.role === 'user') originals.clear();
+      if (m.role !== 'assistant') continue;
+      const original = originals.get(m.rewriteOf);
+      if (original && original.model === m.model && original.provider === m.provider) pairs.set(original.eid, m);
+      if (!m.rewriteOf) originals.set(m.eid, m);
+    }
+    return pairs;
+  }
+
   // Settings-only appends do not move the conversation the person read.
   // A new message or a label pointing to another path does.
   function sameContext(entries, expectedLeaf) {
@@ -153,5 +166,5 @@
     return false;
   }
 
-  return { operation, transport, trace, contains, follow, project, branches, label, packageMessages, sameContext };
+  return { operation, transport, trace, contains, follow, project, branches, label, packageMessages, sameContext, rewritePairs };
 });

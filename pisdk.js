@@ -267,6 +267,13 @@ function createPiSdkProxy(options = {}) {
       return W && !W.dead ? request(W, 'queue', [wireTarget(target), message, behavior, images]) : false;
     },
     piSetThinking: async (target, level) => request(start(target), 'thinking', [wireTarget(target), level]),
+    // A derivation on a private snapshot session: its own worker, stopped
+    // when the completion returns. Nothing reaches the real conversation.
+    piDeriveAt: async (target, opts) => {
+      const W = start(target);
+      try { return await request(W, 'derive', [wireTarget(target), opts]); }
+      finally { stop(W); }
+    },
     stopWarmSession: sessionPath => { const W = sessions.get(path.resolve(sessionPath)); return W ? stop(W) : false; },
     stopAllWarmSessions: () => { let count = 0; for (const W of children) if (stop(W)) count++; return count; },
     listWarmSessions: () => [...sessions.values()].filter(W => !W.dead && !W.stopping).map(W => ({ ...W.state,

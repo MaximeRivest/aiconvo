@@ -72,6 +72,8 @@ async function openLiveFile(pathValue, opts = {}) {
     reviewRef: opts.reviewRef || null, reviewData: opts.reviewData || null };
   fileWs = ws;
   setRoute('file', fileWsHash(ws));
+  // A person opened this file: it joins the shared recent-files list.
+  if (typeof recordRecentFile === 'function') recordRecentFile(ws.path, ws.project);
   $('view').innerHTML = '<section class="files-ws live-file-view"><div id="ffCompare" class="live-file-body"></div><div id="fwAsk" class="fw-ask" hidden></div></section>';
   // A link may name recorded versions (to=, from=): open straight into history.
   if (opts.to || opts.from) return liveFileHistory(ws, { to: opts.to || null, from: opts.from || null });
@@ -303,8 +305,7 @@ async function liveFileHistory(ws, selection = {}) {
     $('fhOlder').onclick = () => select(usable[Math.max(0, i - 1)].id, comparing ? from.id : null);
     $('fhNewer').onclick = () => select(usable[Math.min(usable.length - 1, i + 1)].id, comparing ? from.id : null);
     host.querySelectorAll('[data-fh-point]').forEach(b => b.onclick = () => select(b.dataset.fhPoint, comparing ? from.id : null));
-    currentHash = fileWsHash(ws);
-    history.replaceState(null, '', location.pathname + location.search + '#' + currentHash);
+    replaceRoute(fileWsHash(ws));
     await liveHistoryPaint(ws, scope, doc, from, to, ticket);
   } catch (e) { if (fileWs === ws && host.isConnected && ws.historyRequest === ticket) host.textContent = 'History unavailable: ' + e.message; }
 }

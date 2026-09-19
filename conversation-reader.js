@@ -4,6 +4,9 @@ const readerStates = new Map();
 const readerSessions = new Map();
 const readerLiveMessages = new Map();
 const readerDrafts = new Map();
+// In-memory reading choices: a live answer never changes underneath its reader.
+// A fresh visit starts with the completed simpler version.
+const answerRewriteChoices = new Map();
 function rememberConversationDraft() {
   const ta = $('agentText');
   const key = ta?.closest('[data-conversation-key]')?.dataset.conversationKey;
@@ -122,8 +125,11 @@ function maintainReaderLanding(apply) {
 }
 function readerRoute(key, leaf, anchor, replace = false) {
   const hash = 'path=' + encodeURIComponent(JSON.stringify({ key, leaf: leaf || null, anchor: anchor || null }));
-  history[replace ? 'replaceState' : 'pushState'](null, '', '#' + hash);
-  currentHash = hash;
+  // Same screen, another reading path: a step of its own in history, so
+  // back returns to the path read before (a replace only records where the
+  // current path was left).
+  if (replace) replaceRoute(hash);
+  else { navRememberScroll(); currentHash = hash; nav.push(hash, { kind: 'conversation' }); navShownId = nav.current().id; }
 }
 async function browseConversationPath(key, id, anchor, { exact = false, history: record = true } = {}) {
   const sameView = key === current?.key && viewKind === 'conversation';
@@ -223,6 +229,9 @@ async function continueReadingPath(key, id, button, expectedLeaf = null) {
 // fragment renderer. Tools and their matching results never cross paths.
 function transcriptFragmentHtml(d, messages, { after = new Map(), before = new Map(), replacements = new Map(), skip = new Set(), q = '', exact = null } = {}) {
   const indexes = new Map(d.messages.map((m, i) => [m, i]));
+  const pairs = ConversationFlow.rewritePairs(messages);
+  for (const [id, rewrite] of pairs) if (id === exact || rewrite.eid === exact || skip.has(id) || replacements.has(id)) pairs.delete(id);
+  const pairedIds = new Set([...pairs.values()].map(m => m.eid));
   const msgs = messages.map(m => ({ ...m, _source: m }));
   const calls = new Map();
   for (const m of msgs) {
@@ -279,7 +288,9 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
     const m = msgs[i], first = i === 0 || msgs[i - 1].eid !== m.eid;
     if (first && m.role === 'user') { flush(); endTurn(); }
     if (first && before.has(m.eid)) { flush(); out.push(before.get(m.eid)); }
-    if (replacements.has(m.eid) && m.eid !== exact) {
+    if (pairedIds.has(m.eid)) {
+      // The complete replacement is rendered beside its original, not as a new turn.
+    } else if (replacements.has(m.eid) && m.eid !== exact) {
       flush(); if (first) out.push(replacements.get(m.eid));
     } else if ((!skip.has(m.eid) && !ConversationFlow.transport(m)) || m.eid === exact) {
       // Assistant commentary is addressed to the reader even when the same
@@ -293,7 +304,15 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
         }
         const op = ConversationFlow.operation(m);
         if (op?.kind === 'edit') out.push(`<div class="flow-origin">${m.role === 'user' ? 'Edited question' : 'Your correction'}${op.sourceEntryId ? ` · <button data-reader-entry="${esc(op.sourceEntryId)}">Read original</button>` : ''}</div>`);
-        out.push(msgBlock(m, esc, true, q, indexes.get(m._source), d.key));
+        const rewrite = m.role === 'assistant' && pairs.get(m.eid);
+        const choiceKey = d.key + '|' + m.eid;
+        if (rewrite) {
+          const choice = answerRewriteChoices.get(choiceKey) || 'simple';
+          out.push(`<section class="answer-versions" data-rewrite-choice="${esc(choiceKey)}"><div data-answer-pane="simple"${choice === 'simple' ? '' : ' hidden'}>${msgBlock(rewrite, esc, true, q, indexes.get(rewrite), d.key, 'original')}</div><div data-answer-pane="original"${choice === 'original' ? '' : ' hidden'}>${msgBlock(m, esc, true, q, indexes.get(m._source), d.key, 'simple')}</div></section>`);
+        } else {
+          if (m.role === 'assistant') answerRewriteChoices.set(choiceKey, 'original');
+          out.push(msgBlock(m, esc, true, q, indexes.get(m._source), d.key));
+        }
       }
     }
     if (msgs[i + 1]?.eid !== m.eid && after.has(m.eid)) { flush(); out.push(after.get(m.eid)); }
@@ -449,7 +468,18 @@ async function prepareConversationReading(d, scroll) {
 
 function wireConversationReader() {
   const view = $('view'), key = current.key;
+  if (typeof ensureNotebookCards === 'function') ensureNotebookCards(key);
   view.querySelectorAll('[data-step-review]').forEach(b => b.onclick = () => openStepReview(JSON.parse(b.dataset.stepReview)));
+  view.querySelectorAll('[data-answer-version]').forEach(button => button.onclick = () => {
+    const box = button.closest('[data-rewrite-choice]'), choice = button.dataset.answerVersion;
+    answerRewriteChoices.set(box.dataset.rewriteChoice, choice);
+    box.querySelectorAll('[data-answer-pane]').forEach(pane => { pane.hidden = pane.dataset.answerPane !== choice; });
+    // The clicked action is now hidden. Keep keyboard/touch access to the
+    // reverse action without a browser-driven jump to the other answer's end.
+    const reverse = box.querySelector(`[data-answer-pane="${choice}"] [data-answer-version]`);
+    reverse?.closest('.msg')?.focus({ preventScroll: true });
+    reverse?.focus({ preventScroll: true });
+  });
   const blocked = readerIsBrowsing(current) || !!readerPendingChoice(current);
   for (const id of ['agentRun', 'agentSend']) if ($(id)) $(id).disabled = blocked;
   const group = node => readerFlow.groups.find(g => g.node === node);
@@ -737,7 +767,10 @@ function captureLiveReplyHandoff(d) {
     if (L.key !== d.key || (L.fanoutId && L.fanoutRootKey === d.key)) continue;
     for (const [id, m] of savedLiveReplies(L, d.messages)) {
       const el = host.querySelector(`[data-live-reply="${CSS.escape(jobId + ':' + id)}"]`);
-      if (el && m.eid) adopted.push({ el, eid: m.eid });
+      if (el && m.eid) {
+        answerRewriteChoices.set(d.key + '|' + m.eid, 'original');
+        adopted.push({ el, eid: m.eid });
+      }
     }
   }
   return { host, adopted };

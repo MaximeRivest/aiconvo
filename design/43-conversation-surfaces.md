@@ -1,0 +1,56 @@
+# 43 — Quieter conversation controls and appearance choices
+
+## Intent
+
+Keep writing and sending obvious. Less-used controls must remain reachable,
+not push the microphone/model/send controls off the edge. Prefer a quiet title
+line to a floating card. Shape belongs to themes, not hard-coded components.
+
+## Composer
+
+- Always-visible toolbar: **+ options**, microphone (when available), model,
+  send. The existing buttons for attachments, Context, commands, snippets,
+  tree, mode, reasoning, and usage are inside a native details menu. Their
+  handlers and keyboard shortcuts remain; no second implementation of them.
+- Utility actions close the options menu when opening their own surface.
+  Mode and reasoning can be adjusted without leaving it. Escape returns
+  focus to the summary; clicking elsewhere closes the menu.
+- The model name shrinks/ellipsizes before send or microphone lose room.
+  No horizontally scrolling toolbar. Phone focus changes no longer collapse
+  the controls into a different layout.
+- Side-layout composer is inset 10px from the bottom and 12px horizontally,
+  with a theme-controlled contour. The entire dock (including live stream
+  and continuation notice), not only the input, is measured for transcript
+  clearance. This applies to e-ink too.
+
+## Title and message actions
+
+- The side-layout title is a small left-aligned transparent line **outside the
+  transcript scroller**: no overlap, border, blur, card background, or shadow.
+  It retains rename/move actions and scroll-direction hiding. Hiding/showing
+  compensates the scroll offset for the line’s height, keeping the same prose
+  in place. Blank space in the line does not intercept clicks.
+- Copy/read/more sit **below** a user bubble, 6px away, outside its tinted
+  background. The bubble stays compact. The gap below reserves room for
+  these controls, without negative margins or overlap with the next message.
+- Assistant actions stay in normal document flow. Actions are visible rather
+  than hover-only; touch users do not need to discover hidden controls.
+
+## Appearance
+
+- `--r`, `--r-sm`, `--r-menu`, `--r-composer` control general controls, small
+  actions, menus and composer. Default: 6/4/10/18px. Built-in e-ink sets all
+  to zero. The theme template documents the same tokens.
+- Appearance offers Theme default, System sans, Humanist sans, Book serif,
+  Monospace. Applies immediately; `aiconvo.font` persists per browser and is
+  restored before paint. These use installed font stacks, not remote assets;
+  the exact face can vary by device. Theme default removes the override.
+- Code and editor/terminal text retain `--font-mono`; a reading-font change
+  does not disturb column alignment.
+
+## Verification
+
+`test/side-panel.test.js` exercises menu reachability, closing, long model
+names at 760/1000/390px, composer bounds, action spacing, transparent title,
+e-ink shape switching, font setting/persistence/reset, and monospace code.
+The complete conversation-app test covers the real editor/composer wiring.

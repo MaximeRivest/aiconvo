@@ -56,6 +56,13 @@ test('normalizeSettings keeps the built-in default', () => {
   assert.strictEqual(normalizeSettings({ thinking: 'nope' }).thinking, 'off');
 });
 
+test('semantic search defaults to Tailscale without replacing custom servers', () => {
+  for (const usePiDefault of [false, true]) {
+    assert.strictEqual(normalizeSettings({ usePiDefault }).semanticUrl, 'http://100.86.49.54:8090');
+    assert.strictEqual(normalizeSettings({ usePiDefault, semanticUrl: 'http://search.example:8090/' }).semanticUrl, 'http://search.example:8090');
+  }
+});
+
 test('normalizeSettings can follow the pi default', () => {
   const s = normalizeSettings({ usePiDefault: true, thinking: 'low' });
   assert.strictEqual(s.usePiDefault, true);

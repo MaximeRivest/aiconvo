@@ -13,11 +13,20 @@
 // `since` is the first-use guard: activity older than it is treated as read,
 // so enabling the feature (or wiping the state) never floods the inbox with
 // every old conversation.
+//
+// Three explicit marks ride in the same state (design/42):
+// · flagged[key]   marked unread by hand; unread while newer than the read,
+//                  whatever the transcript's age (the guard does not apply);
+// · dismissed[key] removed from the inbox; hidden while its activity is not
+//                  newer than the dismissal, a later reply brings it back;
+// · pinned[key]    kept in a section of its own, in pin order.
 
 function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }
 
+const MARK_MAPS = ['flagged', 'dismissed', 'pinned'];
+
 function createState(now = Date.now()) {
-  return { since: now, read: {}, finished: {} };
+  return { since: now, read: {}, finished: {}, flagged: {}, dismissed: {}, pinned: {} };
 }
 
 function normalize(raw, now = Date.now()) {
@@ -26,18 +35,22 @@ function normalize(raw, now = Date.now()) {
   if (num(raw.since)) state.since = num(raw.since);
   for (const [k, v] of Object.entries(raw.read || {})) if (k && num(v)) state.read[k] = num(v);
   for (const [k, v] of Object.entries(raw.finished || {})) if (k && num(v)) state.finished[k] = num(v);
+  for (const map of MARK_MAPS) for (const [k, v] of Object.entries(raw[map] || {})) if (k && num(v)) state[map][k] = num(v);
   return state;
 }
 
-// A person read `key`. Returns the delta to broadcast ({ read: { key: at } })
-// or null when nothing moved.
+// A person read `key`. Returns the delta to broadcast ({ read: { key: at } },
+// plus `flagged: { key: 0 }` when a manual unread mark was lifted) or null
+// when nothing moved.
 function markRead(state, key, { now = Date.now(), mtimeMs = 0 } = {}) {
   if (!key) return null;
-  const at = Math.max(num(now), num(mtimeMs), num(state.finished[key]), num(state.read[key]));
-  const changed = at !== state.read[key] || key in state.finished;
+  const at = Math.max(num(now), num(mtimeMs), num(state.finished[key]), num(state.read[key]), num(state.flagged[key]));
+  const changed = at !== state.read[key] || key in state.finished || key in state.flagged;
   state.read[key] = at;
   delete state.finished[key];
-  return changed ? { read: { [key]: at } } : null;
+  const delta = { read: { [key]: at } };
+  if (key in state.flagged) { delete state.flagged[key]; delta.flagged = { [key]: 0 }; }
+  return changed ? delta : null;
 }
 
 // A run on `key` ended at `at` (server time). The finish time survives even
@@ -49,6 +62,41 @@ function markFinished(state, key, at = Date.now()) {
   if (t === state.finished[key]) return null;
   state.finished[key] = t;
   return { finished: { [key]: t } };
+}
+
+// "Mark as unread": the flag must beat the last read even when that read
+// was stamped with a future mtime, so it is at least one past the read.
+// A dismissed conversation comes back into the inbox.
+function markUnread(state, key, { now = Date.now() } = {}) {
+  if (!key) return null;
+  const at = Math.max(num(now), num(state.read[key]) + 1);
+  const delta = { flagged: { [key]: at } };
+  state.flagged[key] = at;
+  if (key in state.dismissed) { delete state.dismissed[key]; delta.dismissed = { [key]: 0 }; }
+  return delta;
+}
+
+// "Remove from the inbox": reads the conversation and hides it while no
+// newer activity arrives. The dismissal time is the read time, so the same
+// clock rule covers it.
+function dismiss(state, key, { now = Date.now(), mtimeMs = 0 } = {}) {
+  if (!key) return null;
+  const delta = markRead(state, key, { now, mtimeMs }) || { read: { [key]: state.read[key] } };
+  state.dismissed[key] = state.read[key];
+  delta.dismissed = { [key]: state.dismissed[key] };
+  return delta;
+}
+
+function setPinned(state, key, on, now = Date.now()) {
+  if (!key) return null;
+  if (on) {
+    if (state.pinned[key]) return null;
+    state.pinned[key] = num(now) || Date.now();
+    return { pinned: { [key]: state.pinned[key] } };
+  }
+  if (!(key in state.pinned)) return null;
+  delete state.pinned[key];
+  return { pinned: { [key]: 0 } };
 }
 
 // One-time import of a browser's old local state. Raw merge: reads keep their
@@ -70,11 +118,42 @@ function importState(state, raw) {
   return changed ? delta : null;
 }
 
-// Time of the newest unread activity for `key`, or 0 when it is read.
+// Apply a broadcast delta to a copy of the state (what browsers do). In the
+// mark maps a value of 0 means "removed".
+function applyDelta(state, delta) {
+  if (!delta || typeof delta !== 'object') return state;
+  if (num(delta.since)) state.since = num(delta.since);
+  for (const [k, v] of Object.entries(delta.read || {})) { state.read[k] = num(v); delete state.finished[k]; }
+  for (const [k, v] of Object.entries(delta.finished || {})) state.finished[k] = Math.max(num(state.finished[k]), num(v));
+  for (const map of MARK_MAPS) for (const [k, v] of Object.entries(delta[map] || {})) {
+    if (num(v)) state[map][k] = num(v); else delete state[map][k];
+  }
+  return state;
+}
+
+function activityAt(state, key, mtimeMs = 0) {
+  return Math.max(num(mtimeMs), num(state.finished[key]));
+}
+
+// Time of the newest unread activity for `key`, or 0 when it is read. A
+// manual flag newer than the last read makes it unread regardless of age.
 function unreadAt(state, key, mtimeMs = 0) {
-  const activity = Math.max(num(mtimeMs), num(state.finished[key]));
+  const activity = activityAt(state, key, mtimeMs);
+  const flagged = num(state.flagged[key]);
+  if (flagged && flagged > num(state.read[key])) return Math.max(activity, flagged);
   const read = Math.max(num(state.since), num(state.read[key]));
   return activity > read ? activity : 0;
 }
 
-module.exports = { createState, normalize, markRead, markFinished, importState, unreadAt };
+// Removed from the inbox, and nothing newer has happened since.
+function isDismissed(state, key, mtimeMs = 0) {
+  const at = num(state.dismissed[key]);
+  return !!at && activityAt(state, key, mtimeMs) <= at && !(num(state.flagged[key]) > num(state.read[key]));
+}
+
+// Pinned keys, most recently pinned first.
+function pinnedKeys(state) {
+  return Object.entries(state.pinned).sort((a, b) => b[1] - a[1]).map(([k]) => k);
+}
+
+module.exports = { createState, normalize, markRead, markFinished, markUnread, dismiss, setPinned, importState, applyDelta, unreadAt, isDismissed, pinnedKeys, activityAt };

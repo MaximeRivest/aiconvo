@@ -77,7 +77,8 @@
   --theme-mode: color;
   --theme-motion: 1;
 
-  --font: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  --font: var(--font-mono);
   --fs-title: 15px;
   --fs-body: 13px;
   --fs-label: 12px;
@@ -88,9 +89,18 @@
   --sp-3: 12px;
   --sp-4: 16px;
   --sp-6: 24px;
-  --r: 0;
-  --r-sm: 2px;
+  /* Shared shape vocabulary. Themes can set all four to 0 for square UI. */
+  --r: 6px;
+  --r-sm: 4px;
+  --r-menu: 10px;
+  --r-composer: 18px;
   --shadow: none;
+  /* The navigation column and the agents tray (design/42): softer than the
+     rest of the app by default; themes may flatten it. */
+  --panel-bg: var(--surface-1);
+  --panel-r: 8px;
+  --panel-row-r: 6px;
+  --panel-border: transparent;
   --list-w: 400px;
   --read-max: 1080px;
   --header-h: 44px;
@@ -225,6 +235,13 @@
 }
 
 :root[data-theme="eink"] {
+  --panel-r: 0;
+  --panel-row-r: 0;
+  --r: 0px;
+  --r-sm: 0px;
+  --r-menu: 0px;
+  --r-composer: 0px;
+  --panel-border: #000000;
   --bg: #ffffff;
   --surface-1: #ffffff;
   --surface-2: #ffffff;

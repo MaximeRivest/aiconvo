@@ -55,9 +55,10 @@ class NotifyService : Service() {
         }
     }
 
-    private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .build()
+    // Built per server address: a self-signed certificate is accepted on
+    // private and tailnet addresses only (see ServerReach.httpClient).
+    private var clientBase = ""
+    private var client: OkHttpClient = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
     @Volatile private var running = false
     private var worker: Thread? = null
 
@@ -102,9 +103,12 @@ class NotifyService : Service() {
     private fun listenLoop() {
         var backoffMs = 2000L
         while (running) {
-            val base = (prefs().getString("server", "") ?: "").trimEnd('/')
+            val base = ServerReach.normalizeBase(prefs().getString("server", "") ?: "")
             val token = prefs().getString("token", "") ?: ""
             if (base.isEmpty()) { sleep(backoffMs); continue }
+            // Deliberately no Tailscale start here: this runs in the
+            // background and must not undo a user turning the VPN off.
+            if (base != clientBase) { client = ServerReach.httpClient(base); clientBase = base }
             try {
                 val req = Request.Builder().url("$base/api/events")
                     .header("Accept", "text/event-stream")

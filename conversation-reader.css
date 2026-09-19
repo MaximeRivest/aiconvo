@@ -33,9 +33,10 @@
 .flow-answer .msg { padding: 16px; }
 .transcript .msg-actions, .flow-live .msg-actions { flex-wrap: nowrap; }
 .msg-more-actions { position: relative; white-space: normal; }
-.msg-more-actions > summary { cursor: pointer; list-style: none; padding: 4px 8px; font-size: 12px; min-height: 30px; display: flex; align-items: center; }
+.msg-more-actions > summary { cursor: pointer; list-style: none; padding: 4px 8px; border-radius: var(--r-sm); font-size: 12px; min-height: 30px; display: flex; align-items: center; }
+.msg-more-actions > summary:hover, .msg-more-actions[open] > summary { background: var(--surface-2); }
 .msg-more-actions > summary::-webkit-details-marker { display: none; }
-.msg-more-actions > div { position: absolute; bottom: 100%; right: 0; z-index: 50; min-width: 190px; padding: 6px; display: flex; flex-direction: column; border: 1px solid var(--border-strong); background: var(--bg); box-shadow: 0 4px 12px var(--shadow-color); }
+.msg-more-actions > div { position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 50; min-width: 190px; padding: 6px; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-menu); background: var(--surface-1); box-shadow: 0 4px 12px var(--shadow-color); }
 .msg-more-actions > div > button { width: 100%; text-align: left; min-height: 36px; font-size: 13px; }
 .flow-compare-title { flex: 1; font-size: 14px; }
 .flow-answer-foot { padding: 8px 14px 14px; }
@@ -95,6 +96,7 @@
   .flow-merge-dialog { padding: 16px; }
   .flow-instruction textarea { font-size: 16px; }
 }
+.answer-versions [data-answer-pane][hidden] { display: none; }
 :root[data-theme-mode="binary"] .flow-turn, :root[data-theme-mode="binary"] .flow-paths, :root[data-theme-mode="binary"] .reader-destination { border-color: var(--text); }
 :root[data-theme-mode="binary"] .flow-pair { grid-template-columns: minmax(0, 1fr); }
 :root[data-theme-mode="binary"] .flow-mobile-switch { display: flex; flex-wrap: wrap; }

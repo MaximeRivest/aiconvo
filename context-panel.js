@@ -16,7 +16,7 @@ window.openContextPanel = async function(api) {
     const r = await fetch('/api/conversation/context-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: api.key, context: items }) });
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Preview unavailable'); return d;
   };
-  const titleOf = item => item.type === 'chat' ? (item.title || 'Conversation') : item.type === 'file' ? item.path : item.project + ' · ' + item.kind;
+  const titleOf = item => item.type === 'chat' ? (item.title || 'Conversation') : item.type === 'file' ? item.path : item.type === 'note' ? 'Instructions for this conversation' : item.project + ' · ' + item.kind;
   const refreshAttached = async () => {
     const n = ++totalRevision, host = $('[data-attached]'); host.replaceChildren();
     const items = api.items();

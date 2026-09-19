@@ -18,12 +18,14 @@ export default function (pi: any) {
           stream.push({ type: 'error', reason: 'aborted', error }); stream.end(); return;
         }
         if (process.env.FIXTURE_REQUEST_MARKER) fs.appendFileSync(process.env.FIXTURE_REQUEST_MARKER, 'request\n');
+        if (process.env.FIXTURE_WIRE_LOG) fs.appendFileSync(process.env.FIXTURE_WIRE_LOG, JSON.stringify({ model: model.id, provider: model.provider, context, reasoning: options?.reasoning, sessionId: options?.sessionId }) + '\n');
         const last = context.messages.at(-1);
         const input = typeof last?.content === 'string' ? last.content : (last?.content || []).map((b: any) => b.text || '').join('');
+        const rewrite = input.startsWith('Wait, I don’t get it. Re-explain your entire last answer simply');
         const call = last?.role === 'user' && input.includes('capture environment');
         const content = call ? [{ type: 'toolCall', id: 'env-probe', name: 'bash', arguments: {
           command: `node -e 'if(process.env.FIXTURE_CHECKPOINT_WRITE) require("fs").writeFileSync("probe.txt","checkpointed"); console.log(JSON.stringify({session:process.env.PI_SESSION_ID,fixture:process.env.FIXTURE_SESSION,mode:process.env.PI_EFFECTIVE_PROMPT_MODE}))'`,
-        } }, ...(process.env.FIXTURE_CHECKPOINT_WRITE ? [{ type: 'toolCall', id: 'target-probe', name: 'write', arguments: { path: 'scratch/probe.txt', content: 'target checkpoint' } }] : [])] : [{ type: 'text', text: 'Fixture reply.' }];
+        } }, ...(process.env.FIXTURE_CHECKPOINT_WRITE ? [{ type: 'toolCall', id: 'target-probe', name: 'write', arguments: { path: 'scratch/probe.txt', content: 'target checkpoint' } }] : [])] : [{ type: 'text', text: rewrite ? 'The full explanation in everyday words.' : 'Fixture reply.' }];
         const result = { role: 'assistant', api: model.api, provider: model.provider, model: model.id, content,
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
           stopReason: call ? 'toolUse' : 'stop', timestamp: Date.now() };

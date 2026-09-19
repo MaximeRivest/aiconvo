@@ -15,10 +15,28 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/tokens.css">
 <script>
-// Apply the saved theme before first paint (no flash). '' = follow the OS.
+// Local font choices use installed fonts only: no network or font downloads.
+window.appFonts = {
+  theme: { label: 'Theme default', value: '' },
+  sans: { label: 'System sans', value: 'system-ui, -apple-system, "Segoe UI", sans-serif' },
+  humanist: { label: 'Humanist sans', value: '"Trebuchet MS", "Noto Sans", sans-serif' },
+  serif: { label: 'Book serif', value: 'Georgia, "Noto Serif", serif' },
+  mono: { label: 'Monospace', value: 'var(--font-mono)' },
+};
+window.setAppFont = function (id) {
+  const choice = window.appFonts[id] || window.appFonts.theme;
+  if (choice.value) document.documentElement.style.setProperty('--font', choice.value);
+  else document.documentElement.style.removeProperty('--font');
+  document.documentElement.dataset.appFont = window.appFonts[id] ? id : 'theme';
+};
+// Apply saved appearance before first paint. '' theme = follow the OS.
 try {
+  window.setAppFont(localStorage.getItem('aiconvo.font') || 'theme');
   const t = localStorage.getItem('aiconvo.theme');
   if (t) document.documentElement.dataset.theme = t;
+  // The side-panel layout (design/42) is a device choice; the class lands
+  // before first paint so the column never flashes in or out.
+  if (localStorage.getItem('aiconvo.layout') === 'side') document.documentElement.dataset.layout = 'side';
   const manifestTheme = t || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.getElementById('appManifest').href = `/manifest.webmanifest?theme=${encodeURIComponent(manifestTheme)}`;
 } catch {}
@@ -132,9 +150,117 @@ body.bar-fold header:hover { background: var(--surface-2); }
 body.bar-fold header:has(#activeBtn.work) {
   background: linear-gradient(90deg, var(--accent) 0 48px, var(--surface-1) 48px);
 }
+/* ---- side-panel layout (design/42): the tray becomes a left column ----
+   html[data-layout=side] is set before paint from localStorage; the body
+   class follows it only above 700px (the phone keeps the top bar). */
+#side { display: none; }
+body.side-layout { display: grid; grid-template-columns: var(--side-w, 288px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+body.side-layout > header { grid-column: 2; }
+body.side-layout > main { grid-column: 2; grid-row: 2; min-height: 0; }
+body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-direction: column; min-height: 0; background: var(--panel-bg); border-right: 1px solid var(--panel-border); }
+:root[data-theme-mode="binary"] body.side-layout > #side { border-right-color: var(--border); }
+/* No bar at all. Home's project-ordering buttons move into the timeline
+   toolbar; the conversation title floats over the page (#floatHead). */
+body.side-layout > header, body.side-layout #conversationFilesSwitch { display: none !important; }
+body.side-layout #ganttBar #projSort { display: flex; margin-right: var(--sp-2); }
+#floatHead { display: none; }
+body.side-layout.conv > main { position: relative; }
+body.side-layout.conv #floatHead { display: flex; align-items: center; gap: 6px; position: relative; flex: 0 0 auto; order: 0; z-index: 8; }
+body.side-layout.conv #floatHead #chTitle { display: block; max-width: none; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-size: var(--fs-body); cursor: text; }
+body.side-layout.conv #floatHead #chTitle input { width: min(38vw, 520px); }
+body.side-layout.conv #floatHead #chMove { display: inline-flex; }
+body.side-layout.conv #floatHead #convHeadExtra { display: inline-flex; flex-shrink: 0; }
+/* The title has its own line, outside the transcript scroller. */
+body.side-layout.conv #view { padding-top: 12px; }
+/* Reading owns the page: scroll down and the title steps out of the way. */
+body.side-layout.conv.chrome-min #floatHead { display: none; opacity: 0; pointer-events: none; }
+body.side-layout.zen:not(.home) #floatHead { display: none; }
+:root[data-theme-motion="none"] #floatHead { transition: none; }
+:root[data-theme-mode="binary"] #floatHead { background: transparent; backdrop-filter: none; box-shadow: none; }
+/* The composer never moves: pinned to the bottom of the page. */
+body.side-layout .composer-dock { position: fixed; left: var(--side-w, 288px); right: 0; bottom: 0; margin: 0 auto; z-index: 45; }
+body.side-layout.side-fold .composer-dock { left: 14px; }
+body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + 16px); }
+body.side-layout .agent-compose { border-bottom: 0; }
+.side-top .side-row { display: flex; gap: 2px; }
+.side-top .side-row > #sideHome { flex: 1 1 auto; min-width: 0; }
+#sideProject { flex: 0 1 auto; min-width: 0; max-width: 60%; color: var(--text-dim); }
+#sideProject[hidden] { display: none; }
+.side-top { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) var(--sp-2) var(--sp-1); }
+.side-top button { display: flex; align-items: center; gap: 8px; height: 30px; min-height: 30px; padding: 0 8px; border-color: transparent; border-radius: var(--panel-row-r); background: transparent; color: var(--text); text-align: left; overflow: hidden; }
+.side-top button:hover { background: var(--surface-2); }
+.side-top button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* One "new" line: the main button starts where you are; ▾ offers the rest. */
+.side-new { display: flex; gap: 0; }
+#sideNew { flex: 1 1 auto; min-width: 0; font-weight: 700; }
+#sideNewMore { flex: 0 0 auto; width: 28px; padding: 0; justify-content: center; color: var(--text-dim); }
+#sideNewMore[hidden] { display: none; }
+#sideAgents { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+body.side-layout #agentsPop { position: static; width: auto; max-width: none; max-height: none; flex: 1 1 auto; min-height: 0; border: 0; padding: 0 var(--sp-1); overflow: auto; display: flex; flex-direction: column; }
+/* The dock: folded sections, traffic and notifications, at the bottom. */
+body.side-layout #agentsLegacy { margin-top: auto; padding-bottom: var(--sp-1); }
+body.side-layout #agentsPop .ag-row.current { background: var(--surface-2); }
+body.side-layout #agentsPop .ag-row.current .ag-title { color: var(--accent); }
+body.side-layout #agentsPop .ag-row.kbd-selected { outline: 1px solid var(--accent); outline-offset: -1px; }
+body.side-layout #agentsPop:not(.kbd) .ag-row.kbd-selected { outline: 0; }
+/* Recent files are a column thing: the tray has no room for a standing list. */
+body:not(.side-layout) .ag-files-block { display: none; }
+.ag-sec-body[hidden] { display: none; }
+/* Sections are separated by space, not lines. A head is a quiet label; it
+   folds on click (the fold is remembered) and shows a count when folded. */
+.ag-section { padding: var(--sp-2) 0 2px; }
+.ag-sec { display: flex; align-items: center; gap: 6px; padding: 2px 10px 4px; border: 0; cursor: pointer; user-select: none; color: var(--text-faint); font-size: 10px; letter-spacing: .04em; }
+.ag-sec:hover { color: var(--text-dim); }
+.ag-sec .ag-sec-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-sec .ag-sec-n { color: var(--text-faint); }
+.ag-sec::after { content: "⌄"; color: var(--text-faint); opacity: 0; }
+.ag-sec[aria-expanded="false"]::after { content: "›"; }
+.ag-sec:hover::after, .ag-sec[aria-expanded="false"]::after { opacity: 1; }
+.ag-sub-sec { padding: 8px 10px 2px; color: var(--text-faint); font-size: 10px; letter-spacing: .04em; }
+.ag-scope { display: inline-flex; border-radius: 999px; background: var(--surface-2); padding: 1px; }
+.ag-scope button { height: 16px; min-height: 16px; padding: 0 7px; border: 0; border-radius: 999px; background: transparent; color: var(--text-faint); font-size: 9px; line-height: 1; letter-spacing: 0; }
+.ag-scope button.on { background: var(--surface-1); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+.ag-scope button:hover { color: var(--text); }
+.ag-scope button:disabled { opacity: .5; }
+:root[data-theme-mode="binary"] .ag-scope { border-radius: 0; border: 1px solid var(--border); padding: 0; }
+:root[data-theme-mode="binary"] .ag-scope button { border-radius: 0; }
+:root[data-theme-mode="binary"] .ag-scope button.on { background: var(--text); color: var(--bg); box-shadow: none; }
+.ag-empty { padding: 3px 10px 4px; color: var(--text-faint); font-size: 10px; }
+.side-foot { display: flex; align-items: center; gap: 4px; padding: var(--sp-1) var(--sp-2); }
+#sideFootSlot { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
+#sideFold { height: 26px; min-height: 26px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; margin-left: auto; }
+#sideFold:hover { color: var(--text); background: var(--surface-2); }
+/* Folded: a thin rail, like the folded bar. It keeps the inbox count. */
+body.side-layout.side-fold { grid-template-columns: 14px minmax(0, 1fr); }
+body.side-layout.side-fold > #side { cursor: pointer; overflow: hidden; }
+body.side-layout.side-fold > #side > * { display: none !important; }
+body.side-layout.side-fold > #side:hover { background: var(--surface-2); }
+body.side-layout.side-fold > #side.work { background: linear-gradient(180deg, var(--accent) 0 48px, var(--surface-1) 48px); }
+body.side-layout.side-fold > #side.unread::after { content: attr(data-unread); position: absolute; top: 56px; left: 0; width: 14px; text-align: center; font-size: 10px; color: var(--accent); font-weight: 700; }
+body.side-layout > #side { position: relative; }
+/* Pop-ups that hung from the bar's right edge hang from the column's foot. */
+body.side-layout #machinePop { top: auto; bottom: 44px; left: var(--sp-2); right: auto; }
+/* Zen hides every chrome, the column included. */
+body.zen:not(.home).side-layout > #side { display: none !important; }
+body.zen:not(.home).side-layout { grid-template-columns: 0 minmax(0, 1fr); }
+/* Row actions: pin, mark unread, remove. One ⋯ per conversation row. */
+.ag-row .ag-more { border: 0; background: transparent; color: var(--text-faint); font-size: 12px; }
+.ag-row .ag-more:hover { color: var(--text); background: var(--surface-3); }
+.file-action-menu.ag-menu .file-action-head { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The brand is gone: one subtle home glyph anchors the left edge. */
 #brand { font-weight: 400; font-size: 16px; line-height: 1; color: var(--text-dim); border: 0; background: none; padding: 0 var(--sp-2); height: 26px; }
 #brand:hover { color: var(--accent); background: none; }
+/* ---- ‹ ›: back and forward through the screens (design/44) ----
+   One pair in the bar, one in the column; both follow the same stack. A
+   disabled arrow stays visible so the pair never jumps around. */
+.nav-pair { display: inline-flex; gap: 0; flex-shrink: 0; }
+.nav-pair button { height: 26px; min-height: 26px; min-width: 26px; padding: 0 6px; border: 0; border-radius: var(--panel-row-r, 4px); background: transparent; color: var(--text-dim); font-size: 19px; line-height: 1; font-weight: 400; }
+.nav-pair button:hover:not(:disabled) { color: var(--accent); background: var(--surface-2); }
+.nav-pair button:disabled { color: var(--text-faint); opacity: .45; cursor: default; }
+.nav-pair button:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.side-top .side-row > .nav-pair > button { height: 30px; min-height: 30px; width: 28px; padding: 0; justify-content: center; }
+.nav-menu { min-width: 200px; }
+.nav-menu button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Away from home, a spacer pushes agents and settings to the right. */
 /* Banner header on every view: identity left, count centered, tools right. */
 header { position: relative; }
@@ -195,7 +321,7 @@ body:not(.home) .count { display: none !important; }
 #activeBtn.unread::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 #activeBtn:hover { background: var(--surface-2); }
 @keyframes activepulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
-#agentsPop { position: absolute; top: calc(var(--header-h) - 4px); right: var(--sp-3); z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); width: 460px; max-width: calc(100vw - 24px); max-height: 60vh; overflow: auto; padding: var(--sp-1) 0; }
+#agentsPop { position: absolute; top: calc(var(--header-h) - 4px); right: var(--sp-3); z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--panel-r); width: 460px; max-width: calc(100vw - 24px); max-height: 60vh; overflow: auto; padding: var(--sp-1) 0; }
 #agentsPop[hidden] { display: none; }
 /* Delegation, shown where it happens.
    .dg-card   one `delegate` call in a parent transcript: a one-line fold.
@@ -245,39 +371,56 @@ body:not(.home) .count { display: none !important; }
 .dg-event .tool-out { margin: 4px 14px; }
 @media (pointer: coarse) { .dg-actions button, .dg-lock button, .dg-card .dg > summary { min-height: 44px; } }
 #agentsPop .ag-row.kbd-selected { background: var(--surface-2); outline: 1px solid var(--accent); outline-offset: -1px; }
-.ag-sec { color: var(--text-faint); font-size: var(--fs-micro); padding: 8px 10px 3px; border-bottom: 1px solid var(--border); }
 /* Keep one stable inbox slot. New replies never shift the rest of the menu. */
-.ag-unread-tray { min-height: 58px; border-bottom: 1px solid var(--border-strong); }
-.ag-unread-tray .ag-sec { border-bottom-color: var(--border); }
-.ag-sec.ag-active-sec { margin-top: 6px; border-top: 1px solid var(--border-strong); }
-.ag-row { display: flex; gap: 8px; align-items: center; padding: 5px 10px; cursor: pointer; font-size: var(--fs-meta); }
+.ag-interrupted { align-items: flex-start; }
+.ag-recovery-reason { display: block; font-size: 12px; overflow-wrap: anywhere; white-space: normal; max-height: 3.8em; overflow: auto; }
+.ag-recovery-actions { display: flex; flex-wrap: wrap; gap: 4px; flex: 0 0 auto; max-width: 140px; }
+.ag-recovery-actions button { min-height: 36px; padding: 5px 8px; font-size: 12px; }
+.ag-recovery-setting { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; font-size: 12px; cursor: pointer; }
+.ag-recovery-help { padding: 4px 12px 12px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+@media (max-width: 520px) { .ag-recovery-actions { flex-direction: column; max-width: 90px; } .ag-recovery-actions button { min-height: 44px; } }
+.ag-unread-tray { min-height: 58px; }
+.ag-traffic { margin-top: 6px; }
+/* A row is two lines: the title across the whole width, then the folder and
+   a short time at the end. No icon columns: unread is a dot after the title,
+   working is a hollow pulsing one. Actions (⋯, stop) overlay on hover. */
+.ag-row { position: relative; display: flex; gap: 8px; align-items: center; padding: 4px 10px; margin: 0 2px; border-radius: var(--panel-row-r); cursor: pointer; font-size: var(--fs-meta); }
 .ag-row:hover { background: var(--surface-2); }
+/* One-line rows (no folder line) carry the time on the title line. */
+.ag-row .ag-title .ag-age { margin-left: auto; padding-left: 8px; }
 .ag-row.off { cursor: default; color: var(--text-dim); }
 .ag-row .ag-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.ag-row .ag-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-row .ag-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ag-row .ag-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-row.unread .ag-title { font-weight: 700; }
-.ag-row.working .src i { background: var(--success); }
-.ag-unread-dot, .ag-read-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; }
-.ag-unread-dot { background: var(--accent); }
-.ag-read-dot { border: 1px solid var(--text-faint); background: transparent; }
-.ag-row .ag-dir { color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ag-row .ag-age { flex: 0 0 auto; color: var(--text-faint); font-size: var(--fs-micro); white-space: nowrap; }
-.ag-row .ag-expand { flex: 0 0 auto; min-height: 24px; padding: 0 6px; font-size: var(--fs-micro); color: var(--text-dim); background: var(--surface-1); border: 1px solid var(--border); white-space: nowrap; }
+.ag-row .ag-title::after { content: ""; flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; display: none; }
+.ag-row.unread .ag-title::after { display: block; background: var(--accent); }
+.ag-row.working .ag-title::after { display: block; border: 1px solid var(--accent); box-sizing: border-box; animation: activepulse 2.4s ease-in-out infinite; }
+.ag-row.unread.working .ag-title::after { background: var(--accent); }
+.ag-row .ag-sub { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ag-row .ag-dir { flex: 1 1 auto; color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ag-row .ag-age { flex: 0 0 auto; color: var(--text-faint); font-size: 10px; white-space: nowrap; }
+.ag-row .ag-acts { position: absolute; right: 6px; top: 3px; display: none; gap: 2px; align-items: center; padding-left: 8px; background: linear-gradient(90deg, transparent, var(--surface-2) 8px); }
+.ag-row:hover .ag-acts, .ag-row.kbd-selected .ag-acts, .ag-row .ag-acts:has([aria-expanded="true"]) { display: flex; }
+.ag-row .ag-acts button { min-height: 22px; height: 22px; padding: 0 5px; font-size: 11px; line-height: 1; }
+@media (pointer: coarse) { .ag-row .ag-acts { display: flex; position: static; background: none; padding: 0; } .ag-row .ag-acts button { min-height: 36px; height: 36px; padding: 0 10px; } }
+.ag-row .ag-expand { flex: 0 0 auto; min-height: 20px; padding: 0 5px; font-size: 10px; color: var(--text-dim); background: var(--surface-1); border: 1px solid var(--border); white-space: nowrap; }
 .ag-row .ag-expand[aria-expanded="true"] { color: var(--text); border-color: var(--border-strong); }
 .ag-row.ag-child { padding-inline-start: calc(10px + (var(--depth, 1) - 1) * 14px); }
 .ag-children { border-inline-start: 1px solid var(--border-strong); margin-inline-start: 14px; }
 @media (pointer: coarse) { .ag-row .ag-expand { min-height: 36px; padding: 0 10px; } }
-.ag-notifications { margin-top: 7px; border-top: 1px solid var(--border-strong); }
-.ag-notifications > summary { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; color: var(--text-dim); font-size: var(--fs-meta); list-style: none; }
+.ag-notifications { margin-top: 4px; }
+.ag-notifications > summary { display: flex; align-items: center; gap: 6px; padding: 6px 10px 4px; cursor: pointer; color: var(--text-faint); font-size: 10px; letter-spacing: .04em; list-style: none; }
 .ag-notifications > summary::-webkit-details-marker { display: none; }
-.ag-notifications > summary::before { content: "▸"; color: var(--text-faint); }
-.ag-notifications[open] > summary::before { content: "▾"; }
-.ag-notifications > summary .ag-notify-count { margin-left: auto; color: var(--text-faint); font-size: var(--fs-micro); }
+.ag-notifications > summary:hover { color: var(--text-dim); }
+.ag-notifications > summary::after { content: "›"; color: var(--text-faint); }
+.ag-notifications[open] > summary::after { content: "⌄"; }
+.ag-notifications > summary .ag-notify-count { margin-left: auto; color: var(--text-faint); font-size: 10px; letter-spacing: 0; }
 .ag-notifications .job { margin: 0; border-width: 1px 0 0; padding: 7px 10px; }
 .ag-notifications .job:last-child { border-bottom: 1px solid var(--border); }
 :root[data-theme-mode="binary"] #activeBtn.unread::after,
-:root[data-theme-mode="binary"] .ag-unread-dot { background: var(--text); }
-:root[data-theme-mode="binary"] .ag-read-dot { border: 2px solid var(--text); }
+:root[data-theme-mode="binary"] .ag-row.unread .ag-title::after { background: var(--text); }
+:root[data-theme-mode="binary"] .ag-row.working .ag-title::after { border: 2px solid var(--text); }
 
 /* filter popover */
 #filtersPop { position: absolute; top: calc(var(--header-h) - 4px); right: var(--sp-3); z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); padding: var(--sp-3); min-width: 280px; display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -543,7 +686,12 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 /* Output blocks read as results, not as code: the conversation's run-out
    voice — no side borders, a single quiet accent bar, dim text. */
 .doc-editor-host .cm-md-codeblock-line[data-lang="output"], .doc-editor-host .cm-md-codeblock-line.cm-output-line { border-left: 3px solid var(--border-strong); border-right: 0; box-shadow: none; color: var(--text-dim); }
-.doc-run-fix { display: flex; align-items: center; gap: var(--sp-2); padding: 4px 10px; font-size: var(--fs-micro); border-top: 1px solid var(--border); flex-wrap: wrap; background: var(--bg); }
+.doc-run-fix, .doc-run-setup { display: flex; align-items: center; gap: var(--sp-2); padding: 4px 10px; font-size: var(--fs-micro); border-top: 1px solid var(--border); flex-wrap: wrap; background: var(--bg); }
+.doc-run-setup .doc-setup-item { color: var(--text-dim); }
+.doc-run-setup .doc-setup-item b { color: var(--text); font-weight: 600; }
+.doc-run-setup .doc-setup-go, .doc-run-setup .doc-setup-recreate, .doc-run-setup .doc-setup-agent, .doc-run-fix .doc-fix-agent { height: 22px; padding: 0 8px; font-size: var(--fs-micro); }
+.doc-run-setup .doc-setup-recreate { color: var(--danger); }
+.doc-run-setup .doc-setup-hint { flex-basis: 100%; }
 .doc-run-fix .doc-fix-pkg { width: 18ch; height: 22px; font: inherit; font-size: var(--fs-micro); background: var(--surface-1); color: var(--text); border: 1px solid var(--border); padding: 0 6px; }
 .doc-run-fix .doc-fix-go { height: 22px; padding: 0 8px; font-size: var(--fs-micro); }
 /* project documents list */
@@ -863,9 +1011,16 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .abortbar::before, .abortbar::after { content: ""; flex: 1; border-top: 1px dashed var(--border-strong); }
 .msg .role { display: flex; align-items: center; gap: var(--sp-1); font-size: var(--fs-micro); margin-bottom: 4px; color: var(--text-faint); }
 .msg .role > span { min-width: 0; }
-.msg-actions { display: flex; justify-content: flex-end; align-items: center; gap: 2px; min-height: 22px; margin-top: 8px; opacity: 0; visibility: hidden; transition: opacity .12s ease; }
+.msg-notebook { margin-top: 8px; font-size: var(--fs-micro); color: var(--text-dim); }
+.msg-notebook button { height: 20px; padding: 0 4px; border-color: transparent; background: transparent; color: var(--text); font-size: var(--fs-micro); font-family: var(--mono, monospace); }
+.msg-notebook button:hover, .msg-notebook button:focus-visible { text-decoration: underline; }
+/* Action spacing belongs outside the user bubble; see conversation surfaces
+   below. Trim paragraph margins, not the space around controls. */
+.msg-actions { display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-height: 30px; margin: 8px 0 0; }
+.msg.user > .md > :first-child, .msg.assistant > .md > :first-child { margin-top: 0; }
+.msg.user > .md > :last-child, .msg.assistant > .md > :last-child { margin-bottom: 0; }
 .msg:hover > .msg-actions, .msg:focus-within > .msg-actions, .msg.actions-open > .msg-actions { opacity: 1; visibility: visible; }
-.msg-actions button { height: 20px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; }
+.msg-actions button { height: 18px; min-height: 18px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; }
 .msg-actions button:hover, .msg-actions button:focus-visible { background: transparent; color: var(--text); text-decoration: underline; }
 /* Touch has no stable hover. Keep the actions visible after a message tap. */
 @media (hover: none) { .msg-actions { transition: none; } }
@@ -1493,6 +1648,10 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
   header { height: auto; min-height: 52px; padding: 4px 6px; gap: 3px; flex-wrap: wrap; align-content: center; }
   /* One row: brand + compact buttons must fit 360 CSS px. */
   #brand { height: 44px; padding: 0 8px; font-size: 17px; }
+  /* Phone bar: back keeps its place (the PWA has no browser chrome);
+     forward appears only when there is somewhere to go. */
+  .nav-pair button { height: 44px; min-height: 44px; min-width: 38px; font-size: 22px; }
+  .nav-pair .nav-fwd:disabled { display: none; }
   #ticker, header .count { display: none !important; }
   #activeBtn, #settingsBtn, #barFold { width: 42px; min-width: 42px; height: 44px; padding: 0; }
   /* Conversation: one 52px row — home, +, title, agents, settings.
@@ -1500,6 +1659,9 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
      already hides the chrome, and home reaches the project overview. */
   body.conv header { flex-wrap: nowrap; }
   body.conv #chProject, body.conv #chMove, body.conv #barFold { display: none; }
+  /* The Conversation/Files switch (146px) does not fit a 360px row next to
+     ‹ ›; the F key still toggles it. Same call as the side layout (design/42). */
+  body.conv #conversationFilesSwitch { display: none !important; }
   body.conv #chNew { height: 44px; min-width: 44px; padding: 0 10px; font-size: 17px; }
   body.conv #chTitle { flex: 1 1 auto; min-width: 0; max-width: none; }
   body.conv #chTitle input { width: 100%; }
@@ -1549,7 +1711,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
   .msg { padding: 12px 10px; font-size: 15px; line-height: 1.55; }
   .msg.tool, .msg.toolresult { font-size: 12px; }
   .msg pre, .msg code { max-width: 100%; overflow-wrap: anywhere; }
-  .msg .msg-copy, .msg .msg-read { min-height: 28px; height: 28px; }
+  .msg .msg-copy, .msg .msg-read, .msg [data-answer-version] { min-height: 28px; height: 28px; }
 
   .composer-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; }
   .agent-compose { width: auto; max-width: none; margin: 0; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-width: 1px 0 0; }
@@ -1654,6 +1816,68 @@ body.zen:not(.home) .msg.user { border-left: 2px solid var(--border-strong); pad
 #gRecenter { display: none; position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 40; width: 46px; height: 46px; min-height: 46px; align-items: center; justify-content: center; border: 1px solid var(--border-strong); background: var(--surface-1); font-size: 20px; box-shadow: 0 2px 12px var(--shadow-color); }
 body.zen:not(.home) #zenExit { display: block; position: fixed; top: 6px; right: 10px; z-index: 60; border: 0; background: transparent; color: var(--text-faint); font-size: var(--fs-micro); height: auto; padding: 2px 6px; }
 #zenExit:hover { color: var(--text); background: transparent; }
+/* Conversation surfaces share theme shape tokens; no hard-coded pill radii. */
+.agent-compose { border: 1px solid var(--border); border-radius: var(--r-composer); padding: 10px 12px; gap: 4px; }
+.agent-compose:focus-within { border-color: var(--border-strong); }
+.agent-compose textarea { background: transparent; padding: 8px 4px; border: 0; border-radius: var(--r); min-height: 44px; height: 44px; }
+.agent-compose textarea:focus { outline: none; }
+.composer-dock { min-width: 0; }
+body.side-layout .composer-dock { width: calc(100% - var(--side-w, 288px) - 24px); bottom: 10px; }
+body.side-layout.side-fold .composer-dock { width: calc(100% - 38px); }
+body.side-layout .agent-compose { border-bottom: 1px solid var(--border); }
+body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + 28px); }
+.agent-compose-row { min-width: 0; flex-wrap: nowrap; gap: 6px; overflow: visible; }
+.agent-compose-row > .model-strip { flex: 1 1 0; min-width: 0; margin-left: auto; justify-content: flex-end; }
+.agent-compose-row .model-pick { min-width: 0; max-width: 100%; }
+.agent-compose-row .model-strip > .model-pick { flex: 0 1 auto; }
+.agent-compose-row .model-pick .mname { min-width: 0; max-width: 100%; }
+.agent-compose-row .model-strip .mmore { flex-shrink: 0; }
+.agent-compose-row button, .compose-tools > summary { border-radius: var(--r); }
+.agent-compose-row > button { flex: 0 0 auto; white-space: nowrap; }
+.agent-compose-row .model-pick, .agent-compose-row .agent-mic { border-color: transparent; background: transparent; }
+.agent-compose-row .agent-mic.recording { background: var(--accent-strong); color: var(--accent-ink); }
+.compose-tools { position: relative; flex: 0 0 auto; }
+.compose-tools > summary { display: flex; align-items: center; justify-content: center; width: 34px; min-height: 34px; list-style: none; cursor: pointer; font-size: 22px; color: var(--text-dim); }
+.compose-tools > summary::-webkit-details-marker { display: none; }
+.compose-tools > summary:hover, .compose-tools[open] > summary { background: var(--surface-2); color: var(--text); }
+.compose-tools-menu { position: absolute; bottom: calc(100% + 12px); left: 0; z-index: 60; width: min(300px, calc(100vw - 48px)); max-height: min(480px, 55dvh); overflow: auto; padding: 8px; border: 1px solid var(--border); border-radius: var(--r-menu); background: var(--surface-1); box-shadow: 0 4px 16px var(--shadow-soft); display: flex; flex-direction: column; gap: 2px; }
+.compose-tools-menu > button { width: 100%; justify-content: flex-start; text-align: left; border: 0; background: transparent; min-height: 34px; height: auto; }
+.compose-tools-menu > button[hidden] { display: none; }
+.compose-tools-menu > button:hover { background: var(--surface-2); }
+.compose-tools-menu #agentMode::before { content: 'Mode'; color: var(--text-dim); margin-right: auto; }
+.compose-tools-menu #agentThink::before { content: 'Reasoning'; color: var(--text-dim); margin-right: auto; }
+.compose-tools-menu .ctxmeter { white-space: normal; overflow-wrap: anywhere; padding: 8px; border-top: 1px solid var(--border); }
+.compose-tools :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Quiet, transparent title line, outside the scroller: never over the prose. */
+body.side-layout.conv #floatHead { top: 0; left: 0; right: 0; transform: none; max-width: none; padding: 8px 20px; min-height: 36px; justify-content: flex-start; border: 0; border-radius: 0; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
+body.side-layout.conv #floatHead > * { pointer-events: auto; }
+body.side-layout.conv #floatHead #chTitle { flex: 0 1 auto; font-size: var(--fs-meta); font-weight: 400; color: var(--text-dim); }
+body.side-layout.conv.chrome-min #floatHead > * { pointer-events: none; }
+/* No negative margins: actions sit below the bubble, with their own air. */
+.msg.user { position: relative; border-radius: var(--r); margin-bottom: 44px; }
+.msg-actions { height: auto; min-height: 30px; margin: 8px 0 0; gap: 4px; opacity: 1; visibility: visible; }
+.msg.user > .msg-actions { position: absolute; top: 100%; right: 8px; margin: 6px 0 0; }
+.msg-actions button { height: auto; min-height: 28px; padding: 4px 7px; border-radius: var(--r-sm); }
+.msg-actions button:hover { background: var(--surface-2); text-decoration: none; }
+.file-action-menu, .mpick, .slash-pop { border-radius: var(--r-menu); }
+.file-action-menu button { border-radius: var(--r-sm); }
+/* A reading-font choice must not turn code or terminal output proportional. */
+.md pre, .md code, .tool-out, .think-body, .ls-blocks pre { font-family: var(--font-mono); }
+@media (max-width: 700px), (max-height: 700px) and (pointer: coarse) {
+  .composer-dock { width: calc(100% - 16px); bottom: 8px; margin: 0 auto; }
+  .agent-compose-row { overflow: visible; gap: 4px; }
+  .agent-compose-row > * { flex: 0 0 auto; }
+  .agent-compose-row > .model-strip { flex: 1 1 0; min-width: 0; }
+  .agent-compose-row > button, .compose-tools > summary { min-height: 44px; height: 44px; }
+  .agent-compose-row .agent-mic { order: 0; }
+  .agent-compose-row .model-pick { padding: 0 6px; }
+  .msg.user { margin-bottom: 50px; }
+}
+@media (pointer: coarse) {
+  .compose-tools-menu > button { min-height: 44px; }
+  .msg-actions button { min-height: 36px; }
+  .msg.user { margin-bottom: 50px; }
+}
 </style>
 <link id="customThemeSheet" rel="stylesheet" href="/api/themes.css">
 <style id="customThemeRuntime"></style>
@@ -1675,10 +1899,16 @@ window.aiconvoSyncTheme();
 </script>
 </head>
 <body class="home">
+<script>
+// The column's frame paints with the page (design/42); the script at the end
+// of the page fills it. Same rule as applyLayout(): the choice, above 700px.
+if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width: 701px)').matches) document.body.classList.add('side-layout');
+</script>
 <header>
   <div id="projSort" hidden></div>
-  <button id="newLoose" title="New projectless conversation · working directory: your home (C)">+ conversation</button>
+  <button id="newLoose" title="New conversation (C) — a blank page: no project memory, home folder, pi defaults. Everything stays changeable until the first message goes."><span class="nl-long">+ </span>new</button>
   <button id="brand" aria-label="Home">⌂</button>
+  <span class="nav-pair"><button id="navBack" class="nav-back" disabled aria-label="Back">‹</button><button id="navFwd" class="nav-fwd" disabled aria-label="Forward">›</button></span>
   <button id="chProject" title="Open the project overview"></button>
   <button id="chMove" title="Move this conversation to another project (P) — its memory follows; tools keep running in the original folder">⇢</button>
   <button id="chNew" title="New conversation in this project — same model and thinking level, the project map in the system prompt, an empty composer">+</button>
@@ -1697,6 +1927,24 @@ window.aiconvoSyncTheme();
 <button id="gRecenter" title="Jump to now" aria-label="Jump to now">⌖</button>
 <div id="agentsPop" hidden><div id="agentsUnread"></div><div id="agentsLegacy"></div></div>
 <div id="machinePop" hidden></div>
+<aside id="side" hidden aria-label="Navigation and agents">
+  <div class="side-top">
+    <div class="side-row">
+      <span class="nav-pair"><button id="sideBack" class="nav-back" disabled aria-label="Back">‹</button><button id="sideFwd" class="nav-fwd" disabled aria-label="Forward">›</button></span>
+      <button id="sideHome" title="Go home — the whole-system timeline">⌂ <span>home</span></button>
+      <button id="sideProject" hidden title="Open the project area"><span></span> ↗</button>
+    </div>
+    <div class="side-new">
+      <button id="sideNew" title="New conversation (C) — a blank page: no project memory, home folder, pi defaults">+ <span>new</span></button>
+      <button id="sideNewMore" hidden title="Other ways to start" aria-haspopup="menu" aria-label="More ways to start">▾</button>
+    </div>
+  </div>
+  <div id="sideAgents"></div>
+  <div class="side-foot">
+    <span id="sideFootSlot"></span>
+    <button id="sideFold" title="Fold the side panel — click the rail to bring it back (`)">◂</button>
+  </div>
+</aside>
 <div id="searchOverlay" class="overlay" hidden>
   <div class="dialog search-dialog" role="dialog" aria-modal="true" aria-labelledby="searchModalInput">
     <div class="search-modal-head">
@@ -1716,10 +1964,11 @@ window.aiconvoSyncTheme();
 </div>
 <div id="markPop" hidden></div>
 <main>
+  <div id="floatHead"></div>
   <div id="left">
     <div id="ganttResize" title="Drag to resize the timeline tray. Double-click to reset."></div>
     <div id="tabs">
-      <button data-tab="conv" class="on">conversations</button><button data-tab="notes">notes</button><button data-tab="epics">epics</button><button data-tab="repos">repos</button><button id="selShown" class="ghost" title="Select all shown conversations">select shown</button>
+      <button id="tabsNew" title="New conversation">+ new</button><button data-tab="conv" class="on">conversations</button><button data-tab="notes">notes</button><button data-tab="epics">epics</button><button data-tab="repos">repos</button><button id="selShown" class="ghost" title="Select all shown conversations">select shown</button>
     </div>
     <div id="ganttBar">
       <button id="jumpStart" title="Jump to the oldest conversation (b)">«</button>
@@ -1766,11 +2015,15 @@ window.aiconvoSyncTheme();
   <div id="readBody" tabindex="0"></div>
 </div>
 <link rel="stylesheet" href="/conversation-reader.css">
+<link rel="stylesheet" href="/conversation-draft.css">
 <script src="/conversation-flow.js"></script>
 <script src="/conversation-reader.js"></script>
+<script src="/navigation.js"></script>
 <script src="/context-panel.js"></script>
+<script src="/conversation-draft.js"></script>
 <script src="/file-completion-ui.js"></script>
 <script src="/linediff.js"></script>
+<script src="/notebook-env.js"></script>
 <script src="/streaming-tool.js"></script>
 <script src="/delegation-ui.js"></script>
 <script src="/filesmode.js"></script>
@@ -1815,11 +2068,21 @@ const lastNavConversation = new Map(); // project → last conversation opened t
 
 // ---- router: one truth for "where the user is" ----
 // Every view change goes through setRoute/setRouteKind. The hash mirrors the
-// route, hashchange dispatches, so the browser back button always works.
+// route; the navigation stack (navigation.js, design/44) mirrors the browser
+// history, so back and forward — the browser's, the ‹ › buttons, Android's
+// key — rebuild the screen from its hash and land where the reader left it.
 // Rule: the app never navigates by itself — only user clicks change routes.
 let viewKind = 'home';
 let currentHash = '';
-let suppressHashEvents = 0;
+// Progress screens are not places: nothing goes back to "launching…".
+const TRANSIENT_KINDS = new Set(['launch', 'distill']);
+const nav = Navigation.createStack({
+  history, location, describe: h => describeRoute(h),
+  storage: (() => { try { return window.sessionStorage; } catch { return null; } })(),
+});
+let navShownId = null;     // the entry whose screen is in the DOM right now
+let navTraversalSeq = 0;   // a quick second press cancels the first landing
+let navHold = null;        // the scroll hold of the last landing
 
 // ---- phone orientation: the Gantt is a landscape surface ----
 // Netflix-style: phones (not tablets) lock to landscape while home shows
@@ -1847,7 +2110,9 @@ function unlockLandscape() {
 function setRouteKind(kind) {
   // Capture before the route resets scroll or replaces the conversation DOM.
   rememberConversationPosition();
+  navRememberScroll();
   stopReaderLanding();
+  if (navHold) { navHold(); navHold = null; }
   // Leaving a document flushes its pending autosave and destroys the editor.
   // The file workspace flushes itself when it swaps one document for another.
   if (kind !== 'file' && kind !== 'files-project' && typeof docState !== 'undefined' && docState) flushAndCloseDocument();
@@ -1856,6 +2121,9 @@ function setRouteKind(kind) {
   if (kind !== 'file' && kind !== 'files-project' && typeof fileWs !== 'undefined' && fileWs) closeFileWorkspace();
   viewKind = kind;
   queueMicrotask(() => delegationUI.visibilityChanged());
+  // The column follows the page: the current row, "new here", the project
+  // scope of the recent lists.
+  if (sideLayoutOn()) { renderAgentsPopSoon(); queueMicrotask(renderSideNew); }
   // Systematic: every navigation starts at the top. #view is the scroller;
   // without this, a new view inherits the old scroll offset and opens
   // mid-document (worst on the phone: head and TOC land off-screen).
@@ -1866,37 +2134,108 @@ function setRouteKind(kind) {
   window.scrollTo(0, 0);
   if (kind !== 'conversation' && $('matchHud')) $('matchHud').remove();
   document.body.classList.toggle('home', kind === 'home');
-  document.body.classList.toggle('conv', kind === 'conversation');
+  // A draft (a conversation before its first message) uses the conversation
+  // header layout; body.draft hides what needs a started session.
+  document.body.classList.toggle('conv', kind === 'conversation' || kind === 'draft');
+  document.body.classList.toggle('draft', kind === 'draft');
   if (kind === 'home') lockLandscape(); else unlockLandscape();
   document.body.classList.remove('chrome-min'); // navigation always shows the chrome again
   chromeScrollLast = -1;
   chromeUpAcc = chromeDownAcc = 0;
+  window.dispatchEvent(new Event('aiconvo:route'));
 }
 
 function setRoute(kind, hash) {
   rememberConversationDraft();
   setRouteKind(kind);
   currentHash = hash || '';
-  let now = location.hash.replace(/^#/, '');
-  let same = now === currentHash;
-  if (!same) { try { same = decodeURIComponent(now) === decodeURIComponent(currentHash); } catch {} }
-  if (!same) {
-    // Only a hash assignment fires hashchange; pushState (clearing the hash
-    // for home) fires nothing, so it must not arm the suppressor — a stale
-    // count would swallow the user's next real navigation.
-    if (currentHash) { suppressHashEvents++; location.hash = currentHash; }
-    else history.pushState('', '', location.pathname + location.search);
+  // A traversal or a reload arrives with the hash in place: the entry exists.
+  // Anything else is a new place: a new entry, the forward path dropped.
+  if (!routeHashIs(currentHash)) { nav.push(currentHash, { kind }); navTraversalSeq++; } // a landing in flight is abandoned
+  else nav.replace(currentHash, { kind });
+  navShownId = nav.current()?.id ?? null;
+}
+
+// The address bar already shows this hash (a traversal, a reload, a link).
+function routeHashIs(hash) {
+  const now = location.hash.replace(/^#/, '');
+  if (now === hash) return true;
+  try { return decodeURIComponent(now) === decodeURIComponent(hash); } catch { return false; }
+}
+
+// The current screen changed its own address (a settings pane, a files-browser
+// mode, a file version): one history entry, updated in place.
+function replaceRoute(hash) {
+  currentHash = hash || '';
+  nav.replace(currentHash, { kind: viewKind });
+}
+
+// Where the screen that is on the page is scrolled: kept on its entry so a
+// return lands there. Conversations keep their own anchor-based memory.
+function navRememberScroll() {
+  if (navShownId == null || TRANSIENT_KINDS.has(viewKind)) return;
+  const view = document.getElementById('view');
+  if (!view) return;
+  nav.remember(navShownId, { view: view.scrollTop, win: window.scrollY || 0 });
+}
+
+// Back, forward, a link click, a typed hash: the browser moved, we follow.
+window.addEventListener('popstate', e => {
+  navRememberScroll();
+  let hash = location.hash.slice(1);
+  try { hash = decodeURIComponent(hash); } catch {}
+  const arrival = nav.arrive(e.state, hash);
+  navLand(arrival.entry, hash);
+});
+
+async function navLand(entry, hash) {
+  const seq = ++navTraversalSeq;
+  try { await dispatchHash(hash, { restore: true }); }
+  catch (err) { console.error('navigation failed:', err); }
+  // The person moved on while this screen was loading: nothing to land.
+  if (seq !== navTraversalSeq || nav.current()?.id !== entry.id) return;
+  navShownId = entry.id;
+  // The transcript restores its reading anchor itself; home is a chart.
+  if (entry.scroll && viewKind !== 'conversation' && viewKind !== 'home' && !TRANSIENT_KINDS.has(viewKind)) {
+    if (navHold) navHold();
+    navHold = Navigation.holdScroll($('view'), entry.scroll.view);
   }
 }
 
-window.addEventListener('hashchange', () => {
-  if (suppressHashEvents > 0) { suppressHashEvents--; return; }
-  dispatchHash(decodeURIComponent(location.hash.slice(1)), { restore: true });
-});
-window.addEventListener('popstate', () => {
-  // pushState('' ) landings (hash cleared = home) do not fire hashchange.
-  if (!location.hash && viewKind !== 'home') goHome();
-});
+// A human label for an address — the ‹ › tooltips and their lists. Reads the
+// index, so a title learned after the visit shows on the next look.
+function describeRoute(h) {
+  const convTitle = key => { const s = sessions.find(x => x.key === key); return (s && (s.title || s.timelineTitle)) || null; };
+  const dec = s => { try { return decodeURIComponent(s); } catch { return s; } };
+  const base = p => String(p || '').split('/').filter(Boolean).pop() || p;
+  const json = s => { try { return JSON.parse(s.startsWith('{') ? s : dec(s)); } catch { return null; } };
+  if (!h) return { kind: 'home', title: 'home' };
+  if (h === 'settings' || h.startsWith('settings=')) return { kind: 'settings', title: 'settings' };
+  if (h === 'usage') return { kind: 'usage', title: 'usage' };
+  if (h.startsWith('q=')) return { kind: 'home', title: 'search “' + dec(h.slice(2)) + '”' };
+  if (h.startsWith('note=')) return { kind: 'note', title: 'note · ' + base(dec(h.slice(5))) };
+  if (h === 'new' || h.startsWith('new=')) return { kind: 'draft', title: 'new conversation' };
+  if (h.startsWith('review=')) return { kind: 'change-review', title: 'change review' };
+  if (h.startsWith('browse=')) { const o = json(h.slice(7)); return { kind: 'files-browser', title: 'files · ' + ((o && o.project) || '') }; }
+  if (h === 'files') return { kind: 'home', title: 'files' };
+  if (h.startsWith('files&project=')) return { kind: 'files-browser', title: 'files · ' + dec(h.slice(14)) };
+  if (h === 'file' || h.startsWith('file=') || h.startsWith('file&')) { const f = parseFileHash(h); return { kind: 'file', title: base(f.path) }; }
+  if (h.startsWith('doc=')) return { kind: 'file', title: base(dec(h.slice(4).split('&')[0])) };
+  if (h.startsWith('path=') || h.startsWith('read=')) { const o = json(h.slice(5)); const t = o && convTitle(o.key); return { kind: 'conversation', title: t || 'conversation' }; }
+  if (h.startsWith('tree=')) return { kind: 'tree', title: 'tree · ' + (convTitle(dec(h.slice(5))) || 'conversation') };
+  if (h === 'git' || h.startsWith('git=')) return { kind: 'home', title: 'repos' };
+  if (h.startsWith('epic=')) { const id = dec(h.slice(5)); const e = epicsList.find(x => x.id === id); return { kind: 'epic', title: 'epic · ' + ((e && e.title) || id) }; }
+  if (h.startsWith('epicevidence=')) return { kind: 'evidence', title: 'epic evidence' };
+  if (h.startsWith('evidence=')) return { kind: 'evidence', title: 'evidence · ' + (convTitle(dec(h.slice(9))) || 'conversation') };
+  if (h.startsWith('project=')) {
+    const rest = h.slice(8), areaAt = rest.indexOf('&area=');
+    if (areaAt >= 0) return { kind: 'project', title: dec(rest.slice(0, areaAt)) + '/' + dec(rest.slice(areaAt + 6)) };
+    return { kind: 'project', title: dec(rest.split('&')[0]) };
+  }
+  if (h.startsWith('diffs=')) return { kind: 'files-browser', title: 'changes · ' + (convTitle(dec(h.slice(6))) || 'conversation') };
+  if (h.startsWith('filecall=')) { const parts = h.slice(9).split('&'); return { kind: 'file', title: base(dec(parts[2] || '')) }; }
+  return { kind: 'conversation', title: convTitle(dec(h)) || convTitle(h) || 'conversation' };
+}
 
 function goHome() {
   markSettingsClosed();
@@ -1935,6 +2274,8 @@ function dispatchHash(h, { restore = false } = {}) {
     return;
   }
   if (h.startsWith('note=')) return openNoteFile(h.slice(5));
+  // A new conversation before its first message (conversation-draft.js).
+  if (h === 'new' || h.startsWith('new=')) return showDraft(h.startsWith('new=') ? h.slice(4) : null);
   // Files: the browser, and the file (the live editor). `doc=` stays as an
   // alias for old links.
   if (h.startsWith('review=')) {
@@ -1988,6 +2329,11 @@ function dispatchHash(h, { restore = false } = {}) {
   // Old repository-history links: the files browser of that checkout.
   if (h.startsWith('git=')) { const root = h.slice(4); return showFilesBrowser(projectNameForRoot(root), { root }); }
   if (h.startsWith('epic=')) return showEpic(h.slice(5));
+  if (h.startsWith('epicevidence=')) {
+    const [id, focus] = h.slice(13).split('&focus=').map(s => { try { return decodeURIComponent(s); } catch { return s; } });
+    return showEpicEvidence(id, focus || activeRel);
+  }
+  if (h.startsWith('evidence=')) { let key = h.slice(9); try { key = decodeURIComponent(key); } catch {} return showConversationEvidence(key); }
   if (h.startsWith('project=')) {
     const project = h.slice(8);
     const areaAt = project.indexOf('&area=');
@@ -2135,6 +2481,7 @@ async function openRelatedNote(key) {
 
 // ---- job notifications inside the agents panel ----
 let agentNotificationsOpen = false;
+let agentRecoveryOpen = false;
 function updateJob(job) { jobs.set(job.id, job); renderJobs(); }
 
 function barFor(j) {
@@ -2185,11 +2532,13 @@ function toggleJobs(show) {
   const next = show !== undefined ? !!show : !visible;
   if (!next) {
     agentNotificationsOpen = false;
-    if (!$('agentsPop').hidden) toggleAgents(false);
+    if (agentsTrayOpen()) toggleAgents(false);
+    else if (sideLayoutOn()) renderAgentsPop(false);
     return;
   }
   agentNotificationsOpen = true;
   toggleAgents(true);
+  if (sideLayoutOn()) renderAgentsPop(false);
 }
 
 // ---------- voice playback state ----------
@@ -2461,7 +2810,7 @@ try {
 } catch {}
 document.addEventListener('click', e => {
   if (!$('filtersPop').hidden && !e.target.closest('#filtersPop')) $('filtersPop').hidden = true;
-  if (!$('agentsPop').hidden && !e.target.closest('#agentsPop')) toggleAgents(false);
+  if (agentsTrayOpen() && !e.target.closest('#agentsPop')) toggleAgents(false);
   if (!$('machinePop').hidden && !e.target.closest('#machinePop')) $('machinePop').hidden = true;
 });
 
@@ -2545,15 +2894,22 @@ setInterval(renderTicker, 30000);
 // the server echoes back rather than merged.
 const AGENT_READ_LEGACY_KEY = 'aiconvo.agentRead.v1'; // per-browser state, imported once
 const AGENT_READ_CACHE_KEY = 'aiconvo.agentRead.v2';  // last server state, boot copy
-let agentReadState = { since: Date.now(), read: {}, finished: {} };
+// Besides reads and finishes, three explicit marks (design/42): flagged
+// (marked unread by hand), dismissed (removed from the inbox), pinned.
+const AGENT_MARK_MAPS = ['flagged', 'dismissed', 'pinned'];
+const emptyAgentReadState = () => ({ since: Date.now(), read: {}, finished: {}, flagged: {}, dismissed: {}, pinned: {} });
+let agentReadState = emptyAgentReadState();
 let agentReadLoaded = false;           // the server state has been fetched once
 const agentReadPending = new Map();    // key → local read time, not yet accepted by the server
 let agentReadPushTimer = null, agentReadPushing = false;
+function agentReadStateFrom(d) {
+  const out = { since: Number(d.since) || agentReadState.since, read: { ...(d.read || {}) }, finished: { ...(d.finished || {}) } };
+  for (const map of AGENT_MARK_MAPS) out[map] = { ...(d[map] || {}) };
+  return out;
+}
 try {
   const saved = JSON.parse(localStorage.getItem(AGENT_READ_CACHE_KEY) || 'null');
-  if (saved && Number(saved.since)) agentReadState = {
-    since: Number(saved.since), read: saved.read || {}, finished: saved.finished || {},
-  };
+  if (saved && Number(saved.since)) agentReadState = agentReadStateFrom(saved);
 } catch {}
 function saveAgentReadState() {
   try { localStorage.setItem(AGENT_READ_CACHE_KEY, JSON.stringify(agentReadState)); } catch {}
@@ -2563,10 +2919,11 @@ function saveAgentReadState() {
 function applyAgentReadFromServer(d, { replace = false } = {}) {
   if (!d || typeof d !== 'object') return;
   if (replace) {
-    agentReadState = { since: Number(d.since) || agentReadState.since, read: { ...(d.read || {}) }, finished: { ...(d.finished || {}) } };
+    agentReadState = agentReadStateFrom(d);
     for (const [key, at] of agentReadPending) {
       agentReadState.read[key] = Math.max(at, Number(agentReadState.read[key]) || 0);
       delete agentReadState.finished[key];
+      delete agentReadState.flagged[key];
     }
   } else {
     if (Number(d.since)) agentReadState.since = Number(d.since);
@@ -2578,6 +2935,10 @@ function applyAgentReadFromServer(d, { replace = false } = {}) {
     for (const [key, at] of Object.entries(d.finished || {})) {
       if (agentReadPending.has(key)) continue;
       agentReadState.finished[key] = Math.max(Number(agentReadState.finished[key]) || 0, Number(at) || 0);
+    }
+    // Marks: a value of 0 means removed.
+    for (const map of AGENT_MARK_MAPS) for (const [key, at] of Object.entries(d[map] || {})) {
+      if (Number(at) > 0) agentReadState[map][key] = Number(at); else delete agentReadState[map][key];
     }
   }
   saveAgentReadState();
@@ -2647,8 +3008,67 @@ function agentActivityAt(s) {
 }
 function agentUnreadAt(s) {
   const activity = agentActivityAt(s);
-  const read = Math.max(Number(agentReadState.since) || 0, Number(agentReadState.read[s && s.key]) || 0);
+  const key = s && s.key;
+  // A manual "mark as unread" beats the first-use guard: the person asked.
+  const flagged = Number(agentReadState.flagged[key]) || 0;
+  if (flagged && flagged > (Number(agentReadState.read[key]) || 0)) return Math.max(activity, flagged);
+  const read = Math.max(Number(agentReadState.since) || 0, Number(agentReadState.read[key]) || 0);
   return activity > read ? activity : 0;
+}
+function agentIsFlagged(s) {
+  const key = s && s.key;
+  return (Number(agentReadState.flagged[key]) || 0) > (Number(agentReadState.read[key]) || 0);
+}
+// Removed from the inbox by hand, and nothing newer happened since.
+function agentIsDismissed(s) {
+  const at = Number(agentReadState.dismissed[s && s.key]) || 0;
+  return !!at && agentActivityAt(s) <= at && !agentIsFlagged(s);
+}
+function agentIsPinned(key) { return !!agentReadState.pinned[key]; }
+function pinnedSessions() {
+  return Object.entries(agentReadState.pinned).sort((a, b) => b[1] - a[1])
+    .map(([key]) => sessions.find(s => s.key === key)).filter(Boolean);
+}
+// Explicit inbox marks: optimistic locally, then one request each. The
+// server's full state comes back and replaces the local copy.
+async function postAgentMarks(body) {
+  try {
+    const r = await fetch('/api/agent-read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error('agent-read ' + r.status);
+    applyAgentReadFromServer(await r.json(), { replace: true });
+  } catch { errToast('Could not reach the server; the change may not have been kept.'); }
+}
+function agentMarksChanged() {
+  saveAgentReadState();
+  updateActiveBtn();
+  renderAgentsPopSoon();
+  delegationUI.repaint();
+}
+function markAgentUnread(key) {
+  if (!key) return;
+  agentReadPending.delete(key);
+  agentReadState.flagged[key] = Math.max(Date.now(), (Number(agentReadState.read[key]) || 0) + 1);
+  delete agentReadState.dismissed[key];
+  agentMarksChanged();
+  return postAgentMarks({ unread: [key] });
+}
+function dismissAgentConversation(key) {
+  if (!key) return;
+  const s = sessions.find(item => item.key === key);
+  const at = Math.max(Date.now(), Number(s && s.mtimeMs) || 0, Number(agentReadState.finished[key]) || 0, Number(agentReadState.read[key]) || 0);
+  agentReadPending.delete(key);
+  agentReadState.read[key] = at;
+  delete agentReadState.finished[key];
+  delete agentReadState.flagged[key];
+  agentReadState.dismissed[key] = at;
+  agentMarksChanged();
+  return postAgentMarks({ dismiss: [key] });
+}
+function setAgentPinned(key, on) {
+  if (!key) return;
+  if (on) agentReadState.pinned[key] = Date.now(); else delete agentReadState.pinned[key];
+  agentMarksChanged();
+  return postAgentMarks({ pin: { [key]: !!on } });
 }
 function agentIsRead(s) {
   const activity = agentActivityAt(s);
@@ -2677,9 +3097,22 @@ function delegatedNeedsPerson(s, byKey = delegationTaskByKey()) {
   if (!task) return true;
   return DelegationUI.attentionState(task) === 'unreported';
 }
+let agentsRecovery = { enabled: false, interrupted: [], network: {} };
+function applyAgentRecovery(recovery) {
+  if (!recovery) return;
+  agentsRecovery = recovery;
+  updateActiveBtn(); renderAgentsPopSoon();
+}
+async function loadAgentRecovery() {
+  try {
+    const response = await fetch('/api/agents/recovery');
+    if (response.ok) applyAgentRecovery(await response.json());
+  } catch {}
+}
 function finishedUnreadSessions() {
   const busy = agentBusyKeys(), byKey = delegationTaskByKey();
-  return sessions.filter(s => agentUnreadAt(s) && !busy.has(s.key) && delegatedNeedsPerson(s, byKey))
+  const interrupted = new Set(agentsRecovery.interrupted.map(r => r.key));
+  return sessions.filter(s => agentUnreadAt(s) && !interrupted.has(s.key) && !busy.has(s.key) && !agentIsDismissed(s) && delegatedNeedsPerson(s, byKey))
     .sort((a, b) => agentUnreadAt(b) - agentUnreadAt(a));
 }
 function markAgentRead(key, at = Date.now()) {
@@ -2689,6 +3122,7 @@ function markAgentRead(key, at = Date.now()) {
     Number(agentReadState.finished[key]) || 0);
   agentReadState.read[key] = readAt;
   delete agentReadState.finished[key];
+  delete agentReadState.flagged[key];
   saveAgentReadState();
   updateActiveBtn();
   renderAgentsPopSoon();
@@ -2715,20 +3149,27 @@ function updateActiveBtn() {
   const unread = finishedUnreadSessions();
   const attention = new Set(sessions.filter(isActive).map(s => s.key));
   unread.forEach(s => attention.add(s.key));
+  agentsRecovery.interrupted.forEach(r => attention.add(r.key));
   const runningJobs = [...jobs.values()].filter(j => j.status === 'running').length;
   const working = activeRuns.size > 0 || sessions.some(isWorking) || runningJobs > 0;
   $('activeBtn').hidden = attention.size === 0 && !working && jobs.size === 0 && !delegationUI.index().tasks.some(DelegationUI.isLive);
   // The number is an inbox count. Its reserved slot stays empty when clear,
   // so activity changes never move the other header controls.
   $('activeGlyph').textContent = working ? '⚉' : '⚇';
-  $('agentUnreadCount').textContent = unread.length ? String(unread.length) : '';
+  $('agentUnreadCount').textContent = (unread.length ? String(unread.length) : '') + (agentsRecovery.interrupted.length ? ' !' : '');
   $('activeBtn').title = unread.length
     ? `${unread.length} unread ${unread.length === 1 ? 'reply' : 'replies'} · agents and notifications (a)`
     : 'Agents, replies, and notifications (a)';
+  if (agentsRecovery.interrupted.length) $('activeBtn').title += ` · ${agentsRecovery.interrupted.length} interrupted`;
   // The gentle pulse runs only while something truly works (e-ink kills all
   // animation globally, so this stays static there).
   $('activeBtn').classList.toggle('work', working);
   $('activeBtn').classList.toggle('unread', unread.length > 0);
+  // The folded side column keeps the same two signals.
+  const side = $('side');
+  side.classList.toggle('work', working);
+  side.classList.toggle('unread', unread.length > 0);
+  side.dataset.unread = unread.length ? String(unread.length) : '';
 }
 
 // The panel is built from LIVE client state — sessions (mtimes), runningKeys
@@ -2791,6 +3232,38 @@ function paintTreeDelegations() {
   if (treeNav.sel && treeNav.sel.startsWith('dg:')) paintTreeBar();
 }
 document.addEventListener('visibilitychange', () => delegationUI.visibilityChanged());
+// Every section of the panel folds, and the fold is remembered on this
+// device. The two "recent" sections also remember their scope: the current
+// project, or everything.
+const AGENT_SEC_KEY = 'aiconvo.agentSections.v1';
+let agentSecState = {};
+try { agentSecState = JSON.parse(localStorage.getItem(AGENT_SEC_KEY) || '{}') || {}; } catch {}
+function saveAgentSecState() { try { localStorage.setItem(AGENT_SEC_KEY, JSON.stringify(agentSecState)); } catch {} }
+const agentSecOpen = id => agentSecState['fold:' + id] !== true;
+const agentSecScope = id => agentSecState['scope:' + id] === 'project' ? 'project' : 'all';
+function toggleAgentSec(id) { agentSecState['fold:' + id] = agentSecOpen(id); saveAgentSecState(); renderAgentsPop(false); }
+function setAgentSecScope(id, scope) { agentSecState['scope:' + id] = scope; saveAgentSecState(); renderAgentsPop(false); }
+// The project the panel means by "this project": the open conversation's,
+// or the project page's. Empty on home and elsewhere.
+function panelProjectName() {
+  const name = currentProjectName() || (viewKind === 'project' && projectOverviewName) || (fileWs && fileWs.project) || '';
+  return name && name !== '?' && name !== LOOSE_PROJECT ? name : '';
+}
+// Short age: 40s, 12m, 3h, 2d. Sits at the end of the second line.
+function tinyAge(ms) {
+  if (!(ms > 0)) return 'now';
+  if (ms < 60000) return Math.max(1, Math.round(ms / 1000)) + 's';
+  return ago(ms);
+}
+function agentSecHtml(id, label, body, { count = null, scope = null, empty = '', cls = '' } = {}) {
+  const open = agentSecOpen(id);
+  const scopeHtml = scope ? `<span class="ag-scope" data-scope-of="${id}" title="${esc(scope.project ? 'Only ' + scope.project + ', or everything' : 'Open a conversation to narrow this to its project')}">` +
+    `<button data-scope="project" class="${scope.value === 'project' ? 'on' : ''}"${scope.project ? '' : ' disabled'}>${esc(scope.project || 'project')}</button>` +
+    `<button data-scope="all" class="${scope.value === 'all' ? 'on' : ''}">all</button></span>` : '';
+  return `<div class="ag-section ${cls}" data-sec="${id}"><div class="ag-sec" data-sec-head="${id}" role="button" aria-expanded="${open}">` +
+    `<span class="ag-sec-label">${esc(label)}${count != null && !open ? ` <span class="ag-sec-n">· ${count}</span>` : ''}</span>${open ? scopeHtml : ''}</div>` +
+    `<div class="ag-sec-body"${open ? '' : ' hidden'}>${body || (empty ? `<div class="ag-empty">${esc(empty)}</div>` : '')}</div></div>`;
+}
 function renderAgentsPopSoon() {
   if ($('agentsPop').hidden) return;
   clearTimeout(agentsPopT);
@@ -2804,12 +3277,14 @@ async function renderAgentsPop(refetch) {
       const d = await (await fetch('/api/agents/active')).json();
       agentsPids = new Map((d.running || []).filter(a => a.key).map(a => [a.key, a.pid]));
       agentsProcs = d.procs || [];
+      if (d.recovery) agentsRecovery = d.recovery;
     } catch {}
     if (pop.hidden) return;
   }
   const now = Date.now();
   const delegationIndex = delegationUI.index();
   const byKey = k => sessions.find(s => s.key === k);
+  const busyNow = agentBusyKeys();
   // One row per orchestration, not one per worker. Workers fold under the
   // conversation that launched them; that row shows progress and expands on
   // request. A worker gets its own top-level row only when it is unread and
@@ -2845,11 +3320,9 @@ async function renderAgentsPop(refetch) {
     const kids = delegationIndex.children.get(id) || [];
     const note = attentionNote(t) || (t.error ? String(t.error).slice(0, 80) : t.role || '');
     return `<div class="ag-row ag-child${unread ? ' unread' : ''}${live ? ' working' : ''}${t.key ? '' : ' off'}" data-key="${esc(t.key || '')}" style="--depth:${depth}">` +
-      `<span class="src pi"><i></i></span>` +
-      (unread ? '<span class="ag-unread-dot" title="Unread" aria-label="Unread"></span>' : s && agentIsRead(s) ? '<span class="ag-read-dot" title="Read" aria-label="Read"></span>' : '') +
-      `<span class="ag-main"><span class="ag-title" title="${esc(t.title || 'Untitled task')}">${esc(t.title || 'Untitled task')}</span>` +
-      `<span class="ag-dir">${esc(note)}</span></span>` +
-      `<span class="ag-age">${esc((t.status || 'running') + (t.review && t.review !== 'unreviewed' ? ' · ' + t.review : ''))}</span></div>` +
+      `<span class="ag-main"><span class="ag-title" title="${esc(t.title || 'Untitled task')}"><span>${esc(t.title || 'Untitled task')}</span></span>` +
+      `<span class="ag-sub"><span class="ag-dir">${esc(note)}</span>` +
+      `<span class="ag-age">${esc((t.status || 'running') + (t.review && t.review !== 'unreviewed' ? ' · ' + t.review : ''))}</span></span></span></div>` +
       (kids.length ? childRows(kids, depth + 1) : '');
   }).join('');
   const orchestration = key => {
@@ -2876,15 +3349,27 @@ async function renderAgentsPop(refetch) {
   const rowTitle = s => (s && (s.title || s.timelineTitle)) || '(untitled)';
   // A delegated worker belongs to its supervisor, so its row has no kill
   // button; cancel it from the parent conversation's delegation section.
-  const row = (s, key, status, pid, readState = '', working = false) => `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}" data-key="${esc(key || '')}">` +
-    `<span class="src ${esc((s && s.source) || 'pi')}"><i></i></span>` +
-    (readState === 'unread' ? '<span class="ag-unread-dot" title="Unread" aria-label="Unread"></span>' :
-      readState === 'read' ? '<span class="ag-read-dot" title="Read" aria-label="Read"></span>' : '') +
-    `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}">${esc(rowTitle(s))}</span>` +
-    `<span class="ag-dir">${esc(origin(key) || shortDir((s && s.cwd) || ''))}</span></span>` +
-    `<span class="ag-age">${esc(status)}</span>` +
-    orchestration(key).badge +
-    (delegatedBy.has(key) ? '' : kill(pid, rowTitle(s))) + `</div>` + orchestration(key).children;
+  // Every row of an indexed conversation carries the ⋯ actions (pin, mark
+  // unread, remove); the open conversation is marked so the column shows
+  // where the person is.
+  const more = (s, key) => s && key ? `<button class="ag-more" data-more="${esc(key)}" title="Pin, mark unread, remove…" aria-label="Conversation actions" aria-haspopup="menu">⋯</button>` : '';
+  // `status` is the short text at the end of the second line: normally the
+  // age of the last activity; the traffic rows put the pid there.
+  // The second line names the project (a delegated worker: its parent). A
+  // list already scoped to one project has no second line: the time moves
+  // to the end of the title line.
+  const projectLabel = s => { const p = s ? projectOf(s) : ''; return p && p !== '?' ? (p === LOOSE_PROJECT ? shortDir((s && s.cwd) || '') : p) : ''; };
+  const row = (s, key, status, pid, readState = '', working = false, { dir } = {}) => {
+    const acts = (delegatedBy.has(key) ? '' : kill(pid, rowTitle(s))) + more(s, key);
+    const o = orchestration(key);
+    const sub = dir === false ? '' : (dir || origin(key) || projectLabel(s));
+    const ageHtml = `<span class="ag-age">${esc(status)}</span>`;
+    return `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}${key && key === activeRel ? ' current' : ''}" data-key="${esc(key || '')}">` +
+      `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}"><span>${esc(rowTitle(s))}</span>${sub || o.badge ? '' : ageHtml}</span>` +
+      (sub || o.badge ? `<span class="ag-sub"><span class="ag-dir">${esc(sub)}</span>${o.badge}${ageHtml}</span>` : '') + `</span>` +
+      (acts ? `<span class="ag-acts">${acts}</span>` : '') + `</div>` + o.children;
+  };
+  const age = s => tinyAge(now - agentActivityAt(s));
   const webKeys = new Set([...activeRuns.values()].map(r => r.fanoutRootKey || r.key));
   const webGroups = new Map();
   for (const r of activeRuns.values()) {
@@ -2898,8 +3383,8 @@ async function renderAgentsPop(refetch) {
     // they do not reappear as separate "other agents" rows below.
     for (const r of rs) { const p = procByKey.get(r.key); if (p) shownPids.add(p.pid); }
     const status = first.fanoutId
-      ? rs.length + ' models · ' + rs.filter(r => r.status === 'running').length + ' working'
-      : ((first.model || '').split('/').pop() || 'session model').slice(0, 16) + ' · ' + (first.statusText || 'working…').slice(0, 24);
+      ? rs.filter(r => r.status === 'running').length + '/' + rs.length + ' working'
+      : (first.statusText || 'working…').slice(0, 18);
     return row(byKey(key), key, status, null, '', true);
   });
   const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) }));
@@ -2907,12 +3392,25 @@ async function renderAgentsPop(refetch) {
   const termIdle = termRows.filter(t => !t.s || !isActive(t.s));
   const termStatus = t => {
     const pid = (t.p && t.p.pid) || agentsPids.get(t.k);
-    const activity = t.s && t.s.mtimeMs ? 'activity ' + secs(now - t.s.mtimeMs) + ' ago' : 'waiting for activity';
+    const activity = t.s && t.s.mtimeMs ? tinyAge(now - t.s.mtimeMs) : 'waiting';
     return (pid ? 'pid ' + pid + ' · ' : '') + activity;
   };
   const unread = finishedUnreadSessions();
   const unreadKeys = new Set(unread.map(s => s.key));
-  const unreadSec = unread.map(s => row(s, s.key, 'replied ' + secs(now - agentUnreadAt(s)) + ' ago', null, 'unread')).join('');
+  const unreadStatus = s => (agentIsFlagged(s) ? 'marked · ' : '') + age(s);
+  // Pinned conversations have a section of their own; each shows its live
+  // state there and leaves the unread and read sections (one inbox row per
+  // conversation). The process sections below still list it while it works.
+  const pinned = pinnedSessions();
+  const pinnedKeys = new Set(pinned.map(s => s.key));
+  const pinnedSec = pinned.map(s => {
+    const working = busyNow.has(s.key);
+    const isUnread = unreadKeys.has(s.key);
+    const readAt = Number(agentReadState.read[s.key]) || 0;
+    const status = isUnread ? unreadStatus(s) : s.mtimeMs ? age(s) : readAt ? tinyAge(now - readAt) : '';
+    return row(s, s.key, status, null, isUnread ? 'unread' : agentIsRead(s) ? 'read' : '', working);
+  }).join('');
+  const unreadSec = unread.filter(s => !pinnedKeys.has(s.key)).map(s => row(s, s.key, unreadStatus(s), null, 'unread')).join('');
   // "Writing" claims only sessions with a busy live process behind them. A
   // warm web process at the prompt is not work and must not hide a result.
   const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key) && !delegatedBy.has(s.key)
@@ -2920,13 +3418,14 @@ async function renderAgentsPop(refetch) {
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const writeStatus = s => {
     const p = procByKey.get(s.key);
-    return 'activity ' + secs(now - s.mtimeMs) + ' ago' + (p ? ' · pid ' + p.pid + ' · ' + p.owner : '');
+    return (p ? 'pid ' + p.pid + ' · ' : '') + tinyAge(now - s.mtimeMs);
   };
-  const claimed = new Set([...runningKeys, ...webKeys, ...writing.map(s => s.key), ...unreadKeys]);
+  const interruptedKeys = new Set(agentsRecovery.interrupted.map(r => r.key));
+  const claimed = new Set([...runningKeys, ...webKeys, ...writing.map(s => s.key), ...unreadKeys, ...interruptedKeys]);
   // A result moves into the read section immediately after it opens. Keep a
   // newly read old result here for one hour, instead of making it disappear.
   const recent = sessions.filter(s => {
-    if (!agentIsRead(s) || claimed.has(s.key) || delegatedBy.has(s.key)) return false;
+    if (!agentIsRead(s) || claimed.has(s.key) || delegatedBy.has(s.key) || pinnedKeys.has(s.key) || agentIsDismissed(s)) return false;
     const readAt = Number(agentReadState.read[s.key]) || 0;
     return (s.mtimeMs && now - s.mtimeMs < 3600000) || (readAt && now - readAt < 3600000);
   }).sort((a, b) => Math.max(Number(agentReadState.read[b.key]) || 0, b.mtimeMs || 0)
@@ -2937,9 +3436,9 @@ async function renderAgentsPop(refetch) {
   const delegatedSec = [...orchestrations.keys()].filter(k => orchProgress.get(k).live && !(claimed.has(k) || recentKeys.has(k))).map(k => {
     if (!k) {
       const o = orchestration('');
-      return `<div class="ag-row working off" data-key=""><span class="src pi"><i></i></span>` +
-        `<span class="ag-main"><span class="ag-title">Delegated work from an unindexed conversation</span><span class="ag-dir">records under ~/.local/share/aiconvo/delegations</span></span>` +
-        o.badge + `</div>` + o.children;
+      return `<div class="ag-row working off" data-key="">` +
+        `<span class="ag-main"><span class="ag-title"><span>Delegated work from an unindexed conversation</span></span><span class="ag-sub"><span class="ag-dir">records under ~/.local/share/aiconvo/delegations</span>${o.badge}</span></span>` +
+        `</div>` + o.children;
     }
     const p = orchProgress.get(k);
     return row(byKey(k), k, p.live + ' working', null, '', true);
@@ -2950,36 +3449,86 @@ async function renderAgentsPop(refetch) {
   const writeSec = writing.map(s => row(s, s.key, writeStatus(s), (procByKey.get(s.key) || {}).pid, '', true)).join('');
   // Leftovers: processes no row above claimed — idle warm RPC sessions on
   // other conversations, server children, and untracked strays.
-  const others = agentsProcs.filter(p => !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !unreadKeys.has(p.key));
+  const others = agentsProcs.filter(p => !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !unreadKeys.has(p.key) && !interruptedKeys.has(p.key));
   const otherSec = others.map(p => `<div class="ag-row${p.busy === true ? ' working' : ''}" data-key="${esc(p.key || '')}">` +
-    `<span class="src ${esc(p.kind === 'claude' ? 'claude' : 'pi')}"><i></i></span>` +
-    `<span class="ag-main"><span class="ag-title">${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span>` +
-    `<span class="ag-dir">untracked agent · ${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(secs(p.ageMs)) : ''}</span></span>` +
-    `<span class="ag-age">pid ${p.pid}</span>` +
-    kill(p.pid, p.title || p.kind + ' pid ' + p.pid) + `</div>`).join('');
+    `<span class="ag-main"><span class="ag-title"><span>${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span></span>` +
+    `<span class="ag-sub"><span class="ag-dir">${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(tinyAge(p.ageMs)) : ''}</span>` +
+    `<span class="ag-age">pid ${p.pid}</span></span></span>` +
+    `<span class="ag-acts">${kill(p.pid, p.title || p.kind + ' pid ' + p.pid)}</span></div>`).join('');
   const st = pop.scrollTop;
+  const focusedRecovery = document.activeElement?.dataset?.recoveryId;
+  const focusedAction = document.activeElement?.dataset?.recoveryAction;
+  const recoveryToggleFocused = document.activeElement?.id === 'agentAutoResume';
+  const interruptedSec = agentsRecovery.interrupted.map(r => `<div class="ag-row ag-interrupted" data-key="${esc(r.key)}">
+    <span class="ag-main"><span class="ag-title">${esc(rowTitle(byKey(r.key)) === '(untitled)' ? r.title : rowTitle(byKey(r.key)))}</span>
+    <span class="ag-dir">${esc(r.kind === 'network' ? 'Likely connection problem' : r.kind === 'stopped' ? 'Stopped' : 'Needs attention')} · ${esc(secs(now - r.createdAt))} ago</span>
+    <span class="ag-recovery-reason">${esc(r.reason)}</span>
+    <span class="ag-dir">${esc(r.note || (r.waiting ? 'Waiting for a stable connection · attempt ' + (r.attempts + 1) + '/3' : 'Resume when ready'))}</span></span>
+    <span class="ag-recovery-actions">${r.canResume ? `<button data-recovery-id="${esc(r.id)}" data-recovery-action="resume"${r.state === 'resuming' ? ' disabled' : ''}>${r.state === 'resuming' ? 'Resuming…' : 'Resume'}</button>` : ''}
+    <button data-recovery-id="${esc(r.id)}" data-recovery-action="dismiss" title="Remove from this list and cancel automatic recovery. Saved history is kept."${r.state === 'resuming' ? ' disabled' : ''}>Dismiss</button></span></div>`).join('');
+  const network = agentsRecovery.network || {};
+  const recoverySection = interruptedSec || agentsRecovery.enabled ? `<details class="ag-recovery ag-notifications"${agentRecoveryOpen ? ' open' : ''}><summary>resume interrupted tasks<span class="ag-notify-count">${agentsRecovery.interrupted.length ? agentsRecovery.interrupted.length + ' interrupted' : 'automatic recovery on'}</span></summary>` + interruptedSec +
+    `<label class="ag-recovery-setting"><input id="agentAutoResume" type="checkbox"${agentsRecovery.enabled ? ' checked' : ''}> Resume connection failures automatically</label>` +
+    `<div class="ag-recovery-help">${network.checkedAt ? esc(network.host + (network.state === 'reachable' ? ' reachable' : ' not reachable') + ' · checked ' + secs(now - network.checkedAt) + ' ago') + '. ' : ''}Checks run on the host laptop/server, even with this panel closed. Two successful checks before resuming. At most 3 attempts, within 24 hours. Deliberate stops and other errors stay stopped. Continuing can repeat work; check any uncertain results.</div></details>` : '';
   const notificationsSec = jobsNotificationsHtml();
-  const unreadTray = '<div class="ag-unread-tray"><div class="ag-sec">● unread replies</div>' + unreadSec + '</div>';
-  $('agentsUnread').innerHTML = unreadTray;
-  $('agentsLegacy').innerHTML =
-    (recent.length ? '<div class="ag-sec">○ read replies</div>' + recent.map(s => {
-      const readAt = Number(agentReadState.read[s.key]) || 0;
-      return row(s, s.key, readAt ? 'read ' + secs(now - readAt) + ' ago' : 'replied ' + secs(now - s.mtimeMs) + ' ago', null, 'read');
-    }).join('') : '') +
-    (webSec ? '<div class="ag-sec ag-active-sec">● web agents — responding</div>' + webSec : '') +
-    (workSec ? '<div class="ag-sec ag-active-sec">● terminal agents — active</div>' + workSec : '') +
-    (writeSec ? '<div class="ag-sec ag-active-sec">● agent activity</div>' + writeSec : '') +
-    (delegatedSec ? '<div class="ag-sec ag-active-sec">● delegated work — in progress</div>' + delegatedSec : '') +
-    (idleSec ? '<div class="ag-sec ag-active-sec">○ open terminals</div>' + idleSec : '') +
-    (otherSec ? '<div class="ag-sec ag-active-sec">⚙ background agent processes</div>' + otherSec : '') +
-    notificationsSec;
-  const notifications = pop.querySelector('.ag-notifications');
+  // "recent": the conversations a person last wrote in, then the files a
+  // person last opened or saved. One group, one fold, one scope: the
+  // current project, or everything. In project scope rows are one line.
+  const project = panelProjectName();
+  const scope = { value: project && agentSecScope('recent') === 'project' ? 'project' : 'all', project };
+  const scoped = scope.value === 'project';
+  const listed = new Set([...pinnedKeys, ...unreadKeys, ...recent.map(s => s.key)]);
+  const wrote = sessions.filter(s => s.lastUserTs && !listed.has(s.key) && !delegatedBy.has(s.key) && (!scoped || projectOf(s) === project))
+    .sort((a, b) => Date.parse(b.lastUserTs) - Date.parse(a.lastUserTs)).slice(0, 8);
+  const wroteSec = wrote.map(s => row(s, s.key, tinyAge(now - Date.parse(s.lastUserTs)), null, '', busyNow.has(s.key), { dir: scoped ? false : undefined })).join('');
+  const fileProject = f => f.project || projectOf({ cwd: f.path.slice(0, f.path.lastIndexOf('/')) });
+  const files = recentFilesList.filter(f => !scoped || fileProject(f) === project).slice(0, 8);
+  const filesSec = files.map(f => {
+    const name = f.path.split('/').pop();
+    const dir = scoped ? '' : fileProject(f) || shortDir(f.path.slice(0, -name.length - 1));
+    const ageHtml = `<span class="ag-age">${esc((f.kind === 'saved' ? 'saved ' : '') + tinyAge(now - f.at))}</span>`;
+    return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(f.project || '')}" title="${esc(f.path)}">` +
+      `<span class="ag-main"><span class="ag-title"><span>${esc(name)}</span>${dir ? '' : ageHtml}</span>` +
+      (dir ? `<span class="ag-sub"><span class="ag-dir">${esc(dir)}</span>${ageHtml}</span>` : '') + `</span>` +
+      `<span class="ag-acts"><button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
+  }).join('');
+  const recentBody = (wroteSec || `<div class="ag-empty">${esc(scoped ? 'nothing written in ' + project + ' yet' : 'nothing written yet')}</div>`) +
+    `<div class="ag-files-block"><div class="ag-sub-sec">files</div>${filesSec || '<div class="ag-empty">none opened yet</div>'}</div>`;
+  const readSec = recent.map(s => row(s, s.key, age(s), null, 'read')).join('');
+  const traffic = webSec + workSec + writeSec + delegatedSec + idleSec + otherSec;
+  const trafficCount = (traffic.match(/class="ag-row/g) || []).length;
+  // Sections in order. Open ones flow from the top; folded ones dock at the
+  // bottom with traffic and notifications (column only: the tray has no
+  // free space to speak of, so there they stay in place).
+  const sections = [
+    pinnedSec ? ['pinned', 'pinned', pinnedSec, { count: pinned.length, cls: 'ag-pinned' }] : null,
+    ['unread', 'unread replies', unreadSec, { count: unread.length, cls: 'ag-unread-tray', empty: 'nothing new' }],
+    readSec ? ['read', 'read replies', readSec, { count: recent.length }] : null,
+    ['recent', 'recent', recentBody, { count: wrote.length + (sideLayoutOn() ? files.length : 0), scope }],
+    traffic ? ['traffic', 'traffic', traffic, { count: trafficCount, cls: 'ag-traffic', dock: true }] : null,
+  ].filter(Boolean);
+  const dockFolded = sideLayoutOn();
+  const flow = sections.filter(([id, , , o]) => !o.dock && (agentSecOpen(id) || !dockFolded));
+  const dock = sections.filter(([id, , , o]) => o.dock || (!agentSecOpen(id) && dockFolded));
+  $('agentsUnread').innerHTML = flow.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('');
+  $('agentsLegacy').innerHTML = dock.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('') + recoverySection + notificationsSec;
+  const recovery = pop.querySelector('.ag-recovery');
+  if (recovery) recovery.ontoggle = () => { agentRecoveryOpen = recovery.open; };
+  const notifications = pop.querySelector('.ag-notifications:not(.ag-recovery)');
   if (notifications) notifications.ontoggle = () => { agentNotificationsOpen = notifications.open; };
+  const autoResume = $('agentAutoResume');
+  if (autoResume) autoResume.onchange = async () => {
+    autoResume.disabled = true;
+    await saveSettings({ autoResumeNetwork: autoResume.checked }, 'connection recovery updated');
+    await loadAgentRecovery(); renderAgentsPop(false);
+  };
   pop.scrollTop = st;
   selectAgentRow(agentsSelectedKey, false);
+  if (recoveryToggleFocused) autoResume?.focus({ preventScroll: true });
+  else if (focusedRecovery) [...pop.querySelectorAll('[data-recovery-id]')].find(b => b.dataset.recoveryId === focusedRecovery && b.dataset.recoveryAction === focusedAction)?.focus({ preventScroll: true });
 }
 function agentRows() {
-  return [...$('agentsPop').querySelectorAll('.ag-row[data-key]')].filter(row => row.dataset.key);
+  return [...$('agentsPop').querySelectorAll('.ag-row[data-key]')].filter(row => row.dataset.key && !row.closest('details:not([open])') && !row.closest('.ag-sec-body[hidden]'));
 }
 function selectAgentRow(key, scroll = true) {
   const rows = agentRows();
@@ -2989,8 +3538,9 @@ function selectAgentRow(key, scroll = true) {
   let row = key ? rows.find(item => item.dataset.key === key) : null;
   if (!row) row = rows.find(item => item.dataset.key === activeRel) || rows[0];
   agentsSelectedKey = row.dataset.key;
-  rows.forEach(item => item.classList.toggle('kbd-selected', item === row));
-  if (scroll) row.scrollIntoView({ block: 'nearest' });
+  const cursor = !sideLayoutOn() || agentsKbd;
+  rows.forEach(item => item.classList.toggle('kbd-selected', cursor && item === row));
+  if (scroll && cursor) row.scrollIntoView({ block: 'nearest' });
   return row;
 }
 function agentsPopKeydown(e) {
@@ -3001,6 +3551,7 @@ function agentsPopKeydown(e) {
     toggleAgents(false);
     return true;
   }
+  if (e.target.closest('button, input, summary') && ['Enter', ' ', 'Tab'].includes(e.key)) return true;
   if (e.key === 'j') {
     e.preventDefault();
     toggleJobs();
@@ -3031,6 +3582,17 @@ function agentsPopKeydown(e) {
     if (row) { toggleAgents(false); open(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined); }
     return true;
   }
+  // Inbox marks on the row under the cursor (design/42).
+  if (e.key === 'p' || e.key === 'u' || e.key === 'Delete') {
+    const row = selectAgentRow(agentsSelectedKey, false);
+    const s = row && sessions.find(item => item.key === row.dataset.key);
+    if (!s) return true;
+    e.preventDefault();
+    if (e.key === 'p') setAgentPinned(s.key, !agentIsPinned(s.key));
+    else if (e.key === 'u') agentUnreadAt(s) ? markAgentRead(s.key) : markAgentUnread(s.key);
+    else dismissAgentConversation(s.key);
+    return true;
+  }
   return true;
 }
 function toggleOrchestration(key) {
@@ -3039,8 +3601,26 @@ function toggleOrchestration(key) {
   renderAgentsPop(true);
   selectAgentRow(selected, false);
 }
+// In the side layout the panel is always open: "toggle" means moving the
+// keyboard cursor into the column (`a`) and out again (Escape, a click
+// elsewhere, opening a row). agentsTrayOpen() is what the rest of the app
+// asks: is the inbox the thing under the keys right now?
+let agentsKbd = false;
+function agentsTrayOpen() {
+  return !$('agentsPop').hidden && (!sideLayoutOn() || agentsKbd);
+}
+function setAgentsKbd(on) {
+  agentsKbd = !!on;
+  $('agentsPop').classList.toggle('kbd', agentsKbd);
+  if (agentsKbd) { agentsSelectedKey = null; selectAgentRow(null); }
+  else agentRows().forEach(item => item.classList.remove('kbd-selected'));
+}
 function toggleAgents(show) {
   const pop = $('agentsPop');
+  if (sideLayoutOn()) {
+    setAgentsKbd(show !== undefined ? show : !agentsKbd);
+    return;
+  }
   pop.hidden = show !== undefined ? !show : !pop.hidden;
   clearInterval(agentsTimer);
   if (!pop.hidden) {
@@ -3050,8 +3630,93 @@ function toggleAgents(show) {
   } else agentNotificationsOpen = false;
   delegationUI.visibilityChanged();
 }
+// One menu per conversation row: pin, mark unread, remove. Same surface as
+// the file path menu, so the Escape and outside-click rules already apply.
+function openAgentRowMenu(key, x, y, anchor) {
+  closeFileActionMenu();
+  const s = sessions.find(item => item.key === key);
+  if (!s) return;
+  const unread = !!agentUnreadAt(s), pinned = agentIsPinned(key);
+  const items = [
+    [pinned ? 'Unpin' : 'Pin to the top', () => setAgentPinned(key, !pinned)],
+    [unread ? 'Mark as read' : 'Mark as unread', () => unread ? markAgentRead(key) : markAgentUnread(key)],
+    ['Remove from the inbox', () => dismissAgentConversation(key), 'Hidden until it replies again. Nothing is deleted.'],
+    ['Open', () => { toggleAgents(false); open(key, unread ? 'reply' : undefined); }],
+  ];
+  const menu = document.createElement('div');
+  menu.className = 'file-action-menu ag-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `<div class="file-action-head">${esc((s.title || s.timelineTitle) || '(untitled)')}</div>` +
+    items.map((item, i) => `<button type="button" role="menuitem" data-ag-action="${i}"${item[2] ? ` title="${esc(item[2])}"` : ''}>${esc(item[0])}</button>`).join('');
+  document.body.appendChild(menu);
+  if (anchor) { const r = anchor.getBoundingClientRect(); x = r.left; y = r.bottom + 2; }
+  const width = menu.offsetWidth, height = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(x, window.innerWidth - width - 8)) + 'px';
+  menu.style.top = Math.max(8, Math.min(y, window.innerHeight - height - 8)) + 'px';
+  if (anchor) anchor.setAttribute('aria-expanded', 'true');
+  menu.querySelectorAll('[data-ag-action]').forEach(button => button.onclick = ev => {
+    ev.stopPropagation();
+    const item = items[Number(button.dataset.agAction)];
+    closeFileActionMenu();
+    item[1]();
+  });
+  menu.querySelector('button').focus();
+}
 $('activeBtn').onclick = e => { e.stopPropagation(); toggleAgents(); };
+$('agentsPop').addEventListener('contextmenu', e => {
+  const row = e.target.closest('.ag-row[data-key]');
+  if (!row || !row.dataset.key || !sessions.some(s => s.key === row.dataset.key)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openAgentRowMenu(row.dataset.key, e.clientX, e.clientY);
+});
 $('agentsPop').onclick = async e => {
+  const scope = e.target.closest('[data-scope]');
+  if (scope) {
+    e.stopPropagation();
+    if (!scope.disabled) setAgentSecScope(scope.closest('[data-scope-of]').dataset.scopeOf, scope.dataset.scope);
+    return;
+  }
+  const head = e.target.closest('[data-sec-head]');
+  if (head) {
+    e.stopPropagation();
+    toggleAgentSec(head.dataset.secHead);
+    return;
+  }
+  const forget = e.target.closest('[data-forget]');
+  if (forget) {
+    e.stopPropagation();
+    recentFilesList = recentFilesList.filter(f => f.path !== forget.dataset.forget);
+    renderAgentsPop(false);
+    fetch('/api/recent-files', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ remove: forget.dataset.forget }) }).catch(() => {});
+    return;
+  }
+  const fileRow = e.target.closest('.ag-file[data-path]');
+  if (fileRow) {
+    e.stopPropagation();
+    if (sideLayoutOn()) setAgentsKbd(false); else toggleAgents(false);
+    openLiveFile(fileRow.dataset.path, { project: fileRow.dataset.project || null });
+    return;
+  }
+  const more = e.target.closest('.ag-more[data-more]');
+  if (more) {
+    e.stopPropagation();
+    openAgentRowMenu(more.dataset.more, 0, 0, more);
+    return;
+  }
+  const recoveryButton = e.target.closest('[data-recovery-id]');
+  if (recoveryButton) {
+    e.stopPropagation();
+    recoveryButton.disabled = true;
+    try {
+      const out = await postJson('/api/agents/recovery', { id: recoveryButton.dataset.recoveryId, action: recoveryButton.dataset.recoveryAction });
+      if (out?.error) errToast(out.error);
+      else if (recoveryButton.dataset.recoveryAction === 'resume') toast('Continuing from saved history');
+    } catch (error) { errToast('Could not reach the server. Check the conversation before trying again.'); }
+    await loadAgentRecovery(); renderAgentsPop(false);
+    return;
+  }
+  if (e.target.closest('.ag-recovery-setting')) return;
   const notification = e.target.closest('.job[data-job]');
   if (notification) {
     e.stopPropagation();
@@ -5023,12 +5688,12 @@ function mrmdHostTheme() {
     '--editor-line-number': 'var(--text-faint)',
     '--editor-line-number-active': 'var(--text-dim)',
     '--editor-matching-bracket': 'color-mix(in srgb, var(--accent) 25%, var(--bg))',
-    '--editor-font-family': 'var(--font)',
+    '--editor-font-family': 'var(--font-mono)',
     '--editor-font-size': 'var(--fs-title)',
     '--editor-line-height': '1.65',
 
     // widgets (panels, tooltips, fold placeholders)
-    '--widget-font-mono': 'var(--font)',
+    '--widget-font-mono': 'var(--font-mono)',
     '--widget-font-sans': 'var(--font)',
     '--widget-border-radius': 'var(--r-sm)',
     '--widget-surface': 'var(--surface-1)',
@@ -5267,14 +5932,16 @@ async function reloadDocumentFromDisk() {
 
 // Run the fenced code block at the cursor through rat (Mod-Enter, or the
 // ▶ button in the head bar). Deliberate boundaries, to stay simple:
-// · rat owns kernels, project resolution, venvs, state — the server just
-//   shells out to `rat run <lang> <code>` in the document's directory.
-// · output lands in a dock under the editor, never inside the markdown —
-//   the document text is the user's; running code must not mutate it.
-// The run status strip under the editor: kernel chip, elapsed time,
-// cancel. Output does NOT live here — it lands in the document as an
-// ```output fence under the cell (the MRMD convention). The strip only
-// answers "what is running, on which kernel, and how do I stop it".
+// · rat owns kernels, project resolution, environments and their state.
+//   The server shells out to `rat run --doc <notebook> <lang> <code>`; the
+//   notebook path — not a guessed folder — decides the kernel, so the
+//   terminal, VS Code and this page all reach the same one.
+// · a notebook declares what it needs in its front matter (rat.python.
+//   dependencies …). `rat doctor` reports whether that is satisfied;
+//   `rat ensure` makes it so. Both are surfaced in the strip below the
+//   editor; nothing installs without a click.
+// · output lands in the document as an ```output fence under the cell
+//   (the MRMD convention); the editor owns the markdown mechanics.
 function docRunStrip() {
   let strip = document.querySelector('.doc-run-strip');
   if (strip) return strip;
@@ -5282,31 +5949,147 @@ function docRunStrip() {
   if (!view) return null;
   strip = document.createElement('div');
   strip.className = 'doc-run-strip';
-  strip.innerHTML = `<span class="doc-run-chip dim" title="The kernel rat resolves for this document's folder"></span>
+  strip.innerHTML = `<span class="doc-run-chip dim" title="The kernel rat resolves for this notebook"></span>
     <span class="doc-run-state"></span>
     <button class="doc-run-cancel" hidden title="Interrupt the kernel (variables survive)">■ cancel</button>`;
   view.appendChild(strip);
   return strip;
 }
 
-// The kernel chip: rat's own resolution for this document's folder.
-async function refreshDocRuntimeChip(lang = 'py') {
+// The setup line under the strip: what `rat doctor` found and the one
+// button that fixes it. Created on demand, removed when all is well.
+function docSetupLine(strip) {
+  let line = document.querySelector('.doc-run-setup');
+  if (line) return line;
+  line = document.createElement('div');
+  line.className = 'doc-run-setup';
+  strip.insertAdjacentElement('afterend', line);
+  return line;
+}
+
+// Ask rat whether this notebook can run as it is, and show the answer.
+// The focused (checkpoint-review) view stays minimal: a notebook that is
+// ready shows nothing until the first run; one that needs setup shows the
+// setup line right away, before a run can fail.
+async function refreshDocDoctor() {
   const st = docState;
+  if (!st) return null;
+  let report = null;
+  try { report = await (await fetch('/api/doc/doctor?doc=' + encodeURIComponent(st.path))).json(); } catch {}
+  if (docState !== st) return null;
+  st.doctor = report;
+  const quiet = st.focused && !document.querySelector('.doc-run-strip') && report && report.ok;
+  if (quiet) return report;
   const strip = docRunStrip();
-  if (!st || !strip) return;
-  const docDir = st.path.split('/').slice(0, -1).join('/');
-  let info = null;
-  try { info = await (await fetch('/api/doc/runtime-info?cwd=' + encodeURIComponent(docDir) + '&lang=' + encodeURIComponent(lang))).json(); } catch {}
-  if (docState !== st || !strip.isConnected) return;
-  st.runtimeInfo = info && info.name ? info : null;
+  if (!strip) return report;
+  renderDocDoctor(st, strip, report);
+  return report;
+}
+
+function renderDocDoctor(st, strip, report) {
   const chip = strip.querySelector('.doc-run-chip');
-  if (!info || !info.name) { chip.textContent = ''; return; }
-  // The chip answers "which kernel, which environment": venv when the
-  // project has one, the bare interpreter warning when it does not.
-  const env = info.venv ? shortDir(info.venv) : 'no venv — system python';
-  chip.textContent = '⚙ ' + info.name + ' · ' + env;
-  chip.title = 'The kernel rat resolves for this document\u0027s folder.\nProject root: ' + (info.cwd || '?')
-    + '\nEnvironment: ' + (info.venv || 'none — the kernel runs on the system python');
+  document.querySelector('.doc-run-setup')?.remove();
+  if (!report) { chip.textContent = ''; return; }
+  if (report.ratMissing) {
+    chip.textContent = '⚙ rat missing';
+    chip.title = report.error;
+    const line = docSetupLine(strip);
+    line.innerHTML = `<span>✗ ${esc(report.error)}</span>`;
+    return;
+  }
+  if (report.error) { chip.textContent = ''; docStatusLine('⚠ ' + report.error); return; }
+  const py = report.python;
+  if (py) {
+    const env = py.venv_exists ? shortDir(py.venv) + (py.version ? ' · Python ' + py.version : '') : 'no environment yet';
+    chip.textContent = '⚙ ' + py.kernel + ' · ' + env;
+    chip.title = 'Kernel: ' + py.kernel + '\nProject: ' + report.project + ' (' + report.project_source + ')'
+      + '\nEnvironment: ' + (py.venv_exists ? py.venv : 'none — rat ensure creates ' + py.venv)
+      + (py.requirements && py.requirements.length ? '\nDeclared: ' + py.requirements.join(', ') : '\nThis notebook declares no requirements (front matter rat.python.dependencies).')
+      + (report.ratNote ? '\n' + report.ratNote : '');
+  } else {
+    chip.textContent = '⚙ ' + report.project_source + ' project ' + shortDir(report.project);
+    chip.title = 'No python cells. Project: ' + report.project;
+  }
+  if (report.ok) return;
+  const line = docSetupLine(strip);
+  const problems = (report.checks || []).filter(c => !c.ok);
+  const parts = problems.map(c => `<span class="doc-setup-item" title="${esc(c.hint || '')}">✗ <b>${esc(c.label)}</b> ${esc(c.detail)}</span>`);
+  const actions = report.actions || [];
+  const effects = actions.map(a => a.effect).filter(Boolean);
+  let buttons = '';
+  if (actions.length) {
+    buttons = `<button class="doc-setup-go" title="${esc(actions.map(a => a.label + ' — ' + (a.reason || '')).join('\n'))}">▶ make it run</button>`
+      + (effects.length ? `<span class="dim">(${esc(effects.join('; '))})</span>` : '');
+  }
+  // A blocked report with a --recreate hint: offer the destructive step
+  // by its real name, never as "fix".
+  const needsRecreate = problems.some(c => /--recreate/.test(c.hint || ''));
+  if (needsRecreate) buttons += `<button class="doc-setup-recreate" title="rat ensure --recreate: deletes the environment and rebuilds it with a matching Python. Installed packages are lost.">rebuild environment (deletes it)</button>`;
+  const hints = problems.map(c => c.hint).filter(h => h && !/--recreate/.test(h));
+  // Hand the situation to a coding agent: the Ask panel (focused view)
+  // receives a brief built from this very report; the person reads and
+  // edits it before anything is sent.
+  if (document.getElementById('fwAsk')) buttons += `<button class="doc-setup-agent" title="Open Ask with a brief built from this report: fix the header or environment, then prove it with rat play. You review the text before it is sent.">ask an agent to fix it</button>`;
+  line.innerHTML = parts.join(' ') + ' ' + buttons + (hints.length ? `<span class="doc-setup-hint dim">→ ${esc(hints.join(' · '))}</span>` : '');
+  const go = line.querySelector('.doc-setup-go');
+  if (go) go.onclick = () => ensureDocEnvironment(st, {});
+  const agent = line.querySelector('.doc-setup-agent');
+  if (agent) agent.onclick = () => askAgentToFixNotebook(st);
+  const rec = line.querySelector('.doc-setup-recreate');
+  if (rec) rec.onclick = () => { if (confirm('Delete ' + (py ? py.venv : 'the environment') + ' and rebuild it? Packages installed there are lost.')) ensureDocEnvironment(st, { recreate: true }); };
+}
+
+// Open the file's Ask panel with a brief from the doctor report (and the
+// last failing cell, when there is one). Nothing is sent here.
+async function askAgentToFixNotebook(st, extra = {}) {
+  if (!st || docState !== st) return;
+  if (typeof fileWsToggleAsk !== 'function' || !document.getElementById('fwAsk')) return toast('open the notebook from Files to ask an agent');
+  if (!st.doctor) await refreshDocDoctor();
+  await fileWsToggleAsk(true);
+  const ta = document.getElementById('fwAskText');
+  if (!ta) return;
+  ta.value = NotebookEnv.agentBrief(st.doctor, { path: st.path, lastOutput: extra.lastOutput || null, focus: extra.focus || null });
+  ta.rows = Math.min(18, ta.value.split('\n').length + 1);
+  ta.focus();
+  ta.setSelectionRange(0, 0);
+  ta.scrollTop = 0;
+  toast('brief ready — read it, edit if you like, then send');
+}
+
+// `rat ensure` for this notebook, with elapsed time while it runs and a
+// plain account of each step afterwards. Returns the final report.
+async function ensureDocEnvironment(st, opts) {
+  const strip = docRunStrip();
+  if (docState !== st || !strip) return null;
+  if (st.running) { toast('a cell is running — wait for it or cancel it first'); return null; }
+  const state = strip.querySelector('.doc-run-state');
+  const line = document.querySelector('.doc-run-setup');
+  if (line) line.querySelectorAll('button').forEach(b => b.disabled = true);
+  const t0 = Date.now();
+  st.running = 'ensure';
+  const tick = setInterval(() => { if (st.running === 'ensure') state.textContent = '● setting up the environment · ' + Math.round((Date.now() - t0) / 1000) + 's'; }, 1000);
+  state.textContent = '● setting up the environment · 0s';
+  let r;
+  try { r = await postJson('/api/doc/ensure', { doc: st.path, ...opts }); }
+  catch { r = { error: 'network failure' }; }
+  clearInterval(tick);
+  if (docState !== st) return null;
+  st.running = null;
+  if (r.error && !r.checks) { state.textContent = '✗ ' + r.error + (r.detail ? ' · ' + String(r.detail).trim().split('\n').at(-1) : ''); if (line) line.querySelectorAll('button').forEach(b => b.disabled = false); return null; }
+  const steps = r.steps || [];
+  const failed = steps.find(s => !s.ok);
+  const secs = Math.round((Date.now() - t0) / 100) / 10;
+  if (failed) {
+    state.textContent = '✗ ' + failed.action.label + ' failed · ' + secs + 's';
+    toast('✗ ' + failed.action.label + ': ' + (failed.output || '').trim().split('\n').at(-1), null, 'err');
+  } else if (steps.length) {
+    state.textContent = '✓ ' + steps.map(s => s.action.label).join(', ') + ' · ' + secs + 's';
+  } else {
+    state.textContent = r.ok ? '✓ ready' : '';
+  }
+  st.doctor = r;
+  renderDocDoctor(st, strip, r);
+  return r;
 }
 
 let docRunSeq = 0;
@@ -5314,14 +6097,15 @@ let docRunSeq = 0;
 async function runDocCell(cell, opts = {}) {
   const st = docState;
   if (!st || !cell || !cell.code.trim()) return { ok: false };
-  if (st.running) { toast('a cell is already running — cancel it first'); return { ok: false }; }
+  if (st.running) { toast(st.running === 'ensure' ? 'the environment is being set up — one moment' : 'a cell is already running — cancel it first'); return { ok: false }; }
   const strip = docRunStrip();
+  // The strip may be appearing for the first time (focused view, ready
+  // notebook): fill the chip from the doctor report already in hand.
+  if (st.doctor && !strip.querySelector('.doc-run-chip').textContent) renderDocDoctor(st, strip, st.doctor);
   const state = strip.querySelector('.doc-run-state');
   const cancelBtn = strip.querySelector('.doc-run-cancel');
-  const docDir = st.path.split('/').slice(0, -1).join('/');
   const runId = 'run-' + (++docRunSeq) + '-' + Date.now();
   st.running = runId;
-  refreshDocRuntimeChip(cell.lang && cell.lang.toLowerCase().startsWith('p') ? 'py' : cell.lang);
   const t0 = Date.now();
   const tick = setInterval(() => {
     if (st.running === runId) state.textContent = '● ' + (cell.lang || '?') + ' cell · ' + Math.round((Date.now() - t0) / 1000) + 's';
@@ -5334,9 +6118,31 @@ async function runDocCell(cell, opts = {}) {
     state.textContent = '■ interrupting the kernel…';
     try { await postJson('/api/doc/cancel-run', { runId }); } catch {}
   };
+  // A notebook that declares `rat.after` gets its prerequisites run first
+  // (each once per kernel lifetime) — the declared chain, never a guess.
+  if (st.doctor && (st.doctor.after || []).some(a => !a.played)) {
+    const pending = st.doctor.after.filter(a => !a.played).map(a => a.path.split('/').pop());
+    state.textContent = '● running prerequisites: ' + pending.join(', ');
+    let pr;
+    try { pr = await postJson('/api/doc/play-prerequisites', { doc: st.path }); }
+    catch { pr = { error: 'network failure' }; }
+    if (docState !== st) return { ok: false };
+    if (pr.error || !pr.ok) {
+      clearInterval(tick);
+      st.running = null;
+      cancelBtn.hidden = true;
+      const failedRun = (pr.runs || []).find(x => !x.ok && !x.skipped);
+      const failedCell = failedRun && failedRun.cells.find(c => !c.ok);
+      state.textContent = '✗ prerequisite ' + (failedRun ? failedRun.notebook.split('/').pop() + (failedCell ? ' failed at line ' + failedCell.line : '') : 'failed') + (pr.error ? ' · ' + pr.error : '');
+      if (failedCell) toast('✗ ' + failedRun.notebook.split('/').pop() + ': ' + (failedCell.output || '').trim().split('\n').at(-1), null, 'err');
+      refreshDocDoctor();
+      return { ok: false, r: pr };
+    }
+    st.doctor.after = st.doctor.after.map(a => ({ ...a, played: true }));
+  }
   let r;
   try {
-    r = await postJson('/api/doc/run-cell', { lang: cell.lang, code: cell.code, cwd: docDir, runId });
+    r = await postJson('/api/doc/run-cell', { lang: cell.lang, code: cell.code, doc: st.path, runId });
   } catch { r = { error: 'network failure' }; }
   clearInterval(tick);
   if (docState !== st) return { ok: false };
@@ -5345,11 +6151,12 @@ async function runDocCell(cell, opts = {}) {
   if (r.error) { state.textContent = '✗ ' + r.error; return { ok: false, r }; }
   const secs = Math.round(r.ms / 100) / 10;
   state.textContent = (r.code === 0 ? '✓ ' : '✗ exit ' + r.code + ' · ') + r.runtime + ' · ' + secs + 's';
+  if (r.missing) refreshDocDoctor(); // rat vanished: say so in the strip, not per cell
   // Write the result under the cell — the editor owns markdown mechanics
   // (ownership rule, replacement, undo). Strip rat's own status tail and
   // kernel-start banner: the fence stores program output, not chrome.
   const outText = String(r.out || '')
-    .replace(/^[a-z0-9@._-]+ started on http[^\n]*\n?/im, '')
+    .replace(/^[a-z0-9@._-]+ (?:started|restarted) on http[^\n]*\n?/im, '')
     .replace(/\n?[✓✗] \d+(?:\.\d+)?m?s( \| \d+ vars?)?\s*$/, '')
     .trim();
   const wrote = st.editor.setCellOutput(cell, outText);
@@ -5358,7 +6165,8 @@ async function runDocCell(cell, opts = {}) {
     toast('the cell changed while it ran — output not written');
     state.textContent += ' · cell edited during run, output dropped';
   }
-  offerPackageInstall(strip, r, cell, docDir);
+  if (!st.doctor || !st.doctor.python || !st.doctor.python.kernel_running) refreshDocDoctor(); // the first run started the kernel
+  offerDeclareDependency(strip, r, cell);
   if (opts.advance && r.code === 0) st.editor.advanceToNextCell(cell);
   return { ok: r.code === 0, r };
 }
@@ -5385,71 +6193,90 @@ async function runAllDocCells() {
   toast('✓ ran all ' + cells.length + ' cells');
 }
 
-// A failed python cell with ModuleNotFoundError gets a one-click repair:
-// install the package into the project venv (uv), then rerun the cell.
-// The bar answers the three questions users actually have:
-//   what is missing · where will the install land · what exactly runs.
-// Special case: when the missing module IS this project's own package
-// (pyproject.toml name), the right fix is `uv pip install -e .` — the
-// project in editable mode — not a PyPI download of the same name.
-// The module name is only a guess for the PyPI name (cv2 ≠ opencv-python),
-// so the field is editable. Explicit click — nothing installs on its own.
-async function offerPackageInstall(dock, r, cell, docDir) {
+// A failed python cell with ModuleNotFoundError gets a one-click repair
+// that leaves a trace: the requirement is added to the notebook's own
+// front matter, then `rat ensure` installs it, then the cell reruns. The
+// next machine (or the next person) gets the same environment from the
+// declaration — an install that only happened here would be invisible.
+// The module name is only a guess for the requirement (cv2 ≠
+// opencv-python), so the field is editable. Explicit click — nothing
+// installs on its own.
+async function offerDeclareDependency(strip, r, cell) {
   document.querySelector('.doc-run-fix')?.remove();
   if (r.code === 0 || r.runtime !== 'py') return;
-  const miss = (r.out || '').match(/ModuleNotFoundError: No module named '([A-Za-z0-9_.]+)'/);
-  if (!miss) return;
-  const guess = miss[1].split('.')[0];
+  const moduleName = NotebookEnv.missingModule(r.out);
+  if (!moduleName) {
+    // Any other failure: the agent gets the report plus this output.
+    if (!document.getElementById('fwAsk')) return;
+    const st = docState;
+    const fix = document.createElement('div');
+    fix.className = 'doc-run-fix';
+    fix.innerHTML = `<span class="dim">the cell failed ·</span> <button class="doc-fix-agent" title="Open Ask with a brief: this report, this cell's output, and the rules for a durable fix. You review before sending.">ask an agent to fix it</button>`;
+    const line = (() => { try { return st.editor.view.state.doc.lineAt(cell.from).number; } catch { return null; } })();
+    fix.querySelector('.doc-fix-agent').onclick = () => askAgentToFixNotebook(st, { lastOutput: r.out, focus: (line ? 'line ' + line + ', ' : '') + (cell.lang || 'python') + ' cell' });
+    (document.querySelector('.doc-run-setup') || strip).insertAdjacentElement('afterend', fix);
+    return;
+  }
   const st = docState;
-  // The bar's honesty depends on the resolved runtime info (venv path,
-  // the project's own package name) — fetch it when not yet loaded.
-  if (st && !st.runtimeInfo) await refreshDocRuntimeChip();
+  if (st && !st.doctor) await refreshDocDoctor();
   if (docState !== st) return;
-  const info = (st && st.runtimeInfo) || {};
-  const isSelf = !!info.selfPackage
-    && guess.toLowerCase().replace(/-/g, '_') === info.selfPackage.toLowerCase().replace(/-/g, '_');
-  const destination = info.venv ? shortDir(info.venv) : (shortDir(info.cwd || docDir) + '/.venv (will be created — kernel restarts, variables reset)');
+  const report = (st && st.doctor) || {};
+  const proposed = NotebookEnv.proposeRequirement(moduleName, report.project_package);
+  const isSelf = proposed === '-e .';
+  const already = NotebookEnv.dependencies(st.editor.getContent()).includes(proposed);
   const fix = document.createElement('div');
   fix.className = 'doc-run-fix';
   fix.innerHTML = isSelf
-    ? `<span class="dim">⚙ <b>${esc(guess)}</b> is this project's own package — it is not installed in <b>${esc(destination)}</b> yet:</span>
-       <button class="doc-fix-go">⇩ uv pip install -e . + rerun</button>
+    ? `<span class="dim">⚙ <b>${esc(moduleName)}</b> is this project's own package (${esc(report.project_package)}). Declare it in the notebook and install it editable:</span>
+       <button class="doc-fix-go">＋ -e . → rat ensure → rerun</button>
        <span class="doc-fix-note dim" hidden></span>`
-    : `<span class="dim">module <b>${esc(guess)}</b> not found in <b>${esc(destination)}</b> · install from PyPI (edit if the package name differs):</span>
+    : `<span class="dim">module <b>${esc(moduleName)}</b> is missing · add to this notebook's dependencies (edit if the package name differs):</span>
        <input class="doc-fix-pkg" spellcheck="false">
-       <button class="doc-fix-go">⇩ uv pip install + rerun</button>
+       <button class="doc-fix-go">＋ declare → rat ensure → rerun</button>
        <span class="doc-fix-note dim" hidden></span>`;
   const input = fix.querySelector('.doc-fix-pkg');
-  if (input) input.value = guess;
+  if (input) input.value = proposed;
   const note = fix.querySelector('.doc-fix-note');
+  if (already) { note.hidden = false; note.textContent = 'already declared — the environment may be out of date; "make it run" installs it'; }
   const btn = fix.querySelector('.doc-fix-go');
   const go = async () => {
-    const pkg = isSelf ? '-e .' : input.value.trim();
-    if (!pkg) return;
+    const req = isSelf ? '-e .' : input.value.trim();
+    if (!req) return;
     btn.disabled = true; if (input) input.disabled = true;
-    note.hidden = false; note.textContent = '● installing into ' + destination + '…';
-    let ri;
-    try { ri = await postJson('/api/doc/install-pkg', { pkg, cwd: docDir }); }
-    catch { ri = { error: 'network failure' }; }
-    if (!fix.isConnected) return;
-    if (ri.error) {
+    note.hidden = false;
+    // 1. Declare it in the document (one undo step), then save so that
+    //    rat reads the same text the editor shows.
+    const before = st.editor.getContent();
+    const after = NotebookEnv.addDependency(before, req);
+    if (after === null) {
+      note.textContent = '✗ this front matter has a shape I will not edit blindly — add `' + req + '` under rat.python.dependencies by hand, then use "make it run"';
       btn.disabled = false; if (input) input.disabled = false;
-      const last = (ri.steps || []).at(-1);
-      note.textContent = '✗ ' + ri.error + (last && last.out ? ' · ' + last.out.trim().split('\n').at(-1) : '');
       return;
     }
-    // The bar goes away now — the confirmation must outlive it, so it
-    // lands in the status strip (which stays under the editor).
-    const installedMsg = '✓ installed' + (ri.restarted ? ' · kernel restarted (variables reset — ' + (isSelf ? 'editable installs need a fresh interpreter' : 'new venv') + ')' : '');
+    if (after !== before) {
+      st.editor.setContent(after);
+      st.dirty = true;
+      note.textContent = '● saving the declaration…';
+      await autosaveDocument();
+      if (docState !== st) return;
+      if (st.dirty) { note.textContent = '✗ could not save the notebook — see the status line'; btn.disabled = false; if (input) input.disabled = false; return; }
+    }
+    // 2. rat ensure, 3. rerun.
+    note.textContent = '● rat ensure…';
     fix.remove();
-    const stripState = document.querySelector('.doc-run-strip .doc-run-state');
-    if (stripState) stripState.textContent = installedMsg + ' · rerunning…';
-    toast(installedMsg);
-    await runDocCell(cell);
+    const report = await ensureDocEnvironment(st, {});
+    if (docState !== st || !report) return;
+    const stillMissing = report.python && (report.python.missing || []).length;
+    if (stillMissing || (report.steps || []).some(s => !s.ok)) return;
+    // The declaration moved the document: find the same cell at its new
+    // position so the rerun's output lands under it (the stale guard would
+    // otherwise drop it).
+    const fresh = st.editor.listCells().find(c => c.lang === cell.lang && c.code === cell.code) || cell;
+    await runDocCell(fresh);
   };
   btn.onclick = go;
   if (input) input.onkeydown = e => { if (e.key === 'Enter') go(); };
-  dock.insertAdjacentElement('afterend', fix);
+  (document.querySelector('.doc-run-setup') || strip).insertAdjacentElement('afterend', fix);
 }
 
 // Agents hard-wrap prose at ~80 columns. CommonMark renders a single
@@ -5562,8 +6389,11 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   if (focused && draft && draft.sha !== d.sha) fileWsBanner(ws, 'This draft predates the disk file. Your text is preserved; saving will not overwrite newer disk changes.', [['Reload disk', () => liveFileReload(ws)]]);
   // The unwrap affordance appears only when the file actually looks
   // machine-wrapped (2+ joinable pairs), so hand-written docs stay quiet.
-  if (unwrapHardLines(d.text).joins >= 2) $('docUnwrap').hidden = false;
+  // MDX imports, expressions and JSX are not prose; joining lines can change code.
+  const canUnwrap = !/\.mdx$/i.test(d.path);
+  $('docUnwrap').hidden = !canUnwrap || unwrapHardLines(d.text).joins < 2;
   $('docUnwrap').onclick = () => {
+    if (!canUnwrap) return;
     const now = unwrapHardLines(st.editor.getContent());
     $('docUnwrap').hidden = true;
     if (!now.joins) return toast('no wrapped lines to join');
@@ -5578,7 +6408,7 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   };
   if ($('docRunMenu')) $('docRunMenu').onclick = $('docRun').onclick;
   $('docRunAll').onclick = runAllDocCells;
-  if (!focused) refreshDocRuntimeChip();
+  if (st.editor.listCells && st.editor.listCells().length) refreshDocDoctor();
   $('docSource').onclick = () => {
     st.source = !st.source;
     st.editor.setSourceMode(st.source);
@@ -5587,10 +6417,10 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   st.editor.focus();
 }
 
-// New document: ask for a name, create <project>/documents/<name>.md, open
-// it in the file workspace.
+// New document: preserve a Markdown-family extension; default to .md.
+// Create it in <project>/documents/ and open it in the file workspace.
 async function createProjectDocument(project) {
-  const name = prompt('Document name (a .md file in ' + project + '/documents/):');
+  const name = prompt('Document name (.md by default; use .mdx for MDX) in ' + project + '/documents/:');
   if (!name || !name.trim()) return;
   let out;
   try { out = await postJson('/api/doc/create', { project, name: name.trim() }); }
@@ -6319,6 +7149,7 @@ function showLooseConversations() {
     ${miniGanttHtml(heroRows)}
     <div class="ptitle"><h1>${LOOSE_PROJECT}</h1><button id="looseNew" class="primary pnewbtn" title="Start a projectless conversation in your home directory">+ new conversation</button></div>
     <p class="loose-intro">These conversations started without a project. They have no shared memory, files, or Git history. Assign one when it belongs to existing work.</p>
+    ${draftListHtml()}
     <div class="loose-tools"><input type="text" id="looseQ" placeholder="filter ${rows.length} conversations" autocomplete="off"><span class="dim" id="looseCount"></span></div>
     <div class="loose-list" id="looseList"></div>
   </div>`;
@@ -6341,6 +7172,7 @@ function showLooseConversations() {
   };
   $('looseQ').oninput = paint;
   $('looseNew').onclick = startLooseConversation;
+  wireDraftList($('view'));
   paint();
 }
 
@@ -7019,8 +7851,6 @@ function openMediaLightbox(src, title = 'image') {
 }
 
 const FILE_IMAGE_PATH = /\.(png|jpe?g|gif|webp)(?::\d+(?::\d+)?)?$/i;
-// Case-sensitive on purpose: the document save endpoint accepts exactly
-// '.md', so anything the editor opens is guaranteed to autosave.
 let fileClickSuppressedUntil = 0;
 
 function fileControlContext(button) {
@@ -7195,7 +8025,7 @@ document.addEventListener('pointerover', e => {
   b.dataset.fileHinted = '1';
 });
 
-function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1, messageKey = activeRel) {
+function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1, messageKey = activeRel, versionSwitch = null) {
   // data-i: the message's index in the cached array — the anchor a search
   // hit lands on (renderConv scroll 'hit:N').
   const idxAttr = (copyIndex >= 0 ? ` data-i="${copyIndex}"` : '') + ` data-msg-key="${esc(messageKey || '')}"` + (m.eid ? ` data-eid="${esc(m.eid)}"` : '');
@@ -7259,6 +8089,8 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1, messageKey = 
     const actions = `<div class="msg-actions" aria-label="Message actions">` +
       `<button type="button" class="msg-copy" data-msg-index="${copyIndex}" title="Copy the message Markdown">copy</button>` +
       `<button type="button" class="msg-read" data-msg-index="${copyIndex}" title="Read this message aloud">read</button>` +
+      (versionSwitch ? `<button type="button" data-answer-version="${versionSwitch}" title="${versionSwitch === 'original' ? 'Show the original answer' : 'Show the simpler version'}">${versionSwitch === 'original' ? 'original' : 'simpler'}</button>` : '') +
+      (copyIndex >= 0 && m.role === 'assistant' && m.eid && !ConversationFlow.transport(m) && ['pi', 'pi-remote'].includes((messageKey === current?.key ? current : readerSessions.get(messageKey))?.source) ? `<button type="button" class="msg-notebook-make" title="Write this answer as a self-standing notebook in the project (documents/notebooks). One model call; nothing runs.">notebook</button>` : '') +
       (copyIndex >= 0 && !ConversationFlow.transport(m) ? `<details class="msg-more-actions"><summary aria-label="More message actions">more…</summary><div>` : '') +
       (copyIndex >= 0 && !ConversationFlow.transport(m) ? `<button type="button" class="msg-edit" data-msg-index="${copyIndex}" title="${['pi', 'pi-remote'].includes((messageKey === current?.key ? current : readerSessions.get(messageKey))?.source) ? 'Edit this message on a new path' : 'Edit the original message'}">edit</button>` : '') +
       (copyIndex >= 0 && !ConversationFlow.transport(m) && m.role === 'assistant' ? `<button type="button" class="msg-regenerate" data-msg-index="${copyIndex}" title="Create another answer from the node before this reply">regenerate</button>` : '') +
@@ -7269,6 +8101,78 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1, messageKey = 
     return `<div class="msg ${m.role}${keepOpen ? '' : ' can-fold'}" tabindex="0" data-words="${words}"${anchor}${idxAttr}>${role}${full}${actions}</div>`;
   }
   return `<div class="msg ${m.role}"${idxAttr}>${role}${hl(m.text)}</div>`;
+}
+
+// ---- notebooks derived from answers (design/41) ----
+// The disk is the index: the project's documents/notebooks/*.md carry their
+// source conversation and entry in front matter. The card under an answer
+// is drawn from that list, after every render, so a re-render cannot lose it.
+const conversationNotebooks = new Map(); // key → { byEntry: Map(eid → [nb]), root, project, at }
+
+async function loadConversationNotebooks(key, { force = false } = {}) {
+  const have = conversationNotebooks.get(key);
+  if (have && !force && Date.now() - have.at < 30000) return have;
+  let out;
+  try { out = await (await fetch('/api/doc/notebooks?key=' + encodeURIComponent(key))).json(); } catch { out = { notebooks: [] }; }
+  const byEntry = new Map();
+  for (const nb of out.notebooks || []) {
+    if (!byEntry.has(nb.entry)) byEntry.set(nb.entry, []);
+    byEntry.get(nb.entry).push(nb);
+  }
+  const project = (key === current?.key ? current : readerSessions.get(key))?.project || null;
+  const record = { byEntry, root: out.root || null, project, at: Date.now() };
+  conversationNotebooks.set(key, record);
+  return record;
+}
+
+function notebookCardHtml(nb, record) {
+  const name = nb.path.split('/').pop();
+  const open = encodeURIComponent(JSON.stringify({ path: nb.path, project: record.project, root: record.root }));
+  const after = nb.after && nb.after.length ? `<span class="dim" title="Declared prerequisites (rat.after): ${esc(nb.after.join(', '))}"> · after ${esc(nb.after.map(a => a.replace(/^\.\//, '')).join(', '))}</span>` : '';
+  return `<div class="msg-notebook" data-notebook-path="${esc(nb.path)}">📓 <button type="button" data-open-notebook="${open}" title="${esc(nb.title || name)}\n${esc(nb.path)}">${esc(name)}</button><span class="dim"> · notebook from this answer</span>${after}</div>`;
+}
+
+// Draw (or refresh) the cards under the answers of the conversation in view.
+async function ensureNotebookCards(key, opts = {}) {
+  if (!key) return;
+  const record = await loadConversationNotebooks(key, opts);
+  if (current?.key !== key) return;
+  const view = $('view');
+  for (const [eid, list] of record.byEntry) {
+    const msg = view.querySelector(`.msg.assistant[data-eid="${CSS.escape(eid)}"]`);
+    if (!msg) continue;
+    for (const nb of list) {
+      if (msg.querySelector(`.msg-notebook[data-notebook-path="${CSS.escape(nb.path)}"]`)) continue;
+      const actions = msg.querySelector(':scope > .msg-actions');
+      (actions || msg).insertAdjacentHTML(actions ? 'beforebegin' : 'beforeend', notebookCardHtml(nb, record));
+    }
+  }
+}
+
+// The hover action: one model call on a private copy of the conversation
+// up to this answer; the result is a file in the project. Nothing runs.
+async function deriveNotebookFromMessage(button) {
+  const key = button.closest('[data-msg-key]')?.dataset.msgKey || current?.key;
+  const eid = button.closest('[data-eid]')?.dataset.eid;
+  if (!key || !eid) return errToast('this answer has no saved id yet');
+  if (button.disabled) return;
+  button.disabled = true;
+  const label = button.textContent;
+  button.textContent = 'notebook…';
+  button.closest('.msg')?.classList.add('actions-open');
+  let out;
+  try { out = await postJson('/api/doc/notebook-from-answer', { key, entryId: eid }); }
+  catch { out = { error: 'network failure' }; }
+  button.disabled = false;
+  button.textContent = label;
+  button.closest('.msg')?.classList.remove('actions-open');
+  if (out.error) return errToast(out.error);
+  const name = out.path.split('/').pop();
+  const notes = [];
+  if (out.fixed && out.fixed.length) notes.push('corrected ' + out.fixed.join(', '));
+  if (out.dropped && out.dropped.length) notes.push('dropped an invented prerequisite: ' + out.dropped.join(', '));
+  toast('📓 ' + name + (notes.length ? ' · ' + notes.join(' · ') : ''), () => openLiveFile(out.path, { project: out.project, root: out.root, back: currentHash }));
+  await ensureNotebookCards(key, { force: true });
 }
 
 // Every bash fence in a reply gets a ▶ run button: the block executes in
@@ -7404,8 +8308,9 @@ function setChromeMin(min, compensate) {
   if (document.body.classList.contains('chrome-min') === min) return;
   const view = $('view');
   const measure = () => {
-    const head = document.querySelector('header');
-    return head ? head.offsetHeight : 0;
+    const head = document.querySelector('body > header');
+    const title = $('floatHead');
+    return (head?.offsetHeight || 0) + (sideLayoutOn() ? title?.offsetHeight || 0 : 0);
   };
   // Measure while the chrome is visible: display:none reads 0.
   const before = min ? measure() : 0;
@@ -7415,7 +8320,7 @@ function setChromeMin(min, compensate) {
   chromeScrollLast = view.scrollTop;
 }
 $('view').addEventListener('scroll', () => {
-  if (!phoneLayout() || isEink() || document.body.classList.contains('home')) return;
+  if (!(phoneLayout() || sideLayoutOn()) || isEink() || document.body.classList.contains('home')) return;
   const top = $('view').scrollTop;
   if (chromeScrollLast < 0) { chromeScrollLast = top; return; }
   const delta = top - chromeScrollLast;
@@ -7597,6 +8502,19 @@ $('view').addEventListener('click', async e => {
     e.stopPropagation();
     const message = readerMessage(snipBtn);
     if (message) openSnippetForm({ body: message.text || '' });
+    return;
+  }
+  const makeNotebook = e.target.closest('.msg-notebook-make');
+  if (makeNotebook) {
+    e.stopPropagation();
+    deriveNotebookFromMessage(makeNotebook);
+    return;
+  }
+  const openNotebook = e.target.closest('[data-open-notebook]');
+  if (openNotebook) {
+    e.stopPropagation();
+    const nb = JSON.parse(decodeURIComponent(openNotebook.dataset.openNotebook));
+    openLiveFile(nb.path, { project: nb.project, root: nb.root, back: currentHash });
     return;
   }
   const copy = e.target.closest('.msg-copy');
@@ -7970,6 +8888,7 @@ function convHead(d) {
       ? `Open the project overview · ${project}\nAssigned to “${project}” — tools still run in ${d.cwd || 'the original directory'}`
       : 'Open the project overview · ' + project;
   $('chNew').style.display = project === LOOSE_PROJECT ? 'none' : '';
+  renderSideNew();
   $('chTitle').textContent = title;
   $('chTitle').title = chTitleHint(title);
   $('convHeadExtra').innerHTML = '';
@@ -7985,6 +8904,7 @@ const thinkVersions = new Map(); // local reasoning changes invalidate older con
 async function refreshCtxMeter(d) {
   const el = $('ctxMeter');
   if (!el || !d) return;
+  if (d.draft) return draftPaintMeter(); // nothing counted yet
   const leaf = computeSendTrace(d)?.leaf || '';
   const sig = leaf + '|' + (d.lastTs || '') + '|' + ((d.messages || []).length);
   const hit = ctxMeterCache.get(d.key);
@@ -8032,6 +8952,7 @@ async function cycleThinking() {
   const key = activeRel;
   const btn = $('agentThink');
   if (!key || !btn || window._thinkBusy) return;
+  if (current && current.draft) return draftPickThinking(btn); // no session to cycle: pick the level to start with
   window._thinkBusy = true;
   // Invalidate context reads that started before this operation. Show the
   // press immediately; paintThinkBtn() restores the settled value below.
@@ -8083,6 +9004,7 @@ function paintModeBtn() {
 // Switching runs pi's own /mode command over RPC — the modes extension
 // persists the switch in the session, so the terminal and resumes agree.
 async function setConversationMode(key) {
+  if (current && current.draft) return draftSetMode(key); // applied when the session starts
   const btn = $('agentRun');
   if (!btn) return errToast('mode switching needs pi');
   const conv = activeRel;
@@ -8479,18 +9401,22 @@ function agentComposerHtml(d) {
     <div class="agent-thumbs" id="agentThumbs"></div>
     <div class="agent-ctx" id="agentCtx"></div>
     <div class="agent-compose-row">
+      <details class="compose-tools" id="composeTools">
+      <summary aria-label="Attachments and conversation options" title="Attachments and conversation options">+</summary>
+      <div class="compose-tools-menu">
       ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
-      ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">/</button>' : ''}
+      ${d.source !== 'claude' ? '<button id="agentThink" class="model-pick think-pick" type="button" hidden></button>' : ''}
+      ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">Commands /</button>' : ''}
       <button id="agentAt" type="button" title="Inspect and attach background knowledge to this conversation">Context</button>
-      <button id="agentSnip" type="button" title="Insert a snippet at the cursor (alt+;). Or type the trigger while writing.">;;</button>
-      <button id="agentTree" type="button" title="Open the conversation tree (shift+T): branches, forks, parallel replies">tree</button>
-      <button id="agentAttach" type="button">attach image</button>
+      <button id="agentSnip" type="button" title="Insert a snippet at the cursor (alt+;). Or type the trigger while writing.">Snippets ;;</button>
+      <button id="agentTree" type="button" title="Open the conversation tree (shift+T): branches, forks, parallel replies">Conversation tree</button>
+      <button id="agentAttach" type="button">Attach image</button>
       <input id="agentFiles" type="file" accept="image/*" multiple hidden>
+      <span id="ctxMeter" class="ctxmeter" hidden></span>
+      </div></details>
       <button class="agent-mic" id="agentMic" type="button" title="Start / stop dictation (m, or ctrl+m while typing)" aria-label="Start dictation" aria-pressed="false" hidden>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>
       </button>
-      <span id="ctxMeter" class="ctxmeter" hidden></span>
-      ${d.source !== 'claude' ? '<button id="agentThink" class="model-pick think-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
       ${d.source === 'claude' ? '<button class="primary" id="agentSend" type="button" title="Open the terminal and send (ctrl+enter)">open &amp; send</button>' : ''}
@@ -8525,6 +9451,8 @@ function echoUserPrompt(prompt) {
 // its draft, and its images stay untouched — the detached slash palette and
 // the mode picker run commands through here.
 async function headlessSendFromComposer(btn, promptOverride) {
+  // A draft's first send creates the session with every choice applied.
+  if (current && current.draft) return promptOverride == null ? sendDraft(btn) : errToast('send the first message first');
   if (!readerSendAllowed()) return;
   const ta = $('agentText');
   const fromBox = promptOverride == null;
@@ -8608,6 +9536,7 @@ function fanModels() {
 const modelTouchAt = new Map(); // conversation key → ms of the last local set
 async function setFanModels(list) {
   if (!current || !list.length) return errToast('pick at least one model');
+  if (current.draft) return draftSetModels(list); // no session yet: the draft keeps the choice
   const key = activeRel;
   const before = fanModels();
   current.selectedModels = list;
@@ -8658,6 +9587,7 @@ function renderModelStrip() {
 // ---- slash palette: pi's own commands, autocompleting like the TUI ----
 const slashCmdCache = new Map(); // conversation key → Promise<[{name,description,source}]>
 function ensureSlashCmds(key) {
+  if (isDraftKey(key)) return Promise.reject(new Error('slash commands run inside a started conversation — send the first message, then use /'));
   if (!slashCmdCache.has(key)) {
     slashCmdCache.set(key, fetch('/api/node/commands?id=' + encodeURIComponent(key))
       .then(r => r.json())
@@ -8920,6 +9850,7 @@ function attachedContext() {
 function contextId(c) {
   if (c && c.type === 'chat') return 'chat:' + c.key + ':' + (c.i == null ? '*' : c.i);
   if (c && c.type === 'file') return 'file:' + c.path;
+  if (c && c.type === 'note') return 'note:' + c.text;
   return 'map:' + (c && c.project || '') + ':' + (c && c.kind || '');
 }
 function contextHasItem(item) {
@@ -9037,6 +9968,11 @@ function contextChipParts(c) {
     const name = String(c.path || '').split('/').pop();
     return ['file', name + (c.range ? ` · ${c.range[0]}–${c.range[1]}` : c.line ? ` · line ${c.line}` : '')];
   }
+  if (c.type === 'note') {
+    // Instructions written for this conversation (system prompt, every reply).
+    const words = String(c.text || '').replace(/\s+/g, ' ').trim();
+    return ['instructions', words.slice(0, 28) + (words.length > 28 ? '…' : '')];
+  }
   return [c.project || '?', c.kind || ''];
 }
 
@@ -9046,9 +9982,11 @@ function renderAgentContext() {
   const items = attachedContext();
   box.innerHTML = items.map((c, i) => {
     const [lead, rest] = contextChipParts(c);
-    return `<span class="agent-ctx-chip${c.type === 'file' ? ' file' : ''}"${c.type === 'file' ? ` data-ctx-file="${esc(c.path)}" title="${esc(c.path)} · click to open the file"` : ''}><b>${esc(lead)}</b> ${esc(rest)}<button type="button" data-rm="${i}" title="Remove this context">x</button></span>`;
+    return `<span class="agent-ctx-chip${c.type === 'file' ? ' file' : c.type === 'note' ? ' note' : ''}"${c.type === 'file' ? ` data-ctx-file="${esc(c.path)}" title="${esc(c.path)} · click to open the file"` : c.type === 'note' ? ` data-ctx-note="1" title="${esc(String(c.text || '').slice(0, 400))}"` : ''}><b>${esc(lead)}</b> ${esc(rest)}<button type="button" data-rm="${i}" title="Remove this context">x</button></span>`;
   }).join('');
   box.querySelectorAll('[data-ctx-file]').forEach(el => el.onclick = e => { if (!e.target.closest('[data-rm]')) openLiveFile(el.dataset.ctxFile, { project: currentProjectName(), back: activeRel }); });
+  // On a draft the instructions chip opens the setup where they are edited.
+  box.querySelectorAll('[data-ctx-note]').forEach(el => el.onclick = e => { if (!e.target.closest('[data-rm]') && current && current.draft) { draftToggleSetup(true); const t = $('dsInstr'); if (t) t.focus(); } });
   box.querySelectorAll('[data-rm]').forEach(b => {
     b.onclick = () => {
       window._agentContext.splice(Number(b.dataset.rm), 1);
@@ -9064,6 +10002,7 @@ function renderAgentContext() {
 
 async function persistConversationContext() {
   if (!activeRel) return;
+  if (isDraftKey(activeRel)) return draftSaveContext(); // no session yet: the draft keeps the chips
   const items = attachedContext();
   if (current && current.key === activeRel) current.attachedContext = items.slice();
   try {
@@ -10000,10 +10939,9 @@ function updateComposeMin() {
   const box = $('agentCompose'), ta = $('agentText');
   if (!box || !ta) return;
   if (!phoneLayout() || isEink()) { box.classList.remove('compose-min'); return; }
-  // A blurred draft rests too: the slim bar still shows its first line.
-  const busy = document.activeElement === ta ||
-    (window._agentImages || []).length || attachedContext().length || window._agentSpeechState;
-  box.classList.toggle('compose-min', !busy);
+  // The compact toolbar already fits a phone. Keep its controls reachable
+  // without making the whole composer change shape when focus moves.
+  box.classList.remove('compose-min');
 }
 
 // The transcript must never hide behind the fixed composer: #view padding
@@ -10013,9 +10951,9 @@ function observeComposeHeight() {
   if (!box || !v) return;
   if (!window._composeRO && window.ResizeObserver) {
     window._composeRO = new ResizeObserver(() => {
-      const b = $('agentCompose'), view = $('view');
+      const b = $('composerDock'), view = $('view');
       if (!b || !view) return;
-      if (!phoneLayout() || isEink()) { view.style.removeProperty('--compose-h'); return; }
+      if (!(phoneLayout() || sideLayoutOn())) { view.style.removeProperty('--compose-h'); return; }
       const pinned = view.scrollHeight - view.scrollTop - view.clientHeight < 80;
       view.style.setProperty('--compose-h', Math.ceil(b.getBoundingClientRect().height) + 'px');
       if (pinned) view.scrollTop = view.scrollHeight;
@@ -10023,7 +10961,7 @@ function observeComposeHeight() {
   }
   if (window._composeRO) {
     window._composeRO.disconnect();
-    window._composeRO.observe(box);
+    window._composeRO.observe($('composerDock') || box);
   }
 }
 
@@ -10058,6 +10996,23 @@ function wireComposeMin(ta) {
 }
 
 function wireAgentComposer() {
+  const tools = $('composeTools');
+  if (tools) {
+    tools.addEventListener('click', e => {
+      // These open their own surfaces. Mode/thinking stay in the menu.
+      if (e.target.closest('#agentAttach, #agentAt, #agentSlash, #agentSnip, #agentTree')) tools.open = false;
+    });
+    tools.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && tools.open) { e.preventDefault(); e.stopPropagation(); tools.open = false; tools.querySelector('summary').focus(); }
+    });
+  }
+  if (!window._composeOutsideBound) {
+    window._composeOutsideBound = true;
+    document.addEventListener('click', e => {
+      const menu = $('composeTools');
+      if (menu?.open && !e.target.closest('.compose-tools, .mpick, .slash-pop')) menu.open = false;
+    });
+  }
   if (!window._agentPasteBound) {
     window._agentPasteBound = true;
     document.addEventListener('paste', interceptAgentPaste, true);
@@ -10078,7 +11033,7 @@ function wireAgentComposer() {
   const thinkBtn = $('agentThink');
   if (thinkBtn) { thinkBtn.onclick = () => cycleThinking(); paintThinkBtn(); }
   const modeBtn = $('agentMode');
-  if (modeBtn) { modeBtn.onclick = e => openModePicker(e.currentTarget); paintModeBtn(); }
+  if (modeBtn) { modeBtn.onclick = e => { if ($('composeTools')) $('composeTools').open = true; openModePicker(e.currentTarget); }; paintModeBtn(); }
   const isPi = !!runBtn; // pi composers have the web send button
   const slashBtn = $('agentSlash');
   if (slashBtn) slashBtn.onclick = () => openSlashPalette();
@@ -11144,7 +12099,9 @@ function streamDistill(rel, force) {
 async function showNotePane(rel, text, savedPath) {
   if (savedPath) {
     activeRel = rel;
-    setRouteKind('note');
+    // A saved note is a place: the same address the notes tab opens it by.
+    const rel_ = savedPath.split('/notes/aiconvo/')[1];
+    if (rel_) setRoute('note', 'note=' + encodeURIComponent(rel_)); else setRouteKind('note');
     const related = await relatedFor(rel, true);
     noteViewer(text, savedPath, { kind: 'note', key: rel, related });
     return;
@@ -12051,7 +13008,7 @@ async function showConversationEvidence(key, supplied = null) {
   const d = supplied || await (await fetch('/api/evidence?id=' + encodeURIComponent(key))).json();
   if (d.error) return errToast(d.error);
   activeRel = key;
-  setRouteKind('evidence');
+  setRoute('evidence', 'evidence=' + encodeURIComponent(key));
   const related = await relatedFor(key);
   const label = evidenceLabel(d);
   const warn = d.outdated || d.source === 'outdated-note';
@@ -12077,7 +13034,7 @@ function evidenceLabel(input) {
 }
 
 async function showEpicEvidence(id, focusKey = activeRel) {
-  setRouteKind('evidence');
+  setRoute('evidence', 'epicevidence=' + encodeURIComponent(id) + (focusKey ? '&focus=' + encodeURIComponent(focusKey) : ''));
   $('view').innerHTML = '<div class="empty">loading epic evidence…</div>';
   const d = await (await fetch('/api/epic/evidence?id=' + encodeURIComponent(id))).json();
   if (d.error) return errToast(d.error);
@@ -12324,32 +13281,13 @@ $('ganttGroup').onclick = () => {
   renderTabList();
 };
 
-// ---- loose conversation (home-rooted, no project context) ----
-async function startLooseConversation() {
-  if (window._looseStartBusy) return;
-  window._looseStartBusy = true;
-  setRouteKind('launch');
-  $('view').innerHTML = `<div class="dprog" style="margin-top:70px;text-align:center">
-    <div style="font-size:15px"><span class="spin">░</span> new projectless conversation</div>
-    <div class="hint" style="margin-top:10px">starting in your home directory…</div>
-    <div class="hint" style="color:var(--text-faint);margin-top:6px">no project memory · empty composer</div>
-  </div>`;
-  try {
-    const out = await postJson('/api/conversation/start-loose', {});
-    if (out.error) throw new Error(out.error);
-    if (!out.key) throw new Error('no conversation came back');
-    await open(out.key, 'bottom');
-    toast('✓ projectless conversation · ' + (out.cwd || '~'));
-    const ta = $('agentText');
-    if (ta) ta.focus();
-  } catch (e) {
-    errToast('new conversation failed: ' + e.message);
-    goHome();
-  } finally {
-    window._looseStartBusy = false;
-  }
-}
+// ---- new conversation (a draft until its first message; conversation-draft.js) ----
+// No session is created here: the folder, mode, models, reasoning, and
+// context stay editable on the draft page, and the first send creates the
+// session with all of them applied.
+function startLooseConversation() { startNewConversation(); }
 $('newLoose').onclick = startLooseConversation;
+$('tabsNew').onclick = startLooseConversation;
 
 // ---- project setup ----
 function openNewProjectForm() {
@@ -12924,10 +13862,31 @@ function paneModel() {
       <label for="setThinking">thinking</label>
       <select id="setThinking">${settingsThinkingOptions(resolved.thinking || 'off', modelSupportsThinking(current.provider, current.model))}</select>
       <div class="set-help">${modelSupportsThinking(current.provider, current.model) ? 'How much the model reasons before it answers. Higher is slower and costs more.' : 'This model does not support thinking.'}</div>
-    </div>`;
+    </div>
+    <h3>conversation answers</h3>
+    <label class="set-check"><input id="setSimplifyAnswers" type="checkbox"${s.simplifyAnswers !== false ? ' checked' : ''}> automatically make a simpler version</label>
+    <div class="set-help">Re-explain the full answer for someone with no background in the subject. Uses the same model at its lowest reasoning setting and keeps the original. Adds one model call and some waiting. Reuses the conversation for caching, but changing reasoning can reduce cache reuse with some providers. Available for web conversations using the SDK engine, not terminal or delegated runs.</div>
+    <details class="set-field">
+      <summary>Customize the rewrite prompt</summary>
+      <label for="setSimplifyPrompt">Prompt sent after each answer</label>
+      <textarea id="setSimplifyPrompt" rows="7" style="width:100%;box-sizing:border-box;font:inherit">${esc(s.simplifyPrompt || '')}</textarea>
+      <div class="set-help">Use any instructions you like. Applies to conversations started or continued after saving, not existing versions or work already running. The original is always kept, and the rewrite cannot run tools. An empty prompt restores the default.</div>
+      <button type="button" id="setSimplifyPromptSave">Save prompt</button>
+      <button type="button" id="setSimplifyPromptReset">Restore default</button>
+    </details>
+    <h3>interrupted conversations</h3>
+    <label class="set-check"><input id="setAutoResumeNetwork" type="checkbox"${s.autoResumeNetwork ? ' checked' : ''}> resume connection failures automatically</label>
+    <div class="set-help">Off by default. The host checks the provider connection twice before resuming saved work, one conversation at a time. Up to 3 attempts within 24 hours. No automatic recovery for deliberate stops, login or usage limits, changed conversations, delegated work, or parallel answers. Continues the saved conversation rather than repeating your original prompt; uncertain tool actions can still be repeated. Disable this at any time to stop waiting retries. Already-running work is not stopped.</div>`;
 }
 
 function bindPaneModel(root) {
+  $('setSimplifyPromptSave').onclick = () => saveSettings({ simplifyPrompt: $('setSimplifyPrompt').value }, 'rewrite prompt saved');
+  $('setSimplifyPromptReset').onclick = () => saveSettings({ simplifyPrompt: '' }, 'default rewrite prompt restored');
+  $('setAutoResumeNetwork').onchange = async () => {
+    await saveSettings({ autoResumeNetwork: $('setAutoResumeNetwork').checked }, 'connection recovery updated');
+    await loadAgentRecovery();
+  };
+  $('setSimplifyAnswers').onchange = () => saveSettings({ simplifyAnswers: $('setSimplifyAnswers').checked }, 'simpler answers updated');
   bindOptions(root, 'setModelSource', v => {
     if (v === 'pi') return saveSettings({ usePiDefault: true, provider: '', model: '' }, 'model: pi’s default');
     const cur = currentSettingsModel();
@@ -13175,6 +14134,17 @@ function paneAppearance() {
       <div class="set-help">Custom themes come from the themes folder. Auto follows the system.</div>
     </div>
     <div class="set-field">
+      <label for="setAppFont">font on this device</label>
+      <select id="setAppFont">${Object.entries(window.appFonts).map(([id, font]) => `<option value="${id}"${(document.documentElement.dataset.appFont || 'theme') === id ? ' selected' : ''}>${esc(font.label)}</option>`).join('')}</select>
+      <div class="set-help">Try a font instantly. Saved for this browser. Uses installed fonts; code stays monospace. Theme default restores the theme’s choice.</div>
+    </div>
+    <h3>layout on this device</h3>
+    ${setOptionsHtml('setLayout', [
+      { value: 'top', name: 'top bar', desc: 'One bar across the top; agents, replies, and notifications open as a tray (a).' },
+      { value: 'side', name: 'side panel', desc: 'A column on the left that stays open: home, new conversation, pinned and unread replies, agents, recent files. The top bar goes away; a conversation keeps its title strip. Phones keep the top bar.' },
+    ], layoutPref())}
+    <div class="set-help">Saved in this browser, like the theme, so a phone and a desk can differ.</div>
+    <div class="set-field">
       <label for="setPiTheme">pi theme for hosted extension views</label>
       <input id="setPiTheme" class="medium" type="text" value="${esc(piTheme)}" spellcheck="false" list="setPiThemeList">
       <datalist id="setPiThemeList"><option value="light"><option value="dark"></datalist>
@@ -13183,6 +14153,12 @@ function paneAppearance() {
 }
 
 function bindPaneAppearance(root) {
+  $('setAppFont').onchange = e => {
+    window.setAppFont(e.target.value);
+    try { localStorage.setItem('aiconvo.font', e.target.value); } catch {}
+    if ($('agentText')) autoGrowCompose();
+  };
+  bindOptions(root, 'setLayout', v => { setLayoutPref(v); toast(v === 'side' ? 'side panel layout' : 'top bar layout'); renderSettings(); });
   paintThemeSelect();
   $('themeSel').onchange = () => selectTheme($('themeSel').value);
   $('themeSel').onfocus = () => loadCustomThemes();
@@ -13315,8 +14291,7 @@ async function showSettings(pane) {
 function showSettingsPane(pane) {
   if (!settingsOpen) return showSettings(pane);
   settingsPane = settingsPaneOf('settings=' + pane);
-  currentHash = 'settings=' + settingsPane;
-  try { history.replaceState(null, '', location.pathname + location.search + '#' + currentHash); } catch {}
+  replaceRoute('settings=' + settingsPane);
   renderSettings();
   const pane_ = $('settingsRoot') && $('settingsRoot').querySelector('.settings-pane');
   if (pane_) pane_.scrollIntoView({ block: 'start' });
@@ -13344,6 +14319,131 @@ function setBarFold(fold) {
 $('barFold').onclick = e => { e.stopPropagation(); setBarFold(true); };
 document.querySelector('header').addEventListener('click', () => { if (barFolded()) setBarFold(false); });
 if (localStorage.getItem('aiconvo.barFold')) setBarFold(true);
+
+// ---- side-panel layout (design/42): the tray becomes a left column ----
+// A device choice (localStorage), like the theme. Below 701px the phone
+// keeps the top bar whatever the choice says. The same #agentsPop element
+// moves into the column and stays open; the bar's global controls move too.
+const SIDE_LAYOUT_MQ = matchMedia('(min-width: 701px)');
+function layoutPref() { try { return localStorage.getItem('aiconvo.layout') === 'side' ? 'side' : 'top'; } catch { return 'top'; } }
+function setLayoutPref(v) {
+  try { v === 'side' ? localStorage.setItem('aiconvo.layout', 'side') : localStorage.removeItem('aiconvo.layout'); } catch {}
+  document.documentElement.dataset.layout = v === 'side' ? 'side' : '';
+  applyLayout();
+}
+function sideLayoutOn() { return document.body.classList.contains('side-layout'); }
+// The body class may already be there from the inline script at the top of
+// the page; what this tracks is whether the column has been filled.
+let sideApplied = false;
+function applyLayout() {
+  const on = layoutPref() === 'side' && SIDE_LAYOUT_MQ.matches;
+  if (on === sideApplied) { document.body.classList.toggle('side-layout', on); return; }
+  sideApplied = on;
+  const pop = $('agentsPop'), side = $('side');
+  clearInterval(agentsTimer);
+  closeFileActionMenu();
+  if (on) {
+    document.body.classList.add('side-layout');
+    side.hidden = false;
+    $('sideAgents').appendChild(pop);
+    $('sideFootSlot').append($('machineBtn'), $('settingsBtn'));
+    $('floatHead').append($('chTitle'), $('chMove'), $('convHeadExtra'));
+    $('ganttBar').prepend($('projSort'));
+    pop.hidden = false;
+    agentsSelectedKey = null;
+    setAgentsKbd(false);
+    renderAgentsPop(true);
+    // The column is always open; a background tab still skips the fetch.
+    agentsTimer = setInterval(() => { if (!document.hidden) renderAgentsPop(true); }, 15000);
+    loadRecentFiles();
+    let fold = false;
+    try { fold = !!localStorage.getItem('aiconvo.sideFold'); } catch {}
+    document.body.classList.toggle('side-fold', fold);
+    renderSideNew();
+  } else {
+    document.body.classList.remove('side-layout', 'side-fold');
+    side.hidden = true;
+    $('machinePop').before(pop);
+    $('barFold').before($('machineBtn'), $('settingsBtn'));
+    $('conversationFilesSwitch').before($('chTitle'), $('convHeadExtra'));
+    $('chNew').before($('chMove'));
+    $('newLoose').before($('projSort'));
+    pop.hidden = true;
+    setAgentsKbd(false);
+  }
+  document.body.classList.remove('chrome-min');
+  if ($('agentCompose')) observeComposeHeight();
+  delegationUI.visibilityChanged();
+}
+const sideFolded = () => document.body.classList.contains('side-fold');
+function setSideFold(fold) {
+  document.body.classList.toggle('side-fold', fold);
+  try { fold ? localStorage.setItem('aiconvo.sideFold', '1') : localStorage.removeItem('aiconvo.sideFold'); } catch {}
+}
+$('sideFold').onclick = e => { e.stopPropagation(); setSideFold(true); };
+$('side').addEventListener('click', () => { if (sideFolded()) setSideFold(false); });
+$('sideHome').onclick = () => $('brand').click();
+// ‹ › in the bar and in the column: one stack, every pair in step.
+const navButtons = Navigation.mount(nav, {
+  back: [$('navBack'), $('sideBack')], forward: [$('navFwd'), $('sideFwd')],
+  label: e => describeRoute(e.hash).title || e.title || 'home',
+  glyph: e => ({ home: '⌂', project: '▣', conversation: '☷', file: '□', 'files-browser': '▤', epic: '▸', note: '≡', settings: '⚙', evidence: '◇', tree: '⑂', draft: '+' })[describeRoute(e.hash).kind || e.kind] || '·',
+});
+// "+ new" starts where you are: in a project's conversation it is a sibling
+// there; elsewhere a loose one. ▾ offers the other, in the same words.
+function sideNewProject() {
+  const p = current && !current.draft && viewKind === 'conversation' ? projectOf(current) : '';
+  return p && p !== '?' && p !== LOOSE_PROJECT ? p : '';
+}
+function renderSideNew() {
+  const p = sideNewProject();
+  $('sideNew').querySelector('span').textContent = p ? 'new here' : 'new';
+  $('sideNew').title = p ? 'New conversation in ' + p + ' — same model and thinking level, the project map in the system prompt' : 'New conversation (C) — a blank page: no project memory, home folder, pi defaults';
+  $('sideNewMore').hidden = !p;
+  // The project area, on the right of home: the project of what is open.
+  const area = panelProjectName();
+  $('sideProject').hidden = !area || (viewKind === 'project' && projectOverviewName === area);
+  $('sideProject').querySelector('span').textContent = area;
+  $('sideProject').title = 'Open the project area · ' + area;
+}
+$('sideProject').onclick = () => { const p = panelProjectName(); if (p) showProjectOverview(p); };
+$('sideNew').onclick = () => sideNewProject() ? startSiblingConversation() : startLooseConversation();
+$('sideNewMore').onclick = e => {
+  e.stopPropagation();
+  closeFileActionMenu();
+  const p = sideNewProject();
+  const items = [['New here · ' + p, () => startSiblingConversation()], ['New, no project', () => startLooseConversation()]];
+  const menu = document.createElement('div');
+  menu.className = 'file-action-menu ag-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((item, i) => `<button type="button" role="menuitem" data-ag-action="${i}">${esc(item[0])}</button>`).join('');
+  document.body.appendChild(menu);
+  const r = $('sideNewMore').getBoundingClientRect();
+  menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+  menu.style.top = (r.bottom + 2) + 'px';
+  menu.querySelectorAll('[data-ag-action]').forEach(b => b.onclick = ev => { ev.stopPropagation(); closeFileActionMenu(); items[Number(b.dataset.agAction)][1](); });
+  menu.querySelector('button').focus();
+};
+SIDE_LAYOUT_MQ.addEventListener('change', applyLayout);
+
+// ---- recent files: what a person opened or saved in the editor ----
+// Shared across devices (server store, SSE). Rendered in the column only:
+// that is the layout where a standing list has room.
+let recentFilesList = [];
+async function loadRecentFiles() {
+  try {
+    const d = await (await fetch('/api/recent-files')).json();
+    if (Array.isArray(d.files)) { recentFilesList = d.files; renderRecentFiles(); }
+  } catch {}
+}
+function recordRecentFile(pathValue, project) {
+  if (!pathValue || !String(pathValue).startsWith('/')) return;
+  fetch('/api/recent-files', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: pathValue, project: project || '' }) }).catch(() => {});
+}
+function renderRecentFiles() { renderAgentsPopSoon(); }
+applyLayout();
+renderSideNew();
 
 // Home is the whole-system view: the brand button always returns there.
 // Shift-click also clears every filter (the full reset).
@@ -13572,7 +14672,7 @@ function einkEdgePlace() {
   el.style.top = y + 'px';
   el.hidden = false;
 }
-window.addEventListener('hashchange', () => {
+window.addEventListener('aiconvo:route', () => {
   if ($('einkEdge')) $('einkEdge').hidden = true;
   einkEdge = null;
 });
@@ -13924,7 +15024,7 @@ function helpNow() {
   // Open panels sit on top of the view.
   if (settingsOpen) sections.push({ label: 'settings', keys: [['esc / ,', 'back to where you were']] });
   if (!$('filtersPop').hidden) sections.push({ label: 'filters', keys: [['esc / f', 'close the filters']] });
-  if (!$('agentsPop').hidden) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['j', 'toggle notifications'], ['esc / a', 'close the agents panel']] });
+  if (agentsTrayOpen()) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['p', 'pin / unpin'], ['u', 'mark unread / read'], ['del', 'remove from the inbox'], ['j', 'toggle notifications'], ['esc / a', sideLayoutOn() ? 'leave the side panel' : 'close the agents panel']] });
 
   // The view itself.
   if (document.body.classList.contains('file-full')) {
@@ -14017,7 +15117,7 @@ function helpNow() {
     listKeys.push(
       ['+ − 0', 'timeline zoom'],
       ['n / b / t', 'timeline: now / beginning / date'],
-      ['C', 'new projectless conversation in your home directory'],
+      ['C', 'new conversation — a blank page (works from any view)'],
       ['P', 'create a project or add an existing folder'],
       ['f', 'filters']);
     sections.push({ label: 'list & timeline', keys: listKeys });
@@ -14030,7 +15130,8 @@ const HELP_GLOBAL = [
   ['F', 'conversations ⇄ files mode'],
   ['ctrl+f', 'search overlay — keeps this page'],
   ['x / X', 'fold / unfold everything on the screen'],
-  ['`', 'fold / unfold the top bar'],
+  ['`', 'fold / unfold the top bar or side panel'],
+  ['alt+← / alt+→', 'back / forward through the screens — hold ‹ › for the list'],
   ['a', 'agents'],
   ['j', 'jobs'],
   [',', 'settings'],
@@ -14123,7 +15224,7 @@ document.addEventListener('keydown', e => {
     if (!$('markPop').hidden) { hideMarkPop(); return; }
     if (mgCollapseOpen()) return;
     if (!$('filtersPop').hidden) { $('filtersPop').hidden = true; return; }
-    if (!$('agentsPop').hidden) { toggleAgents(false); return; }
+    if (agentsTrayOpen()) { toggleAgents(false); return; }
     if (!inField && viewKind === 'file' && $('view').querySelector('.quick-file-view')) {
       // In the editor: cancel back to the diff. In the diff: back to the conversation.
       const cancel = $('qfCancel'), back = $('qfBack');
@@ -14140,12 +15241,22 @@ document.addEventListener('keydown', e => {
   }
   if (searchModalOpenNow()) return;
   if (readOverlayOpen()) { readingKeydown(e); return; }
-  if (!$('agentsPop').hidden) { agentsPopKeydown(e); return; }
+  if (agentsTrayOpen()) { agentsPopKeydown(e); return; }
   // Native task buttons and disclosures own Tab, Space, and Enter.
   if (e.target.closest('.dg-card, .dg-origin')) return;
   // Composer controls stay one chord away, including while the user types.
   // Use code, not key, so keyboard layout and Alt characters do not matter.
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.repeat) {
+    // alt+← / alt+→: the app's own back and forward. Handled here so the
+    // PWA window, the Android app and the e-ink tablet behave like a browser.
+    // Not while typing: on a Mac, option+arrow moves the caret by a word.
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !inField) {
+      e.preventDefault();
+      e.stopPropagation();
+      navButtons.close();
+      if (e.key === 'ArrowLeft') nav.back(); else nav.forward();
+      return;
+    }
     const control = { KeyM: $('modelPick'), KeyO: $('agentMode') }[e.code];
     if (control) {
       e.preventDefault();
@@ -14263,7 +15374,7 @@ document.addEventListener('keydown', e => {
     case 'b': jumpToStart(); break;
     case 't': if (!$('ganttBar').checkVisibility()) break; e.preventDefault(); $('ganttDate').focus(); break;
     case 'a': toggleAgents(); break;
-    case '`': e.preventDefault(); setBarFold(!barFolded()); break;
+    case '`': e.preventDefault(); sideLayoutOn() ? setSideFold(!sideFolded()) : setBarFold(!barFolded()); break;
     case ',': e.preventDefault(); settingsOpen ? closeSettings() : showSettings(); break;
     case 'j': toggleJobs(); break;
     case 'p': {
@@ -14273,7 +15384,7 @@ document.addEventListener('keydown', e => {
       break;
     }
     case 'C':
-      if (viewKind === 'home') { e.preventDefault(); startLooseConversation(); }
+      e.preventDefault(); startLooseConversation();
       break;
     case 'P':
       if (viewKind === 'home') { e.preventDefault(); openNewProjectForm(); }
@@ -14372,10 +15483,12 @@ live.onopen = () => {
   // the open transcript against it.
   if (liveConnectedOnce) { loadJobs(); load(); fetchAgentReadState().then(pushAgentReads); }
   liveConnectedOnce = true;
+  loadAgentRecovery();
   delegationUI.invalidate();
 };
 live.onmessage = ev => {
   const d = JSON.parse(ev.data);
+  if (d.type === 'agent-recovery') { applyAgentRecovery(d.recovery); return; }
   if (d.type === 'delegation-update') { delegationUI.invalidate(); return; }
   if (d.type === 'timeline-titles') {
     for (const update of d.titles || []) {
@@ -14451,6 +15564,10 @@ live.onmessage = ev => {
   if (d.type === 'agent-read') {
     // Another device (or this one, echoed) read a reply or a run ended.
     applyAgentReadFromServer(d);
+    return;
+  }
+  if (d.type === 'recent-files') {
+    if (Array.isArray(d.files)) { recentFilesList = d.files; renderRecentFiles(); }
     return;
   }
   if (d.type === 'voice-state') { voiceMutedState = !!d.muted; voiceMutedUntil = Number(d.mutedUntil) || 0; if (settingsOpen) renderSettings(); return; }
@@ -14617,7 +15734,18 @@ fetch('/api/git/repos').then(r => r.json()).then(d => {
   if (viewKind === 'home' && tab === 'conv') render();
 }).catch(() => {});
 load().then(() => {
-  dispatchHash(decodeURIComponent(location.hash.slice(1)));
+  // The stack finds its place (a reload) or starts here (a new tab); the
+  // page then renders from the hash as it always did.
+  try { history.scrollRestoration = 'manual'; } catch {}
+  let bootHash = location.hash.slice(1);
+  try { bootHash = decodeURIComponent(bootHash); } catch {}
+  const bootEntry = nav.load(bootHash), bootScroll = bootEntry.scroll;
+  navShownId = bootEntry.id;
+  nav.refresh();
+  Promise.resolve(dispatchHash(bootHash)).then(() => {
+    // A reload comes back to the same scroll, like a browser page.
+    if (bootScroll && nav.current()?.id === bootEntry.id && viewKind !== 'conversation' && viewKind !== 'home') navHold = Navigation.holdScroll($('view'), bootScroll.view);
+  }).catch(err => console.error('first route failed:', err));
   prefetchDocumentEditor();
 });
 // SSE `update` events patch the list live; this poll only reconciles what a

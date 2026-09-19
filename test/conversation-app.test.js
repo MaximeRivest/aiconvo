@@ -387,14 +387,18 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
   // Markdown retains the real MRMD editor and run/output mechanics. Save is not a commit.
   const headBefore = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).stdout;
   fs.writeFileSync(path.join(work, 'README.md'), '# Notebook\n\n```python\n40 + 2\n```\n');
+  // rat's doctor/run are mocked: this test is about the editor, not rat. A
+  // ready notebook (ok:true) keeps the focused view minimal — no strip.
+  await evaluate(`window.fetch=(url,opts)=>String(url).includes('/api/doc/run-cell')?Promise.resolve(new Response(JSON.stringify({code:0,out:'42',runtime:'fixture',ms:1}))):String(url).includes('/api/doc/doctor')?Promise.resolve(new Response(JSON.stringify({ok:true,project:'x',project_source:'detected',checks:[],actions:[],steps:[],python:{kernel:'fixture',venv:'/v',venv_exists:true,kernel_running:true}}))):liveOriginalFetch(url,opts)`);
   await evaluate(`openLiveFile(${JSON.stringify(path.join(work, 'README.md'))},{project:'work',root:${JSON.stringify(work)},back:'review='+${JSON.stringify(reviewId)}})`);
+  await new Promise(r => setTimeout(r, 300));
   assert.equal(await evaluate(`docState.focused && !!document.querySelector('#docRun') && !document.querySelector('.doc-run-strip')`), true);
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('#docEditor .cm-gutters')).display`), 'flex');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('#docEditor .cm-lineNumbers')).display`), 'none');
   await evaluate(`docState.editor.view.dispatch({changes:{from:docState.editor.view.state.doc.length,insert:'\\nA note.\\n'}});document.querySelector('#docSave').onclick()`);
   assert.ok(fs.readFileSync(path.join(work, 'README.md'), 'utf8').includes('A note.'));
   assert.equal(spawnSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).stdout, headBefore, 'Focused Markdown Save unexpectedly created a commit');
-  await evaluate(`window.fetch=(url,opts)=>String(url).includes('/api/doc/run-cell')?Promise.resolve(new Response(JSON.stringify({code:0,out:'42',runtime:'fixture',ms:1}))):String(url).includes('/api/doc/runtime-info')?Promise.resolve(new Response(JSON.stringify({name:'fixture'}))):liveOriginalFetch(url,opts);runDocCell(docState.editor.listCells()[0])`);
+  await evaluate(`runDocCell(docState.editor.listCells()[0])`);
   assert.equal(await evaluate(`docState.editor.getContent().includes('42') && docState.editor.getContent().includes('\\x60\\x60\\x60output')`), true, 'MRMD run output did not land in the document');
   await evaluate(`autosaveDocument()`);
   await evaluate(`window.fetch=liveOriginalFetch`);

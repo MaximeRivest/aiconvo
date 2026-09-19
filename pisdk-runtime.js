@@ -10,6 +10,7 @@ const { pathToFileURL } = require('url');
 const { execFileSync } = require('child_process');
 const { installCustomPromptPreparation, waitForCustomTurns } = require('./pisdk-custom.js');
 const { forkPiSnapshot } = require('./session-snapshot.js');
+const { captureRewriteRequest } = require('./pisdk-rewrite.js');
 
 const PI_TESTED_VERSION = '0.84.1';
 const WARM_IDLE_MS = 5 * 60 * 1000;
@@ -340,6 +341,8 @@ async function bindS(S, loaded) {
   // Subscribe before bindExtensions: session_start hooks can start turns or dialogs.
   S.unsub = session.subscribe(ev => {
     S.lastEventAt = Date.now();
+    // An autonomous extension turn wins over the optional editing pass.
+    if (ev.type === 'agent_start') S.rewriteController?.abort();
     S.emit(ev);
     if (ev.type === 'agent_settled') {
       // An extension can start a fresh turn inside agent_settled.
@@ -478,7 +481,7 @@ function piHeadlessRun(target, opts = {}) {
   const handle = { done: null, uiAutoCancelled: 0, pid: process.pid, engine: 'sdk',
     abort: async () => {
       aborted = true;
-      if (current) { current.abortEpoch = (current.abortEpoch || 0) + 1; cancelUi(current); await current.session.abort(); }
+      if (current) { current.abortEpoch = (current.abortEpoch || 0) + 1; current.rewriteController?.abort(); cancelUi(current); await current.session.abort(); }
     },
     respondUi: (id, response) => respondUi(id, response),
     uiInput: (id, data) => uiInput(id, data),
@@ -492,6 +495,7 @@ function piHeadlessRun(target, opts = {}) {
     S.onEvent = opts.onEvent || null;
     const beforeCancelled = S.uiAutoCancelled;
     publishState(S);
+    let rewrite;
     try {
       const want = opts.provider && opts.modelId ? opts.provider + '/' + opts.modelId : null;
       if (want && stateOf(S).model !== want) {
@@ -502,6 +506,7 @@ function piHeadlessRun(target, opts = {}) {
         S.model = want;
       }
       if (aborted) throw new Error('Pi run aborted before prompt');
+      if (opts.simplifyAnswers && !opts.customMessage) rewrite = captureRewriteRequest(S.session, opts.simplifyPrompt);
       if (opts.customMessage) {
         const { customType, content, details } = opts.customMessage;
         if (typeof customType !== 'string' || !customType) throw new Error('customMessage.customType is required');
@@ -517,8 +522,20 @@ function piHeadlessRun(target, opts = {}) {
       // Use SDK idle state, not agent_end (which precedes retries/followups).
       await waitForCustomTurns(S.session);
       await S.session.waitForIdle();
+      rewrite?.restore();
+      if (rewrite && !aborted && !S.stopped && S.uiAutoCancelled === beforeCancelled) {
+        S.rewriteController = new AbortController();
+        try { await rewrite.run({ signal: S.rewriteController.signal, emit: ev => S.emit(ev) }); }
+        catch (error) { S.emit({ type: 'answer_rewrite', state: 'failed', error: String(error.message || error) }); }
+        finally { S.rewriteController = null; }
+        // A real extension callback may have superseded the optional pass.
+        // It still owns this run until its retries/follow-ups have settled.
+        await waitForCustomTurns(S.session);
+        await S.session.waitForIdle();
+      }
       return { uiAutoCancelled: S.uiAutoCancelled - beforeCancelled, pid: process.pid, warm: true, engine: 'sdk' };
     } finally {
+      rewrite?.restore();
       S.busy = false;
       S.onEvent = null;
       if (!sessionBusy(S)) { cancelUi(S); S.fileSig = fileSigOf(S.file); }
@@ -531,12 +548,80 @@ function piHeadlessRun(target, opts = {}) {
   return handle;
 }
 
+// One raw completion against the exact context a session would send from
+// a given node, with no tool runner. Used for derivations (a notebook from
+// an answer): the provider sees the same system prompt, tool schemas and
+// history as the conversation — so the cached prefix can be reused — but
+// nothing in this path can execute a tool. The session is a PRIVATE
+// snapshot (target.sessionPath is a staged fork); nothing is written to
+// the real conversation, and the caller discards the snapshot afterwards.
+const DERIVE_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+async function piDeriveAt(target, opts = {}) {
+  const prompt = String(opts.prompt || '').trim();
+  if (!prompt) throw new Error('derive: prompt is required');
+  const S = await createS(target);
+  const textOf = message => (message?.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
+  try {
+    clearTimeout(S.idleTimer);
+    S.busy = true;
+    // Lowest supported reasoning: this is an editing pass, not new thinking.
+    let level = 'off';
+    try {
+      if (S.session.supportsThinking()) {
+        const levels = S.session.getAvailableThinkingLevels();
+        level = DERIVE_LEVELS.find(l => levels.includes(l)) || 'off';
+      }
+    } catch {}
+    const agent = S.session.agent;
+    if (typeof agent?.streamFunction !== 'function') throw new Error('derive: session has no stream function');
+    const original = agent.streamFunction;
+    let captured = null;
+    // Capture the prepared request and refuse the turn: the agent loop never
+    // gets a response to act on, so no tool can run in this pass.
+    agent.streamFunction = async (model, context, options) => {
+      if (!captured) captured = { model, context: { ...context, messages: context.messages.slice() }, options: { ...options } };
+      const refusal = new Error('aiconvo derive: context captured');
+      refusal.aiconvoDerive = true;
+      throw refusal;
+    };
+    try {
+      await S.session.prompt(prompt, { source: 'rpc', streamingBehavior: 'followUp' });
+      await S.session.waitForIdle();
+    } catch (error) {
+      if (!captured) throw error;
+    } finally {
+      if (agent.streamFunction !== original) agent.streamFunction = original;
+    }
+    if (!captured) throw new Error('derive: the session did not prepare a request');
+    const controller = new AbortController();
+    S.rewriteController = controller;
+    const stream = await original(captured.model, captured.context, { ...captured.options, signal: controller.signal, reasoning: level === 'off' ? undefined : level });
+    for await (const _event of stream) { /* drain; the caller reads the complete result */ }
+    const response = await stream.result();
+    if (response.stopReason !== 'stop' || !textOf(response).trim()) {
+      throw new Error(response.errorMessage || (response.stopReason === 'toolUse' ? 'The model tried to use tools; none were executed' : 'The model did not finish'));
+    }
+    if (response.content.some(b => b.type === 'toolCall')) throw new Error('The model tried to use tools; none were executed');
+    return {
+      text: textOf(response),
+      model: captured.model.provider + '/' + captured.model.id,
+      reasoning: level,
+      usage: response.usage || null,
+      timestamp: response.timestamp || Date.now(),
+    };
+  } finally {
+    S.rewriteController = null;
+    S.busy = false;
+    stopWarmSession(S.file);
+  }
+}
+
 // Queue into a run that is ALREADY STREAMING (same semantics as typing in
 // the TUI while the model works). Resolves at prompt acceptance, not end.
 async function piQueuePrompt(target, message, behavior, images) {
   const key = path.resolve(target.sessionPath);
   const S = sdkSessions.get(key);
-  if (!S || !S.session.isStreaming) return false;
+  if (!S || S.rewriteController || !S.session.isStreaming) return false;
   return await new Promise((resolve, reject) => {
     S.session.prompt(message, {
       streamingBehavior: behavior || 'followUp',
@@ -549,9 +634,9 @@ async function piQueuePrompt(target, message, behavior, images) {
 
 // Independent native file forks. Even SDK migration happens on a private
 // snapshot, never on the source owned by a running agent.
-async function piForkAt(target, nodeId) {
+async function piForkAt(target, nodeId, options) {
   const { SDK } = await getSdk();
-  return forkPiSnapshot(SDK.SessionManager, target, nodeId);
+  return forkPiSnapshot(SDK.SessionManager, target, nodeId, options);
 }
 
 async function piForkBefore(target, nodeId) {
@@ -619,6 +704,7 @@ function uiInput(id, data) {
 async function abort() {
   await Promise.all([...sdkSessions.values()].map(async S => {
     S.abortEpoch = (S.abortEpoch || 0) + 1;
+    S.rewriteController?.abort();
     cancelUi(S);
     await S.session.abort();
   }));
@@ -631,6 +717,7 @@ function stopWarmSession(sessionPath) {
   const S = sdkSessions.get(key);
   if (!S) return false;
   S.stopped = true;
+  S.rewriteController?.abort();
   clearTimeout(S.idleTimer);
   sdkSessions.delete(key);
   cancelUi(S);
@@ -679,7 +766,7 @@ function setEditorTextFor(sessionPath, text) {
 }
 
 return {
-  piForkAt, piForkBefore, piSetThinking, piHeadlessRun, piQueuePrompt, piBeginWarm,
+  piForkAt, piForkBefore, piSetThinking, piHeadlessRun, piQueuePrompt, piBeginWarm, piDeriveAt,
   stopWarmSession, stopAllWarmSessions, listWarmSessions,
   setEditorTextFor, abort, respondUi, uiInput, waitForIdle, dispose,
 };

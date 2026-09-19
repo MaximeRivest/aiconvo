@@ -224,8 +224,7 @@ async function showFilesBrowser(project, opts = {}) {
 }
 function fbRemember(s) {
   filesBrowserPlaces.set(s.project + '\0' + s.conv, fbContext(s));
-  currentHash = fbHash(s);
-  history.replaceState(null, '', location.pathname + location.search + '#' + currentHash);
+  replaceRoute(fbHash(s));
 }
 function fbActivityParams(s) {
   const now = Date.now();

@@ -1,6 +1,7 @@
 'use strict';
 
 const os = require('os');
+const { PROMPT: DEFAULT_SIMPLIFY_PROMPT } = require('./pisdk-rewrite');
 
 const DEFAULT_CONTEXT_TOKENS = 272000;
 
@@ -26,11 +27,15 @@ const DEFAULT_SETTINGS = {
   contextTokens: DEFAULT_CONTEXT_TOKENS,
   // Optional GPU-server late-interaction search stage (off by default).
   semanticSearch: false,
-  semanticUrl: 'http://192.168.2.24:8090',
+  semanticUrl: 'http://100.86.49.54:8090',
   semanticNs: defaultSemanticNs(),
   // Engine for web sends: 'sdk' embeds pi in-process (fast forks, full
   // extension UI); 'rpc' spawns pi child processes (isolation fallback).
   piEngine: 'sdk',
+  // One same-model editing pass after a human-facing SDK reply.
+  simplifyAnswers: true,
+  simplifyPrompt: DEFAULT_SIMPLIFY_PROMPT,
+  autoResumeNetwork: false,
   // pi theme for hosted extension views (custom TUI components rendered
   // in the browser). 'light' matches aiconvo's paper look.
   piTheme: 'light',
@@ -179,13 +184,16 @@ function normalizeSettings(input) {
   const semanticUrl = String(src.semanticUrl || DEFAULT_SETTINGS.semanticUrl).trim().replace(/\/$/, '');
   const semanticNs = String(src.semanticNs || DEFAULT_SETTINGS.semanticNs).trim().replace(/[^\w.-]+/g, '-') || 'default';
   const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
+  const simplifyAnswers = src.simplifyAnswers !== false;
+  const simplifyPrompt = typeof src.simplifyPrompt === 'string' && src.simplifyPrompt.trim() ? src.simplifyPrompt : DEFAULT_SIMPLIFY_PROMPT;
+  const autoResumeNetwork = src.autoResumeNetwork === true;
   const piTheme = typeof src.piTheme === 'string' && src.piTheme.trim() ? src.piTheme.trim() : DEFAULT_SETTINGS.piTheme;
   const usageBilling = normalizeUsageBilling(src.usageBilling);
   const snippetTrigger = normalizeSnippetTrigger(src.snippetTrigger);
   const doneSound = DONE_SOUND_MODES.includes(src.doneSound) ? src.doneSound : DEFAULT_SETTINGS.doneSound;
   const machines = normalizeMachines(src.machines);
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, piTheme, usageBilling, snippetTrigger, doneSound, machines };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, simplifyAnswers, simplifyPrompt, autoResumeNetwork, piTheme, usageBilling, snippetTrigger, doneSound, machines };
   }
   return {
     usePiDefault: false,
@@ -197,6 +205,9 @@ function normalizeSettings(input) {
     semanticUrl,
     semanticNs,
     piEngine,
+    simplifyAnswers,
+    simplifyPrompt,
+    autoResumeNetwork,
     piTheme,
     usageBilling,
     snippetTrigger,
