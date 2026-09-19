@@ -22,7 +22,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
     fs.readFileSync(path.join(__dirname, '../conversation-flow.js'), 'utf8'),
     fs.readFileSync(path.join(__dirname, '../conversation-reader.js'), 'utf8'),
     fs.readFileSync(path.join(__dirname, '../navigation.js'), 'utf8'),
-    extract('function setRoute(kind, hash)', '\nfunction goHome()'),
+    extract('function setRoute(kind, hash', '\nfunction goHome()'),
     extract('function dispatchHash(h, { restore = false } = {}) {', '\nconst $ = id => document.getElementById'),
     extract('async function open(rel, scroll,', '// ---- distillation ----'),
     extract('async function renderConv(scroll) {', '// ---- trace machinery ----'),
@@ -34,6 +34,8 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   let current = null, activeRel = null, viewKind = 'home', conversationLoadSeq = 0;
   let progressStream = null, currentHash = '', lastNavProject = null, matchIdx = -1;
   const TRANSIENT_KINDS = new Set(); let nav = null, navShownId = null, navTraversalSeq = 0, navHold = null;
+  // No side column here: the sidebar's project scope is exercised by test/workspace-scope-app.test.js.
+  let restoringScopeEntry = null; const sideLayoutOn = () => false, sidePanel = () => 'conversations', workspaceScope = () => '', adoptWorkspaceProject = () => {}, setWorkspaceScope = () => {};
   const lastNavConversation = new Map(), modelTouchAt = new Map(), traceLeaves = new Map(), fanoutFocus = new Map(), toolGroupOpen = new Map(), compareCache = new Map(), runLedgers = new Map();
   const sessions = [], calls = [], errors = [];
   let transcriptQuery = '';
@@ -105,7 +107,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
     check(computeSendTrace(parent).leaf==='last', 'read changed continuation');
     check(JSON.stringify(parent)===saved, 'read changed fixture continuation');
     check(errors.length===0, errors.join('; '));
-    check(calls.length>=8 && calls.every(([url,opts])=>['/api/session?id=','/api/compare?id='].some(prefix=>url.startsWith(prefix))&&!opts), 'read made a write or branch call');
+    check(calls.length>=8 && calls.every(([url,opts])=>['/api/session?id=','/api/compare?id=','/api/doc/notebooks?key='].some(prefix=>url.startsWith(prefix))&&!opts), 'read made a write or branch call');
     $('result').textContent='PASS: cross-child, same-parent, abandoned branch, merged result, abort, tool package, browser back, GET-only';
   }
   setTimeout(() => run().catch(e=>{$('result').textContent='FAIL: '+e.stack+'; hash='+location.hash+'; calls='+calls.length;}), 100);

@@ -1,0 +1,109 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const net = require('node:net');
+const { spawn } = require('node:child_process');
+
+async function viewerBrowser(t) {
+  const root = path.join(__dirname, '../..'), home = fs.mkdtempSync(path.join(os.tmpdir(), 'file-viewers-'));
+  const work = path.join(home, 'work'); fs.mkdirSync(work);
+  const agent = path.join(home, '.pi/agent'), sessions = path.join(agent, 'sessions/fixture'); fs.mkdirSync(sessions, { recursive: true });
+  fs.writeFileSync(path.join(sessions, 'media.jsonl'), [
+    { type: 'session', version: 3, id: 'media', cwd: work },
+    { type: 'message', id: 'u1', timestamp: '2026-09-01T12:00:00Z', message: { role: 'user', content: [{ type: 'text', text: 'File viewer fixture' }] } },
+  ].map(JSON.stringify).join('\n') + '\n');
+  let server, browser, ws;
+  const stop = async child => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise(r => child.once('exit', r)); child.kill('SIGTERM');
+    const timer = setTimeout(() => child.kill('SIGKILL'), 3000);
+    await exited; clearTimeout(timer);
+  };
+  t.after(async () => { ws?.close(); await stop(browser); await stop(server); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
+  const socket = net.createServer(); await new Promise(r => socket.listen(0, '127.0.0.1', r)); const port = socket.address().port; await new Promise(r => socket.close(r));
+  const base = 'http://127.0.0.1:' + port; let log = '';
+  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: '0', AICONVO_HOST: '127.0.0.1', AICONVO_TOKEN: 'viewer-test-token', AICONVO_NO_WATCH: '1', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server.stdout.on('data', b => log += b); server.stderr.on('data', b => log += b);
+  let ready = false;
+  for (let i = 0; i < 150; i++) {
+    try { const rows = await (await fetch(base + '/api/sessions')).json(); if (rows.some(s => s.key === 'pi:fixture/media.jsonl')) { ready = true; break; } } catch {}
+    if (server.exitCode !== null) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  assert.ok(ready, log);
+  browser = spawn(process.env.CHROMIUM_BIN || 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const endpoint = await new Promise((resolve, reject) => {
+    let output = ''; const timer = setTimeout(() => reject(Error(output)), 10000);
+    browser.stderr.on('data', b => { output += b; const m = output.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });
+    browser.on('error', e => { clearTimeout(timer); reject(e); });
+  });
+  ws = new WebSocket(endpoint); await new Promise(r => ws.onopen = r);
+  let id = 0; const pending = new Map(), exceptions = [], requests = [];
+  ws.onmessage = event => {
+    const m = JSON.parse(event.data);
+    if (m.method === 'Runtime.exceptionThrown') exceptions.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
+    if (m.method === 'Network.requestWillBeSent') requests.push(m.params.request);
+    if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+  };
+  const send = (method, params = {}, sessionId) => new Promise(r => { pending.set(++id, r); ws.send(JSON.stringify({ id, method, params, sessionId })); });
+  const target = await send('Target.createTarget', { url: 'about:blank' });
+  const attached = await send('Target.attachToTarget', { targetId: target.result.targetId, flatten: true }), sid = attached.result.sessionId;
+  const command = (method, params) => send(method, params, sid);
+  const evaluate = async (expression, contextId) => {
+    const out = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true,
+      ...(contextId ? { contextId: contextId.id || contextId } : {}) }, contextId?.session || sid);
+    assert.ok(!out.error && !out.result?.exceptionDetails, JSON.stringify(out));
+    return out.result?.result?.value;
+  };
+  const until = async (expression, label, contextId) => {
+    for (let i = 0; i < 400; i++) { if (await evaluate(`(()=>{try{return !!(${expression})}catch{return false}})()`, contextId)) return; await new Promise(r => setTimeout(r, 25)); }
+    const state = await evaluate(`JSON.stringify({hash:location.hash,view:typeof viewKind==='undefined'?null:viewKind,file:typeof fileWs==='undefined'?null:fileWs?.path,text:document.querySelector('#view')?.textContent.slice(0,1000)})`).catch(() => 'state unavailable');
+    assert.fail('Timed out: ' + (label || expression) + '\n' + state + '\n' + exceptions.join('\n'));
+  };
+  const size = async (width, height, mobile = false) => {
+    await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: mobile ? 2 : 1, mobile });
+    await command('Emulation.setTouchEmulationEnabled', { enabled: mobile });
+  };
+  await command('Runtime.enable'); await command('Network.enable'); await command('Page.enable');
+  await size(1440, 1000); await command('Page.navigate', { url: base }); await until(`typeof openLiveFile==='function'`);
+  const open = async (file, opts = {}) => {
+    await evaluate(`openLiveFile(${JSON.stringify(path.join(work, file))}, ${JSON.stringify({ project: 'work', back: 'pi:fixture/media.jsonl', ...opts })})`);
+  };
+  const frameContext = async name => {
+    const out = await command('Page.getFrameTree');
+    let frame = out.result.frameTree.childFrames?.find(f => f.frame.name === name || f.frame.url.includes(name)), session = sid;
+    if (!frame) {
+      // A sandboxed opaque-origin preview is an out-of-process iframe in Chrome.
+      const targets = await send('Target.getTargets');
+      const target = targets.result.targetInfos.find(t => t.type === 'iframe' && t.url === 'about:srcdoc');
+      assert.ok(target, 'Missing frame ' + name + ' ' + JSON.stringify(targets.result));
+      const attached = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+      session = attached.result.sessionId;
+      const tree = await send('Page.getFrameTree', {}, session); frame = tree.result.frameTree;
+    }
+    const world = await send('Page.createIsolatedWorld', { frameId: frame.frame.id, worldName: 'test' }, session);
+    return { id: world.result.executionContextId, session };
+  };
+  const screenshot = async name => { const shot = await command('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(os.tmpdir(), name), Buffer.from(shot.result.data, 'base64')); };
+  return { home, work, base, command, evaluate, until, size, open, frameContext, screenshot, exceptions, requests };
+}
+
+function samplePDF(padding = 0) {
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>'];
+  for (let i = 0; i < 3; i++) {
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 800] /Resources << /Font << /F1 9 0 R >> >> /Contents ${4 + i * 2} 0 R >>`);
+    const text = `BT /F1 24 Tf 60 700 Td (Viewer page ${i + 1}: searchable apricot) Tj ET`;
+    objects.push(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`);
+  }
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  let out = '%PDF-1.7\n'; const offsets = [0];
+  for (let i = 0; i < objects.length; i++) { offsets.push(out.length); out += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`; }
+  out += ('%' + ' '.repeat(1022) + '\n').repeat(Math.ceil(padding / 1024));
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` + offsets.slice(1).map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('');
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return out;
+}
+module.exports = { viewerBrowser, samplePDF };

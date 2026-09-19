@@ -188,6 +188,22 @@ body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-
 body.side-layout #agentsPop[data-panel]:not([data-panel="conversations"]) #agentsLegacy { margin-top: 0; }
 body.side-layout #agentsPop:not([data-panel="files"]) .ag-files-block { display: none; }
 .panel-title { padding: var(--sp-2) 10px 4px; font-size: var(--fs-label); font-weight: 700; color: var(--text); }
+.panel-scope-caption { padding: 0 10px 8px; font-size: var(--fs-micro); color: var(--text-dim); }
+.inbox-tabs { display: flex; gap: 4px; padding: 2px 8px 8px; }
+.inbox-tabs button { flex: 1; min-width: 0; padding: 4px; font-size: var(--fs-micro); background: transparent; border-color: transparent; }
+.inbox-tabs button[aria-pressed="true"] { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.tray-scope { margin: 6px 10px; }
+.mpick.project-scope-picker { width: 320px; }
+.mpick.project-scope-picker .mp-row { flex-direction: column; align-items: flex-start; gap: 2px; }
+.project-scope-picker .mp-row small { font-size: var(--fs-micro); color: var(--text-dim); overflow-wrap: anywhere; }
+@media (max-width: 700px) { .mpick.project-scope-picker { width: auto; max-width: 100%; } }
+.panel-project-controls { position: sticky; top: 0; z-index: 1; display: grid; gap: 6px; padding: 6px 10px 10px; background: var(--panel-bg); }
+.panel-project-controls input, .panel-project-controls select { width: 100%; min-width: 0; }
+.panel-project-status { font-size: var(--fs-micro); color: var(--text-dim); }
+.panel-project.ag-row { width: calc(100% - 4px); border: 0; background: transparent; text-align: left; font-weight: normal; }
+.panel-project.ag-row:hover { background: var(--surface-2); }
+.panel-project:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.panel-more { display: block; width: calc(100% - 20px); margin: 8px 10px; padding: 6px; background: transparent; border: 1px solid var(--border); color: var(--text-dim); font-size: var(--fs-micro); }
 :root[data-theme-mode="binary"] body.side-layout > #side { border-right-color: var(--border); }
 /* No bar at all. Home's project-ordering buttons move into the timeline
    toolbar; the conversation title floats over the page (#floatHead). */
@@ -648,6 +664,10 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .mgantt .mg-bar button { min-height: 30px; min-width: 36px; }
 .mgantt .mg-scroll { overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; line-height: 0; }
 .mgantt[data-mg-open] { position: fixed; inset: var(--header-h) 0 0; z-index: 25; margin: 0; background: var(--bg); display: flex; flex-direction: column; }
+/* An expanded chart owns the content pane, never the navigation column. */
+body.side-layout .mgantt[data-mg-open] { inset: 0 0 0 var(--side-w, 344px); }
+body.side-layout.side-fold .mgantt[data-mg-open] { left: var(--rail-w, 56px); }
+body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .mgantt[data-mg-open] .mg-bar { flex: none; flex-wrap: wrap; padding: 8px 12px; gap: 6px; }
 .mgantt[data-mg-open] .mg-scroll { flex: 1; min-height: 0; overscroll-behavior: contain; }
 .mgantt[data-mg-open] .tmark text { font-size: 12px; }
@@ -1084,10 +1104,10 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .mmd.ok:not(.show-src) .mmd-src { display: none; }
 .mmd-err { color: var(--danger); font-size: var(--fs-micro); margin-bottom: 4px; }
 /* transcript reasoning rows (everything view) */
-.msg.thinking { border-left: 2px dotted var(--border-strong); padding-left: 8px; }
+.msg.thinking { border-left: 2px solid var(--border); padding-left: 14px; }
 .msg.thinking summary { cursor: pointer; list-style: none; color: var(--text-dim); font-size: var(--fs-micro); }
 .msg.thinking summary::-webkit-details-marker { display: none; }
-.msg.thinking .think-body { color: var(--text-faint); font-style: italic; white-space: pre-wrap; margin-top: 6px; font-size: 12px; }
+.msg.thinking .think-body { color: var(--text-dim); font-family: var(--font); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 10px; font-size: 13px; line-height: 1.7; }
 /* extension view: a modal takeover, not a black box in the chat */
 .rc-cv { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center; background: var(--overlay-strong); }
 .rc-cv-card { width: fit-content; min-width: min(420px, 94vw); max-width: 96vw; max-height: 82vh; display: flex; flex-direction: column; background: var(--surface-1); border: 1px solid var(--border-strong); box-shadow: 0 6px 24px var(--shadow-color); overflow: hidden; }
@@ -1269,12 +1289,14 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .live-strip.work .ls-line { animation: activepulse 2.4s ease-in-out infinite; }
 .ls-abort { height: 20px; padding: 0 8px; font-size: 10px; border: 1px solid var(--border); background: transparent; color: var(--text-faint); flex-shrink: 0; }
 .ls-abort:hover { color: var(--danger); border-color: var(--danger); background: transparent; }
-.ls-full { position: relative; border: 1px dashed var(--border-strong); background: var(--bg); }
-.ls-blocks { max-height: 65vh; min-height: 120px; overflow-y: auto; padding: 8px 12px; font-size: 12px; line-height: 1.55; overscroll-behavior: contain; }
+.ls-full { position: relative; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface-1); overflow: hidden; }
+.ls-blocks { max-height: 65vh; min-height: 120px; overflow-y: auto; padding: 12px; scroll-padding-top: 44px; font-size: 12px; line-height: 1.6; overscroll-behavior: contain; }
 .ls-blocks pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: inherit; }
-.ls-b { margin: 0 0 12px; }
-.ls-b-head { font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }
-.ls-think { color: var(--text-faint); font-style: italic; }
+.ls-b { margin: 0 0 18px; min-width: 0; overflow-wrap: anywhere; }
+.ls-b:last-child { margin-bottom: 0; }
+.ls-b-head { font-size: 11px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; }
+.ls-b .ls-think { color: var(--text-dim); font: 13px/1.7 var(--font); }
+.ls-think:empty, .ls-text:empty { display: none; }
 .ls-args { color: var(--text-dim); border-left: 2px solid var(--border-strong); padding-left: 8px; }
 .st-title { font-weight: 600; overflow-wrap: anywhere; }
 .st-label, .st-new-label, .st-limit, .st-preview summary { color: var(--text-dim); font-size: .85em; margin-top: 8px; }
@@ -1405,22 +1427,49 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .msg.tool .resfold > summary { cursor: pointer; list-style: none; user-select: none; color: var(--text-faint); font-size: 11px; margin-top: 4px; }
 .msg.tool .resfold > summary::-webkit-details-marker { display: none; }
 .msg.tool .resfold > summary:hover { color: var(--text-dim); }
-/* accumulated tool steps: one quiet growing line, expandable */
-/* An OPEN steps fold is its own room: a dashed frame walls the tool
-   boxes off from the user/assistant prose around them. */
-.toolgroup[open] { border: 1px dashed var(--border-strong); margin: 6px 0; padding-bottom: 6px; background: var(--bg); }
-/* An open fold can run for screens. Its line rides at the top of the
-   scroller while the reader is inside it, so the fold control and the
-   "where am I" label are one tap away at any depth. Same top offset as
-   .phead: flush with the scroller's edge. A stuck line gets a hairline
-   shadow so the layering reads as intended. */
-.toolgroup[open] > summary { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 2; background: var(--bg); border-bottom: 1px dashed var(--border); margin-bottom: 4px; padding: 7px 14px; }
-.toolgroup[open] > summary.stuck { box-shadow: 0 1px 0 var(--border-strong), 0 4px 10px -6px rgba(0,0,0,.35); }
-:root[data-theme-mode="binary"] .toolgroup[open] > summary.stuck { box-shadow: 0 1px 0 var(--text); }
-.toolgroup[open] > summary::after { content: " ▴"; color: var(--text-faint); }
-.toolgroup > summary { cursor: pointer; list-style: none; user-select: none; padding: 4px 14px; font-size: 11px; color: var(--text-faint); text-align: center; }
+/* Work folds are quiet cards. Only the header's outer corners curve;
+   leave overflow visible so sticky headers and file menus can escape. */
+.toolgroup { display: inline-block; max-width: calc(100% - 28px); margin: 4px 0 4px 14px; vertical-align: middle; }
+.toolgroup[open] { display: block; max-width: none; border: 1px solid var(--border); border-radius: var(--r); margin: 8px 14px; padding-bottom: 8px; background: transparent; }
+.toolgroup > summary { display: flex; align-items: center; gap: 9px; width: fit-content; max-width: 100%; cursor: pointer; list-style: none; user-select: none; padding: 7px 12px; min-height: 34px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--surface-1); font-size: 12px; color: var(--text-dim); text-align: left; }
+.toolgroup > summary::before { content: ""; width: 5px; height: 5px; flex: 0 0 auto; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); margin-right: 2px; }
+.toolgroup[open] > summary::before { transform: rotate(45deg); }
+.tg-label { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.tg-count { flex: 0 0 auto; font-weight: 600; color: var(--text); }
+.tg-detail { min-width: 0; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.toolgroup:not([open]) > summary .tg-file { display: none; }
+/* Keep message actions reachable without reserving a second large gap
+   between the commentary and its work row. */
+.msg.assistant:has(+ .toolgroup), .msg.assistant:has(+ .tg-review-turn) { padding-bottom: 6px; }
+.msg.assistant:has(+ .toolgroup) > .msg-actions,
+.msg.assistant:has(+ .tg-review-turn) > .msg-actions { margin-top: 0; min-height: 28px; }
 .toolgroup > summary::-webkit-details-marker { display: none; }
-.toolgroup > summary:hover { color: var(--text-dim); }
+.toolgroup > summary:hover { color: var(--text); background: var(--surface-2); }
+.toolgroup > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+/* Keep the fold control within reach, without clipping its sticky range. */
+.toolgroup[open] > summary { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 2; width: 100%; flex-wrap: wrap; background: var(--surface-1); border: 0; border-bottom: 1px solid var(--border); border-radius: max(0px, calc(var(--r) - 1px)) max(0px, calc(var(--r) - 1px)) 0 0; margin-bottom: 8px; }
+.toolgroup[open] .tg-label { flex: 1; }
+.toolgroup[open] .tg-detail { max-width: none; }
+.toolgroup[open] > summary.stuck { box-shadow: 0 1px 0 var(--border-strong); }
+.toolgroup[data-live-work] > div { padding: 8px 16px 12px; }
+.toolgroup > .msg.tool, .toolgroup > .msg.toolresult { background: transparent; }
+/* The live monitor already owns a frame: inset section headers replace
+   nested boxes. Its scroller has its own origin, unlike the transcript. */
+.ls-blocks .toolgroup[open] { border: 0; background: transparent; margin: 0 0 16px; padding: 0; }
+.ls-blocks .toolgroup[open] > summary { top: -12px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; box-shadow: none; }
+.ls-blocks .toolgroup:last-child { margin-bottom: 0; }
+:root[data-theme-mode="binary"] .ls-full,
+:root[data-theme-mode="binary"] .toolgroup[open] { border-color: var(--text); }
+:root[data-theme-mode="binary"] .ls-blocks .toolgroup[open] > summary { border-bottom: 1px solid var(--text); }
+@media (max-width: 650px) {
+  .ls-blocks { padding: 8px; }
+  .ls-blocks .toolgroup[open] > summary { top: -8px; }
+  .toolgroup > summary { min-height: 44px; padding: 10px 12px; }
+  .tg-detail { max-width: 180px; }
+  .toolgroup:not([open]) .tg-detail { display: none; }
+  .toolgroup[data-live-work] > div { padding: 8px 10px 12px; }
+  .ls-b .ls-think { font-size: 14px; }
+}
 /* file-edit links on the group line and in the ▤ files fold */
 .tg-file { height: 18px; padding: 0 5px; border: 0; background: transparent; color: var(--text-dim); font-size: 10px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 .tg-file:hover { color: var(--cyan); text-decoration: underline; background: transparent; }
@@ -1872,7 +1921,7 @@ body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var
 .compose-left, .compose-right { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .compose-left { grid-column: 1; grid-row: 1; }
 .compose-right { grid-column: 3; grid-row: 1; justify-content: flex-end; }
-.compose-right > .model-strip { flex: 0 1 240px; max-width: none; min-width: 0; margin-left: auto; justify-content: flex-end; }
+.compose-right > .model-strip { flex: 0 1 auto; max-width: 240px; min-width: 0; margin-left: 0; justify-content: flex-end; }
 .agent-compose-row .model-pick { min-width: 0; max-width: 100%; }
 .agent-compose-row .model-strip > .model-pick { flex: 0 1 auto; }
 .agent-compose-row .model-pick .mname { min-width: 0; max-width: 100%; }
@@ -1890,7 +1939,16 @@ body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var
 .compose-tools-menu > button[hidden] { display: none; }
 .compose-tools-menu > button:hover { background: var(--surface-2); }
 .compose-tools-menu #agentMode::before { content: 'Mode'; color: var(--text-dim); margin-right: auto; }
-.compose-tools-menu #agentThink::before { content: 'Reasoning'; color: var(--text-dim); margin-right: auto; }
+.thinking-picker { width: 260px; max-height: min(480px, calc(100dvh - 16px)); }
+.thinking-picker .mp-foot { font-size: var(--fs-micro); }
+.compose-right > .think-pick { margin-left: 0; white-space: nowrap; padding-inline: 6px; }
+.agent-compose { container-name: composer; container-type: inline-size; }
+@container composer (max-width: 540px) {
+  .agent-compose-row { grid-template-columns: auto minmax(0, 1fr); }
+  .compose-left { grid-column: 1; }
+  .compose-right { grid-column: 2; }
+  .agent-compose-row > #ctxMeter { grid-column: 1 / -1; grid-row: 2; }
+}
 /* Usage occupies the true center track. It may wrap inside its slot,
    but its center never shifts to make room for the neighboring controls. */
 .agent-compose-row > .ctxmeter { display: block; grid-column: 2; grid-row: 1; width: 100%; min-width: 0; min-height: 24px; height: auto; margin: 0; padding: 2px 4px; border: 0; background: transparent; color: var(--text-dim); font: var(--fs-micro)/1.4 var(--font); text-align: center; white-space: normal; overflow: visible; overflow-wrap: anywhere; text-wrap: pretty; }
@@ -1917,13 +1975,14 @@ body.side-layout.conv.chrome-min #floatHead > * { pointer-events: none; }
 .msg-actions button:hover { background: var(--surface-2); text-decoration: none; }
 .file-action-menu button { border-radius: var(--r-sm); }
 /* A reading-font choice must not turn code or terminal output proportional. */
-.md pre, .md code, .tool-out, .think-body, .ls-blocks pre { font-family: var(--font-mono); }
+.md pre, .md code, .tool-out, .ls-blocks pre:not(.ls-think) { font-family: var(--font-mono); }
 @media (max-width: 700px), (max-height: 700px) and (pointer: coarse) {
   .composer-dock { width: calc(100% - 16px); bottom: 8px; margin: 0 auto; }
   .agent-compose-row { overflow: visible; gap: 4px; }
   .agent-compose-row > * { flex: 0 0 auto; }
   .compose-left, .compose-right { gap: 4px; }
-  .compose-right > .model-strip { flex: 0 1 180px; min-width: 0; }
+  .compose-right > .model-strip { flex: 0 1 auto; max-width: 180px; min-width: 0; }
+  .mpick.thinking-picker { width: auto; max-width: 100%; }
   .compose-left > button, .compose-right > button, .compose-tools > summary { min-height: 44px; height: auto; }
   .agent-compose-row .agent-mic { order: 0; }
   .agent-compose-row .model-pick { padding: 0 6px; }
@@ -1990,10 +2049,11 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <nav id="sideRail" aria-label="Sections">
     <button id="railMachine" type="button" title="Machine" aria-haspopup="menu"><span class="rail-initials">·</span></button>
     <div class="rail-sections">
+      <button type="button" data-rail="projects" aria-pressed="false"><span class="rail-icon">▦</span><span class="rail-label">Projects</span></button>
       <button type="button" data-rail="conversations" aria-pressed="true"><span class="rail-icon">☷</span><span class="rail-label">Chats</span><span class="rail-badge" hidden></span></button>
       <button type="button" data-rail="files" aria-pressed="false"><span class="rail-icon">▤</span><span class="rail-label">Files</span><span class="rail-badge" hidden></span></button>
       <button type="button" data-rail="traffic" aria-pressed="false"><span class="rail-icon">⚉</span><span class="rail-label">Agents</span><span class="rail-badge" hidden></span></button>
-      <button type="button" data-rail="notifications" aria-pressed="false"><span class="rail-icon">◔</span><span class="rail-label">Activity</span><span class="rail-badge" hidden></span></button>
+      <button type="button" data-rail="inbox" aria-pressed="false"><span class="rail-icon">▣</span><span class="rail-label">Inbox</span><span class="rail-badge" hidden></span></button>
     </div>
     <div class="rail-foot"><span id="railFootSlot"></span></div>
   </nav>
@@ -2002,7 +2062,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
     <div class="side-row">
       <span class="nav-pair"><button id="sideBack" class="nav-back" disabled aria-label="Back">‹</button><button id="sideFwd" class="nav-fwd" disabled aria-label="Forward">›</button></span>
       <button id="sideHome" title="Go home — the whole-system timeline">⌂ <span>home</span></button>
-      <button id="sideProject" hidden title="Open the project area"><span></span> ↗</button>
+      <button id="sideProject" type="button" title="Choose project scope" aria-haspopup="dialog" aria-expanded="false"><span>All projects</span> ▾</button>
     </div>
     <div class="side-new">
       <button id="sideNew" title="New conversation (C) — a blank page: no project memory, home folder, pi defaults">+ <span>new</span></button>
@@ -2100,6 +2160,8 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <script src="/streaming-tool.js"></script>
 <script src="/delegation-ui.js"></script>
 <script src="/recent-files.js"></script>
+<script src="/sidebar-projects.js"></script>
+<script src="/project-scope.js"></script>
 <script src="/filesmode.js"></script>
 <script src="/files-browser.js"></script>
 <script src="/live-file.js"></script>
@@ -2224,14 +2286,16 @@ function setRouteKind(kind) {
   window.dispatchEvent(new Event('aiconvo:route'));
 }
 
-function setRoute(kind, hash) {
+function setRoute(kind, hash, { project, selectScope = false } = {}) {
   rememberConversationDraft();
+  const restoring = restoringScopeEntry === nav.current()?.id && routeHashIs(hash || '');
   setRouteKind(kind);
+  if (project !== undefined && !restoring) adoptWorkspaceProject(project, { select: selectScope });
   currentHash = hash || '';
   // A traversal or a reload arrives with the hash in place: the entry exists.
   // Anything else is a new place: a new entry, the forward path dropped.
-  if (!routeHashIs(currentHash)) { nav.push(currentHash, { kind }); navTraversalSeq++; } // a landing in flight is abandoned
-  else nav.replace(currentHash, { kind });
+  if (!routeHashIs(currentHash)) { nav.push(currentHash, { kind, projectScope: workspaceScope() }); navTraversalSeq++; } // a landing in flight is abandoned
+  else nav.replace(currentHash, { kind, projectScope: workspaceScope() });
   navShownId = nav.current()?.id ?? null;
 }
 
@@ -2246,7 +2310,7 @@ function routeHashIs(hash) {
 // mode, a file version): one history entry, updated in place.
 function replaceRoute(hash) {
   currentHash = hash || '';
-  nav.replace(currentHash, { kind: viewKind });
+  nav.replace(currentHash, { kind: viewKind, projectScope: workspaceScope() });
 }
 
 // Where the screen that is on the page is scrolled: kept on its entry so a
@@ -2269,8 +2333,10 @@ window.addEventListener('popstate', e => {
 
 async function navLand(entry, hash) {
   const seq = ++navTraversalSeq;
+  if (typeof entry.projectScope === 'string') { restoringScopeEntry = entry.id; setWorkspaceScope(entry.projectScope, { stamp: false }); }
   try { await dispatchHash(hash, { restore: true }); }
   catch (err) { console.error('navigation failed:', err); }
+  finally { if (restoringScopeEntry === entry.id) restoringScopeEntry = null; }
   // The person moved on while this screen was loading: nothing to land.
   if (seq !== navTraversalSeq || nav.current()?.id !== entry.id) return;
   navShownId = entry.id;
@@ -2309,7 +2375,7 @@ function describeRoute(h) {
   if (h.startsWith('project=')) {
     const rest = h.slice(8), areaAt = rest.indexOf('&area=');
     if (areaAt >= 0) return { kind: 'project', title: dec(rest.slice(0, areaAt)) + '/' + dec(rest.slice(areaAt + 6)) };
-    return { kind: 'project', title: dec(rest.split('&')[0]) };
+    return { kind: 'project', title: ProjectScope.label(dec(rest.split('&')[0])) };
   }
   if (h.startsWith('diffs=')) return { kind: 'files-browser', title: 'changes · ' + (convTitle(dec(h.slice(6))) || 'conversation') };
   if (h.startsWith('filecall=')) { const parts = h.slice(9).split('&'); return { kind: 'file', title: base(dec(parts[2] || '')) }; }
@@ -2377,7 +2443,7 @@ function dispatchHash(h, { restore = false } = {}) {
     let browserContext = null, reviewRef = null;
     try { if (f.browser) browserContext = JSON.parse(f.browser.startsWith('{') ? f.browser : decodeURIComponent(f.browser)); } catch {}
     try { if (f.review) reviewRef = JSON.parse(f.review.startsWith('{') ? f.review : decodeURIComponent(f.review)); } catch {}
-    return openLiveFile(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, back: f.back || null, browserContext, reviewRef });
+    return openLiveFile(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, back: f.back || null, preview: f.preview || null, browserContext, reviewRef });
   }
   if (h.startsWith('doc=')) {
     // doc=PATH[&PROJECT][&conv=KEY]. conv= names the conversation the
@@ -2609,9 +2675,9 @@ async function loadJobs() {
 function toggleJobs(show) {
   if (sideLayoutOn()) {
     // Notifications are their own rail section in the column.
-    const showing = sidePanel() === 'notifications';
+    const showing = sidePanel() === 'inbox' && inboxTab() === 'jobs';
     const next = show !== undefined ? !!show : !showing;
-    if (next) { setSidePanel('notifications'); if (sideFolded()) setSideFold(false); }
+    if (next) { setSidePanel('inbox'); setInboxTab('jobs'); if (sideFolded()) setSideFold(false); }
     else if (showing) setSidePanel('conversations');
     return;
   }
@@ -3275,7 +3341,9 @@ function updateActiveBtn() {
   side.classList.toggle('work', working);
   side.classList.toggle('unread', unread.length > 0);
   side.dataset.unread = unread.length ? String(unread.length) : '';
-  if (sideLayoutOn()) paintRailBadges({ unread: unread.length, working: activeRuns.size > 0 || sessions.some(isWorking), notifications: runningJobs });
+  if (sideLayoutOn()) paintRailBadges({ unread: unread.length,
+    working: [...activeRuns.values()].some(r => scopeIncludesSession(sessions.find(s => s.key === (r.fanoutRootKey || r.key)))) || sessions.some(s => scopeIncludesSession(s) && isWorking(s)) || agentsProcs.some(p => p.busy === true && scopeIncludesProcess(p)),
+    traffic: agentsProcs.filter(scopeIncludesProcess).length, notifications: runningJobs });
 }
 
 // The panel is built from LIVE client state — sessions (mtimes), runningKeys
@@ -3339,21 +3407,114 @@ function paintTreeDelegations() {
 }
 document.addEventListener('visibilitychange', () => delegationUI.visibilityChanged());
 // Every section of the panel folds, and the fold is remembered on this
-// device. The two "recent" sections also remember their scope: the current
-// project, or everything.
+// device. Project scope is a separate, explicit workspace choice.
 const AGENT_SEC_KEY = 'aiconvo.agentSections.v1';
 let agentSecState = {};
 try { agentSecState = JSON.parse(localStorage.getItem(AGENT_SEC_KEY) || '{}') || {}; } catch {}
 function saveAgentSecState() { try { localStorage.setItem(AGENT_SEC_KEY, JSON.stringify(agentSecState)); } catch {} }
 const agentSecOpen = id => agentSecState['fold:' + id] !== true;
-const agentSecScope = id => agentSecState['scope:' + id] === 'project' ? 'project' : 'all';
 const recentFileActor = () => ['agent', 'both'].includes(agentSecState['files:actor']) ? agentSecState['files:actor'] : 'human';
+// Long sidebar lists grow as they are scrolled; no fixed last row at eight.
+const PANEL_PAGE_SIZE = 100;
+const panelListLimits = new Map();
+function panelListRows(id, rows) { return rows.slice(0, panelListLimits.get(id) || PANEL_PAGE_SIZE); }
+function panelListMore(id, total) {
+  const shown = Math.min(total, panelListLimits.get(id) || PANEL_PAGE_SIZE);
+  return shown < total ? `<button type="button" class="panel-more" data-panel-more="${id}">Show more · ${total - shown} remaining</button>` : '';
+}
+function expandPanelList(id) {
+  panelListLimits.set(id, (panelListLimits.get(id) || PANEL_PAGE_SIZE) + PANEL_PAGE_SIZE);
+  renderAgentsPop(false);
+}
+
+let sidebarProjectCatalog = [], sidebarProjectCatalogRequest = null, sidebarProjectCatalogError = '';
+let sidebarProjectQuery = '';
+const sidebarProjectSort = () => SidebarProjects.MODES.includes(agentSecState.projectSort) ? agentSecState.projectSort : 'recent';
+const sidebarProjectStats = Object.create(null);
+let sidebarProjectStatsRequest = { signature: '', busy: false, error: '' };
+function sidebarProjectRows() {
+  return SidebarProjects.build(sessions, projectFolds.created || [], sidebarProjectCatalog, projectOf, LOOSE_PROJECT, recentFilesList);
+}
+function loadSidebarProjectCatalog() {
+  if (sidebarProjectCatalogRequest) return sidebarProjectCatalogRequest;
+  sidebarProjectCatalogRequest = (async () => {
+    try {
+      const r = await fetch('/api/projects/memory-index');
+      if (!r.ok) throw new Error('Could not load project details');
+      const data = await r.json();
+      sidebarProjectCatalog = Array.isArray(data.projects) ? data.projects : [];
+      sidebarProjectCatalogError = '';
+    } catch (error) { sidebarProjectCatalogError = error.message; }
+    finally { sidebarProjectCatalogRequest = null; renderAgentsPopSoon(); }
+  })();
+  return sidebarProjectCatalogRequest;
+}
+function ensureSidebarProjectStats(rows) {
+  const mode = sidebarProjectSort();
+  if (sidebarProjectCatalogRequest || (mode !== 'born' && mode !== 'size')) return;
+  const paths = [...new Set(rows.map(r => r.cwd).filter(Boolean))].sort();
+  const signature = mode + JSON.stringify(paths);
+  if (sidebarProjectStatsRequest.signature === signature) return;
+  const request = sidebarProjectStatsRequest = { signature, busy: true, error: '' };
+  (async () => {
+    try {
+      const stats = {};
+      // The endpoint accepts at most 500 paths. Larger catalogs stay complete.
+      for (let i = 0; i < paths.length; i += 500) {
+        const response = await fetch('/api/projects/stats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths: paths.slice(i, i + 500), size: mode === 'size' }) });
+        if (!response.ok) throw new Error('Folder measurements are unavailable');
+        Object.assign(stats, (await response.json()).stats || {});
+      }
+      for (const row of rows) {
+        const measured = stats[row.cwd];
+        if (!measured) continue;
+        const previous = sidebarProjectStats[row.name] || {};
+        sidebarProjectStats[row.name] = { born: measured.born ?? previous.born, size: measured.size ?? previous.size };
+      }
+    } catch (error) { request.error = error.message; }
+    finally { request.busy = false; renderAgentsPopSoon(); }
+  })();
+}
+function renderSidebarProjects() {
+  const pop = $('agentsPop'), scroll = pop.scrollTop;
+  const focus = document.activeElement;
+  const focusId = focus?.id;
+  const selection = focusId === 'sidebarProjectQuery' ? [focus.selectionStart, focus.selectionEnd] : null;
+  const rows = sidebarProjectRows(), sort = sidebarProjectSort();
+  ensureSidebarProjectStats(rows);
+  const matches = SidebarProjects.select(rows, { query: sidebarProjectQuery, sort, stats: sidebarProjectStats });
+  const options = [['recent', 'Recent activity'], ['name', 'Name'], ['count', 'Conversation count'], ['born', 'Folder date'], ['size', 'Disk size']];
+  const now = Date.now();
+  const active = viewKind === 'project' ? projectOverviewName : panelProjectName();
+  const list = panelListRows('projects', matches).map(p => {
+    const st = sidebarProjectStats[p.name] || {};
+    let metric = p.latest ? tinyAge(now - p.latest) : 'no activity';
+    if (sort === 'size') metric = Number.isFinite(st.size) ? (st.size < 1024 ? st.size + ' B' : st.size < 1024 ** 2 ? (st.size / 1024).toFixed(1) + ' KB' : st.size < 1024 ** 3 ? (st.size / 1024 ** 2).toFixed(1) + ' MB' : (st.size / 1024 ** 3).toFixed(1) + ' GB') : 'not measured';
+    if (sort === 'born') metric = st.born > 0 ? new Date(st.born).toLocaleDateString() : 'date unavailable';
+    return `<button type="button" class="ag-row panel-project${p.name === active ? ' current' : ''}" data-open-project="${esc(p.name)}" title="${esc(p.name + (p.cwd ? '\n' + p.cwd : ''))}"${p.name === active ? ' aria-current="page"' : ''}><span class="ag-main"><span class="ag-title"><span>${esc(p.title || p.name)}</span></span><span class="ag-sub"><span class="ag-dir">${p.count} ${p.count === 1 ? 'conversation' : 'conversations'}${p.title && p.title !== p.name ? ' · ' + esc(p.name) : ''}</span><span class="ag-age">${esc(metric)}</span></span></span></button>`;
+  }).join('');
+  const statsStatus = ['born', 'size'].includes(sort) ? sidebarProjectStatsRequest : null;
+  const error = sidebarProjectCatalogError || statsStatus?.error;
+  $('agentsUnread').innerHTML = `<div class="panel-title">Projects</div><div class="panel-project-controls"><input id="sidebarProjectQuery" type="search" aria-label="Search projects" placeholder="Find a project" value="${esc(sidebarProjectQuery)}"><select id="sidebarProjectSort" aria-label="Sort projects">${options.map(([v, label]) => `<option value="${v}"${sort === v ? ' selected' : ''}>${label}</option>`).join('')}</select><div class="panel-project-status" role="status">${matches.length} ${matches.length === 1 ? 'project' : 'projects'}${statsStatus?.busy ? ' · measuring folders…' : ''}</div>${error ? `<div class="ag-empty">${esc(error)} <button type="button" data-project-retry>Retry</button></div>` : ''}</div><div class="panel-project-list">${list || '<div class="ag-empty">No matching projects.</div>'}${panelListMore('projects', matches.length)}</div>`;
+  $('agentsLegacy').innerHTML = '';
+  $('sidebarProjectQuery').oninput = e => { sidebarProjectQuery = e.target.value; panelListLimits.delete('projects'); pop.scrollTop = 0; renderSidebarProjects(); };
+  $('sidebarProjectSort').onchange = e => { agentSecState.projectSort = e.target.value; saveAgentSecState(); panelListLimits.delete('projects'); pop.scrollTop = 0; renderSidebarProjects(); };
+  pop.scrollTop = scroll;
+  if (focusId === 'sidebarProjectQuery' || focusId === 'sidebarProjectSort') {
+    $(focusId)?.focus({ preventScroll: true });
+    if (selection) $('sidebarProjectQuery').setSelectionRange(...selection);
+  }
+}
+
 // The rail's second level: one section shown at a time in the side panel.
-const SIDE_PANELS = ['conversations', 'files', 'traffic', 'notifications'];
+const SIDE_PANELS = ['projects', 'conversations', 'files', 'traffic', 'inbox'];
+if (agentSecState.panel === 'notifications') agentSecState.panel = 'inbox';
 const sidePanel = () => SIDE_PANELS.includes(agentSecState.panel) ? agentSecState.panel : 'conversations';
 function setSidePanel(id, { remember = true } = {}) {
   if (!SIDE_PANELS.includes(id)) return;
+  if (id !== sidePanel()) $('agentsPop').scrollTop = 0;
   agentSecState.panel = id;
+  if (id === 'projects') loadSidebarProjectCatalog();
   if (remember) saveAgentSecState();
   paintSideRail();
   renderAgentsPop(false);
@@ -3369,7 +3530,11 @@ function paintSideRail() {
   machine.title = (host ? 'This is ' + host : 'This machine') + (others ? ' — switch to another aiconvo machine' : ' — connect other machines under settings → machines');
   machine.setAttribute('aria-label', machine.title);
 }
-function paintRailBadges({ unread = 0, working = false, traffic = 0, notifications = 0 } = {}) {
+const railBadgeState = { unread: 0, working: false, traffic: 0, notifications: 0 };
+const showRailCounts = () => agentSecState.railCounts === true;
+function paintRailBadges(patch = {}) {
+  Object.assign(railBadgeState, patch);
+  const { unread, working, traffic, notifications } = railBadgeState;
   const set = (id, value, tone) => {
     const badge = document.querySelector(`#sideRail [data-rail="${id}"] .rail-badge`);
     if (!badge) return;
@@ -3377,18 +3542,55 @@ function paintRailBadges({ unread = 0, working = false, traffic = 0, notificatio
     badge.classList.toggle('dot', tone === 'dot');
     badge.textContent = tone === 'dot' ? '' : String(value);
   };
-  set('conversations', unread, 'count');
-  set('traffic', working ? 1 : 0, 'dot');
-  set('notifications', notifications, 'count');
+  set('conversations', 0, 'count');
+  set('traffic', showRailCounts() ? traffic : working ? 1 : 0, showRailCounts() ? 'count' : 'dot');
+  const attention = unread || notifications || agentsRecovery.interrupted.length;
+  set('inbox', showRailCounts() && unread ? unread : attention ? 1 : 0, showRailCounts() && unread ? 'count' : 'dot');
 }
 function toggleAgentSec(id) { agentSecState['fold:' + id] = agentSecOpen(id); saveAgentSecState(); renderAgentsPop(false); }
-// Chats and files share one project scope: what you are working in.
-function setAgentSecScope(id, scope) { agentSecState['scope:' + (id === 'files' ? 'recent' : id)] = scope; saveAgentSecState(); renderAgentsPop(false); }
-// The project the panel means by "this project": the open conversation's,
-// or the project page's. Empty on home and elsewhere.
-function panelProjectName() {
-  const name = currentProjectName() || (viewKind === 'project' && projectOverviewName) || (fileWs && fileWs.project) || '';
-  return name && name !== '?' && name !== LOOSE_PROJECT ? name : '';
+// Scope is a browsing choice, not a guess based on the last open chat.
+const workspaceScope = () => ProjectScope.normalize(agentSecState.projectScope, projectFolds.map);
+const panelProjectName = workspaceScope;
+const scopeIncludes = project => ProjectScope.contains(workspaceScope(), project, projectFolds.map);
+const scopeIncludesSession = session => scopeIncludes(session ? projectOf(session) : null);
+function scopeFileProject(file) { return ProjectScope.fileProject(file, sidebarProjectRows(), projectFolds.map); }
+function scopeIncludesProcess(process) {
+  const session = process.key && sessions.find(s => s.key === process.key);
+  if (session) return scopeIncludes(projectOf(session));
+  if (process.cwd) {
+    const inferred = scopeFileProject({ path: process.cwd });
+    if (inferred !== LOOSE_PROJECT || looseCwd(process.cwd)) return scopeIncludes(inferred);
+  }
+  // An untracked process with no recognized project is unknown, not proof
+  // that it belongs to the No project collection. Show it only in All.
+  return scopeIncludes(null);
+}
+let restoringScopeEntry = null;
+function setWorkspaceScope(project, { stamp = true } = {}) {
+  const next = ProjectScope.normalize(project, projectFolds.map);
+  const changed = next !== workspaceScope();
+  agentSecState.projectScope = next;
+  saveAgentSecState();
+  if (stamp && nav.current()?.id === navShownId) nav.rememberScope(navShownId, next);
+  if (changed) {
+    panelListLimits.clear();
+    if (!['inbox', 'projects'].includes(sidePanel())) $('agentsPop').scrollTop = 0;
+  }
+  renderSideNew(); renderAgentsPopSoon(); updateActiveBtn();
+}
+function adoptWorkspaceProject(project, { select = false, stamp = false } = {}) {
+  setWorkspaceScope(ProjectScope.afterNavigation(workspaceScope(), project, { select, folds: projectFolds.map }), { stamp });
+}
+function chooseWorkspaceProject(project) {
+  // Changing scope never calls the conversation-assignment endpoint.
+  if (!project) return setWorkspaceScope('');
+  return showProjectOverview(project);
+}
+const inboxTab = () => ['read', 'jobs'].includes(agentSecState.inboxTab) ? agentSecState.inboxTab : 'unread';
+function setInboxTab(tab) {
+  if (!['unread', 'read', 'jobs'].includes(tab)) return;
+  agentSecState.inboxTab = tab; saveAgentSecState();
+  $('agentsPop').scrollTop = 0; renderAgentsPop(false);
 }
 // Short age: 40s, 12m, 3h, 2d. Sits at the end of the second line.
 function tinyAge(ms) {
@@ -3396,13 +3598,10 @@ function tinyAge(ms) {
   if (ms < 60000) return Math.max(1, Math.round(ms / 1000)) + 's';
   return ago(ms);
 }
-function agentSecHtml(id, label, body, { count = null, scope = null, empty = '', cls = '' } = {}) {
+function agentSecHtml(id, label, body, { count = null, empty = '', cls = '' } = {}) {
   const open = agentSecOpen(id);
-  const scopeHtml = scope ? `<span class="ag-scope" data-scope-of="${id}" title="${esc(scope.project ? 'Only ' + scope.project + ', or everything' : 'Open a conversation to narrow this to its project')}">` +
-    `<button data-scope="project" class="${scope.value === 'project' ? 'on' : ''}"${scope.project ? '' : ' disabled'}>${esc(scope.project || 'project')}</button>` +
-    `<button data-scope="all" class="${scope.value === 'all' ? 'on' : ''}">all</button></span>` : '';
   return `<div class="ag-section ${cls}" data-sec="${id}"><div class="ag-sec" data-sec-head="${id}" role="button" aria-expanded="${open}">` +
-    `<span class="ag-sec-label">${esc(label)}${count != null && !open ? ` <span class="ag-sec-n">· ${count}</span>` : ''}</span>${open ? scopeHtml : ''}</div>` +
+    `<span class="ag-sec-label">${esc(label)}${count != null && !open ? ` <span class="ag-sec-n">· ${count}</span>` : ''}</span></div>` +
     `<div class="ag-sec-body"${open ? '' : ' hidden'}>${body || (empty ? `<div class="ag-empty">${esc(empty)}</div>` : '')}</div></div>`;
 }
 function renderAgentsPopSoon() {
@@ -3421,11 +3620,19 @@ async function renderAgentsPop(refetch) {
       if (d.recovery) agentsRecovery = d.recovery;
     } catch {}
     if (pop.hidden) return;
+    if (sideLayoutOn() && sidePanel() === 'projects') loadSidebarProjectCatalog();
+  }
+  if (sideLayoutOn()) paintRailBadges({ traffic: agentsProcs.filter(scopeIncludesProcess).length });
+  if (sideLayoutOn() && sidePanel() === 'projects') {
+    pop.dataset.panel = 'projects';
+    renderSidebarProjects();
+    return;
   }
   const now = Date.now();
   const delegationIndex = delegationUI.index();
   const byKey = k => sessions.find(s => s.key === k);
   const busyNow = agentBusyKeys();
+  const project = workspaceScope(), scoped = !!project;
   // One row per orchestration, not one per worker. Workers fold under the
   // conversation that launched them; that row shows progress and expands on
   // request. A worker gets its own top-level row only when it is unread and
@@ -3457,6 +3664,7 @@ async function renderAgentsPop(refetch) {
   const childRows = (ids, depth) => ids.map(id => {
     const t = delegationIndex.byId.get(id); if (!t) return '';
     const s = t.key ? byKey(t.key) : null;
+    if (sideLayoutOn() && sidePanel() === 'traffic' && !scopeIncludesSession(s)) return childRows(delegationIndex.children.get(id) || [], depth);
     const unread = !!(s && agentUnreadAt(s)), live = DelegationUI.isLive(t);
     const kids = delegationIndex.children.get(id) || [];
     const note = attentionNote(t) || (t.error ? String(t.error).slice(0, 80) : t.role || '');
@@ -3499,13 +3707,13 @@ async function renderAgentsPop(refetch) {
   // The second line names the project (a delegated worker: its parent). A
   // list already scoped to one project has no second line: the time moves
   // to the end of the title line.
-  const projectLabel = s => { const p = s ? projectOf(s) : ''; return p && p !== '?' ? (p === LOOSE_PROJECT ? shortDir((s && s.cwd) || '') : p) : ''; };
+  const projectLabel = s => { const p = s ? projectOf(s) : ''; return p && p !== '?' ? ProjectScope.label(p) : ''; };
   const row = (s, key, status, pid, readState = '', working = false, { dir } = {}) => {
     const acts = (delegatedBy.has(key) ? '' : kill(pid, rowTitle(s))) + more(s, key);
     const o = orchestration(key);
-    const sub = dir === false ? '' : (dir || origin(key) || projectLabel(s));
+    const sub = dir === false ? '' : (dir || [projectLabel(s), origin(key)].filter(Boolean).join(' · '));
     const ageHtml = `<span class="ag-age">${esc(status)}</span>`;
-    return `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}${key && key === activeRel ? ' current' : ''}" data-key="${esc(key || '')}">` +
+    return `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}${key && key === activeRel && ['conversation', 'tree'].includes(viewKind) ? ' current' : ''}" data-key="${esc(key || '')}">` +
       `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}"><span>${esc(rowTitle(s))}</span>${key ? presenceSlotHtml(key) : ''}${s ? participantsHtml(s) : ''}${sub || o.badge ? '' : ageHtml}</span>` +
       (sub || o.badge ? `<span class="ag-sub"><span class="ag-dir">${esc(sub)}</span>${o.badge}${ageHtml}</span>` : '') + `</span>` +
       (acts ? `<span class="ag-acts">${acts}</span>` : '') + `</div>` + o.children;
@@ -3518,7 +3726,7 @@ async function renderAgentsPop(refetch) {
     if (!webGroups.has(id)) webGroups.set(id, []);
     webGroups.get(id).push(r);
   }
-  const webRuns = [...webGroups.values()].map(rs => {
+  const webRuns = [...webGroups.values()].filter(rs => scopeIncludesSession(byKey(rs[0].fanoutRootKey || rs[0].key))).map(rs => {
     const first = rs[0], key = first.fanoutRootKey || first.key;
     // Child RPC processes belong to this one parallel turn. Claim them so
     // they do not reappear as separate "other agents" rows below.
@@ -3528,7 +3736,7 @@ async function renderAgentsPop(refetch) {
       : (first.statusText || 'working…').slice(0, 18);
     return row(byKey(key), key, status, null, '', true);
   });
-  const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) }));
+  const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) })).filter(t => scopeIncludesSession(t.s));
   const termWork = termRows.filter(t => t.s && isActive(t.s));
   const termIdle = termRows.filter(t => !t.s || !isActive(t.s));
   const termStatus = t => {
@@ -3539,42 +3747,39 @@ async function renderAgentsPop(refetch) {
   const unread = finishedUnreadSessions();
   const unreadKeys = new Set(unread.map(s => s.key));
   const unreadStatus = s => (agentIsFlagged(s) ? 'marked · ' : '') + age(s);
-  // Pinned conversations have a section of their own; each shows its live
-  // state there and leaves the unread and read sections (one inbox row per
-  // conversation). The process sections below still list it while it works.
-  const pinned = pinnedSessions();
+  // Pins belong to the scoped chat browser. Pinning never removes a reply
+  // from the machine-wide Inbox.
+  const pinned = pinnedSessions().filter(scopeIncludesSession);
   const pinnedKeys = new Set(pinned.map(s => s.key));
   const pinnedSec = pinned.map(s => {
     const working = busyNow.has(s.key);
     const isUnread = unreadKeys.has(s.key);
     const readAt = Number(agentReadState.read[s.key]) || 0;
     const status = isUnread ? unreadStatus(s) : s.mtimeMs ? age(s) : readAt ? tinyAge(now - readAt) : '';
-    return row(s, s.key, status, null, isUnread ? 'unread' : agentIsRead(s) ? 'read' : '', working);
+    return row(s, s.key, status, null, isUnread ? 'unread' : agentIsRead(s) ? 'read' : '', working, { dir: scoped ? false : undefined });
   }).join('');
-  const unreadSec = unread.filter(s => !pinnedKeys.has(s.key)).map(s => row(s, s.key, unreadStatus(s), null, 'unread')).join('');
+  const unreadSec = unread.map(s => row(s, s.key, unreadStatus(s), null, 'unread')).join('');
   // "Writing" claims only sessions with a busy live process behind them. A
   // warm web process at the prompt is not work and must not hide a result.
-  const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key) && !delegatedBy.has(s.key)
-      && procByKey.has(s.key) && procByKey.get(s.key).busy !== false && !unreadKeys.has(s.key))
+  const writing = sessions.filter(s => scopeIncludesSession(s) && isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key) && !delegatedBy.has(s.key)
+      && procByKey.has(s.key) && procByKey.get(s.key).busy !== false)
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const writeStatus = s => {
     const p = procByKey.get(s.key);
     return (p ? 'pid ' + p.pid + ' · ' : '') + tinyAge(now - s.mtimeMs);
   };
   const interruptedKeys = new Set(agentsRecovery.interrupted.map(r => r.key));
-  const claimed = new Set([...runningKeys, ...webKeys, ...writing.map(s => s.key), ...unreadKeys, ...interruptedKeys]);
-  // A result moves into the read section immediately after it opens. Keep a
-  // newly read old result here for one hour, instead of making it disappear.
+  const claimed = new Set([...runningKeys, ...webKeys, ...writing.map(s => s.key), ...interruptedKeys]);
+  // Inbox Read is explicit read history, independent of project and pinning.
   const recent = sessions.filter(s => {
-    if (!agentIsRead(s) || claimed.has(s.key) || delegatedBy.has(s.key) || pinnedKeys.has(s.key) || agentIsDismissed(s)) return false;
-    const readAt = Number(agentReadState.read[s.key]) || 0;
-    return (s.mtimeMs && now - s.mtimeMs < 3600000) || (readAt && now - readAt < 3600000);
+    if (!agentIsRead(s) || delegatedBy.has(s.key) || agentIsDismissed(s)) return false;
+    // Read history means an actual receipt, not just the first-use guard.
+    return (Number(agentReadState.read[s.key]) || 0) > 0;
   }).sort((a, b) => Math.max(Number(agentReadState.read[b.key]) || 0, b.mtimeMs || 0)
-    - Math.max(Number(agentReadState.read[a.key]) || 0, a.mtimeMs || 0)).slice(0, 15);
+    - Math.max(Number(agentReadState.read[a.key]) || 0, a.mtimeMs || 0));
   // Orchestrations with live workers whose launching conversation has no row
   // above: one row per orchestration, with its progress and expandable tree.
-  const recentKeys = new Set(recent.map(s => s.key));
-  const delegatedSec = [...orchestrations.keys()].filter(k => orchProgress.get(k).live && !(claimed.has(k) || recentKeys.has(k))).map(k => {
+  const delegatedSec = [...orchestrations.keys()].filter(k => scopeIncludesSession(byKey(k)) && orchProgress.get(k).live && !claimed.has(k)).map(k => {
     if (!k) {
       const o = orchestration('');
       return `<div class="ag-row working off" data-key="">` +
@@ -3584,13 +3789,14 @@ async function renderAgentsPop(refetch) {
     const p = orchProgress.get(k);
     return row(byKey(k), k, p.live + ' working', null, '', true);
   }).join('');
+  const crossProjectWorkers = scoped ? [...delegatedBy.values()].filter(t => t.key && DelegationUI.isLive(t) && scopeIncludesSession(byKey(t.key)) && !scopeIncludesSession(byKey(t.parentKey)) && !claimed.has(t.key)).map(t => row(byKey(t.key), t.key, 'working', null, '', true)).join('') : '';
   const webSec = webRuns.join('');
   const workSec = termWork.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k), '', true)).join('');
   const idleSec = termIdle.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
   const writeSec = writing.map(s => row(s, s.key, writeStatus(s), (procByKey.get(s.key) || {}).pid, '', true)).join('');
   // Leftovers: processes no row above claimed — idle warm RPC sessions on
   // other conversations, server children, and untracked strays.
-  const others = agentsProcs.filter(p => !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !unreadKeys.has(p.key) && !interruptedKeys.has(p.key));
+  const others = agentsProcs.filter(p => scopeIncludesProcess(p) && !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !interruptedKeys.has(p.key));
   const otherSec = others.map(p => `<div class="ag-row${p.busy === true ? ' working' : ''}" data-key="${esc(p.key || '')}">` +
     `<span class="ag-main"><span class="ag-title"><span>${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span></span>` +
     `<span class="ag-sub"><span class="ag-dir">${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(tinyAge(p.ageMs)) : ''}</span>` +
@@ -3601,6 +3807,7 @@ async function renderAgentsPop(refetch) {
   const focusedAction = document.activeElement?.dataset?.recoveryAction;
   const recoveryToggleFocused = document.activeElement?.id === 'agentAutoResume';
   const focusedFileActor = document.activeElement?.dataset?.filesActor;
+  const focusedInboxTab = document.activeElement?.dataset?.inboxTab;
   const interruptedSec = agentsRecovery.interrupted.map(r => `<div class="ag-row ag-interrupted" data-key="${esc(r.key)}">
     <span class="ag-main"><span class="ag-title">${esc(rowTitle(byKey(r.key)) === '(untitled)' ? r.title : rowTitle(byKey(r.key)))}</span>
     <span class="ag-dir">${esc(r.kind === 'network' ? 'Likely connection problem' : r.kind === 'stopped' ? 'Stopped' : 'Needs attention')} · ${esc(secs(now - r.createdAt))} ago</span>
@@ -3613,32 +3820,29 @@ async function renderAgentsPop(refetch) {
     `<label class="ag-recovery-setting"><input id="agentAutoResume" type="checkbox"${agentsRecovery.enabled ? ' checked' : ''}> Resume connection failures automatically</label>` +
     `<div class="ag-recovery-help">${network.checkedAt ? esc(network.host + (network.state === 'reachable' ? ' reachable' : ' not reachable') + ' · checked ' + secs(now - network.checkedAt) + ' ago') + '. ' : ''}Checks run on the host laptop/server, even with this panel closed. Two successful checks before resuming. At most 3 attempts, within 24 hours. Deliberate stops and other errors stay stopped. Continuing can repeat work; check any uncertain results.</div></details>` : '';
   const notificationsSec = jobsNotificationsHtml();
-  // "recent": conversations a person last wrote in, then file activity.
-  // One group/fold/project scope; the file-source filter is independent.
-  // In project scope rows are one line.
-  const project = panelProjectName();
-  const scope = { value: project && agentSecScope('recent') === 'project' ? 'project' : 'all', project };
-  const scoped = scope.value === 'project';
-  const listed = new Set([...pinnedKeys, ...unreadKeys, ...recent.map(s => s.key)]);
-  const wrote = sessions.filter(s => s.lastUserTs && !listed.has(s.key) && !delegatedBy.has(s.key) && (!scoped || projectOf(s) === project))
-    .sort((a, b) => Date.parse(b.lastUserTs) - Date.parse(a.lastUserTs)).slice(0, 8);
-  const wroteSec = wrote.map(s => row(s, s.key, tinyAge(now - Date.parse(s.lastUserTs)), null, '', busyNow.has(s.key), { dir: scoped ? false : undefined })).join('');
-  const fileProject = f => f.project || projectOf({ cwd: f.path.slice(0, f.path.lastIndexOf('/')) });
+  // Browsing lists share the explicit scope. Inbox state never removes a
+  // conversation from Chats: an unread/read chat still belongs to its project.
+  const listed = pinnedKeys;
+  const wrote = sessions.filter(s => s.lastUserTs && !listed.has(s.key) && !delegatedBy.has(s.key) && scopeIncludesSession(s))
+    .sort((a, b) => Date.parse(b.lastUserTs) - Date.parse(a.lastUserTs));
+  const wroteSec = panelListRows('recent', wrote).map(s => row(s, s.key, tinyAge(now - Date.parse(s.lastUserTs)), null, agentUnreadAt(s) ? 'unread' : '', busyNow.has(s.key), { dir: scoped ? false : undefined })).join('') + panelListMore('recent', wrote.length);
+  const directory = sidebarProjectRows();
+  const fileProject = f => ProjectScope.fileProject(f, directory, projectFolds.map);
   const fileActor = recentFileActor();
-  const files = RecentFiles.select(recentFilesList, { actor: fileActor, project: scoped ? project : '', projectOf: fileProject });
-  const filesSec = files.map(f => {
+  const files = RecentFiles.select(recentFilesList, { actor: fileActor, project, projectOf: fileProject, limit: Infinity });
+  const filesSec = panelListRows('files', files).map(f => {
     const name = f.path.split('/').pop();
-    const dir = scoped ? '' : fileProject(f) || shortDir(f.path.slice(0, -name.length - 1));
+    const dir = scoped ? '' : ProjectScope.label(fileProject(f));
     const verb = f.kind === 'written' ? 'wrote' : f.kind;
     const actorLabel = f.actor === 'agent' ? 'agent' : 'human';
     const ageHtml = `<span class="ag-age">${esc((fileActor === 'both' ? actorLabel + ' · ' : '') + verb + ' ' + tinyAge(now - f.at))}</span>`;
-    return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(f.project || '')}" data-file-conv="${esc(f.key || '')}" title="${esc(f.path + '\n' + actorLabel + ' · ' + verb + ' · ' + new Date(f.at).toLocaleString())}">` +
+    return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(fileProject(f) === LOOSE_PROJECT ? '' : fileProject(f))}" data-file-conv="${esc(f.key || '')}" title="${esc(f.path + '\n' + actorLabel + ' · ' + verb + ' · ' + new Date(f.at).toLocaleString())}">` +
       `<span class="ag-main"><span class="ag-title"><span>${esc(name)}</span>${dir ? '' : ageHtml}</span>` +
       (dir ? `<span class="ag-sub"><span class="ag-dir">${esc(dir)}</span>${ageHtml}</span>` : '') + `</span>` +
       `<span class="ag-acts"><button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
-  }).join('');
-  const readSec = recent.map(s => row(s, s.key, age(s), null, 'read')).join('');
-  const traffic = webSec + workSec + writeSec + delegatedSec + idleSec + otherSec;
+  }).join('') + panelListMore('files', files.length);
+  const readSec = panelListRows('read', recent).map(s => row(s, s.key, age(s), null, 'read')).join('') + panelListMore('read', recent.length);
+  const traffic = webSec + workSec + writeSec + delegatedSec + crossProjectWorkers + idleSec + otherSec;
   const trafficCount = (traffic.match(/class="ag-row/g) || []).length;
   // Sections in order. Open ones flow from the top; folded ones dock at the
   // bottom with traffic and notifications (column only: the tray has no
@@ -3650,31 +3854,43 @@ async function renderAgentsPop(refetch) {
   const recentConvBody = wroteSec || `<div class="ag-empty">${esc(scoped ? 'nothing written in ' + project + ' yet' : 'nothing written yet')}</div>`;
   const chatSections = [
     pinnedSec ? ['pinned', 'pinned', pinnedSec, { count: pinned.length, cls: 'ag-pinned' }] : null,
-    ['unread', 'unread replies', unreadSec, { count: unread.length, cls: 'ag-unread-tray', empty: 'nothing new' }],
-    readSec ? ['read', 'read replies', readSec, { count: recent.length }] : null,
-    ['recent', 'recent', panel === 'tray' ? recentConvBody + filesBody : recentConvBody, { count: wrote.length, scope }],
+    ['recent', 'recent', recentConvBody, { count: wrote.length }],
   ].filter(Boolean);
   const trafficSection = ['traffic', 'traffic', traffic, { count: trafficCount, cls: 'ag-traffic', dock: true, empty: 'no agent processes right now' }];
-  let flow, dock, tail = '';
+  let flow, dock, tail = '', heading = '';
+  const scopeCaption = `<div class="panel-scope-caption">${esc(ProjectScope.label(project))}</div>`;
   if (panel === 'files') {
-    flow = [['files', 'recent files', filesBody, { count: files.length, scope }]]; dock = [];
+    heading = '<div class="panel-title">Files</div>' + scopeCaption;
+    flow = [['files', 'recent files', filesBody, { count: files.length }]]; dock = [];
   } else if (panel === 'traffic') {
-    flow = [trafficSection]; dock = []; tail = recoverySection;
-  } else if (panel === 'notifications') {
-    const list = [...jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
+    heading = '<div class="panel-title">Agents</div>' + scopeCaption;
+    flow = [trafficSection]; dock = [];
+  } else if (panel === 'inbox') {
+    const tab = inboxTab();
+    heading = '<div class="panel-title">Inbox</div><div class="panel-scope-caption">All projects on this machine</div>' +
+      `<nav class="inbox-tabs" aria-label="Inbox sections">${[['unread', 'Unread' + (unread.length ? ' · ' + unread.length : '')], ['read', 'Read'], ['jobs', 'Jobs']].map(([id, label]) => `<button type="button" data-inbox-tab="${id}" aria-pressed="${tab === id}">${label}</button>`).join('')}</nav>`;
     flow = []; dock = [];
-    tail = `<div class="panel-title">notifications</div><div class="ag-notification-list">${list.map(jobCardHtml).join('') || '<div class="ag-empty">no background jobs yet</div>'}</div>` + recoverySection;
+    if (tab === 'jobs') {
+      const list = [...jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
+      tail = `<div class="ag-notification-list">${list.map(jobCardHtml).join('') || '<div class="ag-empty">No background jobs yet.</div>'}</div>`;
+    } else {
+      tail = `<section data-sec="${tab}"${tab === 'unread' ? ' class="ag-unread-tray"' : ''}><div class="ag-sec-body">${(tab === 'unread' ? unreadSec : readSec) || `<div class="ag-empty">${tab === 'unread' ? 'No unread replies.' : 'No read replies yet.'}</div>`}</div></section>` + (tab === 'unread' ? recoverySection : '');
+    }
   } else {
-    const sections = [...chatSections, ...(traffic ? [trafficSection] : [])];
+    heading = panel === 'tray'
+      ? `<button type="button" class="tray-scope" data-project-scope-picker>${esc(ProjectScope.label(project))} ▾</button>`
+      : '<div class="panel-title">Chats</div>' + scopeCaption;
+    const sections = panel === 'tray' ? [
+      ['unread', 'Inbox · all projects', unreadSec, { count: unread.length, cls: 'ag-unread-tray', empty: 'Nothing new' }],
+      ...(readSec ? [['read', 'Read replies · all projects', readSec, { count: recent.length }]] : []),
+      ...chatSections, ...(traffic ? [trafficSection] : []),
+    ] : chatSections;
     const dockFolded = sideLayoutOn();
     flow = sections.filter(([id, , , o]) => !o.dock && (agentSecOpen(id) || !dockFolded));
     dock = sections.filter(([id, , , o]) => o.dock || (!agentSecOpen(id) && dockFolded));
-    // In the tray everything stays in one place; the column's chats section
-    // sends processes and notifications to their own rail entries.
     if (panel === 'tray') tail = recoverySection + notificationsSec;
-    else { dock = dock.filter(([id]) => id !== 'traffic'); }
   }
-  $('agentsUnread').innerHTML = flow.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('');
+  $('agentsUnread').innerHTML = heading + flow.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('');
   $('agentsLegacy').innerHTML = dock.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('') + tail;
   renderPresenceMarks();
 
@@ -3690,7 +3906,8 @@ async function renderAgentsPop(refetch) {
   };
   pop.scrollTop = st;
   selectAgentRow(agentsSelectedKey, false);
-  if (focusedFileActor) [...pop.querySelectorAll('[data-files-actor]')].find(b => b.dataset.filesActor === focusedFileActor)?.focus({ preventScroll: true });
+  if (focusedInboxTab) [...pop.querySelectorAll('[data-inbox-tab]')].find(b => b.dataset.inboxTab === focusedInboxTab)?.focus({ preventScroll: true });
+  else if (focusedFileActor) [...pop.querySelectorAll('[data-files-actor]')].find(b => b.dataset.filesActor === focusedFileActor)?.focus({ preventScroll: true });
   else if (recoveryToggleFocused) autoResume?.focus({ preventScroll: true });
   else if (focusedRecovery) [...pop.querySelectorAll('[data-recovery-id]')].find(b => b.dataset.recoveryId === focusedRecovery && b.dataset.recoveryAction === focusedAction)?.focus({ preventScroll: true });
 }
@@ -3785,7 +4002,9 @@ function setAgentsKbd(on) {
 function toggleAgents(show) {
   const pop = $('agentsPop');
   if (sideLayoutOn()) {
-    setAgentsKbd(show !== undefined ? show : !agentsKbd);
+    const enter = show !== undefined ? show : !agentsKbd;
+    if (enter) { setSidePanel('inbox'); setInboxTab('unread'); }
+    setAgentsKbd(enter);
     return;
   }
   pop.hidden = show !== undefined ? !show : !pop.hidden;
@@ -3838,17 +4057,24 @@ $('agentsPop').addEventListener('contextmenu', e => {
   openAgentRowMenu(row.dataset.key, e.clientX, e.clientY);
 });
 $('agentsPop').onclick = async e => {
+  const inboxButton = e.target.closest('[data-inbox-tab]');
+  if (inboxButton) { e.stopPropagation(); setInboxTab(inboxButton.dataset.inboxTab); return; }
+  const scopeButton = e.target.closest('[data-project-scope-picker]');
+  if (scopeButton) { e.stopPropagation(); openWorkspaceProjectPicker(scopeButton); return; }
+  const projectButton = e.target.closest('[data-open-project]');
+  if (projectButton) { e.stopPropagation(); showProjectOverview(projectButton.dataset.openProject); return; }
+  const pageButton = e.target.closest('[data-panel-more]');
+  if (pageButton) { e.stopPropagation(); expandPanelList(pageButton.dataset.panelMore); return; }
+  if (e.target.closest('[data-project-retry]')) {
+    e.stopPropagation(); sidebarProjectStatsRequest.signature = '';
+    loadSidebarProjectCatalog(); renderSidebarProjects(); return;
+  }
   const actor = e.target.closest('[data-files-actor]');
   if (actor) {
     e.stopPropagation();
     agentSecState['files:actor'] = actor.dataset.filesActor;
+    panelListLimits.delete('files'); $('agentsPop').scrollTop = 0;
     saveAgentSecState(); renderAgentsPop(false);
-    return;
-  }
-  const scope = e.target.closest('[data-scope]');
-  if (scope) {
-    e.stopPropagation();
-    if (!scope.disabled) setAgentSecScope(scope.closest('[data-scope-of]').dataset.scopeOf, scope.dataset.scope);
     return;
   }
   const head = e.target.closest('[data-sec-head]');
@@ -3925,6 +4151,20 @@ $('agentsPop').onclick = async e => {
   open(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined);
 };
 
+// Load the next page near its button. Closed sections never trigger this;
+// the button remains a keyboard/touch fallback if scrolling isn't available.
+$('agentsPop').addEventListener('scroll', () => {
+  const pop = $('agentsPop');
+  if (pop.hidden) return;
+  const bounds = pop.getBoundingClientRect();
+  const next = [...pop.querySelectorAll('[data-panel-more]')].find(button => {
+    if (!button.checkVisibility()) return false;
+    const r = button.getBoundingClientRect();
+    return r.top <= bounds.bottom + 120 && r.bottom >= bounds.top;
+  });
+  if (next) expandPanelList(next.dataset.panelMore);
+}, { passive: true });
+
 // ---- index + filtering ----
 // The session list is 1–2 MB. Polling it every 30s rebuilt the Gantt even
 // when nothing changed. ETag + 304 keeps RAM and CPU flat on a quiet desk.
@@ -3938,6 +4178,7 @@ function applyProjectFolds(folds) {
   const sig = JSON.stringify([folds.map, folds.created, folds.areas]);
   const changed = sig !== projectFoldsSig;
   projectFoldsSig = sig;
+  if (changed) { renderSideNew(); renderAgentsPopSoon(); }
   return changed;
 }
 
@@ -5095,7 +5336,7 @@ async function openNoteFile(file) {
   const session = sessions.find(s => s.notePath && s.notePath.endsWith('/' + file));
   if (session) {
     activeRel = session.key;
-    setRoute('note', 'note=' + encodeURIComponent(file));
+    setRoute('note', 'note=' + encodeURIComponent(file), { project: projectOf(session), selectScope: sideLayoutOn() && sidePanel() === 'inbox' });
     const related = await relatedFor(session.key);
     noteViewer(n.text, '~/notes/aiconvo/' + n.file, { kind: 'note', key: session.key, related });
   } else {
@@ -6635,6 +6876,7 @@ function wireProjectSwitch(name, root = $('view')) {
 // ---- project overview (design/14-project-overview.md) ----
 let projectOverview = null;
 let projectOverviewName = null;
+let projectOverviewLoadSeq = 0;
 
 // ---- launcher: pi prompt modes + reviewed inline context ----
 // Modes are ModeDef files owned by the modes extension (~/.pi/agent/modes).
@@ -7388,16 +7630,17 @@ function openProjectPicker(key) {
 const openLooseProjectPicker = openProjectPicker;
 
 function showLooseConversations() {
+  projectOverviewLoadSeq++;
   markSettingsClosed();
   lastNavProject = LOOSE_PROJECT;
   projectOverviewName = LOOSE_PROJECT;
-  setRoute('project', 'project=' + encodeURIComponent(LOOSE_PROJECT));
+  setRoute('project', 'project=' + encodeURIComponent(LOOSE_PROJECT), { project: LOOSE_PROJECT, selectScope: true });
   const rows = sessions.filter(s => projectOf(s) === LOOSE_PROJECT)
     .sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || '')));
   const heroRows = rows.map(s => ({ key: s.key, title: s.title || s.timelineTitle || s.key, firstTs: s.firstTs, lastTs: s.lastTs, mtimeMs: s.mtimeMs }));
   $('view').innerHTML = `<div class="project-overview loose-overview">
     ${miniGanttHtml(heroRows)}
-    <div class="ptitle"><h1>${LOOSE_PROJECT}</h1><button id="looseNew" class="primary pnewbtn" title="Start a projectless conversation in your home directory">+ new conversation</button></div>
+    <div class="ptitle"><h1>${ProjectScope.label(LOOSE_PROJECT)}</h1><button id="looseNew" class="primary pnewbtn" title="Start a projectless conversation in your home directory">+ new conversation</button></div>
     <p class="loose-intro">These conversations started without a project. They have no shared memory, files, or Git history. Assign one when it belongs to existing work.</p>
     ${draftListHtml()}
     <div class="loose-tools"><input type="text" id="looseQ" placeholder="filter ${rows.length} conversations" autocomplete="off"><span class="dim" id="looseCount"></span></div>
@@ -7429,12 +7672,14 @@ function showLooseConversations() {
 async function showProjectOverview(name) {
   if (!name) return;
   if (name === LOOSE_PROJECT) return showLooseConversations();
+  const seq = ++projectOverviewLoadSeq;
   markSettingsClosed();
   lastNavProject = name;
   projectOverviewName = name;
-  setRoute('project', 'project=' + encodeURIComponent(name));
+  setRoute('project', 'project=' + encodeURIComponent(name), { project: name, selectScope: true });
   $('view').innerHTML = `<div class="project-overview"><div class="ptitle"><h1>${esc(name)}</h1></div><div class="pmeta">loading project overview…</div></div>`;
   const d = await (await fetch('/api/project?name=' + encodeURIComponent(name))).json();
+  if (seq !== projectOverviewLoadSeq || viewKind !== 'project' || projectOverviewName !== name) return;
   if (d.error) {
     $('view').innerHTML = `<div class="empty">could not open ${esc(name)}.<div class="hint">${esc(d.error)}</div></div>`;
     return;
@@ -7447,12 +7692,14 @@ async function showProjectOverview(name) {
 // ---- area view: the project panel shape, scoped to one declared area ----
 async function showAreaView(project, rel) {
   if (!project || !rel) return;
+  const seq = ++projectOverviewLoadSeq;
   markSettingsClosed();
   lastNavProject = project;
   projectOverviewName = null;
-  setRoute('project', 'project=' + encodeURIComponent(project) + '&area=' + encodeURIComponent(rel));
+  setRoute('project', 'project=' + encodeURIComponent(project) + '&area=' + encodeURIComponent(rel), { project, selectScope: true });
   $('view').innerHTML = `<div class="project-overview"><div class="ptitle"><h1>${esc(project)} / ${esc(rel)}</h1></div><div class="pmeta">loading area…</div></div>`;
   const d = await (await fetch('/api/area?project=' + encodeURIComponent(project) + '&rel=' + encodeURIComponent(rel))).json();
+  if (seq !== projectOverviewLoadSeq || viewKind !== 'project') return;
   if (d.error) {
     $('view').innerHTML = `<div class="empty">could not open the area.<div class="hint">${esc(d.error)}</div></div>`;
     return;
@@ -8101,7 +8348,8 @@ function openMediaLightbox(src, title = 'image') {
   document.body.appendChild(box);
 }
 
-const FILE_IMAGE_PATH = /\.(png|jpe?g|gif|webp)(?::\d+(?::\d+)?)?$/i;
+const FILE_IMAGE_PATH = /\.(png|jpe?g|gif|webp|avif|bmp|ico)(?::\d+(?::\d+)?)?$/i;
+const FILE_PREVIEW_PATH = /\.(png|jpe?g|gif|webp|avif|bmp|ico|mp4|m4v|webm|ogv|mov|pdf)(?::\d+(?::\d+)?)?$/i;
 let fileClickSuppressedUntil = 0;
 
 function fileControlContext(button) {
@@ -8143,7 +8391,7 @@ async function openPathInApp(ctx, quiet = false) {
     openMediaLightbox('/api/path/content?' + query, info.path);
     return true;
   }
-  if (info.preview !== 'text') {
+  if (!['text', 'video', 'pdf'].includes(info.preview)) {
     if (!quiet) errToast('this file has no in-app preview — use the system application');
     return false;
   }
@@ -8176,7 +8424,7 @@ async function copyFullFilePath(ctx) {
 async function primaryFileAction(ctx) {
   // An image change is useful as a picture first. Text changes keep their
   // exact historical diff. The menu always offers the other interpretation.
-  if (ctx.change && !FILE_IMAGE_PATH.test(ctx.path)) return viewFileChange(ctx);
+  if (ctx.change && !FILE_PREVIEW_PATH.test(ctx.path)) return viewFileChange(ctx);
   const opened = await openPathInApp(ctx, ctx.change);
   if (!opened && ctx.change) viewFileChange(ctx);
 }
@@ -8195,11 +8443,11 @@ function openFileActionMenu(ctx, x, y) {
   const menu = document.createElement('div');
   menu.className = 'file-action-menu';
   menu.setAttribute('role', 'menu');
-  const image = FILE_IMAGE_PATH.test(ctx.path);
+  const image = FILE_IMAGE_PATH.test(ctx.path), preview = FILE_PREVIEW_PATH.test(ctx.path);
   const items = [];
-  if (ctx.change && !image) items.push(['View this change', () => viewFileChange(ctx)]);
+  if (ctx.change && !preview) items.push(['View this change', () => viewFileChange(ctx)]);
   items.push([image ? 'Open image in aiconvo' : 'Open current file in aiconvo', () => openPathInApp(ctx)]);
-  if (ctx.change && image) items.push(['View this change', () => viewFileChange(ctx)]);
+  if (ctx.change && preview) items.push(['View this change', () => viewFileChange(ctx)]);
   items.push(['Open with system application', () => runNativePathAction(ctx, 'open')]);
   items.push(['Show in folder', () => runNativePathAction(ctx, 'reveal')]);
   items.push(['Copy full path', () => copyFullFilePath(ctx)]);
@@ -8272,7 +8520,7 @@ document.addEventListener('pointerover', e => {
   const b = e.target && e.target.closest ? e.target.closest('[data-file-diff], [data-transcript-path]') : null;
   if (!b || b.dataset.fileHinted) return;
   const ctx = fileControlContext(b);
-  b.title = `${ctx.change ? (FILE_IMAGE_PATH.test(ctx.path) ? 'Click: preview image' : 'Click: view this change') : 'Click: open in aiconvo'}\nCtrl-click: open with system application\nRight-click: more file actions\n${ctx.path}`;
+  b.title = `${ctx.change ? (FILE_PREVIEW_PATH.test(ctx.path) ? 'Click: preview file' : 'Click: view this change') : 'Click: open in aiconvo'}\nCtrl-click: open with system application\nRight-click: more file actions\n${ctx.path}`;
   b.dataset.fileHinted = '1';
 });
 
@@ -9189,20 +9437,72 @@ async function refreshCtxMeter(d) {
 // ---- reasoning level (pi thinking) ----
 // The button left of the model picker shows the level that serves the next
 // reply — read from the session's own thinking_level_change entries. Click
-// or shift+tab cycles through the model's available levels; pi persists the
-// change natively, so the terminal and resumes inherit it.
+// chooses a level; Shift+Tab remains a cycling shortcut. The runtime persists
+// the change so terminal continuations and resumes inherit it.
 const thinkLevels = new Map(); // conversation key → 'off' | 'minimal' | … | 'max'
 function paintThinkBtn() {
   const btn = $('agentThink');
   if (!btn) return;
   const lvl = thinkLevels.get(activeRel);
-  btn.textContent = '∴ ' + (lvl || '?');
+  btn.textContent = '∴ ' + (lvl || 'thinking') + ' ▾';
   btn.title = (lvl
     ? 'Reasoning for the next reply: ' + lvl + '.'
-    : 'Reasoning level not known yet.') + ' Click or Shift+Tab to cycle.';
+    : 'Reasoning level not known yet.') + ' Click to choose a level. Shift+Tab cycles.';
+  btn.setAttribute('aria-label', 'Thinking level: ' + (lvl || 'not known yet'));
+  btn.setAttribute('aria-haspopup', 'menu');
   btn.hidden = false;
 }
-async function cycleThinking() {
+let thinkingPickerClose = null;
+function showThinkingPicker(anchor, { levels, current: selected, note, onPick }) {
+  if (thinkingPickerClose) thinkingPickerClose();
+  document.querySelectorAll('.mpick').forEach(el => el.remove());
+  const pop = document.createElement('div');
+  pop.className = 'mpick thinking-picker';
+  pop.setAttribute('role', 'menu');
+  pop.setAttribute('aria-label', 'Thinking level');
+  pop.innerHTML = `<div class="mp-list">${levels.map(level => `<button type="button" role="menuitemradio" aria-checked="${level === selected}" class="mp-row${level === selected ? ' on' : ''}" data-thinking-level="${esc(level)}"><span class="mp-check">${level === selected ? '✓' : ''}</span><b>${esc(level)}</b></button>`).join('')}</div><div class="mp-foot"><span class="hint">${esc(note)}</span></div>`;
+  document.body.appendChild(pop);
+  anchor.setAttribute('aria-expanded', 'true');
+  const rect = anchor.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+  pop.style.top = Math.max(8, Math.min(rect.top - pop.offsetHeight - 8, innerHeight - pop.offsetHeight - 8)) + 'px';
+  const close = (restoreFocus = false) => {
+    pop.remove(); anchor.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', outside, true);
+    window.removeEventListener('aiconvo:route', routeChanged);
+    if (thinkingPickerClose === close) thinkingPickerClose = null;
+    if (restoreFocus && anchor.isConnected) anchor.focus({ preventScroll: true });
+  };
+  const outside = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const routeChanged = () => close();
+  thinkingPickerClose = close;
+  document.addEventListener('click', outside, true);
+  window.addEventListener('aiconvo:route', routeChanged);
+  const buttons = [...pop.querySelectorAll('[data-thinking-level]')];
+  buttons.forEach(button => button.onclick = () => { const level = button.dataset.thinkingLevel; close(true); onPick(level); });
+  pop.onkeydown = e => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); return; }
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+      e.preventDefault(); e.stopPropagation();
+      const at = buttons.indexOf(document.activeElement);
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (at + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next]?.focus();
+    }
+  };
+  (buttons.find(b => b.dataset.thinkingLevel === selected) || buttons[0])?.focus({ preventScroll: true });
+}
+function pickThinking() {
+  const key = activeRel, anchor = $('agentThink');
+  if (!key || !anchor || window._thinkBusy) return;
+  if (thinkingPickerClose) { thinkingPickerClose(true); return; }
+  if (current?.draft) return draftPickThinking(anchor);
+  showThinkingPicker(anchor, {
+    levels: THINKING_LEVELS, current: thinkLevels.get(key),
+    note: 'For the next reply. Model support varies; the applied level is shown after choosing.',
+    onPick: level => { if (activeRel === key && viewKind === 'conversation') cycleThinking(level); },
+  });
+}
+async function cycleThinking(level = 'cycle') {
   const key = activeRel;
   const btn = $('agentThink');
   if (!key || !btn || window._thinkBusy) return;
@@ -9214,7 +9514,7 @@ async function cycleThinking() {
   btn.disabled = true;
   btn.textContent = '∴ …';
   try {
-    const payload = { id: key, level: 'cycle' };
+    const payload = { id: key, level };
     let out = await postJson('/api/conversation/thinking', payload);
     if (out && out.needsForce) {
       if (confirm('A terminal owns this conversation. Stop the terminal and change reasoning from the web?'))
@@ -9233,6 +9533,8 @@ async function cycleThinking() {
     if (hit && hit.data) hit.data.thinking = out.level;
     if (key === activeRel) paintThinkBtn();
     toast('reasoning: ' + out.level);
+  } catch (error) {
+    errToast('Could not change reasoning: ' + error.message);
   } finally {
     window._thinkBusy = false;
     if (key === activeRel) { const now = $('agentThink'); if (now) now.disabled = false; paintThinkBtn(); }
@@ -9660,7 +9962,6 @@ function agentComposerHtml(d) {
       <summary aria-label="Attachments and conversation options" title="Attachments and conversation options">+</summary>
       <div class="compose-tools-menu">
       ${d.source !== 'claude' ? '<button id="agentMode" class="model-pick mode-pick" type="button" hidden></button>' : ''}
-      ${d.source !== 'claude' ? '<button id="agentThink" class="model-pick think-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<button id="agentSlash" type="button" title="Slash commands (extensions, skills, prompts). Or type /.">Commands /</button>' : ''}
       <button id="agentAt" type="button" title="Inspect and attach background knowledge to this conversation">Context</button>
       <button id="agentSnip" type="button" title="Insert a snippet at the cursor (alt+;). Or type the trigger while writing.">Snippets ;;</button>
@@ -9674,6 +9975,7 @@ function agentComposerHtml(d) {
       </div>
       <button id="ctxMeter" class="ctxmeter" type="button" hidden></button>
       <div class="compose-right">
+      ${d.source !== 'claude' ? '<button id="agentThink" class="model-pick think-pick" type="button" hidden></button>' : ''}
       ${d.source !== 'claude' ? '<div class="model-strip" id="modelStrip"></div>' : ''}
       ${d.source !== 'claude' ? `<button class="primary" id="agentRun" type="button" title="Send from the web (ctrl+enter): a headless pi run on this session. The terminal stays your escape hatch.">${agentRunLabel()}</button>` : ''}
       ${d.source === 'claude' ? '<button class="primary" id="agentSend" type="button" title="Open the terminal and send (ctrl+enter)">open &amp; send</button>' : ''}
@@ -11289,7 +11591,7 @@ function wireAgentComposer() {
   if (runBtn) runBtn.onclick = () => headlessSendFromComposer(runBtn);
   renderModelStrip();
   const thinkBtn = $('agentThink');
-  if (thinkBtn) { thinkBtn.onclick = () => cycleThinking(); paintThinkBtn(); }
+  if (thinkBtn) { thinkBtn.onclick = () => pickThinking(); paintThinkBtn(); }
   const modeBtn = $('agentMode');
   if (modeBtn) { modeBtn.onclick = e => { if ($('composeTools')) $('composeTools').open = true; openModePicker(e.currentTarget); }; paintModeBtn(); }
   const isPi = !!runBtn; // pi composers have the web send button
@@ -12255,7 +12557,7 @@ async function open(rel, scroll, routeHash = null) {
     window._agentContext = [];
     const hash = routeHash || (typeof scroll === 'string' && scroll.startsWith('entry:')
       ? 'read=' + encodeURIComponent(JSON.stringify({ key: rel, entryId: scroll.slice(6) })) : encodeURIComponent(rel));
-    setRoute('conversation', hash);
+    setRoute('conversation', hash, { project: navSession ? projectOf(navSession) : undefined, selectScope: sideLayoutOn() && sidePanel() === 'inbox' });
     render();
   } else if (routeHash) {
     setRoute('conversation', routeHash);
@@ -12278,6 +12580,9 @@ async function open(rel, scroll, routeHash = null) {
     return;
   }
   current = next;
+  if (navigating && !sessions.some(s => s.key === rel) && restoringScopeEntry !== nav.current()?.id) {
+    adoptWorkspaceProject(projectOf(next), { select: sideLayoutOn() && sidePanel() === 'inbox', stamp: true });
+  }
   if (!(window._ctxTouched && current && current.key === rel)) {
     window._agentContext = Array.isArray(next.attachedContext) ? next.attachedContext.slice() : [];
   }
@@ -12360,7 +12665,8 @@ async function showNotePane(rel, text, savedPath) {
     activeRel = rel;
     // A saved note is a place: the same address the notes tab opens it by.
     const rel_ = savedPath.split('/notes/aiconvo/')[1];
-    if (rel_) setRoute('note', 'note=' + encodeURIComponent(rel_)); else setRouteKind('note');
+    const session = sessions.find(s => s.key === rel);
+    if (rel_) setRoute('note', 'note=' + encodeURIComponent(rel_), { project: session ? projectOf(session) : undefined, selectScope: sideLayoutOn() && sidePanel() === 'inbox' }); else setRouteKind('note');
     const related = await relatedFor(rel, true);
     noteViewer(text, savedPath, { kind: 'note', key: rel, related });
     return;
@@ -12765,7 +13071,8 @@ function collapseFanoutTree(raw, typedGroups = []) {
 
 async function showTree(key, opts = {}) {
   activeRel = key;
-  setRoute('tree', 'tree=' + encodeURIComponent(key));
+  const session = sessions.find(s => s.key === key);
+  setRoute('tree', 'tree=' + encodeURIComponent(key), { project: session ? projectOf(session) : undefined });
   let t;
   try { t = await (await fetch('/api/tree?id=' + encodeURIComponent(key))).json(); }
   catch { return errToast('could not load the conversation tree'); }
@@ -14432,6 +14739,8 @@ function paneAppearance() {
       { value: 'side', name: 'side panel', desc: 'A column on the left that stays open: home, new conversation, pinned and unread replies, agents, recent files. The top bar goes away; a conversation keeps its title strip. Phones keep the top bar.' },
     ], layoutPref())}
     <div class="set-help">Saved in this browser, like the theme, so a phone and a desk can differ.</div>
+    <label class="set-check"><input id="setRailCounts" type="checkbox"${showRailCounts() ? ' checked' : ''}> Show counts on Agents and Inbox icons</label>
+    <div class="set-help">Off by default: quiet dots instead of numbers. Agents counts follow the selected project. Inbox counts unread replies across this machine. Saved on this device.</div>
     <div class="set-field">
       <label for="setPiTheme">pi theme for hosted extension views</label>
       <input id="setPiTheme" class="medium" type="text" value="${esc(piTheme)}" spellcheck="false" list="setPiThemeList">
@@ -14441,6 +14750,7 @@ function paneAppearance() {
 }
 
 function bindPaneAppearance(root) {
+  $('setRailCounts').onchange = e => { agentSecState.railCounts = e.target.checked; saveAgentSecState(); paintRailBadges(); };
   $('setAppFont').onchange = e => {
     window.setAppFont(e.target.value);
     try { localStorage.setItem('aiconvo.font', e.target.value); } catch {}
@@ -14701,27 +15011,74 @@ const navButtons = Navigation.mount(nav, {
 // "+ new" starts where you are: in a project's conversation it is a sibling
 // there; elsewhere a loose one. ▾ offers the other, in the same words.
 function sideNewProject() {
-  const p = current && !current.draft && viewKind === 'conversation' ? projectOf(current) : '';
-  return p && p !== '?' && p !== LOOSE_PROJECT ? p : '';
+  const p = workspaceScope();
+  return p && p !== LOOSE_PROJECT ? p : '';
+}
+function startScopedConversation() {
+  const project = sideNewProject();
+  if (!project) return startLooseConversation();
+  if (current && !current.draft && viewKind === 'conversation' && projectOf(current) === project) return startSiblingConversation();
+  return startReviewedConversation(project);
 }
 function renderSideNew() {
   const p = sideNewProject();
   $('sideNew').querySelector('span').textContent = p ? 'new here' : 'new';
-  $('sideNew').title = p ? 'New conversation in ' + p + ' — same model and thinking level, the project map in the system prompt' : 'New conversation (C) — a blank page: no project memory, home folder, pi defaults';
+  $('sideNew').title = p ? 'New conversation in ' + p : 'New conversation (C) — a blank page: no project memory, home folder, pi defaults';
   $('sideNewMore').hidden = !p;
-  // The project area, on the right of home: the project of what is open.
-  const area = panelProjectName();
-  $('sideProject').hidden = !area || (viewKind === 'project' && projectOverviewName === area);
-  $('sideProject').querySelector('span').textContent = area;
-  $('sideProject').title = 'Open the project area · ' + area;
+  const scope = workspaceScope();
+  $('sideProject').hidden = false;
+  $('sideProject').querySelector('span').textContent = ProjectScope.label(scope);
+  $('sideProject').title = 'Project scope: ' + ProjectScope.label(scope) + '. Applies to Chats, Files and Agents. Inbox always covers this machine.';
 }
-$('sideProject').onclick = () => { const p = panelProjectName(); if (p) showProjectOverview(p); };
-$('sideNew').onclick = () => sideNewProject() ? startSiblingConversation() : startLooseConversation();
+let workspacePickerClose = null;
+function openWorkspaceProjectPicker(anchor = $('sideProject')) {
+  if (workspacePickerClose) { workspacePickerClose(true); return; }
+  document.querySelectorAll('.mpick').forEach(el => el.remove());
+  const pop = document.createElement('div');
+  pop.className = 'mpick project-scope-picker'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Choose project scope');
+  pop.innerHTML = '<div class="mp-top"><input type="search" class="mp-filter" aria-label="Find a project" placeholder="Find a project"></div><div class="mp-list"></div><div class="mp-foot"><span class="hint">Scope for Chats, Files and Agents. Inbox always covers all projects on this machine.</span></div>';
+  document.body.appendChild(pop); anchor.setAttribute('aria-expanded', 'true');
+  const input = pop.querySelector('input'), list = pop.querySelector('.mp-list');
+  const close = (focus = false) => {
+    pop.remove(); anchor.setAttribute('aria-expanded', 'false'); workspacePickerClose = null;
+    document.removeEventListener('click', outside, true); window.removeEventListener('aiconvo:route', routeChanged);
+    if (focus && anchor.isConnected) anchor.focus({ preventScroll: true });
+  };
+  const outside = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const routeChanged = () => close();
+  workspacePickerClose = close;
+  const paint = () => {
+    if (!pop.isConnected) return;
+    const rows = [{ name: '', title: 'All projects', cwd: 'On this machine' }, { name: LOOSE_PROJECT, title: 'No project', cwd: 'Conversations and files without a project' }, ...sidebarProjectRows()];
+    const q = input.value.trim().toLocaleLowerCase();
+    const matches = rows.filter(p => !q || `${p.name} ${p.title} ${p.cwd}`.toLocaleLowerCase().includes(q));
+    list.innerHTML = matches.map(p => `<button type="button" class="mp-row${workspaceScope() === p.name ? ' on' : ''}" data-workspace-project="${esc(p.name)}" aria-pressed="${workspaceScope() === p.name}"><b>${esc(p.title || p.name)}</b>${p.name && p.name !== LOOSE_PROJECT && p.title && p.title !== p.name ? `<small>${esc(p.name)}</small>` : ''}</button>`).join('') || '<div class="mp-empty">No matching projects.</div>';
+    list.querySelectorAll('[data-workspace-project]').forEach(button => button.onclick = () => { const p = button.dataset.workspaceProject; close(true); chooseWorkspaceProject(p); });
+    const rect = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+    pop.style.top = Math.max(8, Math.min(rect.bottom + 6, innerHeight - pop.offsetHeight - 8)) + 'px';
+  };
+  input.oninput = paint;
+  pop.onkeydown = e => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); return; }
+    const buttons = [...list.querySelectorAll('button')];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); e.stopPropagation();
+      const i = buttons.indexOf(document.activeElement);
+      buttons[(i + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+    } else if (e.key === 'Enter' && e.target === input) { e.preventDefault(); (buttons.find(b => b.getAttribute('aria-pressed') === 'true') || buttons[0])?.click(); }
+  };
+  paint(); input.focus();
+  document.addEventListener('click', outside, true); window.addEventListener('aiconvo:route', routeChanged);
+  loadSidebarProjectCatalog().then(paint);
+}
+$('sideProject').onclick = e => { e.stopPropagation(); openWorkspaceProjectPicker(); };
+$('sideNew').onclick = startScopedConversation;
 $('sideNewMore').onclick = e => {
   e.stopPropagation();
   closeFileActionMenu();
   const p = sideNewProject();
-  const items = [['New here · ' + p, () => startSiblingConversation()], ['New, no project', () => startLooseConversation()]];
+  const items = [['New here · ' + p, startScopedConversation], ['New, no project', () => startLooseConversation()]];
   const menu = document.createElement('div');
   menu.className = 'file-action-menu ag-menu';
   menu.setAttribute('role', 'menu');
@@ -15514,6 +15871,7 @@ document.addEventListener('keydown', e => {
   // must not steal Ctrl-F after CodeMirror opens its own search panel.
   if (fileWs?.focused && e.target.closest?.('.live-file-view')) {
     if (e.target.closest('.cm-editor')) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && fileWs.htmlPreviewOpen) return;
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f' && fileWs.editor?.openSearch) { e.preventDefault(); fileWs.editor.openSearch(); return; }
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); fileWs.kind === 'md' ? autosaveDocument() : fileWsSaveCode(fileWs); return; }
   }
@@ -16053,10 +16411,11 @@ load().then(() => {
   const bootEntry = nav.load(bootHash), bootScroll = bootEntry.scroll;
   navShownId = bootEntry.id;
   nav.refresh();
+  if (typeof bootEntry.projectScope === 'string') { restoringScopeEntry = bootEntry.id; setWorkspaceScope(bootEntry.projectScope, { stamp: false }); }
   Promise.resolve(dispatchHash(bootHash)).then(() => {
     // A reload comes back to the same scroll, like a browser page.
     if (bootScroll && nav.current()?.id === bootEntry.id && viewKind !== 'conversation' && viewKind !== 'home') navHold = Navigation.holdScroll($('view'), bootScroll.view);
-  }).catch(err => console.error('first route failed:', err));
+  }).catch(err => console.error('first route failed:', err)).finally(() => { if (restoringScopeEntry === bootEntry.id) restoringScopeEntry = null; });
   prefetchDocumentEditor();
 });
 // SSE `update` events patch the list live; this poll only reconciles what a

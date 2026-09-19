@@ -2,13 +2,13 @@
 
 ## UI
 
-The sidebar's recent section keeps its existing **project / all** scope.
-The **files** heading gains an independent **human / agents / both** choice.
-Default: human. The choice lives in `aiconvo.agentSections.v1` as
-`files:actor`, independent of `scope:recent`, and survives reloads.
+The Files panel follows the shared project dropdown (All projects, a named
+project, or No project; design/50). Its **human / agents / both** choice is
+independent. Default: human. The choice lives in `aiconvo.agentSections.v1`
+as `files:actor`, independent of `projectScope`, and survives reloads.
 
-Rows show the eight most recent matching paths, once each, newest activity
-first. A short action (opened, saved, read, wrote, edited) accompanies the time;
+Rows show matching paths once each, newest activity first. The original
+eight-row display cap is replaced by scroll loading in design/49. A short action (opened, saved, read, wrote, edited) accompanies the time;
 "both" also names the latest actor. The tooltip carries the full path and
 exact time. A click opens the live file; agent rows retain their originating
 conversation as the return link.
@@ -37,8 +37,8 @@ and path**, not one per path. This is essential: a newer agent edit cannot
 replace the human visit when selecting human-only. Legacy rows lacking an
 actor migrate as human, with their original times.
 
-Filtering by source and project happens **before** path deduplication and the
-8-row display limit. "Both" chooses the newest of the matching observations
+Filtering by source and project happens **before** path deduplication and
+rendering pages. "Both" chooses the newest of the matching observations
 for each path. A project can therefore still show older human visits even
 when other projects have heavy agent activity.
 

@@ -252,7 +252,7 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
   const endTurn = () => {
     if (turn.groups > 1) {
       const files = turn.files.size;
-      out.push(`<button class="tg-review tg-review-turn" data-step-review="${esc(JSON.stringify({ key: d.key, calls: turn.calls })).replace(/"/g, '&quot;')}">Review whole turn · ${turn.steps} steps${files ? ` · ${files} files touched` : ''}</button>`);
+      out.push(`<button class="tg-review tg-review-turn" data-step-review="${esc(JSON.stringify({ key: d.key, calls: turn.calls })).replace(/"/g, '&quot;')}">Review whole turn · ${turn.steps} steps${files ? ` · ${files} ${files === 1 ? 'file' : 'files'} touched` : ''}</button>`);
     }
     turn = { calls: [], files: new Set(), groups: 0, steps: 0 };
   };
@@ -268,14 +268,15 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
     const tally = [...names].map(([n, count]) => n + (count > 1 ? ' ×' + count : '')).join(' · ');
     const links = [...files].map(([path, m]) => `<button class="tg-file" data-file-diff="${esc(path)}" data-file-ts="${esc(m.ts || '')}" data-file-anchor="${esc(m.ts || '')}" data-file-call="${esc(m.id || '')}">${esc(path.split('/').pop())}</button>`).join(' ');
     const opened = toolGroupOpen.get(d.key + '|' + key) ?? readerState(d.key).work?.[key];
-    out.push(`<details class="toolgroup" data-msg-key="${esc(d.key)}" data-gkey="${esc(key)}"${opened ? ' open' : ''}><summary>${[...names.values()].reduce((a, b) => a + b, 0)} steps · ${esc(tally)}${files.size <= 3 ? ' ' + links : ''}</summary>${work.map(m => msgBlock(m, hl, m.eid === exact, q, indexes.get(m._source), d.key)).join('')}</details>`);
+    const count = [...names.values()].reduce((a, b) => a + b, 0);
+    out.push(`<details class="toolgroup" data-msg-key="${esc(d.key)}" data-gkey="${esc(key)}"${opened ? ' open' : ''}><summary><span class="tg-label"><span class="tg-count">${count} ${count === 1 ? 'step' : 'steps'}</span><span class="tg-detail" title="${esc(tally)}">${esc(tally)}</span></span>${files.size <= 3 ? links : ''}</summary>${work.map(m => msgBlock(m, hl, m.eid === exact, q, indexes.get(m._source), d.key)).join('')}</details>`);
     const reviewCalls = [...new Set(work.filter(m => m.role === 'tool' && m.id).map(m => m.id))];
     if (reviewCalls.length) {
       turn.groups++; turn.steps += reviewCalls.length;
       for (const id of reviewCalls) if (!turn.calls.includes(id)) turn.calls.push(id);
       for (const path of files.keys()) turn.files.add(path);
     }
-    if (reviewCalls.length) out.push(`<button class="tg-review" data-step-review="${esc(JSON.stringify({ key: d.key, calls: reviewCalls })).replace(/"/g, '&quot;')}">${files.size ? `${files.size} files touched · ` : ''}Review changes</button>`);
+    if (reviewCalls.length) out.push(`<button class="tg-review" data-step-review="${esc(JSON.stringify({ key: d.key, calls: reviewCalls })).replace(/"/g, '&quot;')}">${files.size ? `${files.size} ${files.size === 1 ? 'file' : 'files'} touched · ` : ''}Review changes</button>`);
     const launches = work.filter(m => m.role === 'tool' && m.name === 'delegate');
     if (launches.length) out.push('<div class="dg-cards">' + launches.map((m, ordinal) => {
       const dg = delegateCallOf(m);
@@ -679,7 +680,7 @@ function renderLiveReplyLedger(host, jobId, L, saved = new Map(), { expandedWork
       if (!work) {
         work = document.createElement('details');
         work.className = 'toolgroup'; work.dataset.liveWork = token;
-        work.innerHTML = '<summary></summary><div></div>';
+        work.innerHTML = '<summary><span class="tg-label"><span class="tg-count"></span><span class="tg-detail"></span></span></summary><div></div>';
         work._ledger = { order: [], blocks: new Map() };
       }
       place(work);
@@ -687,7 +688,9 @@ function renderLiveReplyLedger(host, jobId, L, saved = new Map(), { expandedWork
       const blocks = [...unit.blocks.values()];
       const names = [...new Set(blocks.map(b => b.kind === 'tool' ? b.name || 'tool' : 'thinking'))];
       const working = blocks.some(b => b.kind === 'tool' ? b.phase !== 'done' : !b.done);
-      setLiveText(work.querySelector('summary'), (working && !L.done ? '◌ ' : '') + blocks.length + ' steps · ' + names.join(' · '));
+      setLiveText(work.querySelector('.tg-count'), (working && !L.done ? '◌ ' : '') + blocks.length + (blocks.length === 1 ? ' step' : ' steps'));
+      setLiveText(work.querySelector('.tg-detail'), names.join(' · '));
+      work.querySelector('.tg-detail').title = names.join(' · ');
       work._ledger.order = unit.order; work._ledger.blocks = unit.blocks;
       if (work.open) renderLsBlocks(work._ledger, work.querySelector('div'));
       work.ontoggle = () => { if (work.open) renderLsBlocks(work._ledger, work.querySelector('div')); };

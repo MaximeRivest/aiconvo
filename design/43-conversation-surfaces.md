@@ -8,19 +8,26 @@ line to a floating card. Shape belongs to themes, not hard-coded components.
 
 ## Composer
 
-- Always-visible toolbar: **+ options**, microphone (when available), model,
-  send. The existing buttons for attachments, Context, commands, snippets,
-  tree, mode, and reasoning are inside a native details menu. Their
-  handlers and keyboard shortcuts remain; no second implementation of them.
+- Always-visible toolbar: **+ options**, microphone (when available), thinking
+  level, model, send. The existing buttons for attachments, Context, commands,
+  snippets, tree and mode are inside a native details menu.
+- The thinking button sits immediately left of the model. Clicking opens all
+  levels (off, minimal, low, medium, high, xhigh, max) with the current one
+  checked; selecting sends that exact level to the existing endpoint. The
+  returned, applied level is what the button shows, since model support varies.
+  Shift+Tab remains a cycling shortcut. Drafts use the same picker but persist
+  the choice locally until the first send. Escape, arrow keys and focus return
+  are supported; navigating away closes the picker.
 - Context usage and estimated cost stay outside that menu, in the true center
   of the composer: tools/microphone left, model/Send right. A three-column
   grid with equal outer tracks keeps the center independent of control widths.
-  There is no extra footer row. The caption wraps within its slot on narrow screens,
+  Wide composers keep one toolbar row. Below 540px of composer width, usage
+  spans a second centered row so thinking/model/send remain reachable; it
   stays visible in zen mode, and remains a keyboard-accessible button for
   opening the last sent system prompt. Existing estimate/unknown-cost wording
   and near-capacity warnings are unchanged; absent data is not invented.
 - Utility actions close the options menu when opening their own surface.
-  Mode and reasoning can be adjusted without leaving it. Escape returns
+  Mode can be adjusted without leaving it. Escape returns
   focus to the summary; clicking elsewhere closes the menu.
 - The model name shrinks/ellipsizes before send or microphone lose room.
   No horizontally scrolling toolbar. Phone focus changes no longer collapse

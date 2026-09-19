@@ -87,6 +87,8 @@ const specimens = [
   ['help hint', 'card', '<div id="helpMini">Keyboard help</div>'],
   ['toast', 'card', '<div class="toast">Saved</div>'],
   ['generic card', 'card', '<div class="ui-card">Card</div>'],
+  ['work card', 'card', '<details class="toolgroup" open><summary>3 steps · thinking · bash</summary><div>Work details</div></details>'],
+  ['live monitor', 'card', '<div class="ls-full"><div class="ls-blocks">Live work</div></div>'],
   ['button', 'control', '<button>Choose</button>'],
   ['textarea', 'control', '<textarea>Instructions</textarea>'],
   ['editor button', 'small', '<div class="live-file-head"><button data-pick>Save</button></div>'],
@@ -224,5 +226,73 @@ test('real app surfaces follow the theme together, including nested painted edge
     await evaluate(`selectTheme(${JSON.stringify(theme)})`);
     for (const item of await radii()) assert.deepEqual(item.r, Array(4).fill((theme === 'eink' ? 0 : defaults[item.kind]) + 'px'), 'phone ' + theme + ': ' + item.name);
   }
+  // Render real live work, not hand-written replicas of its nested markup.
+  await evaluate(`gallery.remove();
+    window.workPreview=document.createElement('div');
+    workPreview.style.cssText='position:fixed;inset:0;z-index:150;background:var(--bg);padding:24px;overflow:auto';
+    workPreview.innerHTML='<h2 style="margin-bottom:20px">Live work</h2><div class="ls-full"><div class="ls-blocks"></div></div>';
+    document.body.append(workPreview);
+    window.previewLedger={key:current.key,order:['1','2','3'],blocks:new Map([
+      ['1',{id:'1',kind:'text',done:true,think:('First I’ll check how the panel fits into the conversation. The headings should stay easy to find, while the details have enough space to read comfortably.\\n\\n').repeat(14),text:'The panel can use one frame, with quieter sections inside it.'}],
+      ['2',{id:'2',kind:'tool',name:'bash',phase:'done',args:JSON.stringify({command:'node --test test/live-strip.test.js'}),out:'4 tests passed. No failures.'}],
+      ['3',{id:'3',kind:'text',done:false,think:'Now I’m checking the light, dark, and e-ink themes, including a narrow screen.'}]
+    ])};
+    renderLiveReplyLedger(workPreview.querySelector('.ls-blocks'),'preview',previewLedger,new Map(),{expandedWork:true});`);
+  for (const width of [1200, 390]) {
+    await size(width, 900);
+    for (const theme of ['light', 'dark', 'eink']) {
+      await evaluate(`selectTheme(${JSON.stringify(theme)});workPreview.querySelector('.ls-blocks').scrollTop=0`);
+      const styles = await evaluate(`(()=>{
+        const host=workPreview.querySelector('.ls-blocks'), card=host.parentElement;
+        const group=host.querySelector('.toolgroup'), head=group.querySelector('summary');
+        const think=host.querySelector('.ls-think'), s=getComputedStyle(think);
+        host.scrollTop=80;
+        const before=head.getBoundingClientRect().top;
+        host.scrollTop=120;
+        const sticky=host.scrollTop===120&&Math.abs(head.getBoundingClientRect().top-before)<2
+          &&Math.abs(before-host.getBoundingClientRect().top)<2;
+        return {radius:getComputedStyle(card).borderTopLeftRadius, border:getComputedStyle(card).borderTopStyle,
+          nestedBorder:getComputedStyle(group).borderTopWidth, sticky,
+          overflow:host.scrollWidth>host.clientWidth, readable:s.fontStyle==='normal'&&s.fontFamily===getComputedStyle(document.body).fontFamily};
+      })()`);
+      assert.deepEqual(styles, { radius: theme === 'eink' ? '0px' : '6px', border: 'solid', nestedBorder: '0px', sticky: true, overflow: false, readable: true }, theme + ' live work at ' + width);
+      await evaluate(`workPreview.querySelector('.ls-blocks').scrollTop=0`);
+      await shot('thinking-panel-' + theme + '-' + width);
+      await evaluate(`workPreview.querySelector('.ls-blocks').scrollTop=workPreview.querySelector('.ls-blocks').scrollHeight`);
+      await shot('thinking-panel-tools-' + theme + '-' + width);
+    }
+  }
+  // Standalone folds keep joined header corners, without clipping menus.
+  await evaluate(`selectTheme('light');workPreview.innerHTML='<details class="toolgroup" open><summary>3 steps · thinking</summary><div>Details</div></details>'`);
+  assert.deepEqual(await evaluate(`(()=>{const g=workPreview.querySelector('.toolgroup'),s=getComputedStyle(g.querySelector('summary'));return [getComputedStyle(g).overflow,s.borderTopLeftRadius,s.borderBottomLeftRadius]})()`), ['visible', '5px', '0px']);
+  await evaluate(`workPreview.querySelector('summary').click()`);
+  assert.equal(await evaluate(`workPreview.querySelector('.toolgroup').open`), false);
+  // Judge the default (collapsed) state in a conversation, not just a gallery
+  // of expanded cards. The disclosure and its review action form one row.
+  await evaluate(`workPreview.innerHTML='<div class="transcript"></div>';
+    workPreview.querySelector('.transcript').style.maxWidth='900px';
+    const messages=[
+      {eid:'intro',role:'assistant',text:'I’ll check the panel in context: the work should be easy to open, without interrupting the conversation.'},
+      ...Array.from({length:8},(_,i)=>({eid:'call'+i,id:'call'+i,role:'tool',name:i%2?'read':'bash',text:'Inspect the current styles',ts:'2026-09-20T12:00:00Z'})),
+      {eid:'thought',role:'thinking',text:'The collapsed state needs a clear, compact handle. The details can occupy more space only when someone asks to see them.'},
+      {eid:'comment',role:'assistant',text:'The main issue is the hierarchy. I’m bringing the step count, disclosure arrow, and review action together.'},
+      {eid:'edit',id:'edit',role:'tool',name:'write',path:'/project/panel.css',text:'Panel styles',ts:'2026-09-20T12:00:01Z'},
+      {eid:'done',role:'assistant',text:'The panel now has a compact entry point. Open the steps to inspect the work, or review the changes beside it.'}
+    ];
+    workPreview.querySelector('.transcript').innerHTML=transcriptFragmentHtml({key:current.key,messages},messages);`);
+  for (const width of [1200, 390]) {
+    await size(width, 900);
+    for (const theme of ['light', 'dark', 'eink']) {
+      await evaluate(`selectTheme(${JSON.stringify(theme)})`);
+      assert.equal(await evaluate(`(()=>{const g=workPreview.querySelector('.toolgroup'),h=g.querySelector('summary'),r=g.nextElementSibling;
+        return h.getBoundingClientRect().width<550 && (innerWidth<600 || Math.abs(g.getBoundingClientRect().top-r.getBoundingClientRect().top)<8)
+          && workPreview.scrollWidth<=workPreview.clientWidth;})()`), true, 'compact work row: '+theme+' '+width);
+      await shot('thinking-collapsed-' + theme + '-' + width);
+    }
+  }
+  await size(1200, 900);
+  await evaluate(`selectTheme('light');workPreview.querySelector('.toolgroup > summary').click()`);
+  assert.equal(await evaluate(`workPreview.querySelector('.toolgroup').open`), true);
+  await shot('thinking-expanded-context');
   assert.deepEqual(errors, []);
 });

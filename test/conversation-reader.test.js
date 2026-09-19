@@ -18,7 +18,8 @@ function fixture() {
     fs.readFileSync(path.join(root, 'conversation-flow.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'conversation-reader.js'), 'utf8'),
     fs.readFileSync(path.join(root, 'navigation.js'), 'utf8'),
-    extract('function setRoute(kind, hash)', '\nfunction goHome()'),
+    fs.readFileSync(path.join(root, 'project-scope.js'), 'utf8'),
+    extract('function setRoute(kind, hash', '\nfunction goHome()'),
     extract('function dispatchHash(h, { restore = false } = {}) {', '\nconst $ = id => document.getElementById'),
     extract('async function open(rel, scroll,', '// ---- distillation ----'),
     extract('async function renderConv(scroll) {', '// ---- trace machinery ----'),
@@ -33,6 +34,8 @@ function fixture() {
   const $=id=>document.getElementById(id), noop=()=>{};
   let current=null, activeRel=null, viewKind='home', conversationLoadSeq=0, transcriptQuery='', matchIdx=-1, currentHash='';
   const TRANSIENT_KINDS=new Set(); let nav=null, navShownId=null, navTraversalSeq=0, navHold=null;
+  // No side column here: the sidebar's project scope is exercised by test/workspace-scope-app.test.js.
+  let restoringScopeEntry=null; const sideLayoutOn=()=>false,sidePanel=()=>'conversations',workspaceScope=()=>'',adoptWorkspaceProject=()=>{},setWorkspaceScope=()=>{};
   let progressStream=null,lastNavProject=null,liveOpen=false;
   const lastNavConversation=new Map(), modelTouchAt=new Map(),traceLeaves=new Map(),fanoutFocus=new Map(),toolGroupOpen=new Map(),compareCache=new Map(),runLedgers=new Map(),activeRuns=new Map();
   const sessions=[], writes=[], errors=[], copied=[];
@@ -366,7 +369,9 @@ test('turn-level review gathers every tool group of one reply; single groups kee
   const html = vm.runInContext('transcriptFragmentHtml', ctx)({ key: 'chat', messages }, messages);
   const reviews = [...html.matchAll(/data-step-review="([^"]*)"/g)].map(m => JSON.parse(m[1].replace(/&quot;/g, '"')));
   assert.deepEqual(reviews.map(r => r.calls), [['c1'], ['c2', 'c3'], ['c1', 'c2', 'c3'], ['c4']], 'turn review must cover both groups of the first reply only');
-  assert.match(html, /tg-review-turn[^>]*>Review whole turn · 3 steps · 1 files touched</);
+  assert.match(html, /tg-review-turn[^>]*>Review whole turn · 3 steps · 1 file touched</);
+  assert.match(html, /class="tg-count">1 step<\/span>/);
+  assert.match(html, /class="tg-detail" title="bash">bash<\/span>/);
   assert.equal(html.indexOf('Review whole turn') > html.indexOf('Done.') && html.indexOf('Review whole turn') < html.indexOf('Thanks, one more'), true, 'turn review sits after the final answer of its turn');
   assert.equal((html.match(/tg-review-turn/g) || []).length, 1, 'a reply with one tool group gets no duplicate turn button');
 });

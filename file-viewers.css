@@ -1,0 +1,22 @@
+.lf-media-host, .lf-html-preview { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; overflow:hidden; }
+.lf-preview-frame { display:block; flex:1; width:100%; min-height:0; border:0; background:#fff; color-scheme:normal; }
+.lf-media-message { margin:0; padding:16px; text-align:center; overflow-wrap:anywhere; color:var(--text-dim); }
+.lf-media-head a { padding:5px 8px; font-size:12px; color:var(--text); border-radius:var(--r-sm); }
+.lf-media-head a:hover { background:var(--surface-2); }
+.lf-video-host { background:#000; }
+.lf-video-host video { flex:1; width:100%; height:100%; min-height:0; object-fit:contain; }
+.lf-video-host .lf-media-message { color:#fff; }
+.lf-html-switch { display:flex; gap:2px; }
+.lf-html-switch button[aria-pressed="true"] { color:var(--text); background:var(--surface-2); }
+.lf-html-note { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px; border-bottom:1px solid var(--border); font-size:12px; color:var(--text-dim); }
+.lf-html-note span { flex:1; min-width:180px; }
+.lf-html-note button { font:inherit; white-space:nowrap; }
+@media (pointer:coarse), (max-width:700px) {
+  .live-file-head button, .live-file-head summary, .live-file-head a,
+  .lf-html-note button { min-height:44px; min-width:44px; display:inline-flex; align-items:center; justify-content:center; }
+  .lf-media-head #ffTitle { min-width:0; }
+  .lf-media-head #docStatus { order:5; flex-basis:100%; max-width:none; }
+  .lf-html-note { font-size:11px; }
+}
+:root[data-theme-mode="binary"] .lf-media-head a { text-decoration:underline; }
+:root[data-theme-mode="binary"] .lf-html-switch button[aria-pressed="true"] { outline:1px solid var(--text); }

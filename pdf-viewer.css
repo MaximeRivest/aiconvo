@@ -1,0 +1,10 @@
+/* Upstream PDF.js owns reader layout, keyboard navigation and touch zoom. */
+#secondaryOpenFile { display:none !important; }
+html[data-eink="true"] {
+  --sidebar-transition-duration:0;
+  --body-bg-color:#fff;
+  --toolbar-bg-color:#fff;
+  --main-color:#000;
+  --toolbar-border-color:#000;
+}
+html[data-eink="true"] *, html[data-eink="true"] *::before, html[data-eink="true"] *::after { animation:none !important; transition:none !important; }

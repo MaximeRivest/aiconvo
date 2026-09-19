@@ -134,28 +134,18 @@ function draftSetMode(key) {
 // offers the list and says when it takes effect.
 function draftPickThinking(anchor) {
   if (!isDraftOpen()) return;
-  document.querySelectorAll('.mpick').forEach(el => el.remove());
-  const levels = (draftState.defaults && draftState.defaults.thinkingLevels) || ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-  const cur = thinkLevels.get(activeRel) || null;
-  const pop = document.createElement('div');
-  pop.className = 'mpick draft-think';
-  const rect = anchor.getBoundingClientRect();
-  pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 300)) + 'px';
-  pop.style.top = Math.max(8, rect.top - 8 - 44 - levels.length * 30) + 'px';
-  pop.innerHTML = `<div class="mp-list">${levels.map(l => `<button type="button" class="mp-row${l === cur ? ' on' : ''}" data-level="${esc(l)}"><span class="mp-check">${l === cur ? '✓' : ''}</span><b>${esc(l)}</b></button>`).join('')}</div>
-    <div class="mp-foot"><span class="hint">applied when the conversation starts · a model without that level keeps its own</span></div>`;
-  document.body.appendChild(pop);
-  const close = () => { pop.remove(); document.removeEventListener('click', onDoc, true); };
-  const onDoc = e => { if (!pop.contains(e.target) && e.target !== anchor) close(); };
-  setTimeout(() => document.addEventListener('click', onDoc, true), 0);
-  pop.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
-  pop.querySelectorAll('[data-level]').forEach(b => b.onclick = () => {
-    if (!isDraftOpen()) return close();
-    draftState.d.thinking = b.dataset.level;
-    thinkLevels.set(activeRel, b.dataset.level);
-    paintThinkBtn();
-    saveDraft(draftState.d);
-    close();
+  const draft = draftState.d, key = activeRel;
+  showThinkingPicker(anchor, {
+    levels: draftState.defaults?.thinkingLevels || THINKING_LEVELS,
+    current: thinkLevels.get(key),
+    note: 'Applied when the conversation starts. A model without that level keeps its own.',
+    onPick: level => {
+      if (!isDraftOpen() || draftState.d !== draft || activeRel !== key) return;
+      draft.thinking = level;
+      thinkLevels.set(key, level);
+      paintThinkBtn();
+      saveDraft(draft);
+    },
   });
 }
 function draftPaintMeter() {
@@ -187,7 +177,7 @@ async function showDraft(id) {
   if (draftState) clearTimeout(draftState.saveTimer);
   // The route change first: it saves the previous conversation's reading
   // position and draft under their own key before `current` moves on.
-  setRoute('draft', 'new=' + d.id);
+  setRoute('draft', 'new=' + d.id, { project: d.folder ? undefined : LOOSE_PROJECT });
   draftState = { d, defaults: null, folderInfo: null, saveTimer: 0 };
   activeRel = draftKey(d.id);
   window._agentLiveOn = false;
@@ -284,6 +274,7 @@ function draftApplyFolderInfo(info) {
   if (!draftState) return;
   const d = draftState.d;
   draftState.folderInfo = info;
+  if (isDraftOpen() && info?.project && typeof adoptWorkspaceProject === 'function' && restoringScopeEntry !== nav.current()?.id) adoptWorkspaceProject(info.project, { stamp: true });
   const box = $('draftSetup');
   if (!box) return;
   const status = box.querySelector('.ds-folder-status');
@@ -295,14 +286,14 @@ function draftApplyFolderInfo(info) {
   if (!info.exists) { status.textContent = 'folder not found — the conversation cannot start there'; implies.textContent = ' · folder not found'; }
   else {
     const where = info.loose
-      ? 'loose conversation — not part of a project'
+      ? 'No project — this conversation is not part of a project'
       : `joins project <b>${esc(info.project)}</b>${info.area ? ' · area ' + esc(info.area) : ''}${info.known ? '' : ' (by folder name; not a registered project)'}`;
     const files = info.contextFiles && info.contextFiles.length
       ? 'pi reads ' + info.contextFiles.map(f => `<code>${esc(shortDir(f))}</code>`).join(', ')
       : 'no AGENTS.md on this path';
     const model = info.defaultModel ? `default model ${esc(shortModelName(info.defaultModel.modelId))} (${info.defaultModel.source === 'project' ? 'project setting' : 'pi default'})` : 'no default model set in pi';
     status.innerHTML = `${where} · ${files} · ${model}`;
-    implies.textContent = info.loose ? ' · loose' : ' · ' + info.project;
+    implies.textContent = info.loose ? ' · No project' : ' · ' + info.project;
   }
   // No explicit model pick: the folder's default is what will run. Show it.
   if (!(d.models && d.models.length) && current && current.draft) {
@@ -434,7 +425,7 @@ async function sendDraft(btn) {
     await open(out.key, 'bottom');
     for (const w of out.warnings || []) errToast(w);
     if (out.runError) errToast('the conversation exists but the first message did not go: ' + out.runError);
-    else toast('✓ started · ' + shortDir(out.cwd) + (out.project && out.project !== LOOSE_PROJECT ? ' · ' + out.project : ' · loose') + (out.runs ? ' · ' + out.runs.length + ' models' : ''));
+    else toast('✓ started · ' + shortDir(out.cwd) + (out.project && out.project !== LOOSE_PROJECT ? ' · ' + out.project : ' · No project') + (out.runs ? ' · ' + out.runs.length + ' models' : ''));
   } catch (e) {
     errToast('could not start: ' + e.message);
     if (isDraftOpen()) {

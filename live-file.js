@@ -44,6 +44,7 @@ function liveFileHead(ws) {
     <b id="ffTitle" title="${fgAttr(ws.path)}">${esc(liveFileLabel(ws))}</b>
     <span id="docStatus" role="status">Opening…</span>
     <span id="liveServiceStatus" title="Built-in language support; no language server connected">${esc(liveLanguage(ws.path))}</span>
+    ${/\.html?$/i.test(ws.path) ? '<div class="lf-html-switch" role="group" aria-label="HTML view"><button id="htmlSource" aria-pressed="true">Source</button><button id="htmlPreview" aria-pressed="false">Preview</button></div>' : ''}
     <button id="docReload" hidden title="Reload the current disk file">Reload</button>
     <button id="liveHistory" class="lf-wide" title="Recorded versions of this file: read one, or compare two">History</button>
     <button id="liveAsk" class="lf-wide" title="Ask an agent for a change to this file · Ctrl+K">Ask</button>
@@ -62,6 +63,9 @@ function liveFileHead(ws) {
 }
 async function openLiveFile(pathValue, opts = {}) {
   const seq = ++fileWsSeq;
+  // A conversation fetch/render that began before this navigation must not
+  // paint over the file when it eventually finishes.
+  if (typeof conversationLoadSeq !== 'undefined') conversationLoadSeq++;
   markSettingsClosed();
   if (window.fileInk?.teardown) fileInk.teardown();
   if (progressStream) { progressStream.close(); progressStream = null; }
@@ -71,11 +75,81 @@ async function openLiveFile(pathValue, opts = {}) {
     touched: { repoRoot: opts.root || '', sessions: [], commits: [] }, browserContext: opts.browserContext || null,
     reviewRef: opts.reviewRef || null, reviewData: opts.reviewData || null };
   fileWs = ws;
-  setRoute('file', fileWsHash(ws));
+  setRoute('file', fileWsHash(ws), { project: ws.project || (typeof scopeFileProject === 'function' ? scopeFileProject(ws) : undefined) });
   $('view').innerHTML = '<section class="files-ws live-file-view"><div id="ffCompare" class="live-file-body"></div><div id="fwAsk" class="fw-ask" hidden></div></section>';
   // A link may name recorded versions (to=, from=): open straight into history.
   if (opts.to || opts.from) return liveFileHistory(ws, { to: opts.to || null, from: opts.from || null });
   await fileWsMountBody(ws, opts);
+}
+// Images share file navigation, but never mount an editor, drafts or save actions.
+// Fetch as a blob so access errors remain readable and reload bypasses the cache.
+async function liveFileMountImage(ws) {
+  const host = $('ffCompare');
+  if (fileWs !== ws || !host) return;
+  ws.imageView?.dispose();
+  ws.readOnly = true;
+  host.innerHTML = `<div class="doc-view image-view">
+    <header class="live-file-head lf-media-head">
+      <button id="liveBack" title="Return to the previous view"><span class="lf-back-arrow">←</span><span class="lf-wide">${esc(liveBackLabel(ws).slice(2))}</span></button>
+      <b id="ffTitle" title="${fgAttr(ws.path)}">${esc(liveFileLabel(ws))}</b>
+      <span id="docStatus" role="status">Opening image…</span>
+      <button id="imageFit" aria-pressed="true" title="Fit the image in the panel">Fit</button>
+      <button id="imageActual" aria-pressed="false" title="One image pixel per screen CSS pixel; scroll to explore">Actual size</button>
+      <button id="imageReload" title="Reload the image from disk">Reload</button>
+      <a href="${fgAttr(fileViewerURL(ws, true))}" download>Download</a>
+    </header>
+    <div id="imageStage" class="lf-image-stage" tabindex="0" aria-label="Image preview; scroll in actual size mode">
+      <img id="fileImage" alt="${fgAttr(ws.path.split('/').pop())}" hidden>
+      <p id="imageMessage" role="status">Opening image…</p>
+    </div>
+  </div>`;
+  const image = $('fileImage'), stage = $('imageStage'), message = $('imageMessage'), status = $('docStatus');
+  const fit = $('imageFit'), actual = $('imageActual');
+  const controller = new AbortController();
+  const state = ws.imageView = { disposed: false, url: null, dispose() {
+    state.disposed = true; controller.abort();
+    image.onload = image.onerror = null; image.removeAttribute('src');
+    if (state.url) { URL.revokeObjectURL(state.url); state.url = null; }
+  } };
+  const current = () => fileWs === ws && ws.imageView === state && !state.disposed;
+  const sizing = full => {
+    stage.classList.toggle('lf-image-actual', full);
+    image.style.width = full ? image.naturalWidth + 'px' : '';
+    image.style.height = full ? image.naturalHeight + 'px' : '';
+    fit.setAttribute('aria-pressed', String(!full)); actual.setAttribute('aria-pressed', String(full));
+    stage.scrollTop = stage.scrollLeft = 0;
+  };
+  fit.disabled = actual.disabled = true;
+  fit.onclick = () => sizing(false); actual.onclick = () => sizing(true);
+  $('liveBack').onclick = () => liveFileGoBack(ws);
+  $('imageReload').onclick = () => liveFileMountImage(ws);
+  const fail = detail => {
+    if (!current()) return;
+    image.hidden = true; message.hidden = false;
+    status.textContent = 'Image unavailable';
+    message.textContent = detail;
+    fit.disabled = actual.disabled = true;
+  };
+  image.onload = () => {
+    if (!current()) return;
+    image.hidden = false; message.hidden = true;
+    status.textContent = `${image.naturalWidth} × ${image.naturalHeight} · Read-only`;
+    fit.disabled = actual.disabled = false;
+    liveFileRememberOpen(ws);
+  };
+  image.onerror = () => fail('The browser could not display this image. It may be damaged or use an unsupported format.');
+  try {
+    const conv = typeof fbConversationHash === 'function' ? fbConversationHash(ws.back) : null;
+    const response = await fetch('/api/path/content?' + new URLSearchParams({ id: conv || '', path: ws.path }), { signal: controller.signal, cache: 'no-store' });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => null);
+      throw new Error(detail?.error || `Could not load the image (${response.status}).`);
+    }
+    const blob = await response.blob();
+    if (!current()) return;
+    state.url = URL.createObjectURL(blob);
+    image.src = state.url;
+  } catch (error) { if (current()) fail(error.message || 'Could not load the image. Try Reload.'); }
 }
 function liveFileGoBack(ws) {
   if (ws.back) return typeof fbReturnTo === 'function' ? fbReturnTo(ws.back) : dispatchHash(ws.back);

@@ -186,7 +186,7 @@ async function showFilesBrowser(project, opts = {}) {
   if (filesBrowser) fbFinderClose(filesBrowser);
   filesBrowser = s;
   projectOverviewName = project;
-  setRoute('files-browser', fbHash(s));
+  setRoute('files-browser', fbHash(s), { project });
   $('view').innerHTML = `<section class="fb-view">
     <header class="fb-header">${s.conv ? '<nav aria-label="Conversation view"><button id="fbConversation">Conversation</button><button class="on" aria-current="page">Files</button></nav>' : '<button id="fbSummary">← Project summary</button>'}<h1>${esc(project)}</h1><span class="fb-live">● Live files</span><button id="fbRefresh">Refresh</button></header>
     <div class="fb-toolbar"><nav aria-label="Files view"><button data-fb-mode="browse">Browse</button><button data-fb-mode="changes">Changes</button></nav>

@@ -5,6 +5,7 @@ plugins {
 android {
     namespace "app.aiconvo"
     compileSdk 35
+    buildToolsVersion "35.0.0"
     defaultConfig {
         applicationId "app.aiconvo"
         minSdk 26

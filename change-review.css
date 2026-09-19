@@ -101,10 +101,11 @@
 .cr-dialog p, .cr-dialog label { font-size:12px; line-height:1.5; }
 .cr-dialog select { max-width:100%; }
 .cr-dialog pre { max-height:52vh; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; padding:10px; border:1px solid var(--border); font:12px/1.5 var(--font); }
-.transcript button.tg-review { display:block; width:fit-content; max-width:100%; min-height:24px; height:auto; margin:0 auto 8px; padding:2px 8px; border:0; border-radius:var(--r-sm); background:transparent; box-shadow:none; color:var(--text-dim); font:11px/1.4 var(--font); }
+.transcript button.tg-review { display:inline-flex; align-items:center; vertical-align:middle; width:fit-content; max-width:calc(100% - 28px); min-height:34px; height:auto; margin:4px 0 4px 8px; padding:6px 8px; border:0; border-radius:var(--r-sm); background:transparent; box-shadow:none; color:var(--text-dim); font:12px/1.4 var(--font); text-align:left; }
+.transcript .toolgroup[open] + button.tg-review { display:flex; margin:0 14px 8px; }
 .transcript button.tg-review:hover, .transcript button.tg-review:focus-visible { background:transparent; color:var(--text); text-decoration:underline; text-underline-offset:3px; }
 .transcript button.tg-review:focus-visible { outline:1px solid currentColor; outline-offset:2px; }
-.transcript button.tg-review-turn { margin:4px auto 20px; color:var(--text); }
+.transcript button.tg-review-turn { display:flex; margin:4px 14px 20px; padding:6px 0; color:var(--text-dim); }
 @media(pointer:coarse) { .transcript button.tg-review { min-height:44px; } .cr-view .cr-icon { min-width:36px; min-height:36px; } }
 @media(max-width:750px) {
   .cr-view { padding:4px; }

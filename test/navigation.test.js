@@ -30,6 +30,22 @@ const titles = { '': 'home', 'project=aiconvo': 'aiconvo', 'k1': 'Chat flow', 'k
 const describe = hash => ({ kind: hash ? hash.split('=')[0] : 'home', title: titles[hash] || hash });
 const make = (browser, extra = {}) => Navigation.createStack({ history: browser.history, location: browser.location, storage: browser.storage, describe, now: () => 1, ...extra });
 
+test('project scope travels with each history entry, including explicit All and reloads', () => {
+  const b = fakeBrowser(), nav = make(b);
+  nav.load('');
+  const chat = nav.push('k1', { projectScope: '' });
+  nav.push('project=aiconvo', { projectScope: 'aiconvo' });
+  b.history.go(-1);
+  assert.equal(nav.arrive(b.history.state, b.hash()).entry.projectScope, '');
+  const restored = make(b); restored.load(b.hash());
+  assert.equal(restored.current().projectScope, '');
+  assert.equal(restored.rememberScope(chat.id, 'Loose conversations'), true);
+  restored.replace('k1', { kind: 'conversation' });
+  assert.equal(restored.current().projectScope, 'Loose conversations');
+  b.history.go(1);
+  assert.equal(restored.arrive(b.history.state, b.hash()).entry.projectScope, 'aiconvo');
+});
+
 test('push, back, forward: one entry per screen, forward dropped by a new push', () => {
   const b = fakeBrowser();
   const nav = make(b);

@@ -28,7 +28,12 @@ let fileWs = null;
 let fileWsSeq = 0;
 
 const MD_EXT = /\.(md|markdown|qmd|rmd|mdx)$/i;
-function fileWsKind(p) { return MD_EXT.test(String(p || '')) ? 'md' : 'code'; }
+function fileWsKind(p) {
+  if (/\.(png|jpe?g|gif|webp|avif|bmp|ico)$/i.test(String(p || ''))) return 'image';
+  if (/\.(mp4|m4v|webm|ogv|mov)$/i.test(String(p || ''))) return 'video';
+  if (/\.pdf$/i.test(String(p || ''))) return 'pdf';
+  return MD_EXT.test(String(p || '')) ? 'md' : 'code';
+}
 function fileWsHash(ws) {
   const parts = ['file'];
   if (ws.project) parts.push('p=' + encodeURIComponent(ws.project));
@@ -37,6 +42,7 @@ function fileWsHash(ws) {
   if (ws.browserContext) parts.push('browser=' + encodeURIComponent(encodeURIComponent(JSON.stringify(ws.browserContext))));
   if (ws.back) parts.push('back=' + encodeURIComponent(encodeURIComponent(ws.back)));
   parts.push('focus');
+  if (ws.htmlPreviewOpen) parts.push('preview=1');
   if (ws.reviewRef) parts.push('review=' + encodeURIComponent(encodeURIComponent(JSON.stringify(ws.reviewRef))));
   if (ws.mode === 'history' && ws.historySel?.to) parts.push('to=' + encodeURIComponent(ws.historySel.to), 'from=' + encodeURIComponent(ws.historySel.from || ws.historySel.to));
   parts.push('path=' + (ws.path || ''));
@@ -64,6 +70,9 @@ function fileWsCloseEditor({ keepDraft = true } = {}) {
   if (!fileWs) return;
   fileWsLeaveShared(fileWs);
   fileWs.live?.dispose?.();
+  fileWs.imageView?.dispose();
+  fileWs.mediaView?.dispose();
+  fileWs.htmlPreview?.dispose();
   if (fileWs.editor && fileWs.editor.selection) {
     try { localStorage.setItem('aiconvo.cursor:' + fileWs.path, String(fileWs.editor.selection().line)); } catch {}
   }
@@ -129,7 +138,10 @@ async function fileWsSharedSave(ws) {
 
 async function fileWsMountBody(ws, opts) {
   if (fileWs !== ws) return;
-  if (ws.kind === 'md') await fileWsMountMarkdown(ws, opts);
+  if (ws.kind === 'image') await liveFileMountImage(ws);
+  else if (ws.kind === 'video') await liveFileMountVideo(ws);
+  else if (ws.kind === 'pdf') await liveFileMountPDF(ws);
+  else if (ws.kind === 'md') await fileWsMountMarkdown(ws, opts);
   else await fileWsMountCode(ws, opts);
 }
 
@@ -310,6 +322,7 @@ function fileWsAfterMount(ws, opts) {
   if (line && ws.editor.gotoLine) { try { ws.editor.gotoLine(line); } catch {} }
   ws.line = null;
   liveFileAfterMount(ws);
+  if (/\.html?$/i.test(ws.path)) liveFileEnableHTML(ws, opts);
 }
 
 // ---- who touched this file ----

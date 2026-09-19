@@ -31,8 +31,6 @@
 .draft-setup .ds-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .draft-setup .ds-foot .ds-done { margin-left: auto; }
 .draft-setup .ds-volatile { flex: 1 1 100%; }
-.mpick.draft-think { width: 280px; }
-.mpick.draft-think .mp-foot .hint { font-size: var(--fs-micro); }
 
 /* The header in draft mode: the folder crumb and the title; nothing that
    needs a started conversation (move, sibling, files). */

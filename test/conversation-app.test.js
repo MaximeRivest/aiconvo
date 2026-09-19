@@ -299,7 +299,7 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
   await evaluate(`open(${JSON.stringify(key)},'restore')`);
   await evaluate(`browseConversationPath(${JSON.stringify(key)},'a','p')`);
   assert.equal(await evaluate(`!!document.querySelector('[data-step-review]')`), true);
-  assert.deepEqual(await evaluate(`(()=>{const s=getComputedStyle(document.querySelector('[data-step-review]'));return {border:s.borderTopWidth,background:s.backgroundColor,font:s.fontSize,minHeight:s.minHeight}})()`), { border: '0px', background: 'rgba(0, 0, 0, 0)', font: '11px', minHeight: '24px' }, 'Review action should look like compact metadata, not a boxed button');
+  assert.deepEqual(await evaluate(`(()=>{const s=getComputedStyle(document.querySelector('[data-step-review]'));return {border:s.borderTopWidth,background:s.backgroundColor,font:s.fontSize,minHeight:s.minHeight}})()`), { border: '0px', background: 'rgba(0, 0, 0, 0)', font: '12px', minHeight: '34px' }, 'Review action should look like compact metadata, not a boxed button');
   await evaluate(`openStepReview(JSON.parse(document.querySelector('[data-step-review]').dataset.stepReview))`);
   assert.equal(await evaluate(`viewKind`), 'change-review');
   assert.equal(await evaluate(`document.querySelectorAll('.cr-file').length`), 1);

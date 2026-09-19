@@ -2,6 +2,7 @@ package app.aiconvo
 
 import android.annotation.SuppressLint
 import android.Manifest
+import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,12 +13,14 @@ import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -29,6 +32,12 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
@@ -68,6 +77,10 @@ class MainActivity : AppCompatActivity() {
     // The pending <input type=file> callback. The WebView contract: answer
     // exactly once, with null on cancel, or the page never opens a picker again.
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private var fullscreenView: View? = null
+    private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
+    private var visibleBarsBeforeFullscreen = 0
+    private var barsBehaviorBeforeFullscreen = 0
 
     inner class InkBridge {
         @JavascriptInterface
@@ -171,6 +184,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         NotifyService.appOnScreen = true
+        if (::web.isInitialized) web.onResume()
         // Coming back to a failed screen: the user may have fixed Wi-Fi or
         // Tailscale in the meantime, so try again without being asked.
         if (conn == Conn.FAILED) autoRetry()
@@ -178,6 +192,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         NotifyService.appOnScreen = false
+        if (::web.isInitialized) {
+            web.evaluateJavascript("document.querySelectorAll('video').forEach(v=>v.pause())", null)
+            web.onPause()
+        }
         super.onPause()
     }
 
@@ -212,6 +230,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSetup() {
+        hideFullscreenVideo()
         status.visibility = View.GONE
         setup.visibility = View.VISIBLE
         web.visibility = View.GONE
@@ -256,7 +275,30 @@ class MainActivity : AppCompatActivity() {
         web.addJavascriptInterface(speech, "AiconvoSpeech")
         web.addJavascriptInterface(NotifyBridge(), "AiconvoNotify")
         web.addJavascriptInterface(AppBridge(), "AiconvoApp")
+        web.setDownloadListener { url, userAgent, disposition, mime, _ ->
+            downloadMedia(url, userAgent, disposition, mime)
+        }
         web.webChromeClient = object : WebChromeClient() {
+            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                if (view == null || fullscreenView != null) { callback?.onCustomViewHidden(); return }
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                val insets = ViewCompat.getRootWindowInsets(window.decorView)
+                visibleBarsBeforeFullscreen = 0
+                for (bar in intArrayOf(WindowInsetsCompat.Type.statusBars(), WindowInsetsCompat.Type.navigationBars())) {
+                    if (insets?.isVisible(bar) != false) visibleBarsBeforeFullscreen = visibleBarsBeforeFullscreen or bar
+                }
+                barsBehaviorBeforeFullscreen = controller.systemBarsBehavior
+                fullscreenView = view; fullscreenCallback = callback
+                view.setBackgroundColor(android.graphics.Color.BLACK)
+                findViewById<FrameLayout>(android.R.id.content).addView(view,
+                    FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                web.visibility = View.INVISIBLE
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+            }
+
+            override fun onHideCustomView() { hideFullscreenVideo() }
+
             override fun onShowFileChooser(
                 view: WebView?,
                 callback: ValueCallback<Array<Uri>>?,
@@ -334,6 +376,48 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun hideFullscreenVideo() {
+        val view = fullscreenView ?: return
+        fullscreenView = null
+        (view.parent as? android.view.ViewGroup)?.removeView(view)
+        web.visibility = View.VISIBLE
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior = barsBehaviorBeforeFullscreen
+        controller.show(visibleBarsBeforeFullscreen)
+        val callback = fullscreenCallback; fullscreenCallback = null
+        callback?.onCustomViewHidden()
+    }
+
+    private fun downloadMedia(url: String, userAgent: String?, disposition: String?, mime: String?) {
+        try {
+            val uri = Uri.parse(url)
+            val server = Uri.parse(serverBase)
+            // Never forward session cookies to a different origin or an arbitrary
+            // redirecting endpoint. The media endpoint streams the authorized file.
+            val port: (Uri) -> Int = { if (it.port != -1) it.port else if (it.scheme == "https") 443 else 80 }
+            require(uri.scheme in listOf("https", "http") && uri.scheme == server.scheme &&
+                uri.host == server.host && port(uri) == port(server) && uri.path == "/api/file/media")
+            // WebView may call DownloadListener before exposing the response's
+            // Content-Disposition (notably for <a download>). Our authorized
+            // endpoint already carries the original filename in its path query.
+            val originalName = uri.getQueryParameter("path")?.substringAfterLast('/')
+                ?.takeIf { it.isNotBlank() && it != "." && it != ".." }
+            val name = (originalName ?: URLUtil.guessFileName(url, disposition, mime))
+                .replace(Regex("[\\\\/\\p{Cntrl}]"), "_")
+            val request = DownloadManager.Request(uri)
+                .setTitle(name).setMimeType(mime ?: "application/octet-stream")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+            userAgent?.let { request.addRequestHeader("User-Agent", it) }
+            if (Build.VERSION.SDK_INT >= 29) request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+            else request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, name)
+            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            Toast.makeText(this, "Downloading $name — see Downloads", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Could not start this download. Try opening Aiconvo in your browser.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     fun requestSpeechPermission() {
         requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), SPEECH_PERMISSION_REQUEST)
     }
@@ -381,14 +465,14 @@ class MainActivity : AppCompatActivity() {
 
     // Page-side bridge: a link to another site leaves for the device
     // browser instead of replacing aiconvo inside this WebView (which has no
-    // way back on a device without a navigation bar). When no app can take
-    // the URL, the WebView loads it after all: a page is better than nothing.
+    // way back on a device without a navigation bar). Never fall back to
+    // loading an untrusted site in the WebView that exposes native bridges.
     inner class AppBridge {
         @JavascriptInterface
         fun openExternal(url: String) {
             runOnUiThread {
                 val parsed = try { Uri.parse(url) } catch (_: Exception) { null } ?: return@runOnUiThread
-                if (!openOutside(parsed)) web.loadUrl(url)
+                if (!openOutside(parsed)) Toast.makeText(this@MainActivity, "No application can open this link.", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -487,12 +571,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        hideFullscreenVideo()
         if (::speech.isInitialized) speech.destroy()
         super.onDestroy()
     }
 
     override fun onBackPressed() {
         when {
+            fullscreenView != null -> hideFullscreenVideo()
             setup.visibility == View.VISIBLE -> super.onBackPressed()
             web.canGoBack() -> web.goBack()
             else -> { connectGeneration++; conn = Conn.IDLE; showSetup() }

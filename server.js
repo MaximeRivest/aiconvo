@@ -26,6 +26,8 @@ const foldsLib = require('./projectfolds.js');
 const areasLib = require('./areas.js');
 const gitmeta = require('./gitmeta.js');
 const lineDiff = require('./linediff.js');
+const fileMedia = require('./file-media.js');
+const previewAssets = new fileMedia.PreviewAssets();
 const notebookEnv = require('./notebook-env.js');
 const notebookDerive = require('./notebook-derive.js');
 const { agentPath } = require('./agentpath.js');
@@ -9546,15 +9548,14 @@ async function transcriptFileReadResponse(key, pathValue, local = false) {
 }
 
 function imageMimeForPath(file) {
-  return ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif', '.webp': 'image/webp' })[path.extname(file).toLowerCase()] || null;
+  return fileMedia.mediaKind(file) === 'image' ? fileMedia.mediaType(file) : null;
 }
 
 async function pathInfoResponse(key, pathValue, local = false) {
   const { abs, stat } = await transcriptPathInfo(key, pathValue, { local });
   if (stat.isDirectory()) return { path: abs, kind: 'directory', preview: 'none', hostActions: local };
-  const mime = imageMimeForPath(abs);
-  let preview = mime ? 'image' : 'text';
+  const mime = fileMedia.mediaType(abs);
+  let preview = fileMedia.mediaKind(abs) || 'text';
   if (!mime) {
     if (stat.size > FILE_EDIT_MAX) preview = 'none';
     else {
@@ -12371,6 +12372,16 @@ function sendValidated(req, res, type, cacheControl, text) {
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   try {
+    // Sandboxed HTML cannot use app cookies. A capability authorizes only this
+    // narrow static-asset route, never another API or a whole directory tree.
+    const previewAsset = /^\/api\/file\/preview-assets\/([a-f0-9]{64})\/(.*)$/.exec(u.pathname);
+    if (previewAsset && (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        const found = await previewAssets.resolve(previewAsset[1], decodeURIComponent(previewAsset[2]));
+        return await fileMedia.serveFile(req, res, found, found.mime, { maxBytes: 32 * 1024 * 1024,
+          headers: { 'Access-Control-Allow-Origin': '*', 'Cross-Origin-Resource-Policy': 'cross-origin', 'Cache-Control': 'no-store' } });
+      } catch (e) { return json(res, 404, { error: e.message }); }
+    }
     // Who is asking. A credential in the URL (an invite link, the install
     // token) or a signed handoff from a paired install becomes a cookie;
     // after that the cookie names the person on every request.
@@ -12471,6 +12482,8 @@ const server = http.createServer(async (req, res) => {
       '/tokens.css': { file: 'design/tokens.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/surfaces.css': { file: 'design/surfaces.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/recent-files.js': { file: 'recent-files.js', type: 'application/javascript; charset=utf-8', cache: 'no-cache' },
+      '/sidebar-projects.js': { file: 'sidebar-projects.js', type: 'application/javascript; charset=utf-8', cache: 'no-cache' },
+      '/project-scope.js': { file: 'project-scope.js', type: 'application/javascript; charset=utf-8', cache: 'no-cache' },
       '/icon-192.png': { file: 'icons/icon-192.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
@@ -12485,6 +12498,17 @@ const server = http.createServer(async (req, res) => {
     }[u.pathname];
     if (staticFile) {
       return sendStatic(req, res, path.join(__dirname, staticFile.file), staticFile.type, staticFile.cache, { compress: staticFile.compress !== false });
+    }
+    const viewerVendor = /^\/vendor\/(pdfjs\/6\.3\.289|dompurify\/3\.4\.15)\/(.+)$/.exec(u.pathname);
+    if (viewerVendor && (req.method === 'GET' || req.method === 'HEAD')) {
+      const root = path.join(__dirname, 'vendor', viewerVendor[1]);
+      const file = path.resolve(root, decodeURIComponent(viewerVendor[2]));
+      if (!file.startsWith(root + path.sep)) return json(res, 404, { error: 'not found' });
+      const type = ({ '.mjs': 'text/javascript', '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html',
+        '.svg': 'image/svg+xml', '.gif': 'image/gif', '.json': 'application/json', '.ftl': 'text/plain',
+        '.wasm': 'application/wasm', '.ttf': 'font/ttf' })[path.extname(file)] || 'application/octet-stream';
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return sendStatic(req, res, file, type, 'private, max-age=86400');
     }
     if (u.pathname === '/') {
       // no-cache + ETag: the browser revalidates on every load, so a changed
@@ -12597,16 +12621,38 @@ const server = http.createServer(async (req, res) => {
         const input = JSON.parse(body || '{}');
         json(res, 200, await nativePathAction(input.id, input.path, input.action));
       } catch (e) { json(res, 400, { error: e.message }); }
-    } else if ((u.pathname === '/api/path/content' || u.pathname === '/api/conversation/file-content') && req.method === 'GET') {
+    } else if (u.pathname === '/api/file/preview' && req.method === 'POST') {
+      try {
+        let body = '';
+        for await (const chunk of req) { body += chunk; if (body.length > 16384) throw Error('Preview request too large'); }
+        const input = JSON.parse(body);
+        const found = await transcriptFilePath(input.id, input.path, FILE_EDIT_MAX, isLocalRequest(req));
+        assertPathAccess(identity, found.abs, 'see');
+        // Retain only the proof, not the HTTP request/socket. Re-resolve it so
+        // sign-in revocation, disabled accounts and sharing changes take effect.
+        const proof = { isLocal: isLocalRequest(req), cookie: cookieValue(req, 'aiconvo'), authorization: req.headers.authorization };
+        const authorize = abs => assertPathAccess(LAN_TOKEN ? usersLib.identify({ roster, installToken: LAN_TOKEN, ...proof }) : ownerIdentity(), abs, 'see');
+        json(res, 200, { ...previewAssets.create(found, { authorize }), folder: path.dirname(found.abs) });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/file/preview' && req.method === 'DELETE') {
+      previewAssets.revoke(u.searchParams.get('token')); json(res, 200, { ok: true });
+    } else if (u.pathname === '/api/file/media' && (req.method === 'GET' || req.method === 'HEAD')) {
+      try {
+        const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'), Infinity, isLocalRequest(req));
+        assertPathAccess(identity, found.abs, 'see');
+        const mime = fileMedia.mediaType(found.abs);
+        if (!mime) throw Error('This file is not a supported image, video or PDF');
+        await fileMedia.serveFile(req, res, found, mime, { download: u.searchParams.get('download') === '1',
+          maxBytes: mime.startsWith('image/') ? 32 * 1024 * 1024 : Infinity });
+      } catch (e) { if (!res.headersSent) json(res, 404, { error: e.message }); }
+    } else if ((u.pathname === '/api/path/content' || u.pathname === '/api/conversation/file-content') && (req.method === 'GET' || req.method === 'HEAD')) {
       try {
         const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'), 32 * 1024 * 1024, isLocalRequest(req));
         assertPathAccess(identity, found.abs, 'see');
         const mime = imageMimeForPath(found.abs);
         if (!mime) throw new Error('this file is not a supported image');
-        res.writeHead(200, { 'Content-Type': mime, 'Content-Length': found.stat.size,
-          'Cache-Control': 'private, max-age=60', 'X-Content-Type-Options': 'nosniff' });
-        fs.createReadStream(found.abs).pipe(res);
-      } catch (e) { json(res, 404, { error: e.message }); }
+        await fileMedia.serveFile(req, res, found, mime, { maxBytes: 32 * 1024 * 1024 });
+      } catch (e) { if (!res.headersSent) json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/here') {
       // "Where was I?" — the most recent session whose cwd is (or contains) dir.
       const dir = u.searchParams.get('dir') || '';

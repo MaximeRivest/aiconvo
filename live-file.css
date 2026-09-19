@@ -41,6 +41,14 @@
   .live-file-view .doc-editor-host:not(.code-host) > div { padding:12px 4px 40vh; }
 }
 
+/* A bounded viewport for Fit; actual size scrolls without stretching the page. */
+.lf-image-stage { flex:1; min-width:0; min-height:0; display:flex; overflow:auto; padding:12px; background:var(--surface-1); }
+.lf-image-stage img { display:block; flex:none; margin:auto; width:auto; height:auto; max-width:100%; max-height:100%; object-fit:contain; }
+.lf-image-stage.lf-image-actual img { max-width:none; max-height:none; }
+.lf-image-stage p { margin:auto; padding:20px; text-align:center; overflow-wrap:anywhere; color:var(--text-dim); }
+.image-view .live-file-head button[aria-pressed="true"] { background:var(--surface-2); color:var(--text); }
+.image-view .live-file-head button:disabled { opacity:.5; }
+
 /* History: the editor makes way for the version list and one version or a
    diff of two, drawn by the review's diff component. */
 .live-file-view .lf-narrow { display:none; }

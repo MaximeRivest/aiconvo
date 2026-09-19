@@ -63,7 +63,8 @@
     };
     const make = (hash, meta) => {
       const d = described(hash, meta);
-      return { id: 'n' + (++seq).toString(36), hash: hash || '', kind: d.kind, title: d.title, at: now(), scroll: null };
+      return { id: 'n' + (++seq).toString(36), hash: hash || '', kind: d.kind, title: d.title, at: now(), scroll: null,
+        ...(typeof meta?.projectScope === 'string' ? { projectScope: meta.projectScope } : {}) };
     };
     const trim = () => {
       const extra = entries.length - limit;
@@ -112,7 +113,8 @@
       replace(hash, meta) {
         if (index < 0) return api.push(hash, meta);
         const d = described(hash, meta);
-        entries[index] = { ...entries[index], hash: hash || '', kind: d.kind || entries[index].kind, title: d.title || entries[index].title };
+        entries[index] = { ...entries[index], hash: hash || '', kind: d.kind || entries[index].kind, title: d.title || entries[index].title,
+          ...(typeof meta?.projectScope === 'string' ? { projectScope: meta.projectScope } : {}) };
         try { history.replaceState(stamp(entries[index]), '', url(entries[index].hash)); } catch {}
         persist();
         emit();
@@ -140,6 +142,12 @@
         entries[i] = { ...entries[i], scroll: scroll || null };
         persist();
         return true;
+      },
+      rememberScope(id, projectScope) {
+        const i = findIndex(id);
+        if (i < 0 || typeof projectScope !== 'string') return false;
+        entries[i] = { ...entries[i], projectScope };
+        persist(); return true;
       },
       // Titles can be learned late (a conversation loads, an epic is
       // renamed): refresh them from the describer without moving anything.
