@@ -128,9 +128,26 @@ function lanLoginPage(error = '') {
 ${error ? `<p class="err">${error.replace(/</g, '&lt;')}</p>` : ''}
 <form method="post" action="/login"><label for="token">token</label><input id="token" name="token" autocomplete="off" autofocus><button type="submit">open aiconvo</button></form></main></body></html>`;
 }
+// Under WSL2 the Linux addresses are a private network inside the virtual
+// machine; other devices reach the Windows host instead (with the port
+// forward from windows/lan-forward.ps1). Ask Windows for its addresses so
+// the links people copy are ones that work. One PowerShell call, cached;
+// refreshed when the reach switch flips.
+const ON_WSL = (() => { try { return /microsoft/i.test(fs.readFileSync('/proc/version', 'utf8')); } catch { return false; } })();
+let windowsHostAddresses = [];
+function refreshWindowsHostAddresses() {
+  if (!ON_WSL) return Promise.resolve([]);
+  return new Promise(resolve => {
+    const script = '(Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp,Manual | Where-Object { $_.InterfaceAlias -notmatch "vEthernet|Loopback|WSL" -and $_.AddressState -eq "Preferred" }).IPAddress';
+    execFile('powershell.exe', ['-NoProfile', '-Command', script], { timeout: 8000 }, (err, stdout) => {
+      if (!err) windowsHostAddresses = String(stdout).replace(/\0/g, '').split(/\s+/).filter(a => /^\d+\.\d+\.\d+\.\d+$/.test(a) && !a.startsWith('169.254.'));
+      resolve(windowsHostAddresses);
+    });
+  });
+}
 function lanAddresses() {
   const nets = os.networkInterfaces();
-  const out = [];
+  const out = [...windowsHostAddresses];
   for (const list of Object.values(nets)) {
     for (const net of list || []) {
       if (net.internal || net.family !== 'IPv4') continue;
@@ -13239,7 +13256,11 @@ const server = http.createServer(async (req, res) => {
       const prevLan = lanWanted();
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
       saveAppSettings();
-      if (lanWanted() !== prevLan) applyLanMode(lanWanted());
+      if (lanWanted() !== prevLan) {
+        applyLanMode(lanWanted());
+        // The links in the answer should already carry the Windows address.
+        if (lanWanted()) await refreshWindowsHostAddresses();
+      }
       broadcast({ type: 'agent-recovery', recovery: agentRecovery.snapshot() });
       memoryModelHealth.setIdentity(currentModelLabel());
       // A new URL or namespace means a different remote index: re-push all.
@@ -13923,14 +13944,21 @@ function applyLanMode(on, onListening) {
   if (server.listening) server.close();
   server.listen(PORT, HOST, () => {
     console.log(`aiconvo → http://localhost:${PORT}`);
-    if (!isLoopback(HOST)) {
-      for (const ip of lanAddresses()) console.log(`aiconvo LAN → http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
-      console.log(`aiconvo LAN token file → ${LAN_TOKEN_FILE}`);
-    } else console.log('aiconvo reachable from this computer only');
+    if (isLoopback(HOST)) console.log('aiconvo reachable from this computer only');
     if (onListening) onListening();
   });
   if (tlsServer) { try { tlsServer.close(); } catch {} tlsServer = null; }
   if (isLoopback(HOST)) return;
+  // The certificate names every address people may open, so under WSL wait
+  // for the Windows ones before making it.
+  const ready = ON_WSL ? refreshWindowsHostAddresses() : Promise.resolve();
+  ready.then(() => {
+    for (const ip of lanAddresses()) console.log(`aiconvo LAN → http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
+    console.log(`aiconvo LAN token file → ${LAN_TOKEN_FILE}`);
+    if (!isLoopback(HOST) && !tlsServer) startLanTls();
+  });
+}
+function startLanTls() {
   try {
     const tls = ensureLanTls();
     tlsServer = https.createServer(tls, (req, res) => server.emit('request', req, res));
