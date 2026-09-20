@@ -4,6 +4,46 @@ Status: built 2026-09-19 (steps 1–6 below; the team-scale seams cut, the
 team-scale features deferred). "As built" at the end records what landed
 and every trade-off taken. The thinking above it is kept as written.
 
+## Quiet self-presence
+
+Conversation participant badges and live presence show other people, not the
+viewer. The comparison uses the signed-in user id and roster merge aliases,
+never names or initials; another device signed in as the same person is also
+hidden. The profile/settings button and profile/roster management keep their
+own identity displays. Stored authorship and read receipts are unchanged.
+
+Shared composer and file-editor cursors follow the same rule. The editor gets
+a filtered awareness view for decorations only: local state stays available,
+the real provider still shares full awareness, and edits still synchronize
+between the viewer's devices. Identity arrival or a merge refreshes existing
+markers without rewriting shared documents. Other people's presence bubbles
+are deduplicated per person; their individual editing cursors remain visible.
+
+## Profile settings update
+
+The signed-in user's initials or picture are now the Settings button (first
+in the desktop panel footer). Settings → your profile edits the existing
+user's name, optional custom initials and picture; it does not create a new
+identity or change any role, group, credential or authorship. Additional people
+still join through Settings → people and its existing invitation controls.
+
+The browser accepts PNG/JPEG/WebP up to 12 MB, center-crops to a 128×128 PNG,
+and previews before Save. Use initials removes the picture when saved. Draft
+fields survive settings repaints. A member may change their own profile; the
+existing roster-management rules still gate changes to other users.
+
+The private roster stores the thumbnail as `avatar`. Validation limits it to
+96 KiB and a PNG header with dimensions at most 256×256. Public user records
+contain only the content hash, not image bytes, so presence and attribution
+stay small. Authenticated `GET /api/users/avatar?id=…&v=…` serves that version
+as `image/png` with private caching and `nosniff`. No external image URL or SVG
+is accepted. A failed image falls back to initials. Name and picture are local
+to this install; machine handoff does not transfer the image bytes.
+
+This requires the updated server as well as the UI. Do not restart it during
+active runs merely to enable pictures; the profile form reports an older
+server rather than claiming the photo was saved.
+
 ## What aiconvo is today, seen from the question "who did this?"
 
 Every fact below shapes what a *user* can be. None of them are opinions.

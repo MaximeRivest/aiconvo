@@ -13577,13 +13577,27 @@ const server = http.createServer(async (req, res) => {
       appSettings = settingsLib.normalizeSettings({ ...appSettings, usageBilling: parsed });
       saveAppSettings();
       json(res, 200, { usageBilling: appSettings.usageBilling });
+    } else if (u.pathname === '/api/users/avatar' && (req.method === 'GET' || req.method === 'HEAD')) {
+      const person = usersLib.findUser(roster, u.searchParams.get('id'));
+      if (!person || !person.avatar) return json(res, 404, { error: 'No profile picture' });
+      const version = usersLib.publicUser(person).avatar;
+      if (u.searchParams.has('v') && u.searchParams.get('v') !== version) return json(res, 404, { error: 'Profile picture changed' });
+      const bytes = Buffer.from(person.avatar.slice('data:image/png;base64,'.length), 'base64');
+      const headers = { 'Content-Type': 'image/png', 'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': u.searchParams.has('v') ? 'private, max-age=86400, immutable' : 'private, no-cache', ETag: '"' + version + '"' };
+      if (req.headers['if-none-match'] === headers.ETag) { res.writeHead(304, headers); return res.end(); }
+      res.writeHead(200, { ...headers, 'Content-Length': bytes.length });
+      return res.end(req.method === 'HEAD' ? undefined : bytes);
     } else if (u.pathname === '/api/users' && req.method === 'GET') {
       json(res, 200, { users: publicUsers(), groups: roster.groups, me: usersLib.publicUser(identity.user), tier: identity.tier, canManage: usersLib.canManageUsers(identity), aliases: roster.aliases || {} });
     } else if (u.pathname.startsWith('/api/users/') && req.method === 'POST') {
-      // Roster management: the owner and admins. A member may only make
-      // invite links for their own devices.
+      // Members can edit their own profile and make their own device links;
+      // roster membership and roles remain owner/admin actions.
       let body = '';
-      for await (const chunk of req) body += chunk;
+      for await (const chunk of req) {
+        body += chunk;
+        if (Buffer.byteLength(body) > 192 * 1024) return json(res, 413, { error: 'Profile request is too large' });
+      }
       let p = {};
       try { p = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
       const op = u.pathname.slice('/api/users/'.length);
@@ -13600,7 +13614,7 @@ const server = http.createServer(async (req, res) => {
           out = { user: usersLib.publicUser(user), inviteLink: inviteLinkFor(secret) };
         } else if (op === 'update') {
           if (!(manages && (!isOwnerTarget || ownerTier)) && !self) throw Object.assign(new Error('you cannot change that person'), { status: 403 });
-          const patch = self && !manages ? { name: p.name, glyph: p.glyph, color: p.color } : p;
+          const patch = self && !manages ? { name: p.name, glyph: p.glyph, color: p.color, avatar: p.avatar } : p;
           if (patch.role !== undefined && !ownerTier) delete patch.role;
           out = { user: usersLib.publicUser(usersLib.updateUser(roster, p.id, patch)) };
         } else if (op === 'invite') {
@@ -13631,7 +13645,7 @@ const server = http.createServer(async (req, res) => {
           else for (const usr of roster.users) usr.groups = usr.groups.filter(g => g !== gid);
           out = { groups: roster.groups };
         } else throw Object.assign(new Error('unknown users operation'), { status: 404 });
-        saveRoster();
+        usersLib.saveRoster(USERS_FILE, roster);
         broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
         json(res, 200, { ...out, users: publicUsers(), groups: roster.groups });
       } catch (e) { json(res, e.status || 400, { error: e.message }); }

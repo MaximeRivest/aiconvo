@@ -5,18 +5,57 @@
    postJson, settingsOf, settingsState, viewKind, activeRel, fileWs,
    currentHash, sessions, renderSettings, saveSettings. */
 
-const peopleState = { me: null, tier: null, users: [], groups: [], conn: null, people: [], docs: new Map(), lastReport: '' };
+const peopleState = { me: null, tier: null, users: [], groups: [], aliases: {}, conn: null, people: [], docs: new Map(), lastReport: '' };
 window.aiconvoMe = null;
 
-const peopleUserById = id => peopleState.users.find(u => u.id === id) || null;
+function peopleCanonicalId(id) {
+  if (!id) return null;
+  const seen = new Set();
+  while (typeof peopleState.aliases[id] === 'string' && !seen.has(id)) { seen.add(id); id = peopleState.aliases[id]; }
+  return id;
+}
+function peopleIsMe(person) {
+  const id = typeof person === 'string' ? person : person?.id;
+  return !!id && !!peopleState.me && peopleCanonicalId(id) === peopleCanonicalId(peopleState.me.id);
+}
+window.aiconvoIsSelf = peopleIsMe;
+window.aiconvoPersonId = peopleCanonicalId;
+const peopleUserById = id => peopleState.users.find(u => u.id === peopleCanonicalId(id)) || null;
+function peopleIdentityChanged() {
+  renderPeopleHeader(); renderPresenceMarks();
+  if (typeof renderAgentsPopSoon === 'function') renderAgentsPopSoon();
+  window.dispatchEvent(new Event('aiconvo:identity'));
+}
+let peopleIdentityRequest = 0;
+async function peopleRefreshIdentity() {
+  const seq = ++peopleIdentityRequest;
+  try {
+    const response = await fetch('/api/users');
+    if (!response.ok) return;
+    const data = await response.json();
+    if (seq !== peopleIdentityRequest || !data.me) return;
+    peopleState.aliases = data.aliases || {};
+    peopleState.users = data.users || peopleState.users;
+    peopleState.groups = data.groups || peopleState.groups;
+    peopleState.me = data.me; window.aiconvoMe = data.me;
+    peopleIdentityChanged();
+  } catch {} // Live identity still works when the roster request is unavailable.
+}
 const peopleIsOwner = () => peopleState.tier === 'console' || peopleState.tier === 'owner';
 const peopleManages = () => peopleIsOwner() || peopleState.tier === 'admin';
 const peopleSeesAll = peopleManages;
 function peopleName(id) { const u = peopleUserById(id); return u ? u.name : 'someone'; }
+function peopleAvatarUrl(u) {
+  return u && /^[a-f0-9]{64}$/.test(u.avatar || '') ? '/api/users/avatar?id=' + encodeURIComponent(u.id) + '&v=' + u.avatar : '';
+}
 function userBubble(u, extraClass = '') {
   if (!u) return '';
-  return `<span class="user-bubble ${extraClass}" style="--who:${esc(u.color || '#888')}" title="${esc(u.name || '')}">${esc(u.glyph || '?')}</span>`;
+  u = peopleUserById(u.id) || u;
+  const avatar = peopleAvatarUrl(u);
+  return `<span class="user-bubble ${extraClass}" style="--who:${esc(u.color || '#888')}" title="${esc(u.name || '')}">${esc(u.glyph || '?')}${avatar ? `<img class="user-avatar" src="${esc(avatar)}" alt="" loading="lazy">` : ''}</span>`;
 }
+// A missing image never removes the person's initials.
+document.addEventListener('error', e => { if (e.target?.matches?.('img.user-avatar')) e.target.hidden = true; }, true);
 
 /* ---- live stream events ---- */
 function peopleLiveEvent(d) {
@@ -25,14 +64,22 @@ function peopleLiveEvent(d) {
     peopleState.users = d.users || []; peopleState.people = d.people || [];
     window.aiconvoMe = d.me;
     peopleState.lastReport = '';
-    renderPeopleHeader();
+    peopleIdentityChanged();
+    peopleRefreshIdentity();
     peopleReportRoute();
     refreshShareControl();
     composeShareCheck();
+    if (typeof settingsOpen !== 'undefined' && settingsOpen && settingsPane === 'profile') renderSettings();
     return true;
   }
   if (d.type === 'presence') { peopleState.people = d.people || []; renderPeopleHeader(); renderPresenceMarks(); return true; }
-  if (d.type === 'users') { peopleState.users = d.users || []; peopleState.groups = d.groups || []; if (typeof settingsOpen !== 'undefined' && settingsOpen) renderSettings(); renderPeopleHeader(); return true; }
+  if (d.type === 'users') {
+    peopleState.users = d.users || []; peopleState.groups = d.groups || [];
+    peopleState.me = peopleUserById(peopleState.me?.id) || peopleState.me;
+    window.aiconvoMe = peopleState.me;
+    if (typeof settingsOpen !== 'undefined' && settingsOpen) renderSettings();
+    peopleIdentityChanged(); peopleRefreshIdentity(); return true;
+  }
   if (d.type === 'collab-people') { peopleState.docs.set(d.name, d.people || []); return true; }
   if (d.type === 'access') { if (typeof refreshShareControl === 'function') refreshShareControl(); if (typeof load === 'function') load(); return true; }
   return false;
@@ -151,12 +198,17 @@ window.addEventListener('aiconvo:route', () => { const k = typeof viewKind !== '
 document.addEventListener('input', e => { if (e.target && e.target.id === 'agentText') peopleTyping(); });
 
 /* ---- header: me, and the others on this install ---- */
-function peopleOthersHere() {
-  const me = peopleState.me && peopleState.me.id;
+function peopleVisiblePresence(rows) {
+  if (!peopleState.me) return [];
   const seen = new Map();
-  for (const p of peopleState.people) { if (p.user.id === me) continue; const prev = seen.get(p.user.id); if (!prev || p.kind === 'typing') seen.set(p.user.id, p); }
+  for (const p of rows) {
+    if (!p.user || peopleIsMe(p.user)) continue;
+    const id = peopleCanonicalId(p.user.id), prev = seen.get(id);
+    if (!prev || p.kind === 'typing') seen.set(id, p);
+  }
   return [...seen.values()];
 }
+function peopleOthersHere() { return peopleVisiblePresence(peopleState.people); }
 function peopleRouteLabel(route) {
   if (route.startsWith('conversation:')) { const key = route.slice(13); const s = (typeof sessions !== 'undefined' ? sessions : []).find(x => x.key === key); return s ? 'in “' + (s.timelineTitle?.title || s.title || 'a conversation').slice(0, 60) + '”' : 'in a conversation'; }
   if (route.startsWith('file:')) return 'editing ' + route.slice(5).split('/').pop();
@@ -166,15 +218,14 @@ function peopleRouteLabel(route) {
   return 'on the home page';
 }
 function renderPeopleHeader() {
-  const btn = $('peopleBtn');
+  const btn = $('settingsBtn');
   if (!btn) return;
   const me = peopleState.me;
   const others = peopleOthersHere();
-  btn.hidden = !me;
-  if (!me) return;
-  btn.innerHTML = userBubble(me, 'me') + others.slice(0, 4).map(p => userBubble(p.user, p.kind === 'typing' ? 'typing' : '')).join('') + (others.length > 4 ? `<span class="user-more">+${others.length - 4}</span>` : '');
-  btn.title = 'You are ' + me.name + (others.length ? ' · also here: ' + others.map(p => p.user.name + ' (' + peopleRouteLabel(p.route) + (p.kind === 'typing' ? ', typing' : '') + ')').join(', ') : '') + ' — open people';
-  btn.classList.toggle('has-others', others.length > 0);
+  btn.innerHTML = userBubble(me || { name: 'Your profile', glyph: '?', color: '#888' }, 'me');
+  btn.title = (me ? me.name + ' · ' : '') + 'Settings (,)' +
+    (others.length ? ' · also here: ' + others.map(p => p.user.name + ' (' + peopleRouteLabel(p.route) + ')').join(', ') : '');
+  btn.setAttribute('aria-label', (me ? me.name + ' — ' : '') + 'Open settings and profile');
   renderConversationPresence();
 }
 // "Lilly is typing…" under the conversation title; bubbles on list rows.
@@ -182,8 +233,7 @@ function renderConversationPresence() {
   const host = $('convPresence');
   if (!host) return;
   const route = peopleCurrentRoute();
-  const me = peopleState.me && peopleState.me.id;
-  const here = peopleState.people.filter(p => p.route === route && p.user.id !== me);
+  const here = peopleVisiblePresence(peopleState.people.filter(p => p.route === route));
   if (!here.length) { host.hidden = true; host.innerHTML = ''; return; }
   host.hidden = false;
   const typing = here.filter(p => p.kind === 'typing').map(p => p.user.name);
@@ -191,13 +241,12 @@ function renderConversationPresence() {
   host.innerHTML = here.map(p => userBubble(p.user, p.kind === 'typing' ? 'typing' : '')).join('') + `<span class="presence-label">${esc(label)}</span>`;
 }
 function renderPresenceMarks() {
-  const me = peopleState.me && peopleState.me.id;
   const byKey = new Map();
   for (const p of peopleState.people) {
-    if (p.user.id === me || !p.route.startsWith('conversation:')) continue;
+    if (!peopleState.me || peopleIsMe(p.user) || !p.route.startsWith('conversation:')) continue;
     const key = p.route.slice(13);
     if (!byKey.has(key)) byKey.set(key, []);
-    if (!byKey.get(key).some(x => x.id === p.user.id)) byKey.get(key).push(p.user);
+    if (!byKey.get(key).some(x => peopleCanonicalId(x.id) === peopleCanonicalId(p.user.id))) byKey.get(key).push(p.user);
   }
   for (const el of document.querySelectorAll('[data-presence-key]')) {
     const list = byKey.get(el.dataset.presenceKey) || [];
@@ -225,7 +274,15 @@ function whoFilterOptions() {
   return opts.join('');
 }
 function participantsHtml(s) {
-  const parts = sessionParticipantsOf(s).map(p => peopleUserById(p.id) || { id: p.id, name: p.name, glyph: (p.name || '?')[0].toUpperCase(), color: '#888' });
+  // Attribution remains recorded; these badges only call out other people.
+  // Match the person, not the browser connection, name, or initials.
+  if (!peopleState.me) return '';
+  const seen = new Set();
+  const parts = sessionParticipantsOf(s).filter(p => {
+    const id = peopleCanonicalId(p.id);
+    if (peopleIsMe(p) || seen.has(id)) return false;
+    seen.add(id); return true;
+  }).map(p => peopleUserById(p.id) || { id: p.id, name: p.name, glyph: (p.name || '?')[0].toUpperCase(), color: '#888' });
   if (!parts.length) return '';
   return `<span class="participants">${parts.map(u => userBubble(u)).join('')}</span>`;
 }
@@ -291,6 +348,121 @@ function openShareDialog() {
     close();
     refreshShareControl();
   };
+}
+
+/* ---- settings → your profile ---- */
+let profileDraft = null;
+function profileInitials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? [...parts[0]][0] + [...parts.at(-1)][0] : [...(parts[0] || '?')][0]).toUpperCase();
+}
+function profileDraftFor(me) {
+  if (!profileDraft || profileDraft.id !== me.id) profileDraft = {
+    id: me.id, name: me.name, initials: me.glyph === profileInitials(me.name) ? '' : me.glyph || '',
+    avatar: undefined, busy: false, error: '', imageVersion: 0,
+  };
+  return profileDraft;
+}
+function profilePreviewHtml(draft, me) {
+  const src = draft.avatar === undefined ? peopleAvatarUrl(me) : draft.avatar;
+  return `<span class="user-bubble profile-picture" style="--who:${esc(me.color || '#888')}">${esc(draft.initials || profileInitials(draft.name))}${src ? `<img class="user-avatar" src="${esc(src)}" alt="">` : ''}</span>`;
+}
+function paneProfile() {
+  const me = peopleState.me;
+  if (!me) return '<h2>Your profile</h2><p class="hint">Connecting to your profile…</p>';
+  const d = profileDraftFor(me);
+  return `<h2>Your profile</h2><p class="lead">Your name and picture on this machine. Updating them keeps your existing account, conversations and permissions.</p>
+    <form id="profileForm" class="profile-form">
+      <div class="profile-photo-row"><div id="profilePreview">${profilePreviewHtml(d, me)}</div><div class="profile-photo-actions">
+        <button type="button" id="profilePick"${d.busy ? ' disabled' : ''}>Choose picture</button>
+        <button type="button" id="profileRemove"${d.busy || !(d.avatar === undefined ? me.avatar : d.avatar) ? ' disabled' : ''}>Use initials</button>
+        <input id="profileFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+        <p class="hint">Pictures are cropped to a small square. PNG, JPEG or WebP, up to 12 MB.</p>
+      </div></div>
+      <label for="profileName">Name</label><input id="profileName" type="text" autocomplete="name" maxlength="60" required value="${esc(d.name)}"${d.busy ? ' disabled' : ''}>
+      <label for="profileInitials">Initials <span class="hint">optional; otherwise taken from your name</span></label><input id="profileInitials" type="text" autocomplete="off" maxlength="2" value="${esc(d.initials)}"${d.busy ? ' disabled' : ''}>
+      <div><button type="submit" id="profileSave" class="primary"${d.busy ? ' disabled' : ''}>${d.busy === 'picture' ? 'Preparing picture…' : d.busy ? 'Saving…' : 'Save profile'}</button></div>
+      <p id="profileStatus" class="hint" role="status">${esc(d.error)}</p>
+    </form><button type="button" id="profilePeople" class="ghost">People and device links →</button>`;
+}
+function profileImage(file) {
+  if (!file || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return Promise.reject(new Error('Choose a PNG, JPEG or WebP picture.'));
+  if (file.size > 12 * 1024 * 1024) return Promise.reject(new Error('Choose a picture smaller than 12 MB.'));
+  return new Promise((resolve, reject) => {
+    const image = new Image(), url = URL.createObjectURL(file);
+    image.onload = () => {
+      try {
+        if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 32 * 1024 * 1024) throw new Error('Choose a smaller picture (up to 32 megapixels).');
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const side = Math.min(image.naturalWidth, image.naturalHeight);
+        ctx.drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, 128, 128);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (error) { reject(error); }
+      finally { URL.revokeObjectURL(url); }
+    };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that picture. Try a PNG or JPEG copy.')); };
+    image.src = url;
+  });
+}
+async function prepareProfilePicture(file) {
+  const me = peopleState.me;
+  if (!me || !file) return;
+  const d = profileDraftFor(me);
+  if (d.busy) return;
+  const version = ++d.imageVersion;
+  d.busy = 'picture'; renderSettings();
+  try {
+    const avatar = await profileImage(file);
+    if (profileDraft !== d || d.imageVersion !== version) return;
+    d.avatar = avatar; d.error = 'Picture ready. Save to apply.';
+  } catch (error) { d.error = error.message; }
+  finally { d.busy = false; if (settingsOpen && settingsPane === 'profile' && profileDraft === d) renderSettings(); }
+}
+// The Android app returns decoded pictures through its image bridge rather
+// than the file input. In Profile those pictures belong to this preview.
+async function acceptProfileNativeImage(mime, b64) {
+  try {
+    if (b64.length > 16 * 1024 * 1024) throw new Error('Choose a picture smaller than 12 MB.');
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    await prepareProfilePicture(new File([bytes], 'profile-picture', { type: mime || 'image/jpeg' }));
+  } catch (error) { errToast(error.message || 'Could not read that picture.'); }
+}
+function bindPaneProfile(root) {
+  const me = peopleState.me;
+  if (!me || !root.querySelector('#profileForm')) return;
+  const d = profileDraftFor(me);
+  const status = text => { d.error = text; const el = $('profileStatus'); if (el) el.textContent = text; };
+  const preview = () => {
+    if ($('profilePreview')) $('profilePreview').innerHTML = profilePreviewHtml(d, me);
+    if ($('profileRemove')) $('profileRemove').disabled = d.busy || !(d.avatar === undefined ? me.avatar : d.avatar);
+  };
+  $('profileName').oninput = e => { d.name = e.target.value; preview(); };
+  $('profileInitials').oninput = e => { d.initials = e.target.value; preview(); };
+  $('profilePick').onclick = () => $('profileFile').click();
+  $('profileRemove').onclick = () => { d.imageVersion++; d.avatar = null; preview(); status('Picture removed from the preview. Save to apply.'); };
+  $('profileFile').onchange = async e => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (file) await prepareProfilePicture(file);
+  };
+  $('profileForm').onsubmit = async e => {
+    e.preventDefault();
+    if (d.busy) return;
+    if (!d.name.trim()) return status('Enter your name.');
+    d.busy = true; status(''); renderSettings();
+    try {
+      const out = await postJson('/api/users/update', { id: me.id, name: d.name.trim(), glyph: d.initials.trim(), ...(d.avatar !== undefined ? { avatar: d.avatar } : {}) });
+      if (out.error) throw new Error(out.error);
+      if (d.avatar && !out.user?.avatar) throw new Error('Picture saving needs the updated server. Restart it after running agents finish, then save again.');
+      if (!out.user) throw new Error('The server did not return your saved profile.');
+      peopleState.users = out.users || peopleState.users;
+      peopleState.me = out.user; window.aiconvoMe = out.user;
+      profileDraft = null; renderPeopleHeader(); renderPresenceMarks();
+      toast('Profile saved');
+    } catch (error) { d.error = error.message || 'Could not save your profile.'; }
+    finally { d.busy = false; if (settingsOpen && settingsPane === 'profile') renderSettings(); }
+  };
+  $('profilePeople').onclick = () => showSettingsPane('people');
 }
 
 /* ---- settings → people ---- */

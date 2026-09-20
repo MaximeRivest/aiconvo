@@ -158,38 +158,45 @@ body.bar-fold header:has(#activeBtn.work) {
    html[data-layout=side] is set before paint from localStorage; the body
    class follows it only above 700px (the phone keeps the top bar). */
 #side { display: none; }
-body.side-layout { --side-w: 344px; display: grid; grid-template-columns: var(--side-w, 344px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+body.side-layout { --side-w: 288px; --right-w: 0px; display: grid; grid-template-columns: var(--side-w, 288px) minmax(0, 1fr) var(--right-w); grid-template-rows: auto minmax(0, 1fr); }
+body.side-layout.file-side-open { --right-w: 288px; }
+#rightFiles, #filesToggle { display: none; }
+body.side-layout > #filesToggle { display: flex; align-items: center; justify-content: center; position: fixed; top: 12px; right: 12px; z-index: 48; width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: var(--r); background: var(--surface-1); box-shadow: 0 2px 12px var(--shadow-color); font-size: 18px; }
+body.side-layout.file-side-open > #filesToggle { display: none; }
+body.side-layout.conv:not(.file-side-open) #floatHead { padding-right: 62px; }
+body.side-layout.file-side-open > #rightFiles { display: flex; grid-column: 3; grid-row: 1 / 3; min-width: 0; min-height: 0; background: var(--panel-bg); border-left: 1px solid var(--panel-border); }
+#rightFilePanel { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.file-scope-switch { display: flex; gap: 4px; padding: 0 10px 8px; }
+.file-scope-switch button { flex: 1; background: transparent; border-color: transparent; }
+.file-scope-switch button[aria-pressed="true"] { background: var(--surface-2); border-color: var(--border); font-weight: 700; }
+#rightFilePanel[hidden] { display: none; }
+.right-file-head { display: flex; align-items: center; gap: 8px; padding: 10px; }
+#rightFileTitle { flex: 1; min-width: 0; font-size: var(--fs-label); font-weight: 700; }
+#rightFileClose { flex: none; border: 0; background: transparent; padding: 0 6px; color: var(--text-dim); }
+#rightFileList { flex: 1; min-height: 0; overflow: auto; padding: 0 var(--sp-1) var(--sp-2); }
+#rightFileList .ag-row.current { background: var(--surface-2); }
+.ag-file .ag-file-open { border: 0; background: transparent; padding: 0; color: inherit; font: inherit; text-align: left; min-height: 30px; }
+.ag-file-open:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+@media (min-width: 701px) and (max-width: 1100px) {
+  body.side-layout.file-side-open { --right-w: 0px; }
+  body.side-layout.file-side-open > #rightFiles { border-left: 0; }
+  body.side-layout #rightFilePanel { position: fixed; z-index: 50; top: 0; bottom: 0; right: 0; width: min(288px, calc(100vw - 112px)); background: var(--panel-bg); border-left: 1px solid var(--panel-border); box-shadow: -8px 0 24px var(--shadow-color); }
+}
 body.side-layout > header { grid-column: 2; }
 body.side-layout > main { grid-column: 2; grid-row: 2; min-height: 0; }
 body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-direction: row; min-height: 0; background: var(--panel-bg); border-right: 1px solid var(--panel-border); }
-/* Two levels, Slack-style: a narrow rail chooses a section; the panel shows it. */
-#sideRail { flex: 0 0 var(--rail-w, 56px); display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: var(--sp-2) 4px; border-right: 1px solid var(--border); background: var(--surface-2); min-height: 0; overflow-y: auto; }
-.rail-secondary { border-top: 1px solid var(--border-strong); padding-top: 10px; }
-.rail-primary .rail-label { font-weight: 700; }
-#sideRail #sideProject { max-width: none; flex: none; color: var(--text); }
-#sideRail #sideProject .rail-icon { font-style: normal; }
-#sideRail #sideProject .rail-label { white-space: normal; line-height: 1.15; max-height: 21px; overflow-wrap: anywhere; }
-#sideRail #railMachine { width: 100%; flex-shrink: 0; }
+/* One panel: navigation above the work, machine and utilities below it. */
 #returnToWork[hidden] { display: none; }
 #returnToWork { width: 100%; color: var(--accent); }
 #sidePanel { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-#railMachine { height: 40px; min-height: 40px; padding: 0; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-1); color: var(--text); font-weight: 700; font-size: 12px; letter-spacing: .02em; display: flex; align-items: center; justify-content: center; }
+#railMachine { flex: 0 1 auto; min-width: 0; max-width: 72px; height: 30px; min-height: 30px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-1); color: var(--text); font-weight: 600; font-size: var(--fs-micro); display: flex; align-items: center; justify-content: center; }
 #railMachine .rail-initials { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
 #railMachine:hover { background: var(--surface-3); }
 #railMachine[aria-expanded="true"] { border-color: var(--accent); }
-.rail-sections { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
-.rail-sections button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; height: 48px; min-height: 48px; padding: 4px 2px; border: 0; border-radius: var(--r); background: transparent; color: var(--text-dim); }
-.rail-sections button:hover { background: var(--surface-3); color: var(--text); }
-.rail-sections button[aria-pressed="true"] { background: var(--surface-1); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
-.rail-icon { font-size: 16px; line-height: 1; }
-.rail-label { font-size: 9px; line-height: 1; letter-spacing: .02em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-icon { flex: none; font-size: 16px; line-height: 1; }
 .rail-badge { position: absolute; top: 4px; right: 5px; min-width: 14px; height: 14px; padding: 0 4px; border-radius: var(--r-pill); background: var(--accent-strong); color: var(--accent-ink); font-size: 9px; line-height: 14px; font-weight: 700; text-align: center; }
 .rail-badge[hidden] { display: none; }
 .rail-badge.dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: 7px; right: 8px; font-size: 0; }
-.rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-#railFootSlot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-#railFootSlot > button { width: 36px; height: 32px; min-height: 32px; padding: 0; justify-content: center; }
-:root[data-theme-mode="binary"] .rail-sections button[aria-pressed="true"] { box-shadow: inset 3px 0 0 var(--text); }
 :root[data-theme-mode="binary"] .rail-badge { background: var(--text); color: var(--bg); }
 /* The panel shows one section at a time; the flow/dock split only applies
    inside "chats". Other sections use the full height, top-aligned. */
@@ -197,14 +204,33 @@ body.side-layout #agentsPop[data-panel]:not([data-panel="conversations"]) #agent
 body.side-layout #agentsPop:not([data-panel="files"]):not([data-panel="recent-files"]) .ag-files-block { display: none; }
 .panel-title { padding: var(--sp-2) 10px 4px; font-size: var(--fs-label); font-weight: 700; color: var(--text); }
 .panel-scope-caption { padding: 0 10px 8px; font-size: var(--fs-micro); color: var(--text-dim); }
-.inbox-tabs { display: flex; gap: 4px; padding: 2px 8px 8px; }
-.inbox-tabs button { flex: 1; min-width: 0; padding: 4px; font-size: var(--fs-micro); background: transparent; border-color: transparent; }
-.inbox-tabs button[aria-pressed="true"] { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.inbox-section > h3 { margin: 0; padding: 8px 10px 4px; font-size: var(--fs-micro); font-weight: 600; color: var(--text-dim); }
+.inbox-read-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 4px; }
+.inbox-read-head h3 { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-micro); font-weight: 600; color: var(--text-dim); }
+.read-scope { display: flex; gap: 2px; }
+.read-scope button { min-height: 28px; padding: 2px 8px; font-size: var(--fs-micro); background: transparent; border-color: transparent; }
+.read-scope button[aria-pressed="true"] { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.inbox-section + .inbox-section { margin-top: 12px; padding-top: 4px; border-top: 1px solid var(--border); }
+/* Replies scroll above a working dock that stays reachable. Keep the stored
+   inbox panel id so existing selections and project-scope rules carry over. */
+body.side-layout #agentsPop[data-panel="inbox"] { overflow: hidden; }
+body.side-layout #agentsPop[data-panel="inbox"] #agentsUnread { flex: 1 1 auto; min-height: 0; overflow: auto; }
+body.side-layout #agentsPop[data-panel="inbox"] #agentsLegacy { flex: 0 0 auto; max-height: 42%; overflow: auto; border-top: 1px solid var(--border); }
+#sideUnfold.work .rail-icon { color: var(--live); }
+.ag-project { color: inherit; text-decoration: none; }
+.ag-project:hover, .ag-project:focus-visible { color: var(--text); text-decoration: underline; }
+.ag-project:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .tray-scope { margin: 6px 10px; }
-.mpick.project-scope-picker { width: 320px; }
-.mpick.project-scope-picker .mp-row { flex-direction: column; align-items: flex-start; gap: 2px; }
-.project-scope-picker .mp-row small { font-size: var(--fs-micro); color: var(--text-dim); overflow-wrap: anywhere; }
-@media (max-width: 700px) { .mpick.project-scope-picker { width: auto; max-width: 100%; } }
+.mpick.project-scope-picker { width: 320px; max-height: min(480px, calc(100dvh - 16px)); }
+.mpick.project-scope-picker .mp-top { padding: 10px; border-bottom: 1px solid var(--border); }
+.mpick.project-scope-picker .mp-filter { min-width: 0; }
+.mpick.project-scope-picker .mp-list { min-height: 0; padding: 4px 0; }
+/* List items must keep their natural height; only the list itself shrinks. */
+.mpick.project-scope-picker .mp-row { flex: 0 0 auto; flex-direction: column; align-items: stretch; gap: 3px; padding: 8px 12px; line-height: 1.35; }
+.mpick.project-scope-picker .mp-row b { flex: none; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.mpick.project-scope-picker .mp-row small { flex: none; font-size: var(--fs-micro); line-height: 1.35; color: var(--text-dim); white-space: normal; overflow-wrap: anywhere; }
+.mpick.project-scope-picker .mp-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (max-width: 700px) { .mpick.project-scope-picker { width: auto; max-width: 100%; max-height: 72dvh; } }
 .panel-project-controls { position: sticky; top: 0; z-index: 1; display: grid; gap: 6px; padding: 6px 10px 10px; background: var(--panel-bg); }
 .panel-project-controls input, .panel-project-controls select { width: 100%; min-width: 0; }
 .panel-project-status { font-size: var(--fs-micro); color: var(--text-dim); }
@@ -232,19 +258,22 @@ body.side-layout.zen:not(.home) #floatHead { display: none; }
 :root[data-theme-motion="none"] #floatHead { transition: none; }
 :root[data-theme-mode="binary"] #floatHead { background: transparent; backdrop-filter: none; box-shadow: none; }
 /* The composer never moves: pinned to the bottom of the page. */
-body.side-layout .composer-dock { position: fixed; left: var(--side-w, 344px); right: 0; bottom: 0; margin: 0 auto; z-index: 45; }
+body.side-layout .composer-dock { position: fixed; left: var(--side-w, 288px); right: var(--right-w, 0px); bottom: 0; margin: 0 auto; z-index: 45; }
 body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + 16px); }
 body.side-layout .agent-compose { border-bottom: 0; }
-.side-top .side-row { display: flex; gap: 2px; }
-.side-top .side-row > .nav-pair { flex: 1 1 auto; }
-#sideProject { flex: 0 1 auto; min-width: 0; max-width: 60%; color: var(--text-dim); }
-#sideProject[hidden] { display: none; }
+.side-top .side-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.side-top .side-row > .nav-pair { flex: 0 0 auto; }
+.side-project-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+#sideHome { flex: none; gap: 5px; padding: 0 6px; font-size: var(--fs-micro); }
+.side-project { display: flex; flex: 1 1 auto; min-width: 0; gap: 0; border: 1px solid var(--border); border-radius: var(--panel-row-r); background: var(--surface-2); }
+#sideProject { flex: 1 1 auto; min-width: 0; font-weight: 700; }
+#sideProjectMore { flex: 0 0 28px; width: 28px; padding: 0; justify-content: center; border-left: 1px solid var(--border); border-top-left-radius: 0; border-bottom-left-radius: 0; color: var(--text-dim); }
 .side-top { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) var(--sp-2) var(--sp-1); }
 .side-top button { display: flex; align-items: center; gap: 8px; height: 30px; min-height: 30px; padding: 0 8px; border-color: transparent; border-radius: var(--panel-row-r); background: transparent; color: var(--text); text-align: left; overflow: hidden; }
 .side-top button:hover { background: var(--surface-2); }
 .side-top button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* One "new" line: the main button starts where you are; ▾ offers the rest. */
-.side-new { display: flex; gap: 0; }
+.side-new { display: flex; flex: 1 1 auto; min-width: 0; gap: 0; }
 #sideNew { flex: 1 1 auto; min-width: 0; font-weight: 700; }
 #sideNewMore { flex: 0 0 auto; width: 28px; padding: 0; justify-content: center; color: var(--text-dim); }
 #sideNewMore[hidden] { display: none; }
@@ -256,7 +285,7 @@ body.side-layout #agentsPop .ag-row.current { background: var(--surface-2); }
 body.side-layout #agentsPop .ag-row.current .ag-title { color: var(--accent); }
 body.side-layout #agentsPop .ag-row.kbd-selected { outline: 1px solid var(--accent); outline-offset: -1px; }
 body.side-layout #agentsPop:not(.kbd) .ag-row.kbd-selected { outline: 0; }
-/* Recent files are a column thing: the tray has no room for a standing list. */
+/* File activity lives in the right column; phones keep their existing file views. */
 body:not(.side-layout) .ag-files-block { display: none; }
 .ag-sec-body[hidden] { display: none; }
 /* Sections are separated by space, not lines. A head is a quiet label; it
@@ -283,19 +312,23 @@ body:not(.side-layout) .ag-files-block { display: none; }
 .ag-empty { padding: 3px 10px 4px; color: var(--text-faint); font-size: 10px; }
 .side-foot { display: flex; align-items: center; gap: 4px; padding: var(--sp-1) var(--sp-2); }
 #sideFootSlot { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
+#sideFootSlot > button { flex: none; min-height: 30px; height: 30px; padding: 0 6px; }
 #sideFold { height: 26px; min-height: 26px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; margin-left: auto; }
 #sideFold:hover { color: var(--text); background: var(--surface-2); }
-/* Folded: a thin rail, like the folded bar. It keeps the inbox count. */
-body.side-layout.side-fold { grid-template-columns: var(--rail-w, 56px) minmax(0, 1fr); }
-body.side-layout.side-fold > #side > #sidePanel { display: none !important; }
-body.side-layout.side-fold .composer-dock { left: var(--rail-w, 56px); }
+/* Folding frees the whole column; one floating control brings it back. */
+body.side-layout.side-fold { --side-w: 0px; }
+body.side-layout.side-fold > #side { display: none !important; }
+#sideUnfold { display: none; }
+body.side-layout.side-fold > #sideUnfold { display: flex; align-items: center; justify-content: center; position: fixed; top: 12px; left: 12px; z-index: 48; width: 38px; height: 38px; min-height: 38px; padding: 0; background: var(--surface-1); box-shadow: 0 2px 12px var(--shadow-color); }
+body.side-layout.side-fold.conv #floatHead { padding-left: 62px; }
+body.side-layout.side-fold.home #ganttBar { padding-left: 48px; }
 body.side-layout > #side { position: relative; }
 /* Pop-ups that hung from the bar's right edge hang from the column's foot. */
-body.side-layout #machinePop { top: auto; bottom: 44px; left: calc(var(--rail-w, 56px) + 4px); right: auto; z-index: 40; }
+body.side-layout #machinePop { bottom: auto; right: auto; z-index: 60; max-width: calc(100vw - 16px); overflow: auto; }
 body.side-layout #machineBtn { display: none !important; }
 /* Zen hides every chrome, the column included. */
-body.zen:not(.home).side-layout > #side { display: none !important; }
-body.zen:not(.home).side-layout { grid-template-columns: 0 minmax(0, 1fr); }
+body.zen:not(.home).side-layout > #side, body.zen:not(.home).side-layout > #rightFiles, body.zen:not(.home).side-layout > #filesToggle, body.zen:not(.home).side-layout > #sideUnfold { display: none !important; }
+body.zen:not(.home).side-layout { --side-w: 0px; --right-w: 0px; grid-template-columns: 0 minmax(0, 1fr) 0; }
 /* Row actions: pin, mark unread, remove. One ⋯ per conversation row. */
 .ag-row .ag-more { border: 0; background: transparent; color: var(--text-faint); font-size: 12px; }
 .ag-row .ag-more:hover { color: var(--text); background: var(--surface-3); }
@@ -681,8 +714,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .mgantt .mg-scroll { overflow: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; line-height: 0; }
 .mgantt[data-mg-open] { position: fixed; inset: var(--header-h) 0 0; z-index: 25; margin: 0; background: var(--bg); display: flex; flex-direction: column; }
 /* An expanded chart owns the content pane, never the navigation column. */
-body.side-layout .mgantt[data-mg-open] { inset: 0 0 0 var(--side-w, 344px); }
-body.side-layout.side-fold .mgantt[data-mg-open] { left: var(--rail-w, 56px); }
+body.side-layout .mgantt[data-mg-open] { inset: 0 var(--right-w, 0px) 0 var(--side-w, 288px); }
 body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .mgantt[data-mg-open] .mg-bar { flex: none; flex-wrap: wrap; padding: 8px 12px; gap: 6px; }
 .mgantt[data-mg-open] .mg-scroll { flex: 1; min-height: 0; overscroll-behavior: contain; }
@@ -1927,8 +1959,7 @@ body.zen:not(.home) #zenExit { display: block; position: fixed; top: 6px; right:
 .agent-compose textarea { background: transparent; padding: 8px 4px; border: 0; border-radius: var(--r); min-height: 44px; height: 44px; }
 .agent-compose textarea:focus { outline: none; }
 .composer-dock { min-width: 0; }
-body.side-layout .composer-dock { width: calc(100% - var(--side-w, 344px) - 24px); bottom: 10px; }
-body.side-layout.side-fold .composer-dock { width: calc(100% - var(--rail-w, 56px) - 24px); left: var(--rail-w, 56px); }
+body.side-layout .composer-dock { width: calc(100% - var(--side-w, 288px) - var(--right-w, 0px) - 24px); bottom: 10px; }
 body.side-layout .agent-compose { border-bottom: 1px solid var(--border); }
 body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + 28px); }
 /* Equal outer tracks keep usage centered on the composer, independently
@@ -2038,7 +2069,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <header>
   <div id="projSort" hidden></div>
   <button id="newLoose" title="New conversation (C) — a blank page: no project memory, home folder, pi defaults. Everything stays changeable until the first message goes."><span class="nl-long">+ </span>new</button>
-  <button id="brand" aria-label="Home">⌂</button>
+  <button id="brand" aria-label="Gantt" title="Gantt — conversations on a timeline">▥</button>
   <span class="nav-pair"><button id="navBack" class="nav-back" disabled aria-label="Back">‹</button><button id="navFwd" class="nav-fwd" disabled aria-label="Forward">›</button></span>
   <button id="chProject" title="Open the project overview"></button>
   <button id="chMove" title="Move this conversation to another project (P) — its memory follows; tools keep running in the original folder">⇢</button>
@@ -2053,8 +2084,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <span class="count" id="count"></span>
   <button id="activeBtn" hidden title="Agents and replies (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
   <button id="machineBtn" hidden title="Switch to another aiconvo machine"></button>
-  <button id="peopleBtn" hidden title="People on this machine"></button>
-  <button id="settingsBtn" title="Settings (,)">⚙</button>
+  <button id="settingsBtn" title="Your profile and Settings (,)" aria-label="Open settings and profile"><span class="user-bubble me">?</span></button>
   <button id="barFold" title="Fold the top bar — click the rail to bring it back (`)">▴</button>
 </header>
 <button id="zenExit" title="Leave zen mode (z)">zen ✕</button>
@@ -2062,38 +2092,44 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <div id="agentsPop" hidden><div id="agentsUnread"></div><div id="agentsLegacy"></div></div>
 <div id="machinePop" hidden></div>
 <aside id="side" hidden aria-label="Navigation and agents">
-  <nav id="sideRail" aria-label="Sections">
-    <div class="rail-sections rail-primary" role="group" aria-label="Work across all projects">
-      <button id="sideHome" type="button" title="Home — pick up past work on the timeline"><span class="rail-icon">⌂</span><span class="rail-label">Home</span></button>
-      <button type="button" data-rail="inbox" aria-pressed="true" title="Finished replies and interrupted agents · all projects"><span class="rail-icon">▣</span><span class="rail-label">Inbox</span><span class="rail-badge" hidden></span></button>
-      <button type="button" data-rail="traffic" aria-pressed="false" title="Running agents · all projects"><span class="rail-icon">⚉</span><span class="rail-label">Agents</span><span class="rail-badge" hidden></span></button>
-      <button type="button" data-rail="recent-files" aria-pressed="false" title="Recently opened or changed files · all projects"><span class="rail-icon">◷</span><span class="rail-label">Recent</span></button>
-    </div>
-    <div class="rail-sections rail-secondary" role="group" aria-label="Project browsing">
-      <button id="sideProject" type="button" title="Choose a project" aria-haspopup="dialog" aria-expanded="false"><i class="rail-icon">▾</i><span class="rail-label">All projects</span></button>
-      <button type="button" data-rail="projects" aria-pressed="false"><span class="rail-icon">▦</span><span class="rail-label">Projects</span></button>
-      <button type="button" data-rail="conversations" aria-pressed="false"><span class="rail-icon">☷</span><span class="rail-label">Chats</span><span class="rail-badge" hidden></span></button>
-      <button type="button" data-rail="files" aria-pressed="false"><span class="rail-icon">▤</span><span class="rail-label">Files</span><span class="rail-badge" hidden></span></button>
-    </div>
-    <div class="rail-foot"><button id="railMachine" type="button" title="Machine" aria-haspopup="menu"><span class="rail-initials">·</span></button><span id="railFootSlot"></span></div>
-  </nav>
   <div id="sidePanel">
   <div class="side-top">
+    <div class="side-project-row">
+      <button id="railMachine" type="button" title="Machine" aria-label="Choose machine" aria-haspopup="menu" aria-expanded="false"><span class="rail-initials">·</span></button>
+      <button id="sideHome" type="button" title="Gantt — conversations on a timeline"><svg class="rail-icon" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 4h8M7 10h11M3 16h10" fill="none" stroke="currentColor" stroke-width="3"/></svg><span>Gantt</span></button>
+      <div class="side-project" role="group" aria-label="Project memory">
+        <button id="sideProject" type="button" title="Browse projects"><span>All projects</span></button>
+        <button id="sideProjectMore" type="button" title="Open another project's memory" aria-label="Choose another project" aria-haspopup="dialog" aria-expanded="false">▾</button>
+      </div>
+    </div>
     <div class="side-row">
       <span class="nav-pair"><button id="sideBack" class="nav-back" disabled aria-label="Back">‹</button><button id="sideFwd" class="nav-fwd" disabled aria-label="Forward">›</button></span>
+      <div class="side-new">
+        <button id="sideNew" title="New conversation (C) — a blank page: no project memory, home folder, pi defaults">+ <span>new</span></button>
+        <button id="sideNewMore" hidden title="Other ways to start" aria-haspopup="menu" aria-label="More ways to start">▾</button>
+      </div>
     </div>
     <button id="returnToWork" type="button" hidden title="Return to the page you left to check an agent">↩ <span>Return to work</span></button>
-    <div class="side-new">
-      <button id="sideNew" title="New conversation (C) — a blank page: no project memory, home folder, pi defaults">+ <span>new</span></button>
-      <button id="sideNewMore" hidden title="Other ways to start" aria-haspopup="menu" aria-label="More ways to start">▾</button>
-    </div>
   </div>
   <div id="sideAgents"></div>
   <div class="side-foot">
     <span id="sideFootSlot"></span>
-    <button id="sideFold" title="Fold the side panel — click the rail to bring it back (`)">◂</button>
+    <button id="sideFold" title="Hide the side panel (`)" aria-label="Hide side panel">◂</button>
   </div>
   </div>
+</aside>
+<button id="sideUnfold" type="button" title="Show side panel (`)" aria-label="Show side panel" aria-controls="sidePanel" aria-expanded="false"><span class="rail-icon">▸</span><span class="rail-badge" hidden></span></button>
+<button id="filesToggle" type="button" aria-label="Open files" title="Open files" aria-expanded="false" aria-controls="rightFilePanel">▤</button>
+<aside id="rightFiles" hidden aria-label="Files">
+  <section id="rightFilePanel" hidden aria-labelledby="rightFileTitle">
+    <div class="right-file-head"><span id="rightFileTitle">Files</span><button id="rightFileClose" type="button" title="Close file panel" aria-label="Close file panel">✕</button></div>
+    <div class="file-scope-switch" role="group" aria-label="File scope">
+      <button type="button" data-file-scope="recent-files" aria-pressed="true" title="File activity across all projects">All</button>
+      <button type="button" data-file-scope="files" aria-pressed="false" title="File activity in the selected project">Project</button>
+    </div>
+    <div id="rightFileScope" class="panel-scope-caption"></div>
+    <div id="rightFileList"></div>
+  </section>
 </aside>
 <div id="searchOverlay" class="overlay" hidden>
   <div class="dialog search-dialog" role="dialog" aria-modal="true" aria-labelledby="searchModalInput">
@@ -2378,7 +2414,7 @@ function describeRoute(h) {
   const dec = s => { try { return decodeURIComponent(s); } catch { return s; } };
   const base = p => String(p || '').split('/').filter(Boolean).pop() || p;
   const json = s => { try { return JSON.parse(s.startsWith('{') ? s : dec(s)); } catch { return null; } };
-  if (!h) return { kind: 'home', title: 'home' };
+  if (!h) return { kind: 'home', title: 'Gantt' };
   if (h === 'settings' || h.startsWith('settings=')) return { kind: 'settings', title: 'settings' };
   if (h === 'usage') return { kind: 'usage', title: 'usage' };
   if (h.startsWith('q=')) return { kind: 'home', title: 'search “' + dec(h.slice(2)) + '”' };
@@ -2994,6 +3030,12 @@ function toggleMachinePop(show) {
   const list = settingsOf().machines || [];
   pop.innerHTML = `<div class="mach-head">you are on ${esc(host)} · go to</div>` +
     list.map((m, i) => `<button type="button" data-i="${i}"><span>${esc(m.name)}</span><span class="mach-url">${esc(m.url.replace(/^https?:\/\//i, ''))}</span></button>`).join('');
+  const anchor = sideLayoutOn() ? $('railMachine') : $('machineBtn');
+  const rect = anchor.getBoundingClientRect();
+  pop.style.maxHeight = Math.max(80, innerHeight - rect.bottom - 14) + 'px';
+  pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+  pop.style.top = Math.max(8, Math.min(rect.bottom + 6, innerHeight - pop.offsetHeight - 8)) + 'px';
+  pop.style.right = 'auto';
   // Check that the other install answers before leaving this page: a
   // machine whose aiconvo is off would only give a blank tab.
   pop.querySelectorAll('button[data-i]').forEach(b => b.onclick = async () => {
@@ -3332,7 +3374,7 @@ function updateActiveBtn() {
   $('activeGlyph').textContent = working ? '⚉' : '⚇';
   $('agentUnreadCount').textContent = (unread.length ? String(unread.length) : '') + (agentsRecovery.interrupted.length ? ' !' : '');
   $('activeBtn').title = unread.length
-    ? `${unread.length} unread ${unread.length === 1 ? 'reply' : 'replies'} · Inbox (a)`
+    ? `${unread.length} unread ${unread.length === 1 ? 'reply' : 'replies'} · Agents (a)`
     : 'Agents and replies (a)';
   if (agentsRecovery.interrupted.length) $('activeBtn').title += ` · ${agentsRecovery.interrupted.length} interrupted`;
   // The gentle pulse runs only while something truly works (e-ink kills all
@@ -3345,8 +3387,7 @@ function updateActiveBtn() {
   side.classList.toggle('unread', unread.length > 0);
   side.dataset.unread = unread.length ? String(unread.length) : '';
   if (sideLayoutOn()) paintRailBadges({ unread: unread.length,
-    working: activeRuns.size > 0 || sessions.some(isWorking) || agentsProcs.some(p => p.busy === true),
-    traffic: agentsProcs.length });
+    working: activeRuns.size > 0 || sessions.some(isWorking) || agentsProcs.some(p => p.busy === true) });
 }
 
 // The panel is built from LIVE client state — sessions (mtimes), runningKeys
@@ -3417,6 +3458,7 @@ try { agentSecState = JSON.parse(localStorage.getItem(AGENT_SEC_KEY) || '{}') ||
 function saveAgentSecState() { try { localStorage.setItem(AGENT_SEC_KEY, JSON.stringify(agentSecState)); } catch {} }
 const agentSecOpen = id => agentSecState['fold:' + id] !== true;
 const recentFileActor = () => ['agent', 'both'].includes(agentSecState['files:actor']) ? agentSecState['files:actor'] : 'human';
+const agentReadScope = () => agentSecState.readScope === 'project' ? 'project' : 'all';
 // Long sidebar lists grow as they are scrolled; no fixed last row at eight.
 const PANEL_PAGE_SIZE = 100;
 const panelListLimits = new Map();
@@ -3510,45 +3552,120 @@ function renderSidebarProjects() {
 }
 
 // The rail's second level: one section shown at a time in the side panel.
-const SIDE_PANELS = ['inbox', 'traffic', 'recent-files', 'projects', 'conversations', 'files'];
-if (agentSecState.panel === 'notifications') agentSecState.panel = 'inbox';
+const SIDE_PANELS = ['inbox', 'projects'];
+let rightFilesMode = agentSecState.filePanel === 'files' ? 'files' : 'recent-files';
+let rightFilesOpen = agentSecState.filePanelOpen === true;
+if (['files', 'recent-files'].includes(agentSecState.panel)) {
+  rightFilesMode = agentSecState.panel;
+  rightFilesOpen = true;
+  agentSecState.panel = 'inbox';
+}
+if (['notifications', 'traffic', 'conversations'].includes(agentSecState.panel)) agentSecState.panel = 'inbox';
 const sidePanel = () => SIDE_PANELS.includes(agentSecState.panel) ? agentSecState.panel : 'inbox';
 function setSidePanel(id, { remember = true } = {}) {
+  if (['files', 'recent-files'].includes(id)) { setRightFiles(id, true); return; }
   if (!SIDE_PANELS.includes(id)) return;
-  if (id !== sidePanel()) $('agentsPop').scrollTop = 0;
+  if (id !== sidePanel()) {
+    $('agentsPop').scrollTop = 0;
+    $('agentsUnread').scrollTop = 0;
+    $('agentsLegacy').scrollTop = 0;
+  }
   agentSecState.panel = id;
   if (id === 'projects') loadSidebarProjectCatalog();
   if (remember) saveAgentSecState();
   paintSideRail();
   renderAgentsPop(false);
 }
+function paintRightFilesFrame() {
+  const visible = sideLayoutOn() && rightFilesOpen;
+  document.body.classList.toggle('file-side-open', visible);
+  $('rightFilePanel').hidden = !visible;
+  $('filesToggle').setAttribute('aria-expanded', String(visible));
+}
+function setRightFiles(mode, open = true) {
+  if (!['files', 'recent-files'].includes(mode)) return;
+  if (mode !== rightFilesMode) $('rightFileList').scrollTop = 0;
+  rightFilesMode = mode; rightFilesOpen = open;
+  agentSecState.filePanel = mode; agentSecState.filePanelOpen = open;
+  saveAgentSecState(); paintRightFilesFrame(); renderRightFiles();
+  // Resizing the workspace must also resize timeline geometry, not just CSS.
+  window.dispatchEvent(new Event('resize'));
+}
+function fileActivityHtml(project) {
+  const now = Date.now(), fileActor = recentFileActor();
+  const directory = sidebarProjectRows();
+  const fileProject = f => ProjectScope.fileProject(f, directory, projectFolds.map);
+  const files = RecentFiles.select(recentFilesList, { actor: fileActor, project, projectOf: fileProject, limit: Infinity });
+  const rows = panelListRows('files', files).map(f => {
+    const name = f.path.split('/').pop(), attributed = fileProject(f);
+    const dir = project ? '' : ProjectScope.label(attributed);
+    const verb = f.kind === 'written' ? 'wrote' : f.kind;
+    const actor = f.actor === 'agent' ? 'agent' : 'human';
+    const age = `<span class="ag-age">${esc((fileActor === 'both' ? actor + ' · ' : '') + verb + ' ' + tinyAge(now - f.at))}</span>`;
+    return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(attributed === LOOSE_PROJECT ? '' : attributed)}" data-file-conv="${esc(f.key || '')}" title="${esc(f.path + '\n' + actor + ' · ' + verb + ' · ' + new Date(f.at).toLocaleString())}">` +
+      `<button type="button" class="ag-main ag-file-open"><span class="ag-title"><span>${esc(name)}</span>${dir ? '' : age}</span>` +
+      (dir ? `<span class="ag-sub"><span class="ag-dir">${esc(dir)}</span>${age}</span>` : '') + '</button>' +
+      `<span class="ag-acts"><button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
+  }).join('');
+  return `<div class="ag-files-block"><div class="ag-files-head"><span class="ag-sub-sec">source</span><span class="ag-scope" role="group" aria-label="File activity source">${[['human', 'human'], ['agent', 'agents'], ['both', 'both']].map(([value, label]) => `<button data-files-actor="${value}" class="${fileActor === value ? 'on' : ''}" aria-pressed="${fileActor === value}" title="${value === 'human' ? 'Files opened or saved by a person in the editor' : value === 'agent' ? 'Files read, written or edited by agents, with successful tool results' : 'Human and agent activity, newest first'}">${label}</button>`).join('')}</span></div>${rows || '<div class="ag-empty">No matching file activity yet.</div>'}${panelListMore('files', files.length)}</div>`;
+}
+let rightFilesScopeKey = null;
+function renderRightFiles() {
+  if (!sideLayoutOn() || !rightFilesOpen) return;
+  const host = $('rightFileList');
+  const project = rightFilesMode === 'recent-files' ? '' : workspaceScope();
+  const scopeKey = rightFilesMode + ':' + project;
+  const scroll = scopeKey === rightFilesScopeKey ? host.scrollTop : 0;
+  rightFilesScopeKey = scopeKey;
+  const focus = host.contains(document.activeElement) ? document.activeElement : null;
+  const actor = focus?.dataset.filesActor, forget = focus?.dataset.forget;
+  const file = focus?.closest('.ag-file')?.dataset.path;
+  const hasProject = !!workspaceScope();
+  document.querySelectorAll('[data-file-scope]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.fileScope === rightFilesMode));
+    button.disabled = button.dataset.fileScope === 'files' && !hasProject;
+    button.title = button.dataset.fileScope === 'recent-files' ? 'File activity across all projects'
+      : hasProject ? 'File activity · ' + ProjectScope.label(workspaceScope()) : 'Choose a project using the project button on the left';
+  });
+  $('rightFileScope').textContent = rightFilesMode === 'recent-files' ? 'All projects' : project ? ProjectScope.label(project) : 'No project selected';
+  host.innerHTML = rightFilesMode === 'files' && !hasProject
+    ? '<div class="ag-empty">Choose a project on the left, or switch to All.</div>' : fileActivityHtml(project);
+  host.scrollTop = scroll;
+  const target = actor ? [...host.querySelectorAll('[data-files-actor]')].find(b => b.dataset.filesActor === actor)
+    : forget ? [...host.querySelectorAll('[data-forget]')].find(b => b.dataset.forget === forget)
+    : file ? [...host.querySelectorAll('.ag-file')].find(r => r.dataset.path === file)?.querySelector('.ag-file-open') : null;
+  target?.focus({ preventScroll: true });
+}
 function paintSideRail() {
-  const current = sidePanel();
-  document.querySelectorAll('#sideRail [data-rail]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.rail === current)));
   const machine = $('railMachine');
   const host = (settingsState && settingsState.hostname) || '';
   const others = (settingsOf().machines || []).length;
-  const initials = host.replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase() || '·';
-  machine.querySelector('.rail-initials').textContent = initials;
+  machine.querySelector('.rail-initials').textContent = host || 'Machine';
   machine.title = (host ? 'This is ' + host : 'This machine') + (others ? ' — switch to another aiconvo machine' : ' — connect other machines under settings → machines');
   machine.setAttribute('aria-label', machine.title);
 }
-const railBadgeState = { unread: 0, working: false, traffic: 0 };
+const railBadgeState = { unread: 0, working: false };
 const showRailCounts = () => agentSecState.railCounts === true;
 function paintRailBadges(patch = {}) {
   Object.assign(railBadgeState, patch);
-  const { unread, working, traffic } = railBadgeState;
-  const set = (id, value, tone) => {
-    const badge = document.querySelector(`#sideRail [data-rail="${id}"] .rail-badge`);
+  const { unread, working } = railBadgeState;
+  const set = (selector, value, tone) => {
+    const badge = document.querySelector(selector + ' .rail-badge');
     if (!badge) return;
     badge.hidden = !value;
     badge.classList.toggle('dot', tone === 'dot');
     badge.textContent = tone === 'dot' ? '' : String(value);
   };
-  set('conversations', 0, 'count');
-  set('traffic', showRailCounts() ? traffic : working ? 1 : 0, showRailCounts() ? 'count' : 'dot');
+  const status = (unread ? ` · ${unread} unread` : '') +
+    (agentsRecovery.interrupted.length ? ` · ${agentsRecovery.interrupted.length} interrupted` : '') + (working ? ' · working' : '');
   const attention = unread || agentsRecovery.interrupted.length;
-  set('inbox', showRailCounts() && unread ? unread : attention ? 1 : 0, showRailCounts() && unread ? 'count' : 'dot');
+  const value = showRailCounts() && unread ? unread : attention ? 1 : 0;
+  const tone = showRailCounts() && unread ? 'count' : 'dot';
+  set('#sideUnfold', value, tone);
+  $('sideUnfold').classList.toggle('work', working);
+  $('sideUnfold').querySelector('.rail-icon').textContent = working ? '⚉' : '▸';
+  $('sideUnfold').title = 'Show side panel (`)' + status;
+  $('sideUnfold').setAttribute('aria-label', $('sideUnfold').title);
 }
 function toggleAgentSec(id) { agentSecState['fold:' + id] = agentSecOpen(id); saveAgentSecState(); renderAgentsPop(false); }
 // Scope is a browsing choice, not a guess based on the last open chat.
@@ -3564,8 +3681,9 @@ function setWorkspaceScope(project, { stamp = true } = {}) {
   saveAgentSecState();
   if (stamp && nav.current()?.id === navShownId) nav.rememberScope(navShownId, next);
   if (changed) {
-    panelListLimits.clear();
-    if (['conversations', 'files'].includes(sidePanel())) $('agentsPop').scrollTop = 0;
+    panelListLimits.delete('files');
+    panelListLimits.delete('recent');
+    if (agentReadScope() === 'project') panelListLimits.delete('read');
   }
   renderSideNew(); renderAgentsPopSoon(); updateActiveBtn();
 }
@@ -3576,12 +3694,6 @@ function chooseWorkspaceProject(project) {
   // Changing scope never calls the conversation-assignment endpoint.
   if (!project) return setWorkspaceScope('');
   return showProjectOverview(project);
-}
-const inboxTab = () => agentSecState.inboxTab === 'read' ? 'read' : 'unread';
-function setInboxTab(tab) {
-  if (!['unread', 'read'].includes(tab)) return;
-  agentSecState.inboxTab = tab; saveAgentSecState();
-  $('agentsPop').scrollTop = 0; renderAgentsPop(false);
 }
 // Short age: 40s, 12m, 3h, 2d. Sits at the end of the second line.
 function tinyAge(ms) {
@@ -3601,6 +3713,7 @@ function renderAgentsPopSoon() {
   agentsPopT = setTimeout(() => renderAgentsPop(false), 300);
 }
 async function renderAgentsPop(refetch) {
+  renderRightFiles();
   const pop = $('agentsPop');
   if (pop.hidden) return;
   if (refetch !== false) {
@@ -3622,9 +3735,14 @@ async function renderAgentsPop(refetch) {
   const now = Date.now();
   const delegationIndex = delegationUI.index();
   const byKey = k => sessions.find(s => s.key === k);
+  const projectLink = s => {
+    const project = s ? projectOf(s) : '';
+    if (!project || project === '?') return '';
+    return `<a class="ag-project" href="#project=${encodeURIComponent(project)}" data-open-project="${esc(project)}" title="${esc('Open project · ' + project + (s.cwd ? '\n' + s.cwd : ''))}">${esc(ProjectScope.label(project))}</a>`;
+  };
   const busyNow = agentBusyKeys();
   const panel = sideLayoutOn() ? sidePanel() : 'tray';
-  const project = panel === 'recent-files' ? '' : workspaceScope(), scoped = !!project;
+  const project = workspaceScope(), scoped = !!project;
   // One row per orchestration, not one per worker. Workers fold under the
   // conversation that launched them; that row shows progress and expands on
   // request. A worker gets its own top-level row only when it is unread and
@@ -3661,7 +3779,7 @@ async function renderAgentsPop(refetch) {
     const note = attentionNote(t) || (t.error ? String(t.error).slice(0, 80) : t.role || '');
     return `<div class="ag-row ag-child${unread ? ' unread' : ''}${live ? ' working' : ''}${t.key ? '' : ' off'}" data-key="${esc(t.key || '')}" style="--depth:${depth}">` +
       `<span class="ag-main"><span class="ag-title" title="${esc(t.title || 'Untitled task')}"><span>${esc(t.title || 'Untitled task')}</span></span>` +
-      `<span class="ag-sub"><span class="ag-dir">${esc(note)}</span>` +
+      `<span class="ag-sub"><span class="ag-dir">${[projectLink(s), esc(note)].filter(Boolean).join(' · ')}</span>` +
       `<span class="ag-age">${esc((t.status || 'running') + (t.review && t.review !== 'unreviewed' ? ' · ' + t.review : ''))}</span></span></span></div>` +
       (kids.length ? childRows(kids, depth + 1) : '');
   }).join('');
@@ -3698,15 +3816,14 @@ async function renderAgentsPop(refetch) {
   // The second line names the project (a delegated worker: its parent). A
   // list already scoped to one project has no second line: the time moves
   // to the end of the title line.
-  const projectLabel = s => { const p = s ? projectOf(s) : ''; return p && p !== '?' ? ProjectScope.label(p) : ''; };
   const row = (s, key, status, pid, readState = '', working = false, { dir } = {}) => {
     const acts = (delegatedBy.has(key) ? '' : kill(pid, rowTitle(s))) + more(s, key);
     const o = orchestration(key);
-    const sub = dir === false ? '' : (dir || [projectLabel(s), origin(key)].filter(Boolean).join(' · '));
+    const sub = dir === false ? '' : (dir ? esc(dir) : [projectLink(s), esc(origin(key))].filter(Boolean).join(' · '));
     const ageHtml = `<span class="ag-age">${esc(status)}</span>`;
     return `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}${key && key === activeRel && ['conversation', 'tree'].includes(viewKind) ? ' current' : ''}" data-key="${esc(key || '')}">` +
       `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}"><span>${esc(rowTitle(s))}</span>${key ? presenceSlotHtml(key) : ''}${s ? participantsHtml(s) : ''}${sub || o.badge ? '' : ageHtml}</span>` +
-      (sub || o.badge ? `<span class="ag-sub"><span class="ag-dir">${esc(sub)}</span>${o.badge}${ageHtml}</span>` : '') + `</span>` +
+      (sub || o.badge ? `<span class="ag-sub"><span class="ag-dir">${sub}</span>${o.badge}${ageHtml}</span>` : '') + `</span>` +
       (acts ? `<span class="ag-acts">${acts}</span>` : '') + `</div>` + o.children;
   };
   const age = s => tinyAge(now - agentActivityAt(s));
@@ -3761,9 +3878,15 @@ async function renderAgentsPop(refetch) {
   };
   const interruptedKeys = new Set(agentsRecovery.interrupted.map(r => r.key));
   const claimed = new Set([...runningKeys, ...webKeys, ...writing.map(s => s.key), ...interruptedKeys]);
-  // Inbox Read is explicit read history, independent of project and pinning.
+  // A conversation belongs to Working while a turn runs, not to both lists.
+  const workingKeys = new Set([...webKeys, ...termWork.map(t => t.k), ...writing.map(s => s.key),
+    ...[...orchProgress].filter(([, p]) => p.live).map(([key]) => key),
+    ...agentsProcs.filter(p => p.busy === true && p.key).map(p => p.key)]);
+  // Only Read can be narrowed. Unread, interruptions and Working stay global.
+  const readProjectOnly = panel === 'inbox' && agentReadScope() === 'project';
   const recent = sessions.filter(s => {
-    if (!agentIsRead(s) || delegatedBy.has(s.key) || agentIsDismissed(s)) return false;
+    if (readProjectOnly && (!project || !scopeIncludesSession(s))) return false;
+    if (!agentIsRead(s) || delegatedBy.has(s.key) || agentIsDismissed(s) || workingKeys.has(s.key) || interruptedKeys.has(s.key)) return false;
     // Read history means an actual receipt, not just the first-use guard.
     return (Number(agentReadState.read[s.key]) || 0) > 0;
   }).sort((a, b) => Math.max(Number(agentReadState.read[b.key]) || 0, b.mtimeMs || 0)
@@ -3789,17 +3912,19 @@ async function renderAgentsPop(refetch) {
   const others = agentsProcs.filter(p => !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !interruptedKeys.has(p.key));
   const processRows = procs => procs.map(p => `<div class="ag-row${p.busy === true ? ' working' : ''}" data-key="${esc(p.key || '')}">` +
     `<span class="ag-main"><span class="ag-title"><span>${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span></span>` +
-    `<span class="ag-sub"><span class="ag-dir">${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(tinyAge(p.ageMs)) : ''}</span>` +
+    `<span class="ag-sub"><span class="ag-dir">${projectLink(byKey(p.key)) ? projectLink(byKey(p.key)) + ' · ' : ''}${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(tinyAge(p.ageMs)) : ''}</span>` +
     `<span class="ag-age">pid ${p.pid}</span></span></span>` +
     `<span class="ag-acts">${kill(p.pid, p.title || p.kind + ' pid ' + p.pid)}</span></div>`).join('');
   const st = pop.scrollTop;
+  const replyScroll = $('agentsUnread').scrollTop, workingScroll = $('agentsLegacy').scrollTop;
   const focusedRecovery = document.activeElement?.dataset?.recoveryId;
   const focusedAction = document.activeElement?.dataset?.recoveryAction;
   const recoveryToggleFocused = document.activeElement?.id === 'agentAutoResume';
-  const focusedFileActor = document.activeElement?.dataset?.filesActor;
-  const focusedInboxTab = document.activeElement?.dataset?.inboxTab;
+  const focusedReadScope = document.activeElement?.dataset?.readScope;
+  const focusedProjectKey = document.activeElement?.matches('.ag-project') ? document.activeElement.closest('.ag-row')?.dataset.key : null;
   const interruptedSec = agentsRecovery.interrupted.map(r => `<div class="ag-row ag-interrupted" data-key="${esc(r.key)}">
     <span class="ag-main"><span class="ag-title">${esc(rowTitle(byKey(r.key)) === '(untitled)' ? r.title : rowTitle(byKey(r.key)))}</span>
+    ${projectLink(byKey(r.key)) ? `<span class="ag-dir">${projectLink(byKey(r.key))}</span>` : ''}
     <span class="ag-dir">${esc(r.kind === 'network' ? 'Likely connection problem' : r.kind === 'stopped' ? 'Stopped' : 'Needs attention')} · ${esc(secs(now - r.createdAt))} ago</span>
     <span class="ag-recovery-reason">${esc(r.reason)}</span>
     <span class="ag-dir">${esc(r.note || (r.waiting ? 'Waiting for a stable connection · attempt ' + (r.attempts + 1) + '/3' : 'Resume when ready'))}</span></span>
@@ -3815,21 +3940,6 @@ async function renderAgentsPop(refetch) {
   const wrote = sessions.filter(s => s.lastUserTs && !listed.has(s.key) && !delegatedBy.has(s.key) && scopeIncludesSession(s))
     .sort((a, b) => Date.parse(b.lastUserTs) - Date.parse(a.lastUserTs));
   const wroteSec = panelListRows('recent', wrote).map(s => row(s, s.key, tinyAge(now - Date.parse(s.lastUserTs)), null, agentUnreadAt(s) ? 'unread' : '', busyNow.has(s.key), { dir: scoped ? false : undefined })).join('') + panelListMore('recent', wrote.length);
-  const directory = sidebarProjectRows();
-  const fileProject = f => ProjectScope.fileProject(f, directory, projectFolds.map);
-  const fileActor = recentFileActor();
-  const files = RecentFiles.select(recentFilesList, { actor: fileActor, project, projectOf: fileProject, limit: Infinity });
-  const filesSec = panelListRows('files', files).map(f => {
-    const name = f.path.split('/').pop();
-    const dir = scoped ? '' : ProjectScope.label(fileProject(f));
-    const verb = f.kind === 'written' ? 'wrote' : f.kind;
-    const actorLabel = f.actor === 'agent' ? 'agent' : 'human';
-    const ageHtml = `<span class="ag-age">${esc((fileActor === 'both' ? actorLabel + ' · ' : '') + verb + ' ' + tinyAge(now - f.at))}</span>`;
-    return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(fileProject(f) === LOOSE_PROJECT ? '' : fileProject(f))}" data-file-conv="${esc(f.key || '')}" title="${esc(f.path + '\n' + actorLabel + ' · ' + verb + ' · ' + new Date(f.at).toLocaleString())}">` +
-      `<span class="ag-main"><span class="ag-title"><span>${esc(name)}</span>${dir ? '' : ageHtml}</span>` +
-      (dir ? `<span class="ag-sub"><span class="ag-dir">${esc(dir)}</span>${ageHtml}</span>` : '') + `</span>` +
-      `<span class="ag-acts"><button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
-  }).join('') + panelListMore('files', files.length);
   const readSec = panelListRows('read', recent).map(s => row(s, s.key, age(s), null, 'read')).join('') + panelListMore('read', recent.length);
   const traffic = webSec + workSec + writeSec + delegatedSec + processRows(others.filter(p => p.busy === true));
   const idleTraffic = idleSec + processRows(others.filter(p => p.busy !== true));
@@ -3838,8 +3948,6 @@ async function renderAgentsPop(refetch) {
   // bottom with traffic and notifications (column only: the tray has no
   // free space to speak of, so there they stay in place).
   pop.dataset.panel = panel;
-  const filesHeading = ['files', 'recent-files'].includes(panel) ? 'source' : 'files';
-  const filesBody = `<div class="ag-files-block"><div class="ag-files-head"><span class="ag-sub-sec">${filesHeading}</span><span class="ag-scope" role="group" aria-label="File activity source">${[['human', 'human'], ['agent', 'agents'], ['both', 'both']].map(([value, label]) => `<button data-files-actor="${value}" class="${fileActor === value ? 'on' : ''}" aria-pressed="${fileActor === value}" title="${value === 'human' ? 'Files opened or saved by a person in the editor' : value === 'agent' ? 'Files read, written or edited by agents, with successful tool results' : 'Human and agent activity, newest first'}">${label}</button>`).join('')}</span></div>${filesSec || '<div class="ag-empty">no matching file activity yet</div>'}</div>`;
   const recentConvBody = wroteSec || `<div class="ag-empty">${esc(scoped ? 'nothing written in ' + project + ' yet' : 'nothing written yet')}</div>`;
   const chatSections = [
     pinnedSec ? ['pinned', 'pinned', pinnedSec, { count: pinned.length, cls: 'ag-pinned' }] : null,
@@ -3848,26 +3956,20 @@ async function renderAgentsPop(refetch) {
   const trafficSection = ['traffic', 'Working now', traffic, { count: trafficCount, cls: 'ag-traffic', dock: true, empty: 'No agents working right now.' }];
   let flow, dock, tail = '', heading = '';
   const scopeCaption = `<div class="panel-scope-caption">${esc(ProjectScope.label(project))}</div>`;
-  if (panel === 'files' || panel === 'recent-files') {
-    heading = '<div class="panel-title">' + (panel === 'files' ? 'Files' : 'Recent files') + '</div>' + (panel === 'files' ? scopeCaption : '<div class="panel-scope-caption">All projects on this machine</div>');
-    flow = [['files', 'recent files', filesBody, { count: files.length }]]; dock = [];
-  } else if (panel === 'traffic') {
-    heading = '<div class="panel-title">Agents</div><div class="panel-scope-caption">All projects on this machine</div>';
-    flow = [trafficSection]; dock = [];
-    tail = idleTraffic ? `<details class="ag-notifications"${agentIdleOpen ? ' open' : ''}><summary>Idle and other processes</summary>${idleTraffic}</details>` : '';
-  } else if (panel === 'inbox') {
-    const tab = inboxTab();
-    heading = '<div class="panel-title">Inbox</div><div class="panel-scope-caption">All projects on this machine</div>' +
-      `<nav class="inbox-tabs" aria-label="Inbox sections">${[['unread', 'Unread' + (unread.length ? ' · ' + unread.length : '')], ['read', 'Read']].map(([id, label]) => `<button type="button" data-inbox-tab="${id}" aria-pressed="${tab === id}">${label}</button>`).join('')}</nav>`;
+  if (panel === 'inbox') {
+    heading = '';
     flow = []; dock = [];
-    tail = (tab === 'unread' && interruptedSec ? `<section class="ag-recovery"><div class="ag-sub-sec">Interrupted · needs attention</div>${interruptedSec}</section>` : '') +
-      `<section data-sec="${tab}"${tab === 'unread' ? ' class="ag-unread-tray"' : ''}><div class="ag-sec-body">${(tab === 'unread' ? unreadSec : readSec) || `<div class="ag-empty">${tab === 'unread' ? 'No unread replies.' : 'No read replies yet.'}</div>`}</div></section>` + (tab === 'unread' ? recoverySection : '');
+    heading += (interruptedSec ? `<section class="ag-recovery"><div class="ag-sub-sec">Interrupted · needs attention</div>${interruptedSec}</section>` : '') +
+      `<section data-sec="unread" class="inbox-section ag-unread-tray" aria-labelledby="inboxUnreadHeading"><h3 id="inboxUnreadHeading">Unread${unread.length ? ' · ' + unread.length : ''}</h3><div class="ag-sec-body">${unreadSec || '<div class="ag-empty">No unread replies.</div>'}</div></section>` +
+      `<section data-sec="read" class="inbox-section" aria-labelledby="inboxReadHeading"><div class="inbox-read-head"><h3 id="inboxReadHeading">Read</h3><div class="read-scope" role="group" aria-label="Read replies scope"><button type="button" data-read-scope="all" aria-pressed="${!readProjectOnly}" title="Read replies across all projects">All</button><button type="button" data-read-scope="project" aria-pressed="${readProjectOnly}"${project ? '' : ' disabled'} title="${esc(project ? 'Read replies · ' + ProjectScope.label(project) : 'Choose a project using the project button above')}">Project</button></div></div>${readProjectOnly && project ? `<div class="panel-scope-caption">${esc(ProjectScope.label(project))}</div>` : ''}<div class="ag-sec-body">${readSec || `<div class="ag-empty">${readProjectOnly ? project ? 'No read replies in this project yet.' : 'Choose a project above, or switch to All.' : 'No read replies yet.'}</div>`}</div></section>`;
+    tail = `<section data-sec="traffic" class="inbox-section ag-traffic" aria-labelledby="agentsWorkingHeading"><h3 id="agentsWorkingHeading">Working</h3><div class="ag-sec-body">${traffic || '<div class="ag-empty">No agents working right now.</div>'}</div></section>` +
+      (idleTraffic ? `<details class="ag-notifications"${agentIdleOpen ? ' open' : ''}><summary>Idle and other processes</summary>${idleTraffic}</details>` : '') + recoverySection;
   } else {
     heading = panel === 'tray'
       ? `<button type="button" class="tray-scope" data-project-scope-picker>${esc(ProjectScope.label(project))} ▾</button>`
       : '<div class="panel-title">Chats</div>' + scopeCaption;
     const sections = panel === 'tray' ? [
-      ['unread', 'Inbox · all projects', unreadSec, { count: unread.length, cls: 'ag-unread-tray', empty: 'Nothing new' }],
+      ['unread', 'Unread · all projects', unreadSec, { count: unread.length, cls: 'ag-unread-tray', empty: 'Nothing new' }],
       ...(readSec ? [['read', 'Read replies · all projects', readSec, { count: recent.length }]] : []),
       ...chatSections, ...(traffic ? [trafficSection] : []),
     ] : chatSections;
@@ -3891,9 +3993,11 @@ async function renderAgentsPop(refetch) {
     await loadAgentRecovery(); renderAgentsPop(false);
   };
   pop.scrollTop = st;
+  $('agentsUnread').scrollTop = replyScroll;
+  $('agentsLegacy').scrollTop = workingScroll;
   selectAgentRow(agentsSelectedKey, false);
-  if (focusedInboxTab) [...pop.querySelectorAll('[data-inbox-tab]')].find(b => b.dataset.inboxTab === focusedInboxTab)?.focus({ preventScroll: true });
-  else if (focusedFileActor) [...pop.querySelectorAll('[data-files-actor]')].find(b => b.dataset.filesActor === focusedFileActor)?.focus({ preventScroll: true });
+  if (focusedReadScope) [...pop.querySelectorAll('[data-read-scope]')].find(b => b.dataset.readScope === focusedReadScope && !b.disabled)?.focus({ preventScroll: true });
+  else if (focusedProjectKey) [...pop.querySelectorAll('.ag-row[data-key]')].find(r => r.dataset.key === focusedProjectKey)?.querySelector('.ag-project')?.focus({ preventScroll: true });
   else if (recoveryToggleFocused) autoResume?.focus({ preventScroll: true });
   else if (focusedRecovery) [...pop.querySelectorAll('[data-recovery-id]')].find(b => b.dataset.recoveryId === focusedRecovery && b.dataset.recoveryAction === focusedAction)?.focus({ preventScroll: true });
 }
@@ -3921,7 +4025,7 @@ function agentsPopKeydown(e) {
     toggleAgents(false);
     return true;
   }
-  if (e.target.closest('button, input, summary') && ['Enter', ' ', 'Tab'].includes(e.key)) return true;
+  if (e.target.closest('a, button, input, summary') && ['Enter', ' ', 'Tab'].includes(e.key)) return true;
   if (e.key === 'j') {
     e.preventDefault();
     toggleJobs();
@@ -3989,7 +4093,7 @@ function toggleAgents(show) {
   const pop = $('agentsPop');
   if (sideLayoutOn()) {
     const enter = show !== undefined ? show : !agentsKbd;
-    if (enter) { setSidePanel('inbox'); setInboxTab('unread'); }
+    if (enter) { if (sideFolded()) setSideFold(false); setSidePanel('inbox'); $('agentsUnread').scrollTop = 0; }
     setAgentsKbd(enter);
     return;
   }
@@ -4012,7 +4116,7 @@ function openAgentRowMenu(key, x, y, anchor) {
   const items = [
     [pinned ? 'Unpin' : 'Pin to the top', () => setAgentPinned(key, !pinned)],
     [unread ? 'Mark as read' : 'Mark as unread', () => unread ? markAgentRead(key) : markAgentUnread(key)],
-    ['Remove from the inbox', () => dismissAgentConversation(key), 'Hidden until it replies again. Nothing is deleted.'],
+    ['Remove from replies', () => dismissAgentConversation(key), 'Hidden until it replies again. Nothing is deleted.'],
     ['Open', () => { toggleAgents(false); open(key, unread ? 'reply' : undefined); }],
   ];
   const menu = document.createElement('div');
@@ -4036,19 +4140,32 @@ function openAgentRowMenu(key, x, y, anchor) {
 }
 $('activeBtn').onclick = e => { e.stopPropagation(); toggleAgents(); };
 $('agentsPop').addEventListener('contextmenu', e => {
+  if (e.target.closest('.ag-project')) return;
   const row = e.target.closest('.ag-row[data-key]');
   if (!row || !row.dataset.key || !sessions.some(s => s.key === row.dataset.key)) return;
   e.preventDefault();
   e.stopPropagation();
   openAgentRowMenu(row.dataset.key, e.clientX, e.clientY);
 });
-$('agentsPop').onclick = async e => {
-  const inboxButton = e.target.closest('[data-inbox-tab]');
-  if (inboxButton) { e.stopPropagation(); setInboxTab(inboxButton.dataset.inboxTab); return; }
+$('rightFileList').onclick = $('agentsPop').onclick = async e => {
+  const readScopeButton = e.target.closest('[data-read-scope]');
+  if (readScopeButton) {
+    e.stopPropagation();
+    if (readScopeButton.disabled) return;
+    agentSecState.readScope = readScopeButton.dataset.readScope;
+    panelListLimits.delete('read');
+    saveAgentSecState(); renderAgentsPop(false);
+    $('agentsPop').querySelector('.inbox-read-head')?.scrollIntoView({ block: 'nearest' });
+    return;
+  }
   const scopeButton = e.target.closest('[data-project-scope-picker]');
   if (scopeButton) { e.stopPropagation(); openWorkspaceProjectPicker(scopeButton); return; }
   const projectButton = e.target.closest('[data-open-project]');
-  if (projectButton) { e.stopPropagation(); showProjectOverview(projectButton.dataset.openProject); return; }
+  if (projectButton) {
+    e.stopPropagation();
+    if (projectButton.tagName === 'A' && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey)) return;
+    e.preventDefault(); showProjectOverview(projectButton.dataset.openProject); return;
+  }
   const pageButton = e.target.closest('[data-panel-more]');
   if (pageButton) { e.stopPropagation(); expandPanelList(pageButton.dataset.panelMore); return; }
   if (e.target.closest('[data-project-retry]')) {
@@ -4059,7 +4176,7 @@ $('agentsPop').onclick = async e => {
   if (actor) {
     e.stopPropagation();
     agentSecState['files:actor'] = actor.dataset.filesActor;
-    panelListLimits.delete('files'); $('agentsPop').scrollTop = 0;
+    panelListLimits.delete('files'); $('rightFileList').scrollTop = 0;
     saveAgentSecState(); renderAgentsPop(false);
     return;
   }
@@ -4139,11 +4256,10 @@ $('agentsPop').onclick = async e => {
 
 // Load the next page near its button. Closed sections never trigger this;
 // the button remains a keyboard/touch fallback if scrolling isn't available.
-$('agentsPop').addEventListener('scroll', () => {
-  const pop = $('agentsPop');
-  if (pop.hidden) return;
-  const bounds = pop.getBoundingClientRect();
-  const next = [...pop.querySelectorAll('[data-panel-more]')].find(button => {
+for (const scroller of [$('agentsPop'), $('agentsUnread'), $('rightFileList')]) scroller.addEventListener('scroll', () => {
+  if ($('agentsPop').hidden) return;
+  const bounds = scroller.getBoundingClientRect();
+  const next = [...scroller.querySelectorAll('[data-panel-more]')].find(button => {
     if (!button.checkVisibility()) return false;
     const r = button.getBoundingClientRect();
     return r.top <= bounds.bottom + 120 && r.bottom >= bounds.top;
@@ -11197,6 +11313,7 @@ async function agentLiveKeys(data) {
 window.aiconvoAcceptImage = function (mime, b64, name) {
   try {
     if (!b64) return;
+    if (settingsOpen && settingsPane === 'profile') { acceptProfileNativeImage(mime, b64); return; }
     window._agentImages = window._agentImages || [];
     if (window._agentImages.length >= 8) { errToast('Up to 8 images per message.'); return; }
     const kind = mime || 'image/jpeg';
@@ -14339,12 +14456,13 @@ async function showUsageDashboard() {
 let settingsState = null;
 let modelsState = null;
 let settingsOpen = false;
-let settingsPane = 'model';
+let settingsPane = 'profile';
 let settingsPushed = false; // this visit pushed a history entry; esc = back
 let voiceMutedUntil = 0;
 let voiceMuteTimer = null;
 
 const SETTINGS_PANES = [
+  ['profile', 'your profile', 'Your name, initials and picture.'],
   ['model', 'model', 'Which model writes notes, titles, epics, and memory.'],
   ['sound', 'sound', 'What the speakers do when a run finishes.'],
   ['search', 'search', 'Meaning-based search on the GPU server.'],
@@ -14736,8 +14854,8 @@ function paneAppearance() {
       { value: 'side', name: 'side panel', desc: 'A column on the left that stays open: home, new conversation, pinned and unread replies, agents, recent files. The top bar goes away; a conversation keeps its title strip. Phones keep the top bar.' },
     ], layoutPref())}
     <div class="set-help">Saved in this browser, like the theme, so a phone and a desk can differ.</div>
-    <label class="set-check"><input id="setRailCounts" type="checkbox"${showRailCounts() ? ' checked' : ''}> Show counts on Agents and Inbox icons</label>
-    <div class="set-help">Off by default: quiet dots instead of numbers. Agents counts follow the selected project. Inbox counts unread replies across this machine. Saved on this device.</div>
+    <label class="set-check"><input id="setRailCounts" type="checkbox"${showRailCounts() ? ' checked' : ''}> Show unread counts when the side panel is hidden</label>
+    <div class="set-help">Off by default: the floating reopen button uses a quiet dot for unread replies or interruptions. Counts show unread replies across all projects. Saved on this device.</div>
     <div class="set-field">
       <label for="setPiTheme">pi theme for hosted extension views</label>
       <input id="setPiTheme" class="medium" type="text" value="${esc(piTheme)}" spellcheck="false" list="setPiThemeList">
@@ -14808,6 +14926,7 @@ function renderBackgroundJobs() {
 }
 
 const SETTINGS_PANE_RENDER = {
+  profile: [paneProfile, bindPaneProfile],
   model: [paneModel, bindPaneModel],
   sound: [paneSound, bindPaneSound],
   search: [paneSearch, bindPaneSearch],
@@ -14821,27 +14940,34 @@ const SETTINGS_PANE_RENDER = {
 
 function renderSettings() {
   if (!settingsOpen || !$('settingsRoot')) return;
-  const [paint, bind] = SETTINGS_PANE_RENDER[settingsPane] || SETTINGS_PANE_RENDER.model;
+  const [paint, bind] = SETTINGS_PANE_RENDER[settingsPane] || SETTINGS_PANE_RENDER.profile;
+  const focused = settingsPane === 'profile' && document.activeElement?.id?.startsWith('profile') ? document.activeElement : null;
+  const profileFocus = focused ? { id: focused.id, start: focused.selectionStart, end: focused.selectionEnd } : null;
   $('settingsRoot').innerHTML = `<div class="settings-page">
     <nav class="settings-nav" aria-label="settings sections">
       ${SETTINGS_PANES.map(([id, label, hint]) => `<button type="button" class="${id === settingsPane ? 'on' : ''}" data-pane="${id}" title="${esc(hint)}">${esc(label)}</button>`).join('')}
       <div class="sep"></div>
       <button type="button" data-go="usage" title="Tokens, cost estimates, and subscription value">usage and cost →</button>
     </nav>
-    <section class="settings-pane">${settingsState && settingsState.canEditSettings === false && !['people', 'appearance', 'jobs'].includes(settingsPane) ? `<div class="set-readonly hint">These are ${esc((settingsState.hostname || 'this machine'))}'s settings; only its owner or an admin can change them. Your appearance choices stay yours.</div>` : ''}${settingsState ? paint() : '<div class="empty">loading settings…</div>'}</section>
+    <section class="settings-pane">${settingsState && settingsState.canEditSettings === false && !['profile', 'people', 'appearance', 'jobs'].includes(settingsPane) ? `<div class="set-readonly hint">These are ${esc((settingsState.hostname || 'this machine'))}'s settings; only its owner or an admin can change them. Your appearance choices stay yours.</div>` : ''}${settingsState ? paint() : '<div class="empty">loading settings…</div>'}</section>
   </div>`;
   const root = $('settingsRoot');
   root.querySelectorAll('.settings-nav [data-pane]').forEach(b => b.onclick = () => showSettingsPane(b.dataset.pane));
   root.querySelector('[data-go=usage]').onclick = () => showUsageDashboard();
   if (settingsState) bind(root);
+  if (profileFocus) {
+    const next = $(profileFocus.id);
+    if (next && !next.disabled) {
+      next.focus({ preventScroll: true });
+      if (typeof profileFocus.start === 'number') next.setSelectionRange(profileFocus.start, profileFocus.end);
+    }
+  }
 }
 
 async function loadSettings() {
   const res = await fetch('/api/settings');
   settingsState = await res.json();
-  if (settingsState && settingsState.resolved) {
-    $('settingsBtn').title = 'Settings · memory model: ' + settingsState.resolved.label + ' (,)';
-  }
+  renderPeopleHeader();
   renderMachineBtn();
   if (settingsOpen) renderSettings();
 }
@@ -14863,7 +14989,7 @@ async function saveSettings(patch, message) {
   const data = await res.json();
   if (data.error) return errToast(data.error);
   settingsState = data;
-  $('settingsBtn').title = 'Settings · memory model: ' + data.resolved.label + ' (,)';
+  renderPeopleHeader();
   toast(message || ('memory model: ' + data.resolved.label));
   renderMachineBtn();
   renderSettings();
@@ -14884,12 +15010,12 @@ async function refreshSemanticStatus() {
   } catch { el.textContent = 'status check failed.'; }
 }
 
-const settingsPaneOf = h => { const p = String(h || '').split('=')[1] || 'model'; return SETTINGS_PANE_RENDER[p] ? p : 'model'; };
+const settingsPaneOf = h => { const p = String(h || '').split('=')[1] || 'profile'; return SETTINGS_PANE_RENDER[p] ? p : 'profile'; };
 
 async function showSettings(pane) {
   if (progressStream) { progressStream.close(); progressStream = null; }
   const wasOpen = settingsOpen;
-  settingsPane = pane || settingsPane || 'model';
+  settingsPane = pane || settingsPane || 'profile';
   const before = location.hash.replace(/^#/, '');
   settingsOpen = true;
   $('settingsBtn').classList.add('on');
@@ -14922,8 +15048,7 @@ function closeSettings() {
   else goHome();
 }
 
-$('settingsBtn').onclick = () => settingsOpen ? closeSettings() : showSettings();
-$('peopleBtn').onclick = () => showSettingsPane('people');
+$('settingsBtn').onclick = () => settingsOpen ? closeSettings() : showSettings('profile');
 $('shareBtn').onclick = () => openShareDialog();
 
 // ---- collapsible top bar: ` toggles; the thin rail is the handle ----
@@ -14961,9 +15086,10 @@ function applyLayout() {
   if (on) {
     document.body.classList.add('side-layout');
     side.hidden = false;
+    $('rightFiles').hidden = false;
+    paintRightFilesFrame();
     $('sideAgents').appendChild(pop);
-    $('railFootSlot').append($('settingsBtn'));
-    $('sideFootSlot').append($('machineBtn'), $('peopleBtn'));
+    $('sideFootSlot').append($('settingsBtn'));
     // The switcher pop-up lives in the column with its button, so it paints
     // above the column instead of behind it.
     side.appendChild($('machinePop'));
@@ -14980,13 +15106,15 @@ function applyLayout() {
     let fold = false;
     try { fold = !!localStorage.getItem('aiconvo.sideFold'); } catch {}
     document.body.classList.toggle('side-fold', fold);
+    $('sideUnfold').setAttribute('aria-expanded', String(!fold));
     renderSideNew();
   } else {
-    document.body.classList.remove('side-layout', 'side-fold');
+    document.body.classList.remove('side-layout', 'side-fold', 'file-side-open');
     side.hidden = true;
+    $('rightFiles').hidden = true;
     side.before($('machinePop'));
     $('machinePop').before(pop);
-    $('barFold').before($('machineBtn'), $('peopleBtn'), $('settingsBtn'));
+    $('barFold').before($('machineBtn'), $('settingsBtn'));
     $('conversationFilesSwitch').before($('chTitle'), $('shareBtn'), $('convPresence'), $('convHeadExtra'));
     $('chNew').before($('chMove'));
     $('newLoose').before($('projSort'));
@@ -15000,15 +15128,29 @@ function applyLayout() {
 const sideFolded = () => document.body.classList.contains('side-fold');
 function setSideFold(fold) {
   document.body.classList.toggle('side-fold', fold);
+  $('sideUnfold').setAttribute('aria-expanded', String(!fold));
   try { fold ? localStorage.setItem('aiconvo.sideFold', '1') : localStorage.removeItem('aiconvo.sideFold'); } catch {}
+  if ($('agentCompose')) observeComposeHeight();
+  window.dispatchEvent(new Event('resize'));
 }
-$('sideFold').onclick = e => { e.stopPropagation(); setSideFold(true); };
-// The rail: pick a section (a click on the current one while folded reopens
-// the panel), the machine, and settings. Nothing here navigates by itself.
-document.querySelectorAll('#sideRail [data-rail]').forEach(b => b.onclick = e => {
+$('sideFold').onclick = e => { e.stopPropagation(); setSideFold(true); $('sideUnfold').focus({ preventScroll: true }); };
+$('sideUnfold').onclick = e => { e.stopPropagation(); setSideFold(false); $('sideHome').focus({ preventScroll: true }); };
+$('filesToggle').onclick = e => {
   e.stopPropagation();
-  if (sideFolded()) setSideFold(false);
-  setSidePanel(b.dataset.rail);
+  setRightFiles(rightFilesMode, true);
+  $('rightFileClose').focus({ preventScroll: true });
+};
+document.querySelectorAll('[data-file-scope]').forEach(button => button.onclick = e => {
+  e.stopPropagation();
+  setRightFiles(button.dataset.fileScope, true);
+});
+function closeRightFiles() {
+  setRightFiles(rightFilesMode, false);
+  $('filesToggle').focus({ preventScroll: true });
+}
+$('rightFileClose').onclick = closeRightFiles;
+$('rightFiles').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && rightFilesOpen) { e.preventDefault(); e.stopPropagation(); closeRightFiles(); }
 });
 $('railMachine').onclick = e => {
   e.stopPropagation();
@@ -15037,7 +15179,7 @@ function openAgentCheck(key, scroll) {
   return open(key, scroll);
 }
 function openPanelConversation(key, scroll) {
-  return !sideLayoutOn() || ['inbox', 'traffic'].includes(sidePanel()) ? openAgentCheck(key, scroll) : open(key, scroll);
+  return !sideLayoutOn() || sidePanel() === 'inbox' ? openAgentCheck(key, scroll) : open(key, scroll);
 }
 $('returnToWork').onclick = () => {
   const index = nav.entries().findIndex(e => e.id === workReturnId);
@@ -15068,38 +15210,53 @@ function renderSideNew() {
   $('sideNew').title = p ? 'New conversation in ' + p : 'New conversation (C) — a blank page: no project memory, home folder, pi defaults';
   $('sideNewMore').hidden = !p;
   const scope = workspaceScope();
-  $('sideProject').hidden = false;
   $('sideProject').querySelector('span').textContent = ProjectScope.label(scope);
-  $('sideProject').title = 'Choose a project · ' + ProjectScope.label(scope) + '. Filters Chats and Files only. Inbox, Agents and Recent always cover all projects.';
+  $('sideProject').title = scope && scope !== LOOSE_PROJECT ? 'Open project memory · ' + scope : scope ? 'Open conversations without a project' : 'Browse all projects';
   $('sideProject').setAttribute('aria-label', $('sideProject').title);
 }
 let workspacePickerClose = null;
-function openWorkspaceProjectPicker(anchor = $('sideProject')) {
+function openWorkspaceProjectPicker(anchor = $('sideProjectMore')) {
   if (workspacePickerClose) { workspacePickerClose(true); return; }
   document.querySelectorAll('.mpick').forEach(el => el.remove());
   const pop = document.createElement('div');
-  pop.className = 'mpick project-scope-picker'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Choose project scope');
-  pop.innerHTML = '<div class="mp-top"><input type="search" class="mp-filter" aria-label="Find a project" placeholder="Find a project"></div><div class="mp-list"></div><div class="mp-foot"><span class="hint">Open a project and browse its Chats and Files. Inbox, Agents and Recent always cover all projects.</span></div>';
+  pop.className = 'mpick project-scope-picker'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Choose a project');
+  pop.innerHTML = '<div class="mp-top"><input type="search" class="mp-filter" aria-label="Find a project" placeholder="Find a project" autocomplete="off" spellcheck="false"></div><div class="mp-list"></div>';
   document.body.appendChild(pop); anchor.setAttribute('aria-expanded', 'true');
   const input = pop.querySelector('input'), list = pop.querySelector('.mp-list');
   const close = (focus = false) => {
     pop.remove(); anchor.setAttribute('aria-expanded', 'false'); workspacePickerClose = null;
     document.removeEventListener('click', outside, true); window.removeEventListener('aiconvo:route', routeChanged);
+    window.removeEventListener('resize', position);
     if (focus && anchor.isConnected) anchor.focus({ preventScroll: true });
   };
   const outside = e => { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(); };
   const routeChanged = () => close();
+  const position = () => {
+    if (!pop.isConnected) return;
+    // Phones retain the shared bottom sheet. On desktop, align with the
+    // whole project control, not the tiny arrow at its right-hand edge.
+    if (matchMedia('(max-width: 700px)').matches) {
+      for (const prop of ['width', 'max-height', 'left', 'top']) pop.style.removeProperty(prop);
+      return;
+    }
+    const control = anchor.closest('.side-project-row') || anchor.closest('.side-project') || anchor;
+    const rect = control.getBoundingClientRect();
+    pop.style.width = Math.min(control === anchor ? 320 : rect.width, innerWidth - 16) + 'px';
+    const below = innerHeight - rect.bottom - 14, above = rect.top - 14;
+    const upwards = below < 200 && above > below;
+    pop.style.maxHeight = Math.max(80, Math.min(480, upwards ? above : below)) + 'px';
+    pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+    pop.style.top = Math.max(8, upwards ? rect.top - pop.offsetHeight - 6 : rect.bottom + 6) + 'px';
+  };
   workspacePickerClose = close;
   const paint = () => {
     if (!pop.isConnected) return;
     const rows = [{ name: '', title: 'All projects', cwd: 'On this machine' }, { name: LOOSE_PROJECT, title: 'No project', cwd: 'Conversations and files without a project' }, ...sidebarProjectRows()];
     const q = input.value.trim().toLocaleLowerCase();
     const matches = rows.filter(p => !q || `${p.name} ${p.title} ${p.cwd}`.toLocaleLowerCase().includes(q));
-    list.innerHTML = matches.map(p => `<button type="button" class="mp-row${workspaceScope() === p.name ? ' on' : ''}" data-workspace-project="${esc(p.name)}" aria-pressed="${workspaceScope() === p.name}"><b>${esc(p.title || p.name)}</b>${p.name && p.name !== LOOSE_PROJECT && p.title && p.title !== p.name ? `<small>${esc(p.name)}</small>` : ''}</button>`).join('') || '<div class="mp-empty">No matching projects.</div>';
+    list.innerHTML = matches.map(p => `<button type="button" class="mp-row${workspaceScope() === p.name ? ' on' : ''}" data-workspace-project="${esc(p.name)}" aria-pressed="${workspaceScope() === p.name}" title="${esc(p.cwd || p.name || p.title)}"><b>${esc(p.name && p.name !== LOOSE_PROJECT ? p.name : p.title)}</b>${p.name && p.name !== LOOSE_PROJECT && p.title && p.title !== p.name ? `<small>${esc(p.title)}</small>` : ''}</button>`).join('') || '<div class="mp-empty">No matching projects.</div>';
     list.querySelectorAll('[data-workspace-project]').forEach(button => button.onclick = () => { const p = button.dataset.workspaceProject; close(true); chooseWorkspaceProject(p); });
-    const rect = anchor.getBoundingClientRect();
-    pop.style.left = Math.max(8, Math.min(rect.left, innerWidth - pop.offsetWidth - 8)) + 'px';
-    pop.style.top = Math.max(8, Math.min(rect.bottom + 6, innerHeight - pop.offsetHeight - 8)) + 'px';
+    position();
   };
   input.oninput = paint;
   pop.onkeydown = e => {
@@ -15113,9 +15270,17 @@ function openWorkspaceProjectPicker(anchor = $('sideProject')) {
   };
   paint(); input.focus();
   document.addEventListener('click', outside, true); window.addEventListener('aiconvo:route', routeChanged);
+  window.addEventListener('resize', position);
   loadSidebarProjectCatalog().then(paint);
 }
-$('sideProject').onclick = e => { e.stopPropagation(); openWorkspaceProjectPicker(); };
+$('sideProject').onclick = e => {
+  e.stopPropagation();
+  workspacePickerClose?.();
+  const project = workspaceScope();
+  if (project) showProjectOverview(project);
+  else setSidePanel('projects');
+};
+$('sideProjectMore').onclick = e => { e.stopPropagation(); openWorkspaceProjectPicker(); };
 function toggleHomeFilters() {
   if (viewKind !== 'home') goHome();
   const pop = $('filtersPop');
@@ -15748,7 +15913,7 @@ function helpNow() {
   // Open panels sit on top of the view.
   if (settingsOpen) sections.push({ label: 'settings', keys: [['esc / ,', 'back to where you were']] });
   if (!$('filtersPop').hidden) sections.push({ label: 'filters', keys: [['esc / f', 'close the filters']] });
-  if (agentsTrayOpen()) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['p', 'pin / unpin'], ['u', 'mark unread / read'], ['del', 'remove from the inbox'], ['j', 'background jobs in Settings'], ['esc / a', sideLayoutOn() ? 'leave the side panel' : 'close the agents panel']] });
+  if (agentsTrayOpen()) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['p', 'pin / unpin'], ['u', 'mark unread / read'], ['del', 'remove from replies'], ['j', 'background jobs in Settings'], ['esc / a', sideLayoutOn() ? 'leave the side panel' : 'close the agents panel']] });
 
   // The view itself.
   if (document.body.classList.contains('file-full')) {

@@ -49,11 +49,29 @@ function cleanGroups(raw) {
   return out;
 }
 
+// Profile images are small raster thumbnails, not arbitrary URLs or SVGs.
+// Keep the bytes in the private roster; public records carry only a version.
+const AVATAR_MAX_BYTES = 96 * 1024;
+function cleanAvatar(raw) {
+  if (raw === null || raw === '') return null;
+  if (typeof raw !== 'string' || raw.length > Math.ceil(AVATAR_MAX_BYTES / 3) * 4 + 22) throw new Error('Profile picture is too large');
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(raw);
+  if (!match) throw new Error('Profile picture must be a PNG thumbnail');
+  const bytes = Buffer.from(match[1], 'base64');
+  if (bytes.length > AVATAR_MAX_BYTES || bytes.length < 33 || bytes.toString('base64') !== match[1] ||
+      !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+      bytes.readUInt32BE(8) !== 13 || bytes.toString('ascii', 12, 16) !== 'IHDR') throw new Error('Invalid profile picture');
+  const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
+  if (!width || !height || width > 256 || height > 256) throw new Error('Profile picture must be at most 256 × 256 pixels');
+  return raw;
+}
+
 // The public shape: what other browsers, presence and attribution see.
-// Never the credentials.
+// Never the credentials or image bytes.
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, name: u.name, glyph: u.glyph, color: u.color, role: u.role, groups: [...(u.groups || [])], disabled: !!u.disabled };
+  return { id: u.id, name: u.name, glyph: u.glyph, color: u.color, role: u.role, groups: [...(u.groups || [])], disabled: !!u.disabled,
+    ...(u.avatar ? { avatar: sha256(u.avatar) } : {}) };
 }
 
 function makeUser({ name, role = 'member', groups = [], id = null }) {
@@ -83,7 +101,10 @@ function normalizeRoster(raw, { ownerName } = {}) {
     if (!u || typeof u !== 'object' || typeof u.id !== 'string' || seen.has(u.id)) continue;
     seen.add(u.id);
     const name = cleanName(u.name) || 'someone';
+    let avatar = null;
+    if (u.avatar) { try { avatar = cleanAvatar(u.avatar); } catch {} }
     out.users.push({
+      ...(avatar ? { avatar } : {}),
       id: u.id, name, glyph: cleanName(u.glyph).slice(0, 2) || glyphFor(name), color: /^#[0-9a-f]{6}$/i.test(u.color || '') ? u.color : colorFor(u.id),
       role: ROLES.includes(u.role) ? u.role : 'member', groups: cleanGroups(u.groups),
       createdAt: u.createdAt || new Date().toISOString(), disabled: !!u.disabled,
@@ -142,6 +163,7 @@ function addUser(roster, spec) {
 function updateUser(roster, id, patch) {
   const u = findUser(roster, id);
   if (!u) throw new Error('no such user');
+  const avatar = patch.avatar === undefined ? undefined : cleanAvatar(patch.avatar);
   if (patch.name !== undefined) { const n = cleanName(patch.name); if (!n) throw new Error('a name is needed'); u.name = n; if (patch.glyph === undefined) u.glyph = glyphFor(n); }
   if (patch.glyph !== undefined) u.glyph = cleanName(patch.glyph).slice(0, 2) || glyphFor(u.name);
   if (patch.color !== undefined && /^#[0-9a-f]{6}$/i.test(patch.color)) u.color = patch.color;
@@ -151,6 +173,8 @@ function updateUser(roster, id, patch) {
     u.role = patch.role;
   }
   if (patch.disabled !== undefined && u.role !== 'owner') u.disabled = !!patch.disabled;
+  if (avatar === null) delete u.avatar;
+  else if (avatar !== undefined) u.avatar = avatar;
   return u;
 }
 
@@ -316,7 +340,7 @@ function upsertHandoffUser(roster, claimed) {
 }
 
 module.exports = {
-  ROLES, PALETTE, glyphFor, colorFor, publicUser,
+  ROLES, PALETTE, glyphFor, colorFor, publicUser, cleanAvatar, AVATAR_MAX_BYTES,
   createRoster, normalizeRoster, loadRoster, saveRoster, ownerOf, findUser,
   addUser, updateUser, transferOwnership, removeUser, mergeUsers, resolveId,
   issueCredential, revokeCredential, userForSecret, identify, canManageUsers, isOwnerTier,

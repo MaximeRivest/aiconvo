@@ -12,6 +12,31 @@
 
 const collabSessions = new Map(); // name → session (shared by every binding on the page)
 
+function collabIsSelf(person) {
+  if (typeof window === 'undefined') return false;
+  if (typeof window.aiconvoIsSelf === 'function') return window.aiconvoIsSelf(person);
+  return !!person?.id && person.id === window.aiconvoMe?.id;
+}
+function collabOtherPeople(people) {
+  const seen = new Set();
+  return (people || []).filter(p => {
+    if (!p || collabIsSelf(p)) return false;
+    const id = typeof window !== 'undefined' && window.aiconvoPersonId ? window.aiconvoPersonId(p.id) : p.id;
+    if (id && seen.has(id)) return false;
+    if (id) seen.add(id);
+    return true;
+  });
+}
+// Identity can arrive after an editor opens, or change after a user merge.
+// Refresh decorations without removing anyone from the shared document.
+if (typeof window !== 'undefined') window.addEventListener('aiconvo:identity', () => {
+  for (const s of collabSessions.values()) {
+    const user = collabMe();
+    if (JSON.stringify(s.awareness.getLocalState()?.user) !== JSON.stringify(user)) s.awareness.setLocalStateField('user', user);
+    s.awareness.emit('change', [{ added: [], updated: [...s.awareness.getStates().keys()], removed: [] }, 'identity-view']);
+  }
+});
+
 function collabWsUrl(name) {
   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/collab' + (name ? '/' + encodeURIComponent(name) : '');
 }
@@ -44,7 +69,7 @@ async function collabJoin(name, { timeoutMs = 5000 } = {}) {
   s.awareness.on('change', () => {
     const rows = [];
     const mine = s.awareness.clientID;
-    for (const [id, st] of s.awareness.getStates()) if (id !== mine && st && st.user) rows.push({ clientId: id, ...st.user, cursor: st.cursor || null });
+    for (const [id, st] of s.awareness.getStates()) if (id !== mine && st && st.user && !collabIsSelf(st.user)) rows.push({ clientId: id, ...st.user, cursor: st.cursor || null });
     s.people = rows;
     for (const fn of s.listeners) { try { fn(rows); } catch {} }
   });
@@ -63,10 +88,21 @@ function collabLeave(s, force = false) {
 }
 function collabOnPeople(s, fn) { s.listeners.add(fn); fn(s.people); return () => s.listeners.delete(fn); }
 
-/* The CodeMirror side: one extension, cursors and selections included. */
+/* The CodeMirror side: keep local awareness and everybody else's real
+   cursors, but do not draw this person's other devices as collaborators.
+   This is a read-only view of awareness; the provider still broadcasts the
+   full state and text still synchronizes across all devices. */
 function collabEditorExtension(s) {
   const collab = window.mrmdDocument && window.mrmdDocument.collab;
-  return collab ? [collab.yCollab(s.ytext, s.awareness)] : [];
+  if (!collab) return [];
+  if (!s.editorAwareness) s.editorAwareness = new Proxy(s.awareness, {
+    get(target, key) {
+      if (key === 'getStates') return () => new Map([...target.getStates()].filter(([id, state]) => id === target.clientID || !collabIsSelf(state?.user)));
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return [collab.yCollab(s.ytext, s.editorAwareness)];
 }
 
 /* The textarea side. Local input becomes one minimal replace on the shared
@@ -156,7 +192,7 @@ function collabTextareaCursors(ta, host, s) {
     layer.innerHTML = '';
     const w = ta.clientWidth, h = ta.clientHeight;
     for (const p of s.people) {
-      if (!p.cursor || typeof p.cursor.head !== 'number') continue;
+      if (collabIsSelf(p) || !p.cursor || typeof p.cursor.head !== 'number') continue;
       const head = Math.max(0, Math.min(ta.value.length, p.cursor.head));
       const c = collabCaretCoords(ta, head);
       if (c.top < -c.height || c.top > h + 4 || c.left < 0 || c.left > w) continue;
@@ -175,7 +211,8 @@ function collabTextareaCursors(ta, host, s) {
 
 /* The small "who else is here" strip: glyph bubbles with names. */
 function collabPeopleHtml(people, { verb = 'is also writing here' } = {}) {
-  if (!people || !people.length) return '';
+  people = collabOtherPeople(people);
+  if (!people.length) return '';
   const names = people.map(p => p.name).filter(Boolean);
   const label = names.length === 1 ? `${names[0]} ${verb}` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} ${verb.replace(/^is /, 'are ')}`;
   return `<span class="collab-people">${people.map(p => `<span class="user-bubble" style="--who:${esc(p.color || '#888')}" title="${esc(p.name || '')}">${esc(p.glyph || '?')}</span>`).join('')}<span class="collab-people-label">${esc(label)}</span></span>`;
