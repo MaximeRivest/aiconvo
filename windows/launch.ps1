@@ -43,6 +43,15 @@ try {
     }
     if (-not $ready) { throw "Aiconvo did not start within 90 seconds. Open your WSL terminal and run: systemctl --user status aiconvo" }
     if ($CheckOnly) { Write-Output "Aiconvo is ready at $url"; return }
+    # From Windows the browser reaches the server through the port forward,
+    # so the server sees another device and asks for the install token. The
+    # token lives in this Linux user's own files, which this launcher already
+    # runs as; carry it along once and the browser stays signed in. This is
+    # the same sign-in the connect links use, not a way around it. Without
+    # the file (server local-only) the plain address signs in by itself.
+    $tokenRaw = & "$env:SystemRoot\System32\wsl.exe" -d $config.Distro -u $config.User --exec cat "/home/$($config.User)/.cache/aiconvo/lan-token" 2>$null
+    $token = (($tokenRaw -join '') -replace "`0", '').Trim()
+    if ($token -match '^[A-Za-z0-9_-]{8,}$') { $url = "$url`?token=$token" }
     $browsers = @(
         "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
         "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
