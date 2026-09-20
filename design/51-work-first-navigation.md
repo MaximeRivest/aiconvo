@@ -25,7 +25,8 @@ The folder hierarchy supports this cycle; it does not organize attention.
 - Project browsing lives
   at the top of the adjacent panel instead: the main project button opens its
   memory/overview page, and a separate small arrow opens the project picker.
-  With All projects selected, the main button opens the project directory.
+  With All projects selected, the main button opens the searchable project
+  picker. Browsing projects never replaces the agent sidebar.
   The selection filters Read or Files only when that section's own Project
   toggle is selected, and remains the target of New here. Back/Forward and New here share one row below the project control.
 - Agents starts directly with its reply sections, without a repeated panel
@@ -36,9 +37,11 @@ The folder hierarchy supports this cycle; it does not organize attention.
   Settings → people. Folding hides the panel and leaves a floating reopen
   button with an attention badge. The composer and expanded charts use
   the freed space. `a` still opens Agents directly.
-- A fresh browser starts with Agents. The internal `inbox` id is retained;
-  old `traffic` and `conversations` selections migrate to it. Other saved panel
-  choices survive.
+- Every browser uses Agents as its left panel. The internal `inbox` id is
+  retained; all old panel choices, including `projects`, migrate to it and
+  the corrected preference is saved. Project scope, Read scope, file-panel
+  choices and other preferences are preserved. Legacy file selections move
+  to the right-hand file panel.
 - Recent reuses the existing human/agent/both file selection and retention
   rules; opening a global view does not change the chosen project scope.
 

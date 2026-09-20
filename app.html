@@ -3551,18 +3551,24 @@ function renderSidebarProjects() {
   }
 }
 
-// The rail's second level: one section shown at a time in the side panel.
-const SIDE_PANELS = ['inbox', 'projects'];
+// The left panel is always agent replies and work. Project browsing lives
+// in the picker; old per-browser panel choices must not resurrect the rail.
+const SIDE_PANELS = ['inbox'];
 let rightFilesMode = agentSecState.filePanel === 'files' ? 'files' : 'recent-files';
 let rightFilesOpen = agentSecState.filePanelOpen === true;
 if (['files', 'recent-files'].includes(agentSecState.panel)) {
   rightFilesMode = agentSecState.panel;
   rightFilesOpen = true;
-  agentSecState.panel = 'inbox';
+  agentSecState.filePanel = rightFilesMode;
+  agentSecState.filePanelOpen = true;
 }
-if (['notifications', 'traffic', 'conversations'].includes(agentSecState.panel)) agentSecState.panel = 'inbox';
+if (agentSecState.panel !== 'inbox') {
+  agentSecState.panel = 'inbox';
+  saveAgentSecState();
+}
 const sidePanel = () => SIDE_PANELS.includes(agentSecState.panel) ? agentSecState.panel : 'inbox';
 function setSidePanel(id, { remember = true } = {}) {
+  if (id === 'projects') { openWorkspaceProjectPicker(); return; }
   if (['files', 'recent-files'].includes(id)) { setRightFiles(id, true); return; }
   if (!SIDE_PANELS.includes(id)) return;
   if (id !== sidePanel()) {
@@ -3571,7 +3577,6 @@ function setSidePanel(id, { remember = true } = {}) {
     $('agentsLegacy').scrollTop = 0;
   }
   agentSecState.panel = id;
-  if (id === 'projects') loadSidebarProjectCatalog();
   if (remember) saveAgentSecState();
   paintSideRail();
   renderAgentsPop(false);
@@ -3724,14 +3729,8 @@ async function renderAgentsPop(refetch) {
       if (d.recovery) agentsRecovery = d.recovery;
     } catch {}
     if (pop.hidden) return;
-    if (sideLayoutOn() && sidePanel() === 'projects') loadSidebarProjectCatalog();
   }
   updateActiveBtn();
-  if (sideLayoutOn() && sidePanel() === 'projects') {
-    pop.dataset.panel = 'projects';
-    renderSidebarProjects();
-    return;
-  }
   const now = Date.now();
   const delegationIndex = delegationUI.index();
   const byKey = k => sessions.find(s => s.key === k);
@@ -15278,7 +15277,7 @@ $('sideProject').onclick = e => {
   workspacePickerClose?.();
   const project = workspaceScope();
   if (project) showProjectOverview(project);
-  else setSidePanel('projects');
+  else openWorkspaceProjectPicker();
 };
 $('sideProjectMore').onclick = e => { e.stopPropagation(); openWorkspaceProjectPicker(); };
 function toggleHomeFilters() {
