@@ -175,6 +175,7 @@ function lanAddresses() {
 }
 
 fs.mkdirSync(SESS_DIR, { recursive: true });
+try { fs.mkdirSync(SOURCES.mirror, { recursive: true }); } catch {} // so the watcher covers mirrors from boot
 
 // FTS5 work-memory search (searchindex.js). A derived cache: delete the
 // database and the next boot rebuilds it. Null when node:sqlite is missing;
@@ -4162,7 +4163,7 @@ async function joinRemoteProject({ link, name, folder }) {
   // and remember them as a peer with the credential we use there.
   const myUrl = PUBLIC_URL || '';
   const second = await call({ token: first.credential, install: { name: HOST_NAME, url: myUrl, publicKey: installKey.publicKey, credential: theirCredential } });
-  const peer = syncEngine.addPeer({ name: first.host.name || target.hostname, url: base, credential: first.credential, publicKey: first.host.publicKey || '',
+  const peer = syncEngine.addPeer({ name: first.host.name || target.hostname, url: base, credential: first.credential, publicKey: first.host.publicKey || '', role: 'joined',
     me: { id: first.me.id, name: first.me.name }, them: { id: them.id, name: them.name }, projects: first.projects.map(pr => ({ id: pr.id, name: pr.name, right: pr.right })) });
   for (const b of bound) await rebindMirrors(b.id);
   broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
@@ -12774,7 +12775,7 @@ const server = http.createServer(async (req, res) => {
         const { secret } = usersLib.issueCredential(roster, user.id, { kind: 'invite', label: 'aiconvo on ' + String((p.install && p.install.name) || 'another machine').slice(0, 30) });
         let peer = null;
         if (p.install && typeof p.install === 'object') {
-          peer = syncEngine.addPeer({ name: String(p.install.name || user.name).slice(0, 60), url: String(p.install.url || ''), credential: String(p.install.credential || ''), publicKey: String(p.install.publicKey || ''),
+          peer = syncEngine.addPeer({ name: String(p.install.name || user.name).slice(0, 60), url: String(p.install.url || ''), credential: String(p.install.credential || ''), publicKey: String(p.install.publicKey || ''), role: 'host',
             them: { id: user.id, name: user.name }, me: { id: usersLib.ownerOf(roster).id, name: usersLib.ownerOf(roster).name }, projects });
         }
         saveRoster();
@@ -14141,7 +14142,7 @@ const server = http.createServer(async (req, res) => {
         else if (!usersLib.canManageUsers(identity)) throw Object.assign(new Error('This is not shared with you.'), { status: 403 });
         let peer = syncEngine.peers.find(x => x.them && x.them.id === identity.user.id) || null;
         if (!peer) peer = syncEngine.addPeer({ name: String(p.host || identity.user.name).slice(0, 60), url: '', credential: '', them: { id: identity.user.id, name: identity.user.name }, me: null, projects: [{ id: projectId, name: rec.name, right: 'act' }] });
-        else if (!peer.projects.some(x => x.id === projectId)) syncEngine.addPeer({ url: peer.url, publicKey: peer.publicKey, projects: [{ id: projectId, name: rec.name, right: 'act' }] });
+        else if (!peer.projects.some(x => x.id === projectId)) syncEngine.addProjectToPeer(peer.id, { id: projectId, name: rec.name, right: 'act' });
         const landed = await syncEngine.importItems(peer, projectId, Array.isArray(p.items) ? p.items : []);
         json(res, 200, { ok: true, landed });
       } catch (e) { json(res, e.status || 400, { error: e.message }); }

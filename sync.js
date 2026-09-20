@@ -139,6 +139,9 @@ function normalizePeers(raw) {
       them: p.them && typeof p.them === 'object' ? { id: String(p.them.id || ''), name: String(p.them.name || '') } : null,
       projects: (Array.isArray(p.projects) ? p.projects : []).filter(x => x && typeof x.id === 'string')
         .map(x => ({ id: x.id, name: String(x.name || 'project'), right: x.right === 'act' ? 'act' : 'see', pullCursor: Number(x.pullCursor) || 0, pushCursor: Number(x.pushCursor) || 0 })),
+      // 'host': they joined us with our invite (their rights here decide
+      // what we accept from them); 'joined': we joined them.
+      role: p.role === 'joined' ? 'joined' : 'host',
       createdAt: p.createdAt || new Date().toISOString(),
       lastPullAt: p.lastPullAt || null, lastPushAt: p.lastPushAt || null, lastError: typeof p.lastError === 'string' ? p.lastError : '',
       paused: !!p.paused,
@@ -155,7 +158,7 @@ function savePeers(file, peers) {
   fs.writeFileSync(tmp, JSON.stringify(normalizePeers(peers), null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
-const publicPeer = p => p && { id: p.id, name: p.name, url: p.url, reachable: !!p.url, me: p.me, them: p.them, projects: p.projects.map(x => ({ id: x.id, name: x.name, right: x.right })), createdAt: p.createdAt, lastPullAt: p.lastPullAt, lastPushAt: p.lastPushAt, lastError: p.lastError, paused: p.paused };
+const publicPeer = p => p && { id: p.id, name: p.name, url: p.url, reachable: !!p.url, role: p.role, me: p.me, them: p.them, projects: p.projects.map(x => ({ id: x.id, name: x.name, right: x.right })), createdAt: p.createdAt, lastPullAt: p.lastPullAt, lastPushAt: p.lastPushAt, lastError: p.lastError, paused: p.paused };
 
 // A relative path from a peer, made safe to join under the mirror folder.
 function safeRel(rel) {
@@ -197,7 +200,7 @@ function createSyncEngine(deps) {
     const existing = spec.url && peers.peers.find(p => p.url === spec.url) || (spec.publicKey && peers.peers.find(p => p.publicKey === spec.publicKey)) || null;
     const peer = existing || normalizePeers({ peers: [{ id: newId('peer'), ...spec }] }).peers[0];
     if (existing) {
-      for (const k of ['name', 'url', 'credential', 'publicKey', 'me', 'them']) if (spec[k] !== undefined) existing[k] = spec[k];
+      for (const k of ['name', 'url', 'credential', 'publicKey', 'me', 'them', 'role']) if (spec[k] !== undefined) existing[k] = spec[k];
       for (const pr of spec.projects || []) {
         const have = existing.projects.find(x => x.id === pr.id);
         if (have) { have.name = pr.name || have.name; have.right = pr.right || have.right; }
@@ -206,6 +209,15 @@ function createSyncEngine(deps) {
     } else peers.peers.push(peer);
     save();
     return peer;
+  }
+  function addProjectToPeer(id, pr) {
+    const p = peerById(id);
+    if (!p) throw new Error('no such peer');
+    const have = p.projects.find(x => x.id === pr.id);
+    if (have) { have.name = pr.name || have.name; have.right = pr.right || have.right; }
+    else p.projects.push({ id: pr.id, name: pr.name || 'project', right: pr.right || 'see', pullCursor: 0, pushCursor: 0 });
+    save();
+    return p;
   }
   function updatePeer(id, patch) {
     const p = peerById(id);
@@ -323,6 +335,9 @@ function createSyncEngine(deps) {
   async function pull(peer, { all = false } = {}) {
     let landed = 0;
     for (const pr of peer.projects) {
+      // A guest who may only read here contributes nothing here: their
+      // conversations are not pulled, as they could not be pushed.
+      if (peer.role === 'host' && pr.right !== 'act') continue;
       let since = all ? 0 : pr.pullCursor;
       for (let page = 0; page < 40; page++) {
         const feed = await request(peer, `/api/sync/feed?project=${encodeURIComponent(pr.id)}&since=${since}`);
@@ -393,7 +408,7 @@ function createSyncEngine(deps) {
   function stop() { if (timer) clearInterval(timer); timer = null; }
 
   return {
-    get peers() { return peers.peers; }, peerById, addPeer, updatePeer, removePeer, publicPeer,
+    get peers() { return peers.peers; }, peerById, addPeer, addProjectToPeer, updatePeer, removePeer, publicPeer,
     buildFeed, importItems, pull, push, syncPeer, syncAll, start, stop, request,
     // Re-read after another process wrote the file (the CLI's join).
     reload() { peers = loadPeers(deps.peersFile); return peers.peers; },
