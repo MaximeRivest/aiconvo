@@ -43,12 +43,13 @@ The button is in the desktop panel; the top-bar/phone layout retains Back.
 
 ## Home
 
-The old `body.home #ganttBar { display: none !important }` hid the toolbar and
-all its children, including sorting. Restore it, add a visible Filters button,
-and wrap controls at narrower desktop widths. Preserve the existing sorting
-and zoom defaults. Leave 16 pixels around the desktop chart rather than placing
-it flush against the window. Phone layouts keep their existing compact view.
-This trades a little chart area for visible controls and clearer boundaries.
+The toolbar contains only the four project sort buttons and the magnifying-glass
+project search. Auxiliary timeline controls are no longer shown; existing sort
+and zoom state and zoom keyboard/wheel shortcuts remain. The now marker has its
+own second line in the axis header, just to the right of its line, so it cannot
+collide with a date or time label. This costs 14 pixels of chart height rather
+than hiding or truncating dates. Leave 16 pixels around the desktop chart rather
+than placing it flush against the window. Phone layouts keep their compact view.
 
 ## Verification
 

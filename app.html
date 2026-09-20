@@ -523,6 +523,7 @@ body.home #tabs { display: none; }
   body.home #left { border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
 }
 #ganttBar { flex-wrap: wrap; gap: 4px; padding: 8px; }
+#ganttBar:not(:has(#projSort)) { display: none; }
 #ganttBar #projSort { flex-wrap: wrap; }
 #ganttBar button, #ganttBar select, #ganttBar input { min-height: 30px; }
 /* Floating mark details: one click shows them, a second click opens. */

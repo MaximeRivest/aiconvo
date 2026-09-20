@@ -153,7 +153,7 @@ built-in runtime source.
 
 ## UI
 
-- **Home is the whole-system view.** The work area shows the timeline with its sorting, filter and zoom controls. Desktop keeps the work-first sidebar, with space around the chart. Every click lowers one level: a project label opens the project, a violin mark opens its conversation, a green square opens its note, a triangle opens its epic, and the `⌂ branch` link on a project row opens its Git history.
+- **Home is the whole-system view.** The timeline toolbar keeps just four project sort buttons and a magnifying-glass project search. The “now” marker sits below the date labels, without overlapping them. Desktop keeps the work-first sidebar, with space around the chart. Every click lowers one level: a project label opens the project, a violin mark opens its conversation, a green square opens its note, a triangle opens its epic, and the `⌂ branch` link on a project row opens its Git history.
 - Below home, a **breadcrumb spine** (`❯ home ▸ project ▸ conversation ▸ …`) sits under the top bar. Each segment is a link. Clicking the conversation segment while reading it opens a sibling quick-switch list for the same project. The brand button always goes home; shift-click also clears every filter.
 - One router owns navigation. Every view has a hash route, so the browser back button, refresh, and deep links work everywhere. The app never navigates by itself: live updates only patch data, show a toast, or a badge (`design/22-home-and-router.md`).
 - The home timeline is a Gantt. Four layouts: horizontal, vertical, full-screen project swimlanes, or hidden. Pick a layout with the timeline icons, or press **g** to cycle. The choice is saved.
