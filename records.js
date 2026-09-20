@@ -52,6 +52,12 @@ const HELP = `aiconvo — query the conversation records (all projects)
   aiconvo evidence <id>                the evidence card or note of one conversation
   aiconvo here [DIR]
 
+  Working with other people's aiconvos (design/52):
+  aiconvo join <invite link> [--name "You"] [--folder DIR]   join a project someone invited you to, from this machine
+  aiconvo sync [--all]                 pull and push shared projects with every peer now
+  aiconvo peers                        the installs this one shares projects with
+  aiconvo project-id [PROJECT]         the stable id of a project (the one in .aiconvo/project.json)
+
   PROJECT defaults to the project of the current folder. --json prints raw JSON.
   Records are AI transcripts and AI-written notes: a map of what was said, not verified truth.
   Notes carry a trust label: [unverified] means no person reviewed them.`;

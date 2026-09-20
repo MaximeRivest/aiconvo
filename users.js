@@ -12,6 +12,11 @@ const path = require('path');
 
 const ROSTER_VERSION = 1;
 const ROLES = ['owner', 'admin', 'member'];
+// Household people see everything the rules do not hide; a guest (someone
+// invited to one project — a hire, a collaborator) sees nothing except
+// what is listed for them. Same role model, different default.
+const SCOPES = ['household', 'guest'];
+const INVITE_TTL_MS = 14 * 24 * 3600 * 1000;
 // Distinct enough on a screen; the e-ink theme uses the glyph, never the color.
 const PALETTE = ['#c0392b', '#2471a3', '#1e8449', '#b9770e', '#7d3c98', '#117a65', '#a04000', '#5d6d7e'];
 const SESSION_CREDENTIALS_KEPT = 6;
@@ -70,18 +75,19 @@ function cleanAvatar(raw) {
 // Never the credentials or image bytes.
 function publicUser(u) {
   if (!u) return null;
-  return { id: u.id, name: u.name, glyph: u.glyph, color: u.color, role: u.role, groups: [...(u.groups || [])], disabled: !!u.disabled,
+  return { id: u.id, name: u.name, glyph: u.glyph, color: u.color, role: u.role, scope: SCOPES.includes(u.scope) ? u.scope : 'household', groups: [...(u.groups || [])], disabled: !!u.disabled,
     ...(u.avatar ? { avatar: sha256(u.avatar) } : {}) };
 }
 
-function makeUser({ name, role = 'member', groups = [], id = null }) {
+function makeUser({ name, role = 'member', groups = [], id = null, scope = 'household' }) {
   const uid = id || newId('u');
   return {
     id: uid, name: cleanName(name) || 'someone', glyph: glyphFor(name), color: colorFor(uid),
-    role: ROLES.includes(role) ? role : 'member', groups: cleanGroups(groups),
+    role: ROLES.includes(role) ? role : 'member', scope: SCOPES.includes(scope) ? scope : 'household', groups: cleanGroups(groups),
     createdAt: new Date().toISOString(), credentials: [],
   };
 }
+const isGuest = u => !!u && u.scope === 'guest';
 
 // A fresh roster: one owner, the person whose account this install is.
 // The owner signs in with the install token (the LAN token file), so the
@@ -89,13 +95,13 @@ function makeUser({ name, role = 'member', groups = [], id = null }) {
 function createRoster({ ownerName }) {
   const owner = makeUser({ name: ownerName, role: 'owner' });
   owner.credentials.push({ id: newId('c'), kind: 'install', label: 'install token', createdAt: owner.createdAt });
-  return { v: ROSTER_VERSION, users: [owner], groups: [], aliases: {} };
+  return { v: ROSTER_VERSION, users: [owner], groups: [], aliases: {}, invites: [] };
 }
 
 function normalizeRoster(raw, { ownerName } = {}) {
   const r = raw && typeof raw === 'object' ? raw : {};
   const users = Array.isArray(r.users) ? r.users : [];
-  const out = { v: ROSTER_VERSION, users: [], groups: [], aliases: {} };
+  const out = { v: ROSTER_VERSION, users: [], groups: [], aliases: {}, invites: [] };
   const seen = new Set();
   for (const u of users) {
     if (!u || typeof u !== 'object' || typeof u.id !== 'string' || seen.has(u.id)) continue;
@@ -106,8 +112,9 @@ function normalizeRoster(raw, { ownerName } = {}) {
     out.users.push({
       ...(avatar ? { avatar } : {}),
       id: u.id, name, glyph: cleanName(u.glyph).slice(0, 2) || glyphFor(name), color: /^#[0-9a-f]{6}$/i.test(u.color || '') ? u.color : colorFor(u.id),
-      role: ROLES.includes(u.role) ? u.role : 'member', groups: cleanGroups(u.groups),
+      role: ROLES.includes(u.role) ? u.role : 'member', scope: u.role === 'owner' ? 'household' : SCOPES.includes(u.scope) ? u.scope : 'household', groups: cleanGroups(u.groups),
       createdAt: u.createdAt || new Date().toISOString(), disabled: !!u.disabled,
+      ...(u.invitedBy && typeof u.invitedBy === 'string' ? { invitedBy: u.invitedBy } : {}),
       credentials: (Array.isArray(u.credentials) ? u.credentials : []).filter(c => c && typeof c === 'object' && (c.kind === 'install' || typeof c.hash === 'string'))
         .map(c => ({ id: c.id || newId('c'), kind: ['install', 'invite', 'session'].includes(c.kind) ? c.kind : 'invite', hash: c.kind === 'install' ? undefined : c.hash, label: cleanName(c.label).slice(0, 40) || undefined, createdAt: c.createdAt || new Date().toISOString(), lastUsedAt: c.lastUsedAt || undefined })),
     });
@@ -132,7 +139,27 @@ function normalizeRoster(raw, { ownerName } = {}) {
   for (const [from, to] of Object.entries(r.aliases && typeof r.aliases === 'object' ? r.aliases : {})) {
     if (typeof from === 'string' && typeof to === 'string' && from !== to && seen.has(to) && !seen.has(from)) out.aliases[from] = to;
   }
+  for (const inv of Array.isArray(r.invites) ? r.invites : []) {
+    if (!inv || typeof inv !== 'object' || typeof inv.id !== 'string' || typeof inv.hash !== 'string') continue;
+    out.invites.push(normalizeInvite(inv));
+  }
   return out;
+}
+
+function normalizeInvite(inv) {
+  return {
+    id: inv.id, hash: inv.hash,
+    projects: (Array.isArray(inv.projects) ? inv.projects : []).filter(p => p && typeof p.id === 'string')
+      .map(p => ({ id: p.id, name: cleanName(p.name) || 'project', right: p.right === 'act' ? 'act' : 'see' })),
+    scope: SCOPES.includes(inv.scope) ? inv.scope : 'guest',
+    name: cleanName(inv.name) || '',
+    label: cleanName(inv.label).slice(0, 60) || '',
+    createdBy: typeof inv.createdBy === 'string' ? inv.createdBy : null,
+    createdAt: inv.createdAt || new Date().toISOString(),
+    expiresAt: inv.expiresAt || null,
+    usedAt: inv.usedAt || null, usedBy: typeof inv.usedBy === 'string' ? inv.usedBy : null,
+    revokedAt: inv.revokedAt || null,
+  };
 }
 
 function loadRoster(file, { ownerName }) {
@@ -173,6 +200,10 @@ function updateUser(roster, id, patch) {
     u.role = patch.role;
   }
   if (patch.disabled !== undefined && u.role !== 'owner') u.disabled = !!patch.disabled;
+  if (patch.scope !== undefined && u.role !== 'owner') {
+    if (!SCOPES.includes(patch.scope)) throw new Error('scope must be household or guest');
+    u.scope = patch.scope;
+  }
   if (avatar === null) delete u.avatar;
   else if (avatar !== undefined) u.avatar = avatar;
   return u;
@@ -215,6 +246,62 @@ function mergeUsers(roster, keepId, dropId) {
   for (const [from, to] of Object.entries(roster.aliases)) if (to === drop.id) roster.aliases[from] = keep.id;
   return keep;
 }
+// ---- project invites ----
+// One link, one person, one or more projects. The secret is shown once
+// and stored hashed; claiming it creates the person (a guest by default:
+// nothing visible but the listed projects) and spends the link. The
+// access rules that make the projects visible are written by the caller
+// when the claim lands, because the rules live in another file.
+function issueProjectInvite(roster, { projects, right = 'see', scope = 'guest', name = '', label = '', createdBy = null, ttlMs = INVITE_TTL_MS, now = Date.now() }) {
+  const list = (Array.isArray(projects) ? projects : []).filter(p => p && typeof p.id === 'string' && p.id);
+  if (!list.length) throw new Error('an invite names at least one project');
+  const secret = newSecret();
+  const invite = normalizeInvite({
+    id: newId('i'), hash: sha256(secret),
+    projects: list.map(p => ({ id: p.id, name: p.name, right: p.right || right })),
+    scope, name, label, createdBy, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + ttlMs).toISOString(),
+  });
+  roster.invites = roster.invites || [];
+  roster.invites.push(invite);
+  return { secret, invite };
+}
+function findInvite(roster, secret) {
+  if (!secret) return null;
+  const h = sha256(secret);
+  return (roster.invites || []).find(i => safeEqual(i.hash, h)) || null;
+}
+function inviteState(invite, now = Date.now()) {
+  if (!invite) return 'unknown';
+  if (invite.revokedAt) return 'revoked';
+  if (invite.usedAt) return 'used';
+  if (invite.expiresAt && Date.parse(invite.expiresAt) < now) return 'expired';
+  return 'open';
+}
+// Spend an invite: the person joins the roster with the invite's scope and
+// gets a session credential for this device. Returns what the caller must
+// still do (write the access rules for `invite.projects`).
+function claimInvite(roster, secret, { name = '', now = Date.now() } = {}) {
+  const invite = findInvite(roster, secret);
+  const state = inviteState(invite, now);
+  if (state !== 'open') throw new Error(state === 'unknown' ? 'that invite link is not known here' : 'that invite link was already ' + state);
+  const person = cleanName(name) || invite.name;
+  if (!person) throw new Error('a name is needed');
+  const user = makeUser({ name: person, role: 'member', scope: invite.scope });
+  if (invite.createdBy) user.invitedBy = invite.createdBy;
+  roster.users.push(user);
+  invite.usedAt = new Date(now).toISOString();
+  invite.usedBy = user.id;
+  const { secret: session, credential } = issueCredential(roster, user.id, { kind: 'session', label: 'invite claim' });
+  return { user, invite, secret: session, credential };
+}
+function revokeInvite(roster, id) {
+  const inv = (roster.invites || []).find(i => i.id === id);
+  if (!inv) throw new Error('no such invite');
+  if (!inv.revokedAt) inv.revokedAt = new Date().toISOString();
+  return inv;
+}
+const publicInvite = (inv, now = Date.now()) => inv && { id: inv.id, projects: inv.projects, scope: inv.scope, name: inv.name, label: inv.label, createdBy: inv.createdBy, createdAt: inv.createdAt, expiresAt: inv.expiresAt, usedAt: inv.usedAt, usedBy: inv.usedBy, state: inviteState(inv, now) };
+
 // The current id for a possibly merged one.
 function resolveId(roster, id) {
   let cur = id;
@@ -332,7 +419,8 @@ function upsertHandoffUser(roster, claimed) {
   let u = findUser(roster, claimed.id);
   if (u) return { user: u, created: false };
   if (claimed.role === 'owner' && ownerOf(roster)) claimed = { ...claimed, role: 'member' };
-  u = makeUser({ name: claimed.name, role: claimed.role === 'admin' ? 'admin' : 'member', groups: claimed.groups, id: claimed.id });
+  // A guest stays a guest across the pair; a household person stays household.
+  u = makeUser({ name: claimed.name, role: claimed.role === 'admin' ? 'admin' : 'member', groups: claimed.groups, id: claimed.id, scope: claimed.scope === 'guest' ? 'guest' : 'household' });
   if (claimed.glyph) u.glyph = cleanName(claimed.glyph).slice(0, 2) || u.glyph;
   if (/^#[0-9a-f]{6}$/i.test(claimed.color || '')) u.color = claimed.color;
   roster.users.push(u);
@@ -340,9 +428,10 @@ function upsertHandoffUser(roster, claimed) {
 }
 
 module.exports = {
-  ROLES, PALETTE, glyphFor, colorFor, publicUser, cleanAvatar, AVATAR_MAX_BYTES,
+  ROLES, SCOPES, PALETTE, glyphFor, colorFor, publicUser, cleanAvatar, AVATAR_MAX_BYTES, isGuest,
   createRoster, normalizeRoster, loadRoster, saveRoster, ownerOf, findUser,
   addUser, updateUser, transferOwnership, removeUser, mergeUsers, resolveId,
   issueCredential, revokeCredential, userForSecret, identify, canManageUsers, isOwnerTier,
+  issueProjectInvite, findInvite, inviteState, claimInvite, revokeInvite, publicInvite, INVITE_TTL_MS,
   loadInstallKey, mintHandoff, verifyHandoff, upsertHandoffUser,
 };

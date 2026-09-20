@@ -44,11 +44,17 @@ const DELEGATION_ROOT = process.env.AICONVO_DELEGATION_ROOT || path.join(os.home
 const { execFileWithActivityTimeout } = require('./modelprocess.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
+// `mirror` holds conversations that arrived from a peer install (sync.js):
+// readable and searchable here, written only by their origin. Durable
+// user data, not cache: a re-pull can rebuild it, but the peer may be gone.
 const SOURCES = {
   claude: path.join(os.homedir(), '.claude', 'projects'),
   pi: path.join(os.homedir(), '.pi', 'agent', 'sessions'),
   'pi-remote': path.join(os.homedir(), '.pi', 'remote', 'sessions'),
+  mirror: process.env.AICONVO_MIRROR_DIR || path.join(os.homedir(), '.local', 'share', 'aiconvo', 'mirrors', 'sessions'),
 };
+// The name this machine goes by in memory documents and towards peers.
+const HOST_NAME = String(process.env.AICONVO_HOSTNAME || '').trim() || os.hostname();
 const CACHE_DIR = process.env.AICONVO_CACHE_DIR ? path.resolve(process.env.AICONVO_CACHE_DIR) : path.join(os.homedir(), '.cache', 'aiconvo');
 const NOTES_DIR = path.join(os.homedir(), 'notes', 'aiconvo');
 const SESS_DIR = path.join(CACHE_DIR, 'sessions');
@@ -117,6 +123,26 @@ function lanLoginPage(error = '') {
 <body><main><p>Enter your token for this aiconvo (your invite link, or the install token from settings → machines). After this, the device stays signed in as you.</p>
 ${error ? `<p class="err">${error.replace(/</g, '&lt;')}</p>` : ''}
 <form method="post" action="/login"><label for="token">token</label><input id="token" name="token" autocomplete="off" autofocus><button type="submit">open aiconvo</button></form></main></body></html>`;
+}
+// The page an invite link lands on: who invited you, to what, your name,
+// and the one command for people who want the project on their own
+// machine as well. Same plain style as the login page: it is the first
+// thing a stranger to this install sees, and it must work on anything.
+const escapeHtml = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function invitePage({ secret, invite, inviter, error = '', joinLink = '' }) {
+  const style = 'html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:34rem;margin:8vh auto;padding:1rem}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}code{display:block;white-space:pre-wrap;word-break:break-all;border:1px solid #000;padding:.6rem;margin:.4rem 0}small{display:block;opacity:.75;margin:.2rem 0 1rem}';
+  if (!invite) return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo</title><style>${style}</style></head><body><main><p class="err">${escapeHtml(error || 'This invite link is not valid here.')}</p><p>Ask the person who invited you for a new link.</p></main></body></html>`;
+  const projects = invite.projects.map(p => `<b>${escapeHtml(p.name)}</b>${p.right === 'see' ? ' (read only)' : ''}`).join(', ');
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo — invitation</title><style>${style}</style></head>
+<body><main><p>${escapeHtml(inviter || 'Someone')} invited you to work on ${projects} in their aiconvo.</p>
+<p>You will see that project's conversations, notes and memory${invite.projects.some(p => p.right === 'act') ? ', and you can send messages to its agents here' : ''}. Nothing else on this machine is visible to you.</p>
+${error ? `<p class="err">${escapeHtml(error)}</p>` : ''}
+<form method="post" action="/invite/claim"><input type="hidden" name="invite" value="${escapeHtml(secret)}"><label for="name">your name</label><input id="name" name="name" autocomplete="name" value="${escapeHtml(invite.name)}" autofocus><button type="submit">join in the browser</button></form>
+<small>This link works once. After joining, this device stays signed in as you.</small>
+<p>Want the project on your own computer too? Install aiconvo there, then run:</p>
+<code>aiconvo join ${escapeHtml(joinLink)} --name "${escapeHtml(invite.name || 'Your Name')}" [--folder /path/to/your/checkout]</code>
+<small>That pairs your aiconvo with this one: the project's conversations and memory copy both ways (each side only ever writes its own), and your agents run on your machine.</small>
+</main></body></html>`;
 }
 // Under WSL2 the Linux addresses are a private network inside the virtual
 // machine; other devices reach the Windows host instead (with the port
@@ -1755,7 +1781,53 @@ async function markForkTitle(newKey, srcEntry) {
   } catch (e) { console.error('fork title failed:', newKey, e.message); }
 }
 
+// Pi names a session folder after the working directory.
+const piSessionDirFor = cwd => '--' + String(cwd || '').replace(/^[\/\\]+/, '').replace(/[\/\\]/g, '-') + '--';
+
+// A mirrored conversation forks into a conversation OF THIS MACHINE: the
+// copy lands in the local session folder of the project's local checkout
+// (never back into the mirror), its working directory becomes that
+// checkout, and it files under the local project. The origin stays
+// untouched on the other machine.
+async function forkMirroredSession(key, nodeId) {
+  const { entry, sessionPath } = sessionPathsFor(key);
+  const m = mirrorInfoFor(key);
+  const local = m ? localProjectForId(m.projectId) : null;
+  const cwd = local && local.cwd && fs.existsSync(local.cwd) ? local.cwd : os.homedir();
+  const localName = local && local.bound ? local.name : (m && projectNameOf(entry.cwd, key)) || null;
+  const head = String(await fsp.readFile(sessionPath, 'utf8')).split('\n', 1)[0];
+  let isPi = false;
+  try { isPi = JSON.parse(head).type === 'session'; } catch {}
+  let newAbs;
+  if (isPi) {
+    const dir = path.join(SOURCES.pi, piSessionDirFor(cwd));
+    await fsp.mkdir(dir, { recursive: true });
+    const forked = await pisdk.piForkAt({ sessionPath, cwd }, nodeId, { dir });
+    // The header's working directory is the origin's; this fork works here.
+    const lines = String(await fsp.readFile(forked.file, 'utf8')).split('\n');
+    try { const h = JSON.parse(lines[0]); h.cwd = cwd; h.forkedFromMirror = { peer: m && m.peerName, key: m && m.originKey }; lines[0] = JSON.stringify(h); await writeFileAtomic(forked.file, lines.join('\n'), { sync: true }); } catch {}
+    newAbs = forked.file;
+  } else {
+    const raw = await readSessionSnapshot(sessionPath);
+    const newId = crypto.randomUUID();
+    const dir = path.join(SOURCES.claude, cwd.replace(/[\/\\]/g, '-'));
+    await fsp.mkdir(dir, { recursive: true });
+    newAbs = path.join(dir, `${newId}.jsonl`);
+    await publishSession(newAbs, claudeForkContent(raw, nodeId, newId));
+  }
+  const newKey = await indexNewSessionFile(newAbs);
+  if (localName) {
+    conversationProjects[newKey] = localName;
+    await fsp.mkdir(path.dirname(CONVERSATION_PROJECTS_FILE), { recursive: true });
+    await writeFileAtomic(CONVERSATION_PROJECTS_FILE, JSON.stringify(conversationProjects, null, 2) + '\n');
+    try { if (searchIdx) searchIdx.setProject('conv:' + newKey, localName); } catch {}
+  }
+  await markForkTitle(newKey, entry);
+  return { key: newKey, path: newAbs, cwd, fromMirror: true };
+}
+
 async function forkSession(key, nodeId) {
+  if (syncLib.isMirrorKey(key)) return forkMirroredSession(key, nodeId);
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   await assertDelegationOwnership(sessionPath);
   // Copying immutable saved history is not a mutation of the source. Never
@@ -3499,6 +3571,65 @@ function createdProjectsList() {
   }));
 }
 
+// ---- project ids (projectid.js) ----
+// A project's name is its folder; its id is what crosses machines. The
+// registry lives with the other durable project data under ~/notes; the
+// marker (.aiconvo/project.json) travels inside the checkout.
+const projectIdLib = require('./projectid.js');
+const PROJECT_IDS_FILE = path.join(NOTES_DIR, 'projects', 'ids.json');
+let projectIds = projectIdLib.loadRegistry(PROJECT_IDS_FILE);
+function saveProjectIds() { try { projectIdLib.saveRegistry(PROJECT_IDS_FILE, projectIds); } catch (e) { console.error('[project ids] save:', e.message); } }
+// The id of a local project; minted on first ask. `marker: true` also
+// writes it into the checkout (an invite does that; listing never does).
+function projectIdFor(project, { marker = false } = {}) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw new Error('unknown project: ' + project);
+  const r = projectIdLib.ensureId(projectIds, { name: project, cwd: meta.cwd || null, marker });
+  saveProjectIds();
+  return { id: r.id, name: project, cwd: meta.cwd || null, created: r.created, markerWritten: r.markerWritten };
+}
+// The local project (name, cwd) for an id, or null when this install has
+// not bound the id to a folder yet (a guest reading only in the browser).
+function localProjectForId(id) {
+  const rec = projectIdLib.recordOf(projectIds, id);
+  if (!rec) return null;
+  // A checkout that carries the marker under a different local name wins.
+  if (rec.cwd) {
+    const m = projectIdLib.readMarker(rec.cwd);
+    if (m && m.id === id) return { id, name: rec.name, cwd: rec.cwd, bound: true };
+  }
+  return { id, name: rec.name, cwd: rec.cwd, bound: !!(rec.cwd && projectMetaFor(rec.name)) };
+}
+// The id of the project a conversation belongs to, when one is registered.
+function projectIdOfName(project) { return projectIdLib.idOf(projectIds, project); }
+// Adopt markers found in project folders at boot and when projects appear,
+// so a cloned checkout is recognised by its id without anyone asking.
+function adoptProjectMarkers() {
+  let changed = false;
+  for (const name of allProjectNames()) {
+    const meta = projectMetaFor(name);
+    if (!meta || !meta.cwd) continue;
+    const m = projectIdLib.readMarker(meta.cwd);
+    if (!m) continue;
+    const rec = projectIdLib.recordOf(projectIds, m.id);
+    if (rec && rec.name === name && rec.cwd === meta.cwd) continue;
+    projectIdLib.ensureId(projectIds, { name, cwd: meta.cwd });
+    changed = true;
+  }
+  if (changed) saveProjectIds();
+  return changed;
+}
+function allProjectNames() {
+  const names = new Set();
+  for (const [key, entry] of Object.entries(index)) {
+    if (!entry) continue;
+    const project = projectNameOf(entry.cwd, key);
+    if (project && project !== '?' && project !== LOOSE_PROJECT) names.add(project);
+  }
+  for (const name of Object.keys(createdProjects)) if (name) names.add(canonicalProjectName(name));
+  return [...names];
+}
+
 // ---- areas (declared inner scopes) ----
 // An area is the inverse of a fold: it splits one project into declared
 // inner places. The registry is user data under the notes tree. Membership
@@ -3853,10 +3984,20 @@ function targetOf(key) {
 }
 function canDo(identity, right, target) { return accessLib.can(accessRules, identity, right, target); }
 function assertCan(identity, right, target, what = 'this') {
-  if (canDo(identity, right, target)) return;
-  const err = new Error(right === 'own' ? 'Only the owner of ' + what + ' can change how it is shared.' : right === 'act' ? 'You can read ' + what + ' but not act on it here.' : 'This is not shared with you.');
-  err.status = 403;
-  throw err;
+  if (!canDo(identity, right, target)) {
+    const err = new Error(right === 'own' ? 'Only the owner of ' + what + ' can change how it is shared.' : right === 'act' ? 'You can read ' + what + ' but not act on it here.' : 'This is not shared with you.');
+    err.status = 403;
+    throw err;
+  }
+  // A mirrored conversation is another install's: it is read here, never
+  // driven or edited. Forking it makes a conversation of this install.
+  if (right === 'act' && target && target.key && syncLib.isMirrorKey(target.key)) {
+    const peer = syncEngine.peerById(syncLib.mirrorPeerOf(target.key));
+    const err = new Error(`This conversation lives on ${peer ? peer.name : 'another machine'}. Read it here, continue it there, or fork it into a conversation of this machine.`);
+    err.status = 409;
+    err.mirror = true;
+    throw err;
+  }
 }
 const visibleKeysFor = identity => accessLib.visibleTo(accessRules, identity);
 function keyVisible(identity, key) { return visibleKeysFor(identity)(targetOf(key)); }
@@ -3865,6 +4006,169 @@ function projectCreatorOf(name) {
   return rec && rec.createdBy ? usersLib.resolveId(roster, rec.createdBy) : null;
 }
 function projectVisible(identity, name) { return canDo(identity, 'see', { project: name, creator: projectCreatorOf(name) }); }
+
+// ---- project invites and sync (design/52) ----
+// An invite admits one person to one or more projects: it creates a
+// guest on the roster and writes the access rules that make those
+// projects visible. The same link, claimed from another install with
+// `aiconvo join`, also pairs that install as a sync peer.
+const syncLib = require('./sync.js');
+const PEERS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'peers.json');
+const MIRROR_NOTES_DIR = path.join(NOTES_DIR, 'mirrors');
+const MIRROR_MANIFEST_FILE = path.join(path.dirname(SOURCES.mirror), 'manifest.json');
+// key -> { peer, projectId, originKey, notePath, notedAt, host }: what each
+// mirrored conversation is, so project binding and notes survive a
+// re-index and a later binding of the id to a local folder.
+let mirrorManifest = {};
+try { mirrorManifest = JSON.parse(fs.readFileSync(MIRROR_MANIFEST_FILE, 'utf8')) || {}; } catch { mirrorManifest = {}; }
+function saveMirrorManifest() {
+  fs.mkdirSync(path.dirname(MIRROR_MANIFEST_FILE), { recursive: true });
+  fs.writeFileSync(MIRROR_MANIFEST_FILE, JSON.stringify(mirrorManifest, null, 2) + '\n');
+}
+// The local project name a mirrored conversation files under: the folder
+// bound to the id here, else the name the peer uses (a project this
+// install knows only through its mirrors).
+function mirrorProjectName(projectId, peerName) {
+  const local = localProjectForId(projectId);
+  if (local && local.bound && local.name) return local.name;
+  const rec = projectIdLib.recordOf(projectIds, projectId);
+  return (rec && rec.name) || peerName || 'shared project';
+}
+// After the id is bound to a local folder, every mirror of it files under
+// the local name, so one project stays one project.
+async function rebindMirrors(projectId) {
+  const name = mirrorProjectName(projectId);
+  let changed = 0;
+  for (const [key, m] of Object.entries(mirrorManifest)) {
+    if (m.projectId !== projectId || conversationProjects[key] === name) continue;
+    conversationProjects[key] = name;
+    changed++;
+    try { if (searchIdx && index[key]) searchIdx.setProject('conv:' + key, name); } catch {}
+  }
+  if (changed) {
+    await fsp.mkdir(path.dirname(CONVERSATION_PROJECTS_FILE), { recursive: true });
+    await writeFileAtomic(CONVERSATION_PROJECTS_FILE, JSON.stringify(conversationProjects, null, 2) + '\n');
+    broadcast({ type: 'index' });
+  }
+  return changed;
+}
+const syncEngine = syncLib.createSyncEngine({
+  hostname: HOST_NAME, homeDir: os.homedir(), mirrorDir: SOURCES.mirror, mirrorNotesDir: MIRROR_NOTES_DIR, peersFile: PEERS_FILE,
+  log: msg => console.error(msg),
+  localConversations(projectId) {
+    const local = localProjectForId(projectId);
+    if (!local || !local.name) return [];
+    const meta = projectMetaFor(local.name);
+    if (!meta) return [];
+    return meta.entries.filter(({ key }) => !syncLib.isMirrorKey(key) && key !== 'aiconvo:internal')
+      .map(({ key, entry }) => { const [source, rel] = splitKey(key); return { key, entry, source, rel, absPath: absPathForKey(key) }; })
+      .filter(c => c.absPath);
+  },
+  canSee: (identity, key) => keyVisible(identity, key),
+  projectRootOf: projectId => { const l = localProjectForId(projectId); return (l && l.cwd) || null; },
+  projectPolicyOf: projectId => { const r = projectIdLib.recordOf(projectIds, projectId); return (r && r.policy) || 'redact'; },
+  readLeaf: key => readLeaf(key),
+  async writeLeaf(key, leaf) { await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true }); await writeFileAtomic(leafPathFor(key), JSON.stringify(leaf)); memoryLeafCache.delete(key); },
+  async readNote(entry) {
+    if (!entry || !entry.notePath) return null;
+    try { return { text: await fsp.readFile(entry.notePath, 'utf8'), notedAt: entry.notedAt || 0 }; } catch { return null; }
+  },
+  async onImported({ key, peer, projectId, item, notePath, notedAt }) {
+    const rec = projectIdLib.recordOf(projectIds, projectId);
+    const peerProject = (peer.projects.find(p => p.id === projectId) || {}).name;
+    if (!rec) { projectIdLib.adopt(projectIds, { id: projectId, name: peerProject || 'shared project' }); saveProjectIds(); }
+    const name = mirrorProjectName(projectId, peerProject);
+    mirrorManifest[key] = { peer: peer.id, projectId, originKey: item.key, host: item.leaf && item.leaf.host || null, notePath, notedAt, participants: item.entry && item.entry.participants || [] };
+    saveMirrorManifest();
+    conversationProjects[key] = name;
+    await fsp.mkdir(path.dirname(CONVERSATION_PROJECTS_FILE), { recursive: true });
+    await writeFileAtomic(CONVERSATION_PROJECTS_FILE, JSON.stringify(conversationProjects, null, 2) + '\n');
+    await reindexIfChanged(key);
+    if (index[key]) {
+      if (notePath) { index[key].notePath = notePath; index[key].notedAt = notedAt; }
+      index[key].mirror = { peer: peer.id, originKey: item.key };
+      saveIndexSoon();
+    }
+    try { if (searchIdx && index[key]) searchIdx.setProject('conv:' + key, name); } catch {}
+  },
+  async onDropped(key) { delete mirrorManifest[key]; saveMirrorManifest(); delete conversationProjects[key]; dropIndexed(key); },
+});
+function mirrorInfoFor(key) {
+  const m = mirrorManifest[key];
+  if (!m) return null;
+  const peer = syncEngine.peerById(m.peer);
+  return { peer: m.peer, peerName: peer ? peer.name : 'another machine', originKey: m.originKey, host: m.host || (peer ? peer.name : null), projectId: m.projectId };
+}
+// Where an invite link points: the public https name when there is one.
+function inviteBaseUrl() { return PUBLIC_URL || (lanAddresses()[0] ? `http://${lanAddresses()[0]}:${PORT}` : `http://localhost:${PORT}`); }
+function projectInviteLink(secret) { return inviteBaseUrl() + '/?invite=' + encodeURIComponent(secret); }
+// Write the grants an invite promised, once its person exists.
+function applyInviteGrants(invite, user) {
+  for (const p of invite.projects) {
+    const local = localProjectForId(p.id);
+    const name = (local && local.name) || p.name;
+    if (!name) continue;
+    accessLib.grant(accessRules, 'project:' + name, 'user:' + user.id, p.right);
+  }
+  saveAccessRules();
+}
+// This install joins a project on another person's aiconvo, as the owner
+// of this install. `link` is the invite link (or a device link of an
+// existing person there); `folder` is an optional local checkout to bind
+// the project to. Returns what happened in words the CLI can print.
+async function joinRemoteProject({ link, name, folder }) {
+  let target;
+  try { target = new URL(link); } catch { throw new Error('that is not a link'); }
+  const secretInvite = target.searchParams.get('invite') || '';
+  const secretToken = target.searchParams.get('token') || '';
+  if (!secretInvite && !secretToken) throw new Error('the link carries no invite or token');
+  const base = target.origin;
+  const me = usersLib.ownerOf(roster);
+  const call = async payload => {
+    const r = await fetch(base + '/api/sync/join', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `${r.status} from ${base}`);
+    return data;
+  };
+  // 1. Who are they, who are we there, what may we sync.
+  const first = await call(secretInvite ? { invite: secretInvite, name: name || me.name } : { token: secretToken });
+  if (!first.projects || !first.projects.length) throw new Error('that link grants no project to sync');
+  // 2. They become a guest here, listed on the joined projects, with a
+  // credential so their install can pull from ours.
+  const { user: them } = usersLib.upsertHandoffUser(roster, { ...first.owner, scope: 'guest' });
+  const { secret: theirCredential } = usersLib.issueCredential(roster, them.id, { kind: 'invite', label: 'aiconvo on ' + String(first.host.name || 'their machine').slice(0, 30) });
+  const bound = [];
+  for (const pr of first.projects) {
+    let localName = null, cwd = null;
+    if (folder) {
+      cwd = folder;
+      localName = foldsLib.rawProjectOf(cwd);
+      if (!localName || localName === LOOSE_PROJECT) localName = path.basename(cwd);
+      if (!createdRecordFor(localName)) { createdProjects[localName] = { cwd, createdAt: Date.now(), joined: pr.id, createdBy: me.id }; saveCreatedProjects(); }
+      try { projectIdLib.writeMarker(cwd, { id: pr.id, name: localName }); } catch (e) { console.error('[join] marker:', e.message); }
+      projectIdLib.adopt(projectIds, { id: pr.id, name: localName, cwd });
+      // Their local name: the folder binds the id, and the name follows.
+      projectIds.projects[pr.id].name = localName; projectIds.projects[pr.id].cwd = cwd;
+    } else {
+      const known = projectIdLib.recordOf(projectIds, pr.id);
+      localName = known ? known.name : pr.name;
+      projectIdLib.adopt(projectIds, { id: pr.id, name: localName });
+    }
+    accessLib.grant(accessRules, 'project:' + localName, 'user:' + them.id, 'act');
+    bound.push({ id: pr.id, name: localName, cwd, theirName: pr.name, right: pr.right });
+  }
+  saveProjectIds(); saveAccessRules(); saveRoster();
+  // 3. Register our install with them (with the credential they use here),
+  // and remember them as a peer with the credential we use there.
+  const myUrl = PUBLIC_URL || '';
+  const second = await call({ token: first.credential, install: { name: HOST_NAME, url: myUrl, publicKey: installKey.publicKey, credential: theirCredential } });
+  const peer = syncEngine.addPeer({ name: first.host.name || target.hostname, url: base, credential: first.credential, publicKey: first.host.publicKey || '',
+    me: { id: first.me.id, name: first.me.name }, them: { id: them.id, name: them.name }, projects: first.projects.map(pr => ({ id: pr.id, name: pr.name, right: pr.right })) });
+  for (const b of bound) await rebindMirrors(b.id);
+  broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
+  const sync = await syncEngine.syncPeer(peer, ownerIdentity(), { force: true });
+  return { ok: true, peer: syncLib.publicPeer(peer), me: first.me, them: usersLib.publicUser(them), projects: bound, reachableFromThem: !!myUrl, registered: !!second.peer, sync };
+}
 // The project a file belongs to: the folder of a registered project, else
 // the working folder of a conversation, whichever is the deepest prefix;
 // else the /Projects/<name> convention. Files outside every project are
@@ -4874,9 +5178,28 @@ function quoteIntent(text) {
   return clipped(text, 1600).split('\n').map(line => `> ${line}`).join('\n');
 }
 
-function renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash) {
+// The environment document has two levels. The project part is true in
+// any checkout on any machine (how to build, test, conventions, what the
+// project needs). The machine parts are true on one host only (paths,
+// addresses, where credentials sit, which services answer from there).
+// The split is what stops an agent on one person's laptop from running
+// another person's IP addresses and home paths with confidence.
+const ENV_SECTIONS = [['setup', 'Setup'], ['commands', 'Commands'], ['services', 'Services and addresses'], ['locations', 'Important locations'], ['tooling', 'Tools and CLIs'], ['authentication', 'Authentication'], ['cautions', 'Cautions']];
+function envSections(e, { level = '## ', skipEmpty = false } = {}) {
+  return ENV_SECTIONS.filter(([k]) => !skipEmpty || stringItems(e[k]).length)
+    .map(([k, title]) => `${level}${title}\n\n${mdList(e[k])}\n`).join('\n');
+}
+function renderProjectEnvironmentDoc(project, environment, builtAt, sourceHash, thisHost = HOST_NAME) {
   const e = environment || {};
-  return `# Development environment: ${project}\n\n**Abstract.** ${e.summary || 'Project setup facts for new agents.'}\n\n${projectDocMeta(project, builtAt, sourceHash)}\n\n> Secret values are intentionally excluded. Store only authentication methods, variable names, and credential locations.\n\n## Setup\n\n${mdList(e.setup)}\n\n## Commands\n\n${mdList(e.commands)}\n\n## Services and addresses\n\n${mdList(e.services)}\n\n## Important locations\n\n${mdList(e.locations)}\n\n## Tools and CLIs\n\n${mdList(e.tooling)}\n\n## Authentication\n\n${mdList(e.authentication)}\n\n## Cautions\n\n${mdList(e.cautions)}\n`;
+  // Old shape (one flat environment) renders as the project part.
+  const projectPart = e.project && typeof e.project === 'object' ? e.project : e;
+  const machines = Array.isArray(e.machines) ? e.machines.filter(m => m && typeof m === 'object' && m.host) : [];
+  const here = machines.find(m => m.host === thisHost);
+  const others = machines.filter(m => m !== here);
+  const machineDoc = (m, label) => `## ${label}: ${m.host}\n\n${m.summary ? m.summary + '\n\n' : ''}` + (envSections(m, { level: '### ', skipEmpty: true }) || '- Nothing recorded for this machine yet.\n');
+  return `# Development environment: ${project}\n\n**Abstract.** ${e.summary || projectPart.summary || 'Project setup facts for new agents.'}\n\n${projectDocMeta(project, builtAt, sourceHash)}\n- **This machine:** ${thisHost}\n\n> Secret values are intentionally excluded. Store only authentication methods, variable names, and credential locations.\n>\n> Two levels: the **project** part holds what is true in any checkout on any machine; each **machine** part holds paths, addresses and services that are true on that host only. Sections for other machines describe other computers — do not run their paths or addresses here.\n\n${envSections(projectPart, { level: '## Project: ' })}` +
+    (here ? `\n${machineDoc(here, 'Machine (this one)')}` : '') +
+    others.map(m => `\n${machineDoc(m, 'Machine (elsewhere)')}`).join('');
 }
 
 function normalizeProjectStatus(status) {
@@ -5090,6 +5413,9 @@ async function extractLeaf(key) {
     v: LEAF_VERSION, key, memoryHash, builtAt: Date.now(),
     span: { firstTs: data.firstTs || entry.firstTs || null, lastTs: data.lastTs || entry.lastTs || null },
     title: oneLine(data.title || entry.title, '(untitled)').slice(0, 200),
+    // Where and by whom: environment facts are only true on the machine
+    // they were seen on, and the documents say so per host.
+    host: HOST_NAME, participants: (entry.participants || []).map(p => ({ id: p.id, name: p.name || '' })),
     abstract, intent, environment, problems,
   };
   await fsp.mkdir(MEMORY_LEAVES_DIR, { recursive: true });
@@ -5193,11 +5519,17 @@ const PYRAMID_INTENT_PROMPT =
   '{"coreIntent":"...","vision":"...","currentDirection":"where the work is truly pointed now and why","whatMatters":["..."],"desiredOutcomes":["..."],"principles":["..."],"constraints":["..."],"tensions":["..."],"nonGoals":["..."],"evolution":["wanted X, now wants Y because Z"],"openIntentQuestions":["..."]}.';
 
 const PYRAMID_ENV_PROMPT =
-  'The attached file lists dated environment facts extracted from every conversation of one software project, oldest first. ' +
-  'Build the CURRENT development environment document. The newest evidence wins; drop superseded setup; put unresolved conflicts in cautions. ' +
+  'The attached file lists dated environment facts extracted from every conversation of one software project, oldest first. Each fact names the HOST (machine) it was observed on; several people may work on the project from different machines. ' +
+  'Build the CURRENT development environment document in TWO levels. ' +
+  'PROJECT level: only facts true in any checkout on any machine — how to build, test, run and lint, conventions, tools the project needs, services the project itself provides, relative paths inside the repository. ' +
+  'MACHINE level: one entry per host — absolute paths, home-directory locations, IP addresses and hostnames, ports that answer on that host, credential locations, machine-specific tooling and quirks. A fact that names an absolute path outside the repository, an address, or a hostname belongs to a machine, never to the project. ' +
+  'The newest evidence wins; drop superseded setup; put unresolved conflicts in cautions of the level they belong to. ' +
   'NEVER output passwords, tokens, private keys, secret values, or copied credentials — only methods, variable names, commands, and credential locations. ' +
   'Reply with STRICT JSON only, no prose or code fence: ' +
-  '{"summary":"1-2 sentences","setup":["..."],"commands":["..."],"services":["..."],"locations":["..."],"tooling":["..."],"authentication":["..."],"cautions":["..."]}.';
+  '{"summary":"1-2 sentences about the project environment as a whole",' +
+  '"project":{"setup":["..."],"commands":["..."],"services":["..."],"locations":["..."],"tooling":["..."],"authentication":["..."],"cautions":["..."]},' +
+  '"machines":[{"host":"exact host name from the input","summary":"one line: what this machine is for the project","setup":["..."],"commands":["..."],"services":["..."],"locations":["..."],"tooling":["..."],"authentication":["..."],"cautions":["..."]}]}. ' +
+  'Every host that appears in the input gets exactly one machines entry; use empty arrays rather than inventing.';
 
 const PYRAMID_STATUS_PROMPT =
   'The attached file lists dated problem records (open or resolved) and the newest conversation abstracts for one software project, oldest first. ' +
@@ -5440,14 +5772,17 @@ async function regenerateDocsCore({ label, entries, paths, existingEpics, discov
     title: r.leaf.title, kind: q.kind || 'outcome', confidence: q.confidence || 0, reason: q.reason || '',
     user: q.user || '', assistantBefore: q.assistantBefore || '',
   }))).sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
-  const envFacts = rows.flatMap(r => (r.leaf.environment || []).map(f => `[${dated(r.leaf.span?.lastTs)}] ${f.type}: ${f.fact}`));
+  // A leaf without a host was extracted before hosts were recorded, on
+  // this machine (sync did not exist), so this host is the right label.
+  const hostOf = leaf => (leaf.mirrored && leaf.mirrored.host) || leaf.host || HOST_NAME;
+  const envFacts = rows.flatMap(r => (r.leaf.environment || []).map(f => `[${dated(r.leaf.span?.lastTs)}] [host: ${hostOf(r.leaf)}] ${f.type}: ${f.fact}`));
   const problemFacts = rows.flatMap(r => (r.leaf.problems || []).map(f => `[${dated(r.leaf.span?.lastTs)}] ${f.state}: ${f.fact} (session ${r.key})`));
   const newestAbstracts = rows.slice(-12).map(r => `[${dated(r.leaf.span?.lastTs)}] ${r.leaf.title}: ${r.leaf.abstract || '(none)'}`);
 
   const laneHashes = {
     overview: laneHashOf(abstractBlocks),
     intent: laneHashOf(intentSelected.map(q => [q.id, q.force || '', q.kind])),
-    environment: laneHashOf(envFacts), status: laneHashOf(problemFacts.concat(newestAbstracts)),
+    environment: laneHashOf(['env-v2:' + HOST_NAME, ...envFacts]), status: laneHashOf(problemFacts.concat(newestAbstracts)),
   };
   const skip = lane => prevHashes[lane] === laneHashes[lane] && fs.existsSync(paths[lane === 'status' ? 'status' : lane]);
 
@@ -6064,6 +6399,7 @@ function startMemoryBackfillJob(project) {
       const todo = [];
       for (const { key, entry } of sorted) {
         if (!entry.realUserCount || activeMemoryLeafKeys.has(key)) continue;
+        if (syncLib.isMirrorKey(key)) continue; // its origin extracts; the leaf arrives with the next sync
         if (leafStateFor(entry, await readLeaf(key)) !== 'fresh') todo.push(key);
       }
       job.total = todo.length;
@@ -6154,6 +6490,7 @@ async function sweepSettledLeaves() {
     const entry = index[key];
     if (!entry) { leafDirty.delete(key); memoryModelHealth.leafSuccess(key); continue; }
     if (activeMemoryLeafKeys.has(key) || !memoryModelHealth.canRunLeaf(key, { automatic: true })) continue;
+    if (syncLib.isMirrorKey(key)) { leafDirty.delete(key); continue; }
     if (leafStateFor(entry, await readLeaf(key)) === 'fresh') {
       leafDirty.delete(key);
       memoryModelHealth.leafSuccess(key);
@@ -10230,9 +10567,10 @@ function projectMetaFor(project) {
   let cwd = (registered && registered.cwd) || null;
   if (!cwd) {
     const roots = new Map(); // derived root -> best score seen
-    for (const { entry } of entries) {
+    for (const { key, entry } of entries) {
       const c = entry.cwd;
-      if (!c) continue;
+      // A mirrored conversation's folder is on another machine.
+      if (!c || syncLib.isMirrorKey(key)) continue;
       const root = areasLib.projectRootOfCwd(c) || c;
       const score = (foldsLib.rawProjectOf(c) === project ? 2 : 0) + (areasLib.relOfCwd(c) === '' ? 1 : 0);
       const prev = roots.get(root);
@@ -10666,11 +11004,16 @@ async function buildProjectBriefing(project, include, focusName) {
   lines.push('');
   lines.push(`- Generated: ${new Date().toISOString()}`);
   lines.push(`- Project root: ${info.cwd || '(unknown)'}`);
+  lines.push(`- This machine: ${HOST_NAME}`);
   lines.push(`- On record: ${info.conversations} conversations · ${info.notes} distilled notes (${info.freshness.freshNotes} fresh) · ${info.epics.length} epics`);
   lines.push(`- Latest activity: ${info.latestTs || '(none)'}`);
   if (focusName) lines.push(`- Focus for this new conversation: ${focusName}`);
+  const mirrored = meta.entries.filter(({ key }) => syncLib.isMirrorKey(key)).length;
+  const peerNames = [...new Set(meta.entries.map(({ key }) => { const m = mirrorInfoFor(key); return m && m.peerName; }).filter(Boolean))];
+  if (mirrored) lines.push(`- Shared project: ${mirrored} of these conversations happened on other machines (${peerNames.join(', ')}) and are mirrored here read-only.`);
   lines.push('');
   lines.push("This file maps the project's AI work memory. Every path below is a readable file on this machine. Read what you need; do not guess file content.");
+  if (mirrored || peerNames.length) lines.push('Other people work on this project from other machines. Hostnames, IP addresses, absolute paths outside the project folder and credential locations seen in their conversations describe THEIR computers, not this one; the environment document separates the project part from each machine.');
 
   // Narrow before wide: when the conversation starts inside a declared area,
   // its own memory documents come first.
@@ -12400,8 +12743,77 @@ const server = http.createServer(async (req, res) => {
       });
       res.end();
     };
+    // An install joining as a person (aiconvo join): the credential is in
+    // the body — an invite link (a new person) or a device link (an
+    // existing one). Answers with a credential for that install and the
+    // projects it may sync; registers the install as a peer when it says
+    // where it answers.
+    if (u.pathname === '/api/sync/join' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 64 * 1024) return json(res, 413, { error: 'too large' }); }
+      let p = {};
+      try { p = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      try {
+        if (!LAN_TOKEN) throw new Error('this aiconvo is not reachable from other machines (settings → machines)');
+        let user, projects;
+        if (p.invite) {
+          const claimed = usersLib.claimInvite(roster, String(p.invite), { name: p.name });
+          user = claimed.user;
+          applyInviteGrants(claimed.invite, user);
+          projects = claimed.invite.projects;
+        } else if (p.token) {
+          user = usersLib.userForSecret(roster, String(p.token), LAN_TOKEN);
+          if (!user || user.disabled) throw new Error('that link does not name anyone here');
+          projects = accessLib.objectsListing(accessRules, 'user:' + user.id).filter(o => o.object.startsWith('project:'))
+            .map(o => { const name = o.object.slice('project:'.length); let id = null; try { id = projectIdFor(name).id; } catch {} return id ? { id, name, right: o.right } : null; }).filter(Boolean);
+          if (!usersLib.isGuest(user) && p.projects) projects = (Array.isArray(p.projects) ? p.projects : []).map(name => { try { const r = projectIdFor(String(name)); return { id: r.id, name: r.name, right: 'act' }; } catch { return null; } }).filter(Boolean);
+        } else throw new Error('an invite link or a device link is needed');
+        // Resolve ids to the projects as this install names them, so the
+        // peer asks for the right feed.
+        projects = projects.map(pr => { const local = localProjectForId(pr.id); return { id: pr.id, name: (local && local.name) || pr.name, right: pr.right }; });
+        const { secret } = usersLib.issueCredential(roster, user.id, { kind: 'invite', label: 'aiconvo on ' + String((p.install && p.install.name) || 'another machine').slice(0, 30) });
+        let peer = null;
+        if (p.install && typeof p.install === 'object') {
+          peer = syncEngine.addPeer({ name: String(p.install.name || user.name).slice(0, 60), url: String(p.install.url || ''), credential: String(p.install.credential || ''), publicKey: String(p.install.publicKey || ''),
+            them: { id: user.id, name: user.name }, me: { id: usersLib.ownerOf(roster).id, name: usersLib.ownerOf(roster).name }, projects });
+        }
+        saveRoster();
+        broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
+        json(res, 200, { ok: true, me: usersLib.publicUser(user), owner: usersLib.publicUser(usersLib.ownerOf(roster)), credential: secret, projects,
+          host: { name: HOST_NAME, url: PUBLIC_URL || '', publicKey: installKey.publicKey }, peer: peer ? peer.id : null });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+      return;
+    }
     if (LAN_TOKEN && !isLocalRequest(req)) {
       const landing = u.pathname === '/' ? '/' : u.pathname;
+      // A project invite: a page first (name, what is shared, the join
+      // command), then the claim makes the person and signs them in.
+      const inviteParam = u.searchParams.get('invite');
+      if (inviteParam && req.method === 'GET') {
+        const invite = usersLib.findInvite(roster, inviteParam);
+        const state = usersLib.inviteState(invite);
+        const inviter = invite && invite.createdBy ? (usersLib.findUser(roster, invite.createdBy) || {}).name : usersLib.ownerOf(roster).name;
+        res.writeHead(state === 'open' ? 200 : 410, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end(invitePage({ secret: inviteParam, invite: state === 'open' ? invite : null, inviter, joinLink: projectInviteLink(inviteParam),
+          error: state === 'open' ? '' : state === 'unknown' ? 'This invite link is not known here.' : 'This invite link was already ' + state + '.' }));
+      }
+      if (req.method === 'POST' && u.pathname === '/invite/claim') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const form = new URLSearchParams(body);
+        const secret = form.get('invite') || '';
+        try {
+          const claimed = usersLib.claimInvite(roster, secret, { name: form.get('name') || '' });
+          applyInviteGrants(claimed.invite, claimed.user);
+          saveRoster();
+          broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
+          return setSignInCookie(claimed.secret, '/');
+        } catch (e) {
+          const invite = usersLib.findInvite(roster, secret);
+          res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+          return res.end(invitePage({ secret, invite: usersLib.inviteState(invite) === 'open' ? invite : null, inviter: usersLib.ownerOf(roster).name, joinLink: projectInviteLink(secret), error: e.message }));
+        }
+      }
       const tokenParam = u.searchParams.get('token');
       if (tokenParam) {
         const who = usersLib.userForSecret(roster, tokenParam, LAN_TOKEN);
@@ -12570,7 +12982,8 @@ const server = http.createServer(async (req, res) => {
         const f = fam.get(key);
         // family fields appear only on multi-member families: less payload.
         const project = projectNameOf(e.cwd, key);
-        return f && f.size > 1 ? { key, ...e, project, family: f.primary, familySize: f.size } : { key, ...e, project };
+        const mirror = syncLib.isMirrorKey(key) ? mirrorInfoFor(key) : null;
+        return f && f.size > 1 ? { key, ...e, project, family: f.primary, familySize: f.size, ...(mirror ? { mirror } : {}) } : { key, ...e, project, ...(mirror ? { mirror } : {}) };
       });
       list.sort((a, b) => (b.lastTs || '').localeCompare(a.lastTs || ''));
       sendBody(req, res, 200, { 'Content-Type': 'application/json; charset=utf-8', ETag: etag }, JSON.stringify(list));
@@ -12579,7 +12992,8 @@ const server = http.createServer(async (req, res) => {
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
       if (!keyVisible(identity, key)) return json(res, 403, { error: 'This is not shared with you.' });
       const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
-      data.canAct = canDo(identity, 'act', targetOf(key));
+      data.mirror = syncLib.isMirrorKey(key) ? mirrorInfoFor(key) : null;
+      data.canAct = !data.mirror && canDo(identity, 'act', targetOf(key));
       data.participants = (index[key].participants || []).map(p => userById(usersLib.resolveId(roster, p.id)) || p);
       data.project = projectNameOf(index[key].cwd, key);
       data.selectedModels = await inferredConversationModels(key, data);
@@ -13531,7 +13945,8 @@ const server = http.createServer(async (req, res) => {
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body);
       if (!parsed.id || !index[parsed.id]) return json(res, 404, { error: 'not found' });
-      try { assertCan(identity, 'act', targetOf(parsed.id), 'this conversation'); json(res, 200, await forkSession(parsed.id, parsed.node)); }
+      // Forking a mirror needs only to see it: the fork is this machine's own.
+      try { assertCan(identity, syncLib.isMirrorKey(parsed.id) ? 'see' : 'act', targetOf(parsed.id), 'this conversation'); json(res, 200, await forkSession(parsed.id, parsed.node)); }
       catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/fork-edit' && req.method === 'POST') {
       // pi only: fork BEFORE a user message; the response carries the message
@@ -13636,6 +14051,11 @@ const server = http.createServer(async (req, res) => {
         } else if (op === 'remove') {
           if (!manages || (isOwnerTarget)) throw Object.assign(new Error('only the owner or an admin can remove people'), { status: 403 });
           out = { removed: usersLib.removeUser(roster, p.id).id };
+          // Their grants go with them; a peer install that acted as them
+          // loses its credential here and its pulls stop. Copies already
+          // on their machine are theirs: nothing here can recall them.
+          if (accessLib.revokeSubject(accessRules, 'user:' + p.id)) saveAccessRules();
+          for (const peer of [...syncEngine.peers]) if (peer.them && peer.them.id === p.id) syncEngine.removePeer(peer.id);
         } else if (op === 'transfer') {
           if (!ownerTier) throw Object.assign(new Error('only the owner can hand over the machine'), { status: 403 });
           out = { owner: usersLib.publicUser(usersLib.transferOwnership(roster, p.id)) };
@@ -13656,6 +14076,121 @@ const server = http.createServer(async (req, res) => {
         usersLib.saveRoster(USERS_FILE, roster);
         broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
         json(res, 200, { ...out, users: publicUsers(), groups: roster.groups });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/project-id' && req.method === 'GET') {
+      // By name, or by the folder the asker stands in.
+      const project = u.searchParams.get('project') || (u.searchParams.get('dir') ? projectOfPath(u.searchParams.get('dir')) : '') || '';
+      if (!project) return json(res, 404, { error: 'no project here; name one' });
+      if (!projectVisible(identity, project)) return json(res, 403, { error: 'This is not shared with you.' });
+      try { const r = projectIdFor(project); json(res, 200, { ...r, marker: !!projectIdLib.readMarker(r.cwd), policy: projectIdLib.recordOf(projectIds, r.id).policy }); }
+      catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/invites' && req.method === 'GET') {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin sees invites' });
+      json(res, 200, { invites: (roster.invites || []).map(i => usersLib.publicInvite(i)).reverse() });
+    } else if (u.pathname === '/api/invites' && req.method === 'POST') {
+      // Invite someone to one or more projects. Writes the id marker into
+      // each checkout (so a clone carries the id) and returns the link once.
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin can invite people' });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const names = (Array.isArray(p.projects) ? p.projects : [p.project]).map(x => String(x || '').trim()).filter(Boolean);
+        if (!names.length) throw new Error('name at least one project');
+        const right = p.right === 'act' ? 'act' : 'see';
+        const projects = [];
+        const markers = [];
+        for (const name of names) {
+          if (!projectVisible(identity, name)) throw Object.assign(new Error('This is not shared with you.'), { status: 403 });
+          const r = projectIdFor(name, { marker: true });
+          projects.push({ id: r.id, name, right });
+          if (r.markerWritten) markers.push(path.join(r.cwd, projectIdLib.MARKER_REL));
+        }
+        const { secret, invite } = usersLib.issueProjectInvite(roster, { projects, right, scope: p.scope === 'household' && usersLib.isOwnerTier(identity) ? 'household' : 'guest', name: p.name, label: p.label, createdBy: identity.user.id });
+        saveRoster();
+        json(res, 200, { invite: usersLib.publicInvite(invite), link: projectInviteLink(secret), markersWritten: markers,
+          runsAsAccount: right === 'act', isolation: false });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/invites/revoke' && req.method === 'POST') {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin can revoke invites' });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try { const p = JSON.parse(body || '{}'); const inv = usersLib.revokeInvite(roster, String(p.id || '')); saveRoster(); json(res, 200, { invite: usersLib.publicInvite(inv) }); }
+      catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/sync/feed' && req.method === 'GET') {
+      // What a peer pulls: this install's own conversations of one project,
+      // as the asking person may see them, after a cursor.
+      const projectId = u.searchParams.get('project') || '';
+      const local = localProjectForId(projectId);
+      if (!local || !local.name) return json(res, 404, { error: 'that project is not on this machine' });
+      if (!projectVisible(identity, local.name)) return json(res, 403, { error: 'This is not shared with you.' });
+      try { json(res, 200, await syncEngine.buildFeed({ projectId, since: Number(u.searchParams.get('since')) || 0, identity })); }
+      catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/sync/push' && req.method === 'POST') {
+      // A peer that cannot be reached from here sends its side of a project.
+      // Contributing conversations is acting on the project: `act` is needed.
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 64 * 1024 * 1024) return json(res, 413, { error: 'push too large; the feed pages smaller than this' }); }
+      try {
+        const p = JSON.parse(body || '{}');
+        const projectId = String(p.project || '');
+        const local = localProjectForId(projectId);
+        const rec = projectIdLib.recordOf(projectIds, projectId);
+        if (!rec) throw Object.assign(new Error('that project is not known here'), { status: 404 });
+        if (local && local.name) assertCan(identity, 'act', { project: local.name, creator: projectCreatorOf(local.name) }, 'this project');
+        else if (!usersLib.canManageUsers(identity)) throw Object.assign(new Error('This is not shared with you.'), { status: 403 });
+        let peer = syncEngine.peers.find(x => x.them && x.them.id === identity.user.id) || null;
+        if (!peer) peer = syncEngine.addPeer({ name: String(p.host || identity.user.name).slice(0, 60), url: '', credential: '', them: { id: identity.user.id, name: identity.user.name }, me: null, projects: [{ id: projectId, name: rec.name, right: 'act' }] });
+        else if (!peer.projects.some(x => x.id === projectId)) syncEngine.addPeer({ url: peer.url, publicKey: peer.publicKey, projects: [{ id: projectId, name: rec.name, right: 'act' }] });
+        const landed = await syncEngine.importItems(peer, projectId, Array.isArray(p.items) ? p.items : []);
+        json(res, 200, { ok: true, landed });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/sync/peers' && req.method === 'GET') {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin sees peers' });
+      json(res, 200, { host: HOST_NAME, publicUrl: PUBLIC_URL || '', peers: syncEngine.peers.map(syncLib.publicPeer),
+        projects: Object.entries(projectIds.projects).map(([id, r]) => ({ id, name: r.name, cwd: r.cwd, policy: r.policy, origin: r.origin, bound: !!(r.cwd && projectMetaFor(r.name)) })) });
+    } else if (u.pathname.startsWith('/api/sync/peers/') && req.method === 'POST') {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin manages peers' });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const op = u.pathname.slice('/api/sync/peers/'.length);
+        let out = {};
+        if (op === 'remove') out = { removed: syncEngine.removePeer(String(p.id)).id };
+        else if (op === 'pause') out = { peer: syncLib.publicPeer(syncEngine.updatePeer(String(p.id), { paused: true })) };
+        else if (op === 'resume') out = { peer: syncLib.publicPeer(syncEngine.updatePeer(String(p.id), { paused: false })) };
+        else if (op === 'now') { const peer = syncEngine.peerById(String(p.id)); if (!peer) throw new Error('no such peer'); out = await syncEngine.syncPeer(peer, ownerIdentity(), { force: true, all: !!p.all }); }
+        else throw Object.assign(new Error('unknown peers operation'), { status: 404 });
+        json(res, 200, { ...out, peers: syncEngine.peers.map(syncLib.publicPeer) });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/sync/now' && req.method === 'POST') {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin runs a sync' });
+      try { json(res, 200, { results: await syncEngine.syncAll(ownerIdentity(), { force: true }), peers: syncEngine.peers.map(syncLib.publicPeer) }); }
+      catch (e) { json(res, 500, { error: e.message }); }
+    } else if (u.pathname === '/api/sync/policy' && req.method === 'POST') {
+      if (!usersLib.isOwnerTier(identity)) return json(res, 403, { error: 'only the owner sets what leaves this machine' });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const r = projectIdFor(String(p.project || ''));
+        if (!syncLib.POLICIES.includes(p.policy)) throw new Error('policy is redact, exclude or whole');
+        projectIds.projects[r.id].policy = p.policy;
+        saveProjectIds();
+        json(res, 200, { id: r.id, policy: p.policy });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/sync/join-remote' && req.method === 'POST') {
+      // This install joins another person's project (aiconvo join). Two
+      // round trips: claim the link to learn who they are and get our
+      // credential there; then make them a guest here and register our
+      // install with them so they can pull from us.
+      if (!usersLib.isOwnerTier(identity)) return json(res, 403, { error: 'only the owner joins another aiconvo from this machine' });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        json(res, 200, await joinRemoteProject({ link: String(p.link || ''), name: p.name, folder: p.folder ? path.resolve(String(p.folder)) : null }));
       } catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/handoff' && req.method === 'GET') {
       // The switcher asks for the address that lands the current person on
@@ -14550,6 +15085,11 @@ applyLanMode(lanWanted(), () => {
       .then(() => backfillFileLedger().catch(e => console.error('file ledger backfill', e.message)));
     seedLeavesFromSnapshots().catch(() => {});
     setInterval(() => { sweepSettledLeaves().catch(() => {}); }, LEAF_SWEEP_MS);
+    // Checkouts that carry a project id are recognised; mirrored
+    // conversations file under the local folder's name; peers are polled.
+    try { adoptProjectMarkers(); } catch (e) { console.error('[project ids]', e.message); }
+    for (const id of new Set(Object.values(mirrorManifest).map(m => m.projectId))) rebindMirrors(id).catch(() => {});
+    if (process.env.AICONVO_NO_SYNC !== '1') syncEngine.start(ownerIdentity());
   });
   listPiModels().finally(() => setTimeout(() => listPiModels(true), 2500));
 });

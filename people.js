@@ -331,10 +331,12 @@ function openShareDialog() {
       ${groups.map(g => row('group:' + g.id, 'group ' + g.name)).join('')}
     </div>
     <div class="share-actions">${d.own ? `<button type="button" class="primary" id="shareSave">Save</button>${inherited || !d.object ? '' : ''}` : '<span class="hint">Only its owner can change this.</span>'}<button type="button" id="shareClose">Close</button></div>
+    ${!d.key && peopleManages() ? inviteSectionHtml(d.project) : ''}
   </div>`;
   document.body.appendChild(dlg);
   const close = () => dlg.remove();
   dlg.querySelector('#shareClose').onclick = close;
+  if (!d.key && peopleManages()) bindInviteSection(dlg, d.project);
   dlg.addEventListener('click', e => { if (e.target === dlg) close(); });
   dlg.querySelectorAll('input[name=shareMode]').forEach(r => r.onchange = () => { dlg.querySelector('.share-list').hidden = dlg.querySelector('input[name=shareMode]:checked').value !== 'listed'; });
   const save = dlg.querySelector('#shareSave');
@@ -348,6 +350,91 @@ function openShareDialog() {
     close();
     refreshShareControl();
   };
+}
+
+/* ---- inviting someone from outside the household to one project ---- */
+// The link admits a guest: they see this project and nothing else. The
+// dialog says what "act" means on this machine in plain words, because
+// the agents of a guest run as the account here (no isolation yet).
+function inviteSectionHtml(project) {
+  return `<div class="share-invite" id="shareInvite">
+    <h3>Invite someone to ${esc(project)}</h3>
+    <p class="hint">For a collaborator or a hire who is not part of this household: they get this project only. They can work in the browser here right away, and connect their own aiconvo later so the project's conversations and memory copy both ways.</p>
+    <div class="row"><input type="text" id="invName" placeholder="their name" maxlength="60"><select id="invRight"><option value="see">can read</option><option value="act">can read and act</option></select><button type="button" id="invMake">make invite link</button></div>
+    <div class="warn" id="invWarn" hidden>With <b>act</b>, their agents run as <b>your account</b> on this machine: hidden things stay hidden in the app, but an agent they drive could still read files outside this project. Give <b>read</b> to someone you do not fully trust, and let them act on their own machine.</div>
+    <div id="invOut"></div>
+    <details class="set-more" id="invPolicy"><summary>what leaves this machine when the project syncs</summary><p class="hint">Conversations hold tool output. Before one is copied to a collaborator's machine, tool steps that touched files outside the project folder — or that look like they could hold a secret — are blanked.</p>
+      <label class="set-check"><input type="radio" name="invPolicy" value="redact"> blank those steps (default)</label>
+      <label class="set-check"><input type="radio" name="invPolicy" value="exclude"> keep any conversation with such a step entirely on this machine</label>
+      <label class="set-check"><input type="radio" name="invPolicy" value="whole"> send everything whole</label>
+      <p class="hint" id="invIdLine"></p></details>
+  </div>`;
+}
+function bindInviteSection(dlg, project) {
+  const right = dlg.querySelector('#invRight'), warn = dlg.querySelector('#invWarn'), out = dlg.querySelector('#invOut');
+  right.onchange = () => { warn.hidden = right.value !== 'act'; };
+  dlg.querySelector('#invMake').onclick = async () => {
+    const name = dlg.querySelector('#invName').value.trim();
+    const r = await postJson('/api/invites', { project, right: right.value, name });
+    if (r.error) return errToast(r.error);
+    out.innerHTML = `<div class="invite-box"><b>${esc(name || 'Their')}${name ? "'s" : ''} invite link</b> — send it to them, once. It is shown only now and works for 14 days.
+      <div class="row"><code class="mach-link">${esc(r.link)}</code><button type="button" class="ghost" data-copy="${esc(r.link)}">copy</button></div>
+      ${r.markersWritten.length ? `<div class="hint">Wrote <code>${esc(r.markersWritten[0].replace(/^.*\/(?=\.aiconvo)/, ''))}</code> into the checkout — commit it, so their clone carries the same project id.</div>` : ''}</div>`;
+    const b = out.querySelector('[data-copy]');
+    if (b) b.onclick = async () => { try { await copyText(r.link); toast('link copied'); } catch (e) { errToast(e.message); } };
+  };
+  fetch('/api/project-id?project=' + encodeURIComponent(project)).then(r => r.json()).then(info => {
+    if (info.error) return;
+    const radio = dlg.querySelector(`input[name=invPolicy][value="${info.policy}"]`);
+    if (radio) radio.checked = true;
+    dlg.querySelector('#invIdLine').textContent = `Project id ${info.id}` + (info.marker ? ' · in .aiconvo/project.json' : ' · not yet written into the checkout (an invite does that)');
+    dlg.querySelectorAll('input[name=invPolicy]').forEach(x => x.onchange = async () => {
+      if (!peopleIsOwner()) return errToast('only the owner sets what leaves this machine');
+      const r = await postJson('/api/sync/policy', { project, policy: x.value });
+      if (r.error) errToast(r.error); else toast('sharing policy: ' + x.value);
+    });
+  }).catch(() => {});
+}
+
+/* ---- settings → shared with other machines (peers and open invites) ---- */
+let peersState = { peers: [], invites: [], host: '', publicUrl: '', loaded: false };
+async function loadPeersState() {
+  try {
+    const [p, i] = await Promise.all([fetch('/api/sync/peers').then(r => r.json()), fetch('/api/invites').then(r => r.json())]);
+    peersState = { peers: p.peers || [], projects: p.projects || [], host: p.host || '', publicUrl: p.publicUrl || '', invites: (i.invites || []).filter(x => x.state === 'open'), loaded: true };
+  } catch { peersState.loaded = true; }
+}
+function panePeersHtml() {
+  if (!peersState.loaded) return '';
+  const when = t => t ? new Date(t).toLocaleString() : 'never';
+  const peerRow = p => `<div class="person-row peer-row" data-peer="${esc(p.id)}"><span class="user-bubble group">⇄</span>
+      <div class="person-main"><b>${esc(p.name)}</b>${p.paused ? ' <span class="hint">(paused)</span>' : ''}${p.them ? ` <span class="hint">· ${esc(p.them.name)}'s machine</span>` : ''}
+        <div class="hint">${p.projects.map(x => esc(x.name) + ' (' + x.right + ')').join(', ') || 'no projects'} · ${p.reachable ? 'we pull from ' + esc(p.url) : 'it pushes to us (no address)'} · last pull ${when(p.lastPullAt)} · last push ${when(p.lastPushAt)}${p.lastError ? `<div class="err">${esc(p.lastError)}</div>` : ''}</div></div>
+      <div class="person-actions"><button type="button" class="ghost" data-pact="now">sync now</button><button type="button" class="ghost" data-pact="${p.paused ? 'resume' : 'pause'}">${p.paused ? 'resume' : 'pause'}</button><button type="button" class="ghost" data-pact="remove" title="Forget this peer">✕</button></div></div>`;
+  const inviteRow = i => `<div class="person-row" data-invite="${esc(i.id)}"><span class="user-bubble group">✉</span><div class="person-main"><b>${esc(i.name || 'someone')}</b><div class="hint">${i.projects.map(p => esc(p.name) + ' (' + p.right + ')').join(', ')} · expires ${when(i.expiresAt)}</div></div><div class="person-actions"><button type="button" class="ghost" data-iact="revoke">revoke</button></div></div>`;
+  return `<div class="set-group">
+      <div class="set-group-head"><h3>shared with other machines</h3><button type="button" class="ghost" id="setSyncNow">sync all now</button></div>
+      <p class="hint">Peers are other people's aiconvos that share a project with this one (they joined with an invite link, or you joined theirs with <code>aiconvo join</code>). Every minute each side pulls what is new; what arrives is mirrored read-only under the project. ${peersState.publicUrl ? 'This machine answers at ' + esc(peersState.publicUrl) + '.' : 'This machine has no public address: peers cannot pull from it, so it pushes its side to them.'}</p>
+      <div id="setPeerList">${peersState.peers.map(peerRow).join('') || '<span class="hint">no peers yet — invite someone from a project\'s sharing dialog (◎), or join theirs: aiconvo join &lt;link&gt;</span>'}</div>
+      ${peersState.invites.length ? `<h4 class="hint">open invite links</h4>${peersState.invites.map(inviteRow).join('')}` : ''}
+    </div>`;
+}
+function bindPanePeers(root) {
+  const refresh = async () => { await loadPeersState(); renderSettings(); };
+  const now = $('setSyncNow');
+  if (now) now.onclick = async () => { now.disabled = true; const r = await postJson('/api/sync/now', {}); if (r.error) errToast(r.error); else toast('synced'); refresh(); };
+  root.querySelectorAll('.peer-row [data-pact]').forEach(b => b.onclick = async () => {
+    const id = b.closest('.peer-row').dataset.peer, act = b.dataset.pact;
+    if (act === 'remove' && !confirm('Forget this peer? Syncing stops; what already arrived stays. Their access to this machine is managed in the people list above.')) return;
+    const r = await postJson('/api/sync/peers/' + act, { id });
+    if (r.error) errToast(r.error); else toast(act === 'now' ? `${r.pulled || 0} pulled, ${r.pushed || 0} pushed` : 'peer updated');
+    refresh();
+  });
+  root.querySelectorAll('[data-invite] [data-iact=revoke]').forEach(b => b.onclick = async () => {
+    const r = await postJson('/api/invites/revoke', { id: b.closest('[data-invite]').dataset.invite });
+    if (r.error) errToast(r.error); else toast('invite revoked');
+    refresh();
+  });
 }
 
 /* ---- settings → your profile ---- */
@@ -470,11 +557,12 @@ function panePeople() {
   const me = peopleState.me;
   const manages = peopleManages();
   const owner = peopleIsOwner();
-  const roleWord = u => u.role === 'owner' ? 'owner of this machine' : u.role === 'admin' ? 'admin' : 'member';
+  const roleWord = u => u.role === 'owner' ? 'owner of this machine' : u.role === 'admin' ? 'admin' : u.scope === 'guest' ? 'guest — sees only what is listed for them' : 'member';
   const row = u => `<div class="person-row${u.disabled ? ' disabled' : ''}" data-id="${esc(u.id)}">
       ${userBubble(u)}
-      <div class="person-main"><b>${esc(u.name)}</b>${me && u.id === me.id ? ' <span class="hint">(you)</span>' : ''}<div class="hint">${esc(roleWord(u))}${u.groups.length ? ' · ' + esc(u.groups.join(', ')) : ''}${u.disabled ? ' · disabled' : ''}</div></div>
+      <div class="person-main"><b>${esc(u.name)}</b>${u.scope === 'guest' ? '<span class="badge-guest">guest</span>' : ''}${me && u.id === me.id ? ' <span class="hint">(you)</span>' : ''}<div class="hint">${esc(roleWord(u))}${u.groups.length ? ' · ' + esc(u.groups.join(', ')) : ''}${u.disabled ? ' · disabled' : ''}</div></div>
       <div class="person-actions">
+        ${manages && u.role !== 'owner' ? `<button type="button" class="ghost" data-act="scope">${u.scope === 'guest' ? 'make household member' : 'make guest'}</button>` : ''}
         ${(manages || (me && u.id === me.id)) && !(u.role === 'owner' && !owner) ? `<button type="button" class="ghost" data-act="invite">new device link</button>` : ''}
         ${manages && !(u.role === 'owner' && !owner) ? `<button type="button" class="ghost" data-act="rename">rename</button>` : ''}
         ${manages && u.role !== 'owner' ? `<button type="button" class="ghost" data-act="groups">groups</button>` : ''}
@@ -491,11 +579,12 @@ function panePeople() {
       <div id="setPeopleList">${peopleState.users.map(row).join('')}</div>
       <div class="set-status" id="setPeopleStatus"></div>
     </div>
+    ${manages ? panePeersHtml() : ''}
     ${manages ? `<div class="set-group">
       <div class="set-group-head"><h3>groups</h3><button type="button" class="ghost" id="setGroupAdd">new group</button></div>
       <div id="setGroupList">${peopleState.groups.length ? peopleState.groups.map(g => `<div class="person-row" data-gid="${esc(g.id)}"><span class="user-bubble group">#</span><div class="person-main"><b>${esc(g.name)}</b><div class="hint">${esc(g.id)} · ${peopleState.users.filter(u => u.groups.includes(g.id)).map(u => u.name).join(', ') || 'nobody yet'}</div></div><div class="person-actions"><button type="button" class="ghost" data-gact="remove">✕</button></div></div>`).join('') : '<span class="hint">none — a group lets you share a project with several people at once (say, a department).</span>'}</div>
     </div>` : ''}
-    <details class="set-more"><summary>how sharing works</summary><p>Everything on a machine is shared with everyone admitted to it, unless its owner hides it (the ⊘ button on a conversation or a project). Hidden things leave the lists, search and memory of the people they are hidden from. The owner of the machine — the account the agents run as — always sees everything on it; these are polite walls between people who share a computer, not vaults. Who typed each message, saved each file and vouched each note is recorded by name.</p></details>`;
+    <details class="set-more"><summary>how sharing works</summary><p>Everything on a machine is shared with everyone admitted to it, unless its owner hides it (the ⊘ button on a conversation or a project). Hidden things leave the lists, search and memory of the people they are hidden from. The owner of the machine — the account the agents run as — always sees everything on it; these are polite walls between people who share a computer, not vaults. Who typed each message, saved each file and vouched each note is recorded by name.</p><p>A <b>guest</b> is the other way round: someone invited to one project (from the project's sharing dialog) sees nothing on this machine except what is listed for them. Guests may connect their own aiconvo; the project's conversations and memory then copy both ways, and each machine only ever writes its own.</p></details>`;
 }
 function bindPanePeople(root) {
   const status = t => { const el = $('setPeopleStatus'); if (el) el.innerHTML = t; };
@@ -522,6 +611,7 @@ function bindPanePeople(root) {
     if (act === 'rename') { const name = prompt('New name:', u.name); if (!name || !name.trim()) return; out = await call('update', { id, name: name.trim() }); }
     if (act === 'groups') { const g = prompt('Groups, comma separated (short names, e.g. kids, eng):', u.groups.join(', ')); if (g === null) return; out = await call('update', { id, groups: g.split(',').map(x => x.trim()).filter(Boolean) }); }
     if (act === 'role') out = await call('update', { id, role: u.role === 'admin' ? 'member' : 'admin' });
+    if (act === 'scope') { const guest = u.scope !== 'guest'; if (!confirm(guest ? u.name + ' will see only the projects listed for them.' : u.name + ' will see everything on this machine that is not hidden, like the household.')) return; out = await call('update', { id, scope: guest ? 'guest' : 'household' }); }
     if (act === 'disable') out = await call('update', { id, disabled: !u.disabled });
     if (act === 'transfer') { if (!confirm('Make ' + u.name + ' the owner of this machine? You become an admin. The install token follows them.')) return; out = await call('transfer', { id }); }
     if (act === 'remove') { if (!confirm('Remove ' + u.name + ' from this machine? Their links stop working. What they wrote stays attributed to them.')) return; out = await call('remove', { id }); }
@@ -535,6 +625,7 @@ function bindPanePeople(root) {
     }
     if (out) { toast('people updated'); renderSettings(); renderPeopleHeader(); }
   });
+  if (peopleManages()) { bindPanePeers(root); if (!peersState.loaded) loadPeersState().then(() => { if (settingsOpen && settingsPane === 'people') renderSettings(); }); }
   const gadd = $('setGroupAdd');
   if (gadd) gadd.onclick = async () => { const name = prompt('Group name (short, e.g. kids or eng):'); if (!name || !name.trim()) return; const out = await call('group', { id: name.trim().toLowerCase(), name: name.trim() }); if (out) renderSettings(); };
   root.querySelectorAll('.person-row[data-gid] [data-gact=remove]').forEach(b => b.onclick = async () => { const gid = b.closest('.person-row').dataset.gid; if (!confirm('Remove group ' + gid + '?')) return; const out = await call('group', { id: gid, remove: true }); if (out) renderSettings(); });

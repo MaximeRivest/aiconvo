@@ -13,7 +13,7 @@ const TOKEN = process.env.AICONVO_TOKEN || '';
 
 // Long options that take a value. Anything else that starts with -- is a flag.
 const VALUED = new Set(['project', 'since', 'role', 'type', 'limit', 'offset', 'exclude', 'at', 'context',
-  'from', 'to', 'last', 'roles', 'max', 'area', 'epic', 'kind', 'dir']);
+  'from', 'to', 'last', 'roles', 'max', 'area', 'epic', 'kind', 'dir', 'name', 'folder']);
 
 function parse(argv) {
   const positional = [];
@@ -99,6 +99,15 @@ function plan(positional, opts) {
       params.id = rest[0];
       pass(['max']);
       return { op: 'epic', params };
+    // Sharing with other installs: these talk to this machine's server,
+    // which does the handshake and the copying (design/52).
+    case 'join': {
+      if (!rest[0]) fail('usage: aiconvo join <invite link> [--name "Your Name"] [--folder /path/to/checkout]');
+      return { op: 'sync/join-remote', method: 'POST', params: { link: rest[0], name: opts.name || '', folder: opts.folder ? path.resolve(opts.folder) : '' } };
+    }
+    case 'sync': return { op: 'sync/now', method: 'POST', params: { all: opts.all === 'true' } };
+    case 'peers': return { op: 'sync/peers', method: 'GET', params: {} };
+    case 'project-id': return { op: 'project-id', method: 'GET', params: { project: rest[0] || '', dir: params.dir } };
     case 'evidence':
       if (!rest[0]) fail('usage: aiconvo evidence <id>');
       params.id = rest[0];
@@ -128,10 +137,56 @@ function get(op, params) {
   });
 }
 
+// The sharing commands use the plain API and print their own words.
+function api(method, pathname, params) {
+  const headers = { ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}), 'Content-Type': 'application/json' };
+  const qs = new URLSearchParams();
+  if (method === 'GET') for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, method, path: `/api/${pathname}${qs.size ? '?' + qs : ''}`, headers }, res => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', c => body += c);
+      res.on('end', () => { let data = null; try { data = JSON.parse(body); } catch { data = { error: body.slice(0, 300) || `HTTP ${res.statusCode}` }; } resolve({ status: res.statusCode, data }); });
+    });
+    req.on('error', reject);
+    if (method !== 'GET') req.end(JSON.stringify(params)); else req.end();
+  });
+}
+function sharingText(op, d) {
+  if (op === 'sync/join-remote') {
+    const lines = [`Joined ${d.projects.map(p => p.name + (p.cwd ? ' (' + p.cwd + ')' : '')).join(', ')} on ${d.peer.name} as ${d.me.name}.`];
+    lines.push(`${d.them.name} is now a guest on this machine, listed on ${d.projects.length === 1 ? 'that project' : 'those projects'} only.`);
+    if (!d.projects.some(p => p.cwd)) lines.push('No local folder yet: the project shows up here from its mirrors. Clone it and run the join again with --folder to bind it.');
+    lines.push(d.reachableFromThem ? 'They can pull from this machine, and this one pulls from theirs.' : 'This machine has no public address, so it pushes its side to them and pulls theirs; nothing needs to reach it.');
+    if (d.sync) lines.push(`First sync: ${d.sync.pulled} conversation${d.sync.pulled === 1 ? '' : 's'} pulled, ${d.sync.pushed} pushed${d.sync.skipped ? ' (' + d.sync.skipped + ')' : ''}.`);
+    lines.push('Peers sync every minute; `aiconvo sync` runs one now.');
+    return lines.join('\n');
+  }
+  if (op === 'sync/now') {
+    const rows = d.peers.map(p => { const r = (d.results || {})[p.id] || {}; return `${p.name}: ${r.skipped ? r.skipped : `${r.pulled || 0} pulled, ${r.pushed || 0} pushed`}${p.lastError ? ' — ' + p.lastError : ''}`; });
+    return rows.length ? rows.join('\n') : 'No peers. Someone invites you with a link, then: aiconvo join <link>.';
+  }
+  if (op === 'sync/peers') {
+    if (!d.peers.length) return `No peers on ${d.host}. Someone invites you with a link, then: aiconvo join <link>.`;
+    return d.peers.map(p => `${p.name}${p.paused ? ' (paused)' : ''} — ${p.reachable ? p.url : 'pushes to us (no address)'}\n  projects: ${p.projects.map(x => x.name + ' (' + x.right + ')').join(', ') || '(none)'}\n  last pull ${p.lastPullAt || 'never'} · last push ${p.lastPushAt || 'never'}${p.lastError ? '\n  error: ' + p.lastError : ''}`).join('\n');
+  }
+  if (op === 'project-id') return `${d.name}: ${d.id}\n  folder: ${d.cwd || '(none)'} · marker ${d.marker ? 'in .aiconvo/project.json (commit it)' : 'not written yet (an invite writes it)'} · sharing policy: ${d.policy}`;
+  return JSON.stringify(d, null, 2);
+}
+
 async function main() {
   const { positional, opts } = parse(process.argv.slice(2));
-  const { op, params } = plan(positional, opts);
+  const { op, params, method } = plan(positional, opts);
   let r;
+  if (method) {
+    try { r = await api(method, op, params); }
+    catch (e) { fail(`aiconvo server is not answering on port ${PORT} (${e.code || e.message}).`, 3); }
+    if (opts.json) { process.stdout.write(JSON.stringify(r.data, null, 2) + '\n'); process.exit(r.status === 200 ? 0 : 1); }
+    if (r.status !== 200) fail('error: ' + (r.data.error || r.status), 1);
+    process.stdout.write(sharingText(op, r.data) + '\n');
+    return;
+  }
   try { r = await get(op, params); }
   catch (e) {
     fail(`aiconvo server is not answering on port ${PORT} (${e.code || e.message}).\n` +

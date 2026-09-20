@@ -74,3 +74,16 @@
 /* CodeMirror remote cursors (y-codemirror.next) */
 .cm-ySelectionInfo { font: 600 10px/1.4 var(--font) !important; padding: 0 4px !important; border-radius: var(--r-sm); opacity: 1 !important; }
 .cm-ySelection { }
+
+/* project invites, peers and mirrors (design/52) */
+.mirror-dock { padding: 8px 0 12px; }
+.mirror-notice { border: 1px dashed var(--border); border-radius: var(--r-sm); padding: 10px 12px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.mirror-notice .hint { flex-basis: 100%; }
+.badge-guest { display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 1px 5px; border: 1px solid var(--border); border-radius: var(--r-sm); margin-left: 6px; vertical-align: middle; color: var(--muted); }
+.badge-mirror { display: inline-block; font-size: 10px; padding: 0 4px; border: 1px solid var(--border); border-radius: var(--r-sm); margin-left: 4px; color: var(--muted); vertical-align: middle; }
+.share-invite { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+.share-invite .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.share-invite input[type=text] { flex: 1; min-width: 8em; }
+.share-invite .warn { font-size: 13px; padding: 6px 8px; border-left: 3px solid var(--accent, var(--text)); margin: 6px 0; }
+.peer-row .hint { white-space: normal; }
+.peer-row .err { color: var(--danger, #b00); }

@@ -12,6 +12,11 @@
 //   RULE = { mode: "everyone" | "listed", listed: { "user:<id>" | "group:<g>": "see" | "act" }, owners: ["<user id>"] }
 // No rule means the household default: everyone admitted sees and acts;
 // the creator owns. A conversation rule overrides its project's rule.
+//
+// Guests (users with scope 'guest') invert the default: nothing is theirs
+// to see unless a rule lists them (or a group of theirs). `mode: everyone`
+// means everyone in the household; a guest needs a `listed` entry, which
+// is exactly what a project invite writes.
 const fs = require('fs');
 const path = require('path');
 
@@ -42,8 +47,9 @@ function normalizeRules(raw) {
   for (const [object, rule] of Object.entries(rules)) {
     if (!/^(project|conversation):.+/.test(object)) continue;
     const n = normalizeRule(rule);
-    // A rule that says only what the default says is not kept.
-    if (n.mode === 'everyone' && !n.owners.length) continue;
+    // A rule that says only what the default says is not kept. A listed
+    // entry on an `everyone` rule still says something: it admits a guest.
+    if (n.mode === 'everyone' && !n.owners.length && !Object.keys(n.listed).length) continue;
     out.rules[object] = n;
   }
   return out;
@@ -89,15 +95,45 @@ function can(rules, identity, right, target = {}) {
   const chain = chainFor(target);
   let rule = null, ruleObject = null;
   for (const object of chain) { if (rules.rules[object]) { rule = rules.rules[object]; ruleObject = object; break; } }
+  const guest = user.scope === 'guest';
   const ownsByRule = !!rule && rule.owners.includes(user.id);
   const ownsByCreation = !rule && !!target.creator && target.creator === user.id;
   if (ownsByRule || ownsByCreation) return true;
   if (right === 'own') return false;
-  if (!rule || rule.mode === 'everyone') return true;
+  if (!guest && (!rule || rule.mode === 'everyone')) return true;
+  if (!rule) return false; // a guest with no rule naming them
   let best = 0;
   for (const s of subjectsOf(user)) best = Math.max(best, rank(rule.listed[s]));
   void ruleObject;
   return best >= rank(right);
+}
+
+// Admit one subject to one object without touching how the household
+// sees it: the invite's write. A lower right never downgrades a higher one.
+function grant(rules, object, subject, right) {
+  if (!/^(project|conversation):.+/.test(object || '')) throw new Error('rules apply to a project or a conversation');
+  if (!/^(user:[A-Za-z0-9_-]+|group:[a-z0-9_.-]+)$/.test(subject || '')) throw new Error('bad subject');
+  if (right !== 'see' && right !== 'act') throw new Error('grant see or act');
+  const current = rules.rules[object] || { mode: 'everyone', listed: {}, owners: [] };
+  const listed = { ...current.listed };
+  if (rank(right) > rank(listed[subject])) listed[subject] = right;
+  rules.rules[object] = normalizeRule({ ...current, listed });
+  return rules.rules[object];
+}
+// Drop one subject from every rule (a guest removed, an invite undone).
+function revokeSubject(rules, subject) {
+  let changed = false;
+  for (const [object, rule] of Object.entries(rules.rules)) {
+    if (!(subject in rule.listed)) continue;
+    delete rule.listed[subject];
+    changed = true;
+    if (rule.mode === 'everyone' && !rule.owners.length && !Object.keys(rule.listed).length) delete rules.rules[object];
+  }
+  return changed;
+}
+// The objects a subject is listed on (what a guest can reach), for the UI.
+function objectsListing(rules, subject) {
+  return Object.entries(rules.rules).filter(([, r]) => r.listed[subject]).map(([object, r]) => ({ object, right: r.listed[subject] }));
 }
 
 // A predicate for list filtering, with the tier shortcut taken once.
@@ -112,7 +148,7 @@ function setRule(rules, object, patch) {
   if (!/^(project|conversation):.+/.test(object || '')) throw new Error('rules apply to a project or a conversation');
   const current = rules.rules[object] || { mode: 'everyone', listed: {}, owners: [] };
   const next = normalizeRule({ ...current, ...patch });
-  if (next.mode === 'everyone' && !next.owners.length) delete rules.rules[object];
+  if (next.mode === 'everyone' && !next.owners.length && !Object.keys(next.listed).length) delete rules.rules[object];
   else rules.rules[object] = next;
   return rules.rules[object] || null;
 }
@@ -138,15 +174,18 @@ function rewriteUser(rules, fromId, toId) {
 
 // Words for the sharing control: who this is hidden from, in plain terms.
 function describe(rule, { users = [], me = null } = {}) {
-  if (!rule || rule.mode === 'everyone') return 'everyone on this machine';
-  const names = Object.entries(rule.listed).map(([s, r]) => {
+  const nameOf = s => {
     const [kind, id] = s.split(':');
-    const label = kind === 'group' ? 'group ' + id : (users.find(u => u.id === id) || {}).name || 'someone';
-    return label + (r === 'see' ? ' (read only)' : '');
-  });
+    return kind === 'group' ? 'group ' + id : (users.find(u => u.id === id) || {}).name || 'someone';
+  };
+  if (!rule || rule.mode === 'everyone') {
+    const guests = rule ? Object.entries(rule.listed).filter(([s]) => { const [k, id] = s.split(':'); return k === 'user' && (users.find(u => u.id === id) || {}).scope === 'guest'; }) : [];
+    return 'everyone on this machine' + (guests.length ? ', and guest' + (guests.length > 1 ? 's ' : ' ') + guests.map(([s, r]) => nameOf(s) + (r === 'see' ? ' (read only)' : '')).join(', ') : '');
+  }
+  const names = Object.entries(rule.listed).map(([s, r]) => nameOf(s) + (r === 'see' ? ' (read only)' : ''));
   const owners = rule.owners.map(id => id === (me && me.id) ? 'me' : (users.find(u => u.id === id) || {}).name || 'someone');
   const who = [...new Set([...owners, ...names])];
   return who.length ? 'only ' + who.join(', ') : 'only its owners';
 }
 
-module.exports = { RIGHTS, MODES, normalizeRule, normalizeRules, loadRules, saveRules, chainFor, subjectsOf, seesAll, can, visibleTo, setRule, effectiveRule, rewriteUser, describe, projectObject, conversationObject };
+module.exports = { RIGHTS, MODES, normalizeRule, normalizeRules, loadRules, saveRules, chainFor, subjectsOf, seesAll, can, visibleTo, setRule, grant, revokeSubject, objectsListing, effectiveRule, rewriteUser, describe, projectObject, conversationObject };

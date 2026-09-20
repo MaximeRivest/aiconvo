@@ -555,3 +555,9 @@ client frames, fragmentation, ping/pong, close, size limits; no
 extensions) rather than an npm `ws`: the project keeps zero dependencies,
 and the browser talks the stock y-websocket protocol. Yjs is vendored as
 one CommonJS file built from the mrmd editor's toolchain.
+
+### Continued in design/52 (2026-09-20)
+Guests (scope `guest`: nothing visible unless listed), project-scoped
+invite links, stable project ids, sync between installs (mirrors, one
+writer per record, redaction at export) and the two-level environment
+document: [52-project-invites-and-sync.md](52-project-invites-and-sync.md).

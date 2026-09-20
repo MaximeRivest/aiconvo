@@ -22,6 +22,8 @@ function harness() {
     },
     indexNewSessionFile: async file => 'pi:' + file,
     markForkTitle: async key => calls.push(['title', key]),
+    // Forks of mirrored conversations (design/52) take another path; none here.
+    syncLib: { isMirrorKey: () => false },
   });
   vm.runInContext(slice(server, 'const sessionFileOps = new Map();', '// Index a session file'), ctx);
   vm.runInContext(slice(server, 'async function forkSession(key, nodeId)', '// In-file branch'), ctx);
