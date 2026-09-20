@@ -28,4 +28,12 @@ powershell -ExecutionPolicy Bypass -File install-lan-forward.ps1 -Distro Ubuntu-
 
 This adds a firewall rule for ports 7433 and 7443 (private networks only), forwards them to WSL now, and schedules `lan-forward.ps1` at logon and every 10 minutes so the forward follows WSL's address. The links under settings → machines then carry the Windows address first (the server asks Windows for it), so they can be copied as they are. To undo: `Unregister-ScheduledTask 'Aiconvo LAN forward'`, `netsh interface portproxy reset`, and remove the `Aiconvo` firewall rule.
 
+### Fixing a recurring console flash
+
+Older installs start the forwarding task with `powershell.exe -WindowStyle Hidden`. Windows can create its console before PowerShell hides it, producing a brief flash every 10 minutes. Re-run the administrator command above from an updated checkout to replace the existing task (not add a second one).
+
+The installer now builds `lan-forward.exe` using Windows PowerShell's built-in .NET compiler. It is a Windows application, not a console application, and starts its PowerShell child with console creation disabled. The task keeps the same user, administrator rights, logon trigger, and 10-minute schedule; running as SYSTEM would lose access to the user's WSL distribution. No VBScript dependency, passwords, or execution-policy changes are added. Trade-off: one small executable is installed alongside the script; environments that block locally compiled executables may require administrator approval.
+
+The latest run's output/errors are in `%LOCALAPPDATA%\Aiconvo\lan-forward.log`, and the child exit code is passed back to Task Scheduler. To test the runner without changing any networking, run `powershell -NoProfile -ExecutionPolicy Bypass -File test-lan-forward-runner.ps1` on Windows. A recurring flash is not proof this task caused it; check whether it stops after the update.
+
 To remove the launcher, remove its Desktop and Start Menu shortcuts and LocalAppData/Aiconvo. Restore saved shortcuts if wanted. This does not remove the Linux service or user data.
