@@ -1,5 +1,28 @@
 param([switch]$CheckOnly)
 $ErrorActionPreference = 'Stop'
+
+# "Ready" means the server answered. It is probed at /health, which the
+# server answers before sign-in. An older server without that route answers
+# 401 there (the sign-in gate comes first), which still proves it is up:
+# under WSL even a local browser reaches the server through the Windows
+# port forward, so the server sees it as another machine and asks for the
+# token. Refused or timed-out connections are the only "not yet".
+function Test-AiconvoReady([string]$Url) {
+    $response = $null
+    try {
+        $request = [Net.HttpWebRequest]::Create($Url)
+        $request.Proxy = $null
+        $request.Timeout = 2000
+        $response = $request.GetResponse()
+        return ([int]$response.StatusCode -eq 200)
+    } catch [Net.WebException] {
+        $response = $_.Exception.Response
+        return ($null -ne $response -and [int]$response.StatusCode -eq 401)
+    } finally {
+        if ($null -ne $response) { $response.Close() }
+    }
+}
+
 try {
     $config = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'config.json') -Raw | ConvertFrom-Json
     # A live WSL process keeps the distribution available. systemd alone does not.
@@ -12,15 +35,10 @@ try {
     $ready = $false
     $deadline = (Get-Date).AddSeconds(90)
     while ((Get-Date) -lt $deadline) {
-        try {
-            $request = [Net.HttpWebRequest]::Create("http://127.0.0.1:$($config.Port)/")
-            $request.Proxy = $null
-            $request.Timeout = 2000
-            $response = $request.GetResponse()
-            $status = [int]$response.StatusCode
-            $response.Close()
-            if ($status -eq 200) { $ready = $true; break }
-        } catch { }
+        if (Test-AiconvoReady "http://127.0.0.1:$($config.Port)/health") {
+            $ready = $true
+            break
+        }
         Start-Sleep -Milliseconds 500
     }
     if (-not $ready) { throw "Aiconvo did not start within 90 seconds. Open your WSL terminal and run: systemctl --user status aiconvo" }

@@ -112,3 +112,32 @@ test('server-initiated close ends the socket even if the peer stays silent', asy
   assert.equal(await closed, 4001);
   assert.equal(conn.readyState, 'closed');
 });
+
+// A peer that vanishes (connection reset) ends the connection; it must not
+// surface as an unhandled 'error' event, which would end the whole process.
+// Seen on two installs: the process died every time a WebSocket's socket
+// reported ECONNRESET or ETIMEDOUT.
+test('a socket error closes the connection quietly when nobody listens for it', async t => {
+  let conn = null;
+  const url = await serve(t, c => { conn = c; });
+  const ws = new WebSocket(url);
+  await open(ws);
+  const closed = new Promise(r => conn.on('close', r));
+  const err = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+  conn.socket.destroy(err);
+  await closed;
+  assert.equal(conn.readyState, 'closed');
+  assert.equal(conn.error && conn.error.code, 'ECONNRESET');
+  ws.close();
+});
+
+test('a socket error still reaches a listener that asked for it', async t => {
+  let conn = null;
+  const url = await serve(t, c => { conn = c; });
+  const ws = new WebSocket(url);
+  await open(ws);
+  const seen = new Promise(r => conn.on('error', r));
+  conn.socket.destroy(Object.assign(new Error('read ETIMEDOUT'), { code: 'ETIMEDOUT' }));
+  assert.equal((await seen).code, 'ETIMEDOUT');
+  ws.close();
+});

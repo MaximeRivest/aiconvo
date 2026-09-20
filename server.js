@@ -12372,6 +12372,14 @@ function sendValidated(req, res, type, cacheControl, text) {
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   try {
+    // "Is the server up?" for launchers, update scripts and machine
+    // switching. Answered before sign-in on purpose: a readiness probe has
+    // no cookie, and under WSL even the local browser arrives through the
+    // Windows port forward, so "/" answers it 401. Says nothing but yes.
+    if (u.pathname === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      return res.end(req.method === 'HEAD' ? undefined : '{"ok":true}');
+    }
     // Sandboxed HTML cannot use app cookies. A capability authorizes only this
     // narrow static-asset route, never another API or a whole directory tree.
     const previewAsset = /^\/api\/file\/preview-assets\/([a-f0-9]{64})\/(.*)$/.exec(u.pathname);

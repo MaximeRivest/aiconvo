@@ -136,6 +136,9 @@ function createCollab({ Y, syncProtocol, awarenessProtocol, encoding, decoding, 
       catch (e) { log('[collab] bad message on ' + name + ': ' + e.message); }
     });
     conn.on('close', () => leave(conn, d));
+    // A connection that drops mid-way is ordinary here; note it and let
+    // 'close' do the leaving. Without a listener the emitter would throw.
+    conn.on('error', e => log('[collab] ' + name + ' dropped: ' + (e && e.code || e && e.message || e)));
     // Step 1 of sync, then everyone's awareness so cursors show at once.
     const enc = encoding.createEncoder();
     encoding.writeVarUint(enc, MSG_SYNC);

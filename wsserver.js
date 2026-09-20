@@ -36,7 +36,16 @@ class WsConn extends EventEmitter {
     this.closeSent = false;
     socket.on('data', chunk => this._feed(chunk));
     socket.on('close', () => this._finish());
-    socket.on('error', e => { this.emit('error', e); this._finish(); });
+    // A peer that vanishes (ECONNRESET, ETIMEDOUT, EPIPE: a laptop asleep,
+    // a port forward re-applied, a phone changing networks) is the normal
+    // end of a WebSocket, not a fault in this process. Node throws on an
+    // 'error' event nobody listens to, and that took the whole server down
+    // with every agent run in it. Emit only for listeners; always close.
+    socket.on('error', e => {
+      this.error = e;
+      if (this.listenerCount('error')) this.emit('error', e);
+      this._finish();
+    });
     socket.on('end', () => this._finish());
   }
   get readyState() { return this.closed ? 'closed' : 'open'; }

@@ -69,6 +69,15 @@ test('the reach switch rebinds the listener both ways without a restart', async 
   if (ip) {
     for (let i = 0; i < 20 && await reachable(ip, port) !== 401; i++) await new Promise(r => setTimeout(r, 50));
     assert.equal(await reachable(ip, port), 401, 'answers on the LAN address, asking for the token');
+    // Readiness probes carry no token (the Windows launcher, update.sh,
+    // the machine switcher). /health answers them before sign-in and
+    // gives away nothing but "up".
+    const health = await fetch(`http://${ip}:${port}/health`, { signal: AbortSignal.timeout(1500) });
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { ok: true });
+    assert.equal(health.headers.get('cache-control'), 'no-store');
+    assert.equal((await fetch(`http://${ip}:${port}/health`, { method: 'HEAD' })).status, 200);
+    assert.equal((await fetch(`http://${ip}:${port}/healthz`, { signal: AbortSignal.timeout(1500) })).status, 401, 'only that one path is open');
     const token = new URL(s.connectLinks[0]).searchParams.get('token');
     const withToken = await fetch(`http://${ip}:${port}/api/settings`, { headers: { Authorization: 'Bearer ' + token } });
     assert.equal(withToken.status, 200);
