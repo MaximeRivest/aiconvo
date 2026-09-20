@@ -7598,7 +7598,7 @@ function renderProjectPanel(d) {
         <span title="${memory ? 'The generated project memory: overview, intent, environment, status' : 'No generated memory yet'}">${memory ? `memory ${fmtDate(memory.builtAt)} · ${pyramid.docs && pyramid.docs.stale ? '⚠ stale' : '✓ current'}` : 'memory: none yet'}</span>
         <span id="pMemControls" class="pmemcontrols">${projectMemoryControlsHtml(d)}</span>
         <span class="psep"></span>
-        <button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">Remove from project list</button>' : ''}
+        <button id="pShare" class="ghost pfoldbtn" title="Who can see this project, and invite someone from outside the household to it">◎ share · invite</button><button id="pFold" class="ghost pfoldbtn" title="This is really another project? Fold both into one">⇄ fold</button><button id="pAreaNew" class="ghost pfoldbtn" title="Declare a subfolder as an area — an inner scope with its own memory and briefing">⊞ area</button>${d.created && !d.conversations ? '<button id="pUnregister" class="ghost pfoldbtn" title="Remove this newborn project from the list. The folder stays on disk.">Remove from project list</button>' : ''}
       </div>
     </div>
     ${(d.foldedFrom || []).length ? `<div class="pfolds">contains ${d.foldedFrom.map(f => `<span class="fold-chip" title="${f.kind === 'auto' ? 'folded automatically: a git worktree of this project' : 'folded by you'}">${esc(f.name)}<button data-p-unfold="${esc(f.name)}" title="Unfold ${esc(f.name)} into its own project">✕</button></span>`).join('')}</div>` : ''}
@@ -7617,6 +7617,12 @@ function renderProjectPanel(d) {
   if (!d.conversations) $('pNew').textContent = 'Start conversation';
   $('pTitleBig').ondblclick = e => { e.preventDefault(); startProjectTitleEdit(d.project); };
   $('pFold').onclick = () => openFoldPicker(d);
+  $('pShare').onclick = async () => {
+    // The header's ◎ knows the rule; make sure it is loaded, then open.
+    if (typeof refreshShareControl === 'function') await refreshShareControl();
+    if (typeof shareState === 'undefined' || !shareState) return errToast('sharing needs the live connection — one moment, then try again');
+    openShareDialog();
+  };
   const pUnregister = $('pUnregister');
   if (pUnregister) pUnregister.onclick = async () => {
     if (!confirm(`Remove “${d.project}” from the project list? The folder stays on disk.`)) return;
