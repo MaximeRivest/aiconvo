@@ -55,7 +55,7 @@ test('projects, quiet badges, expanded chart bounds and scroll-loaded lists in t
   await fetch(base + '/api/rescan', { method: 'POST' });
   await ev(`load()`);
   await until(`sessions.some(s=>projectOf(s)==='work') && sideLayoutOn()`);
-  assert.deepEqual(await ev(`[...document.querySelectorAll('#sideRail [data-rail]')].map(b=>b.dataset.rail)`), ['projects','conversations','files','traffic','inbox']);
+  assert.deepEqual(await ev(`[...document.querySelectorAll('#sideRail [data-rail]')].map(b=>b.dataset.rail)`), ['inbox','traffic','recent-files','projects','conversations','files']);
   await ev(`document.querySelector('[data-rail=projects]').click()`);
   await until(`!!document.querySelector('[data-open-project=work]') && !sidebarProjectCatalogRequest`);
   assert.equal(await ev(`sidebarProjectSort()`), 'recent');
@@ -83,12 +83,12 @@ test('projects, quiet badges, expanded chart bounds and scroll-loaded lists in t
   // Snapshot synthetic badge values in the same turn: a real process poll
   // may otherwise replace them between separate browser requests.
   const badgeExpression = `['traffic','inbox'].map(id=>{const b=document.querySelector('[data-rail="'+id+'"] .rail-badge');return {text:b.textContent,dot:b.classList.contains('dot')}})`;
-  assert.deepEqual(await ev(`paintRailBadges({traffic:12,notifications:7,working:true,unread:3});${badgeExpression}`), [{text:'',dot:true},{text:'',dot:true}]);
+  assert.deepEqual(await ev(`paintRailBadges({traffic:12,working:true,unread:3});${badgeExpression}`), [{text:'',dot:true},{text:'',dot:true}]);
   assert.equal(await ev(`document.querySelector('[data-rail=conversations] .rail-badge').hidden`), true);
   await ev(`showSettings('appearance')`);
   await until(`!!$('setRailCounts')`);
   assert.equal(await ev(`$('setRailCounts').checked`), false);
-  assert.deepEqual(await ev(`$('setRailCounts').checked=true;$('setRailCounts').dispatchEvent(new Event('change'));paintRailBadges({traffic:12,notifications:7,unread:3});${badgeExpression}`), [{text:'12',dot:false},{text:'3',dot:false}]);
+  assert.deepEqual(await ev(`$('setRailCounts').checked=true;$('setRailCounts').dispatchEvent(new Event('change'));paintRailBadges({traffic:12,unread:3});${badgeExpression}`), [{text:'12',dot:false},{text:'3',dot:false}]);
   assert.equal(await ev(`JSON.parse(localStorage.getItem(AGENT_SEC_KEY)).railCounts`), true);
   await ev(`window.beforeBadgeReload=true`); await command('Page.reload');
   await until(`!window.beforeBadgeReload && !!document.querySelector('#setRailCounts')`);

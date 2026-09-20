@@ -163,7 +163,15 @@ body.side-layout > header { grid-column: 2; }
 body.side-layout > main { grid-column: 2; grid-row: 2; min-height: 0; }
 body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-direction: row; min-height: 0; background: var(--panel-bg); border-right: 1px solid var(--panel-border); }
 /* Two levels, Slack-style: a narrow rail chooses a section; the panel shows it. */
-#sideRail { flex: 0 0 var(--rail-w, 56px); display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: var(--sp-2) 4px; border-right: 1px solid var(--border); background: var(--surface-2); min-height: 0; }
+#sideRail { flex: 0 0 var(--rail-w, 56px); display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: var(--sp-2) 4px; border-right: 1px solid var(--border); background: var(--surface-2); min-height: 0; overflow-y: auto; }
+.rail-secondary { border-top: 1px solid var(--border-strong); padding-top: 10px; }
+.rail-primary .rail-label { font-weight: 700; }
+#sideRail #sideProject { max-width: none; flex: none; color: var(--text); }
+#sideRail #sideProject .rail-icon { font-style: normal; }
+#sideRail #sideProject .rail-label { white-space: normal; line-height: 1.15; max-height: 21px; overflow-wrap: anywhere; }
+#sideRail #railMachine { width: 100%; flex-shrink: 0; }
+#returnToWork[hidden] { display: none; }
+#returnToWork { width: 100%; color: var(--accent); }
 #sidePanel { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 #railMachine { height: 40px; min-height: 40px; padding: 0; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-1); color: var(--text); font-weight: 700; font-size: 12px; letter-spacing: .02em; display: flex; align-items: center; justify-content: center; }
 #railMachine .rail-initials { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
@@ -186,7 +194,7 @@ body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-
 /* The panel shows one section at a time; the flow/dock split only applies
    inside "chats". Other sections use the full height, top-aligned. */
 body.side-layout #agentsPop[data-panel]:not([data-panel="conversations"]) #agentsLegacy { margin-top: 0; }
-body.side-layout #agentsPop:not([data-panel="files"]) .ag-files-block { display: none; }
+body.side-layout #agentsPop:not([data-panel="files"]):not([data-panel="recent-files"]) .ag-files-block { display: none; }
 .panel-title { padding: var(--sp-2) 10px 4px; font-size: var(--fs-label); font-weight: 700; color: var(--text); }
 .panel-scope-caption { padding: 0 10px 8px; font-size: var(--fs-micro); color: var(--text-dim); }
 .inbox-tabs { display: flex; gap: 4px; padding: 2px 8px 8px; }
@@ -228,7 +236,7 @@ body.side-layout .composer-dock { position: fixed; left: var(--side-w, 344px); r
 body.side-layout:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + 16px); }
 body.side-layout .agent-compose { border-bottom: 0; }
 .side-top .side-row { display: flex; gap: 2px; }
-.side-top .side-row > #sideHome { flex: 1 1 auto; min-width: 0; }
+.side-top .side-row > .nav-pair { flex: 1 1 auto; }
 #sideProject { flex: 0 1 auto; min-width: 0; max-width: 60%; color: var(--text-dim); }
 #sideProject[hidden] { display: none; }
 .side-top { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-2) var(--sp-2) var(--sp-1); }
@@ -283,7 +291,7 @@ body.side-layout.side-fold > #side > #sidePanel { display: none !important; }
 body.side-layout.side-fold .composer-dock { left: var(--rail-w, 56px); }
 body.side-layout > #side { position: relative; }
 /* Pop-ups that hung from the bar's right edge hang from the column's foot. */
-body.side-layout #machinePop { top: 56px; bottom: auto; left: calc(var(--rail-w, 56px) + 4px); right: auto; z-index: 40; }
+body.side-layout #machinePop { top: auto; bottom: 44px; left: calc(var(--rail-w, 56px) + 4px); right: auto; z-index: 40; }
 body.side-layout #machineBtn { display: none !important; }
 /* Zen hides every chrome, the column included. */
 body.zen:not(.home).side-layout > #side { display: none !important; }
@@ -508,8 +516,15 @@ body.home #newLoose:hover { color: var(--accent); background: var(--surface-2); 
    Home fills the work area with the timeline tray; every other view
    hides the tray and fills the area with #view. */
 body.home #view { display: none !important; }
-/* Home is the bare chart: no tabs bar, no filter bar. */
-body.home #tabs, body.home #ganttBar { display: none !important; }
+/* Home keeps its controls visible, with a little space around the chart. */
+body.home #tabs { display: none; }
+@media (min-width: 701px) {
+  body.home > main { padding: 16px; }
+  body.home #left { border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+}
+#ganttBar { flex-wrap: wrap; gap: 4px; padding: 8px; }
+#ganttBar #projSort { flex-wrap: wrap; }
+#ganttBar button, #ganttBar select, #ganttBar input { min-height: 30px; }
 /* Floating mark details: one click shows them, a second click opens. */
 #markPop { position: fixed; z-index: 70; max-width: 340px; padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--border-strong); color: var(--text); font: 12px var(--font); box-shadow: 0 8px 28px color-mix(in srgb, var(--bg) 60%, transparent); }
 #markPop h4 { margin: 0 0 4px; font-size: 12px; line-height: 1.35; }
@@ -2035,7 +2050,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <span id="headSpace"></span>
   <button id="ticker" hidden title="Open the latest active conversation"></button>
   <span class="count" id="count"></span>
-  <button id="activeBtn" hidden title="Agents, replies, and notifications (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
+  <button id="activeBtn" hidden title="Agents and replies (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
   <button id="machineBtn" hidden title="Switch to another aiconvo machine"></button>
   <button id="peopleBtn" hidden title="People on this machine"></button>
   <button id="settingsBtn" title="Settings (,)">⚙</button>
@@ -2047,23 +2062,26 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <div id="machinePop" hidden></div>
 <aside id="side" hidden aria-label="Navigation and agents">
   <nav id="sideRail" aria-label="Sections">
-    <button id="railMachine" type="button" title="Machine" aria-haspopup="menu"><span class="rail-initials">·</span></button>
-    <div class="rail-sections">
-      <button type="button" data-rail="projects" aria-pressed="false"><span class="rail-icon">▦</span><span class="rail-label">Projects</span></button>
-      <button type="button" data-rail="conversations" aria-pressed="true"><span class="rail-icon">☷</span><span class="rail-label">Chats</span><span class="rail-badge" hidden></span></button>
-      <button type="button" data-rail="files" aria-pressed="false"><span class="rail-icon">▤</span><span class="rail-label">Files</span><span class="rail-badge" hidden></span></button>
-      <button type="button" data-rail="traffic" aria-pressed="false"><span class="rail-icon">⚉</span><span class="rail-label">Agents</span><span class="rail-badge" hidden></span></button>
-      <button type="button" data-rail="inbox" aria-pressed="false"><span class="rail-icon">▣</span><span class="rail-label">Inbox</span><span class="rail-badge" hidden></span></button>
+    <div class="rail-sections rail-primary" role="group" aria-label="Work across all projects">
+      <button id="sideHome" type="button" title="Home — pick up past work on the timeline"><span class="rail-icon">⌂</span><span class="rail-label">Home</span></button>
+      <button type="button" data-rail="inbox" aria-pressed="true" title="Finished replies and interrupted agents · all projects"><span class="rail-icon">▣</span><span class="rail-label">Inbox</span><span class="rail-badge" hidden></span></button>
+      <button type="button" data-rail="traffic" aria-pressed="false" title="Running agents · all projects"><span class="rail-icon">⚉</span><span class="rail-label">Agents</span><span class="rail-badge" hidden></span></button>
+      <button type="button" data-rail="recent-files" aria-pressed="false" title="Recently opened or changed files · all projects"><span class="rail-icon">◷</span><span class="rail-label">Recent</span></button>
     </div>
-    <div class="rail-foot"><span id="railFootSlot"></span></div>
+    <div class="rail-sections rail-secondary" role="group" aria-label="Project browsing">
+      <button id="sideProject" type="button" title="Choose a project" aria-haspopup="dialog" aria-expanded="false"><i class="rail-icon">▾</i><span class="rail-label">All projects</span></button>
+      <button type="button" data-rail="projects" aria-pressed="false"><span class="rail-icon">▦</span><span class="rail-label">Projects</span></button>
+      <button type="button" data-rail="conversations" aria-pressed="false"><span class="rail-icon">☷</span><span class="rail-label">Chats</span><span class="rail-badge" hidden></span></button>
+      <button type="button" data-rail="files" aria-pressed="false"><span class="rail-icon">▤</span><span class="rail-label">Files</span><span class="rail-badge" hidden></span></button>
+    </div>
+    <div class="rail-foot"><button id="railMachine" type="button" title="Machine" aria-haspopup="menu"><span class="rail-initials">·</span></button><span id="railFootSlot"></span></div>
   </nav>
   <div id="sidePanel">
   <div class="side-top">
     <div class="side-row">
       <span class="nav-pair"><button id="sideBack" class="nav-back" disabled aria-label="Back">‹</button><button id="sideFwd" class="nav-fwd" disabled aria-label="Forward">›</button></span>
-      <button id="sideHome" title="Go home — the whole-system timeline">⌂ <span>home</span></button>
-      <button id="sideProject" type="button" title="Choose project scope" aria-haspopup="dialog" aria-expanded="false"><span>All projects</span> ▾</button>
     </div>
+    <button id="returnToWork" type="button" hidden title="Return to the page you left to check an agent">↩ <span>Return to work</span></button>
     <div class="side-new">
       <button id="sideNew" title="New conversation (C) — a blank page: no project memory, home folder, pi defaults">+ <span>new</span></button>
       <button id="sideNewMore" hidden title="Other ways to start" aria-haspopup="menu" aria-label="More ways to start">▾</button>
@@ -2103,7 +2121,11 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
     <div id="tabs">
       <button id="tabsNew" title="New conversation">+ new</button><button data-tab="conv" class="on">conversations</button><button data-tab="notes">notes</button><button data-tab="epics">epics</button><button data-tab="repos">repos</button><button id="selShown" class="ghost" title="Select all shown conversations">select shown</button>
     </div>
-    <div id="ganttBar">
+    <div id="ganttBar" role="toolbar" aria-label="Sort and find projects">
+      <!-- Auxiliary controls retain the timeline's existing state and keyboard bindings,
+           but the visible toolbar contains only project sorting and search. -->
+      <div hidden>
+      <button id="homeFilters" type="button" aria-expanded="false" aria-controls="filtersPop" title="Filter the timeline (f)">Filters</button>
       <button id="jumpStart" title="Jump to the oldest conversation (b)">«</button>
       <button id="jumpNow" title="Jump to now (n)">»</button>
       <span class="gsep"></span>
@@ -2115,6 +2137,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
       <select id="ganttProject" title="Filter the timeline by project or repository"><option value="">all projects</option></select>
       <button id="newProject" title="Create a project or add an existing folder. No agent starts during setup.">+ project</button>
       <input id="ganttDate" type="date" title="Jump to a date (t)">
+      </div>
     </div>
     <div id="list"></div>
     <div id="selbar" hidden>
@@ -2624,8 +2647,8 @@ async function openRelatedNote(key) {
   showNotePane(key, n.text, n.notePath);
 }
 
-// ---- job notifications inside the agents panel ----
-let agentNotificationsOpen = false;
+// ---- background jobs (Settings), separate from agent attention ----
+let agentIdleOpen = false;
 let agentRecoveryOpen = false;
 function updateJob(job) { jobs.set(job.id, job); renderJobs(); }
 
@@ -2644,18 +2667,10 @@ function jobCardHtml(j) {
     <div class="jobtop"><b class="jobtitle">${esc(j.title || j.type)}</b><span class="jobtype">${esc(j.type)}${j.model ? ' · ' + esc(j.model) : ''}</span></div>
     <div class="jobstatus">${status}</div></div>`;
 }
-function jobsNotificationsHtml() {
-  const list = [...jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
-  if (!list.length) return '';
-  const running = list.filter(j => j.status === 'running').length;
-  const count = running ? `${running} active · ${list.length}` : String(list.length);
-  return `<details class="ag-notifications"${agentNotificationsOpen ? ' open' : ''}>
-    <summary>notifications <span class="ag-notify-count">${esc(count)}</span></summary>
-    <div class="ag-notification-list">${list.map(jobCardHtml).join('')}</div></details>`;
-}
 function renderJobs() {
   updateActiveBtn();
   renderAgentsPopSoon();
+  renderBackgroundJobs();
 }
 
 async function loadJobs() {
@@ -2673,23 +2688,10 @@ async function loadJobs() {
 }
 
 function toggleJobs(show) {
-  if (sideLayoutOn()) {
-    // Notifications are their own rail section in the column.
-    const showing = sidePanel() === 'inbox' && inboxTab() === 'jobs';
-    const next = show !== undefined ? !!show : !showing;
-    if (next) { setSidePanel('inbox'); setInboxTab('jobs'); if (sideFolded()) setSideFold(false); }
-    else if (showing) setSidePanel('conversations');
-    return;
-  }
-  const visible = !$('agentsPop').hidden && agentNotificationsOpen;
+  const visible = settingsOpen && settingsPane === 'jobs';
   const next = show !== undefined ? !!show : !visible;
-  if (!next) {
-    agentNotificationsOpen = false;
-    if (agentsTrayOpen()) toggleAgents(false);
-    return;
-  }
-  agentNotificationsOpen = true;
-  toggleAgents(true);
+  if (next) { toggleAgents(false); showSettings('jobs'); }
+  else if (visible) closeSettings();
 }
 
 // ---------- voice playback state ----------
@@ -2735,6 +2737,7 @@ async function voiceSetMuted(muted, minutes = 30) {
 function openJobNotification(job) {
   if (!job) return;
   toggleAgents(false);
+  if (job.type === 'agent-run' && (job.fanoutRootKey || job.key)) return openAgentCheck(job.fanoutRootKey || job.key, job.status === 'done' ? 'reply' : 'bottom');
   if (job.status === 'error') return; // error text is visible in the card
   if (job.type === 'distill' && job.key) {
     if (job.status === 'running') streamDistill(job.key, false);
@@ -3321,16 +3324,15 @@ function updateActiveBtn() {
   const attention = new Set(sessions.filter(isActive).map(s => s.key));
   unread.forEach(s => attention.add(s.key));
   agentsRecovery.interrupted.forEach(r => attention.add(r.key));
-  const runningJobs = [...jobs.values()].filter(j => j.status === 'running').length;
-  const working = activeRuns.size > 0 || sessions.some(isWorking) || runningJobs > 0;
-  $('activeBtn').hidden = attention.size === 0 && !working && jobs.size === 0 && !delegationUI.index().tasks.some(DelegationUI.isLive);
+  const working = activeRuns.size > 0 || sessions.some(isWorking);
+  $('activeBtn').hidden = attention.size === 0 && !working && !delegationUI.index().tasks.some(DelegationUI.isLive);
   // The number is an inbox count. Its reserved slot stays empty when clear,
   // so activity changes never move the other header controls.
   $('activeGlyph').textContent = working ? '⚉' : '⚇';
   $('agentUnreadCount').textContent = (unread.length ? String(unread.length) : '') + (agentsRecovery.interrupted.length ? ' !' : '');
   $('activeBtn').title = unread.length
-    ? `${unread.length} unread ${unread.length === 1 ? 'reply' : 'replies'} · agents and notifications (a)`
-    : 'Agents, replies, and notifications (a)';
+    ? `${unread.length} unread ${unread.length === 1 ? 'reply' : 'replies'} · Inbox (a)`
+    : 'Agents and replies (a)';
   if (agentsRecovery.interrupted.length) $('activeBtn').title += ` · ${agentsRecovery.interrupted.length} interrupted`;
   // The gentle pulse runs only while something truly works (e-ink kills all
   // animation globally, so this stays static there).
@@ -3342,8 +3344,8 @@ function updateActiveBtn() {
   side.classList.toggle('unread', unread.length > 0);
   side.dataset.unread = unread.length ? String(unread.length) : '';
   if (sideLayoutOn()) paintRailBadges({ unread: unread.length,
-    working: [...activeRuns.values()].some(r => scopeIncludesSession(sessions.find(s => s.key === (r.fanoutRootKey || r.key)))) || sessions.some(s => scopeIncludesSession(s) && isWorking(s)) || agentsProcs.some(p => p.busy === true && scopeIncludesProcess(p)),
-    traffic: agentsProcs.filter(scopeIncludesProcess).length, notifications: runningJobs });
+    working: activeRuns.size > 0 || sessions.some(isWorking) || agentsProcs.some(p => p.busy === true),
+    traffic: agentsProcs.length });
 }
 
 // The panel is built from LIVE client state — sessions (mtimes), runningKeys
@@ -3507,9 +3509,9 @@ function renderSidebarProjects() {
 }
 
 // The rail's second level: one section shown at a time in the side panel.
-const SIDE_PANELS = ['projects', 'conversations', 'files', 'traffic', 'inbox'];
+const SIDE_PANELS = ['inbox', 'traffic', 'recent-files', 'projects', 'conversations', 'files'];
 if (agentSecState.panel === 'notifications') agentSecState.panel = 'inbox';
-const sidePanel = () => SIDE_PANELS.includes(agentSecState.panel) ? agentSecState.panel : 'conversations';
+const sidePanel = () => SIDE_PANELS.includes(agentSecState.panel) ? agentSecState.panel : 'inbox';
 function setSidePanel(id, { remember = true } = {}) {
   if (!SIDE_PANELS.includes(id)) return;
   if (id !== sidePanel()) $('agentsPop').scrollTop = 0;
@@ -3530,11 +3532,11 @@ function paintSideRail() {
   machine.title = (host ? 'This is ' + host : 'This machine') + (others ? ' — switch to another aiconvo machine' : ' — connect other machines under settings → machines');
   machine.setAttribute('aria-label', machine.title);
 }
-const railBadgeState = { unread: 0, working: false, traffic: 0, notifications: 0 };
+const railBadgeState = { unread: 0, working: false, traffic: 0 };
 const showRailCounts = () => agentSecState.railCounts === true;
 function paintRailBadges(patch = {}) {
   Object.assign(railBadgeState, patch);
-  const { unread, working, traffic, notifications } = railBadgeState;
+  const { unread, working, traffic } = railBadgeState;
   const set = (id, value, tone) => {
     const badge = document.querySelector(`#sideRail [data-rail="${id}"] .rail-badge`);
     if (!badge) return;
@@ -3544,7 +3546,7 @@ function paintRailBadges(patch = {}) {
   };
   set('conversations', 0, 'count');
   set('traffic', showRailCounts() ? traffic : working ? 1 : 0, showRailCounts() ? 'count' : 'dot');
-  const attention = unread || notifications || agentsRecovery.interrupted.length;
+  const attention = unread || agentsRecovery.interrupted.length;
   set('inbox', showRailCounts() && unread ? unread : attention ? 1 : 0, showRailCounts() && unread ? 'count' : 'dot');
 }
 function toggleAgentSec(id) { agentSecState['fold:' + id] = agentSecOpen(id); saveAgentSecState(); renderAgentsPop(false); }
@@ -3553,18 +3555,6 @@ const workspaceScope = () => ProjectScope.normalize(agentSecState.projectScope, 
 const panelProjectName = workspaceScope;
 const scopeIncludes = project => ProjectScope.contains(workspaceScope(), project, projectFolds.map);
 const scopeIncludesSession = session => scopeIncludes(session ? projectOf(session) : null);
-function scopeFileProject(file) { return ProjectScope.fileProject(file, sidebarProjectRows(), projectFolds.map); }
-function scopeIncludesProcess(process) {
-  const session = process.key && sessions.find(s => s.key === process.key);
-  if (session) return scopeIncludes(projectOf(session));
-  if (process.cwd) {
-    const inferred = scopeFileProject({ path: process.cwd });
-    if (inferred !== LOOSE_PROJECT || looseCwd(process.cwd)) return scopeIncludes(inferred);
-  }
-  // An untracked process with no recognized project is unknown, not proof
-  // that it belongs to the No project collection. Show it only in All.
-  return scopeIncludes(null);
-}
 let restoringScopeEntry = null;
 function setWorkspaceScope(project, { stamp = true } = {}) {
   const next = ProjectScope.normalize(project, projectFolds.map);
@@ -3574,7 +3564,7 @@ function setWorkspaceScope(project, { stamp = true } = {}) {
   if (stamp && nav.current()?.id === navShownId) nav.rememberScope(navShownId, next);
   if (changed) {
     panelListLimits.clear();
-    if (!['inbox', 'projects'].includes(sidePanel())) $('agentsPop').scrollTop = 0;
+    if (['conversations', 'files'].includes(sidePanel())) $('agentsPop').scrollTop = 0;
   }
   renderSideNew(); renderAgentsPopSoon(); updateActiveBtn();
 }
@@ -3586,9 +3576,9 @@ function chooseWorkspaceProject(project) {
   if (!project) return setWorkspaceScope('');
   return showProjectOverview(project);
 }
-const inboxTab = () => ['read', 'jobs'].includes(agentSecState.inboxTab) ? agentSecState.inboxTab : 'unread';
+const inboxTab = () => agentSecState.inboxTab === 'read' ? 'read' : 'unread';
 function setInboxTab(tab) {
-  if (!['unread', 'read', 'jobs'].includes(tab)) return;
+  if (!['unread', 'read'].includes(tab)) return;
   agentSecState.inboxTab = tab; saveAgentSecState();
   $('agentsPop').scrollTop = 0; renderAgentsPop(false);
 }
@@ -3622,7 +3612,7 @@ async function renderAgentsPop(refetch) {
     if (pop.hidden) return;
     if (sideLayoutOn() && sidePanel() === 'projects') loadSidebarProjectCatalog();
   }
-  if (sideLayoutOn()) paintRailBadges({ traffic: agentsProcs.filter(scopeIncludesProcess).length });
+  updateActiveBtn();
   if (sideLayoutOn() && sidePanel() === 'projects') {
     pop.dataset.panel = 'projects';
     renderSidebarProjects();
@@ -3632,7 +3622,8 @@ async function renderAgentsPop(refetch) {
   const delegationIndex = delegationUI.index();
   const byKey = k => sessions.find(s => s.key === k);
   const busyNow = agentBusyKeys();
-  const project = workspaceScope(), scoped = !!project;
+  const panel = sideLayoutOn() ? sidePanel() : 'tray';
+  const project = panel === 'recent-files' ? '' : workspaceScope(), scoped = !!project;
   // One row per orchestration, not one per worker. Workers fold under the
   // conversation that launched them; that row shows progress and expands on
   // request. A worker gets its own top-level row only when it is unread and
@@ -3664,7 +3655,6 @@ async function renderAgentsPop(refetch) {
   const childRows = (ids, depth) => ids.map(id => {
     const t = delegationIndex.byId.get(id); if (!t) return '';
     const s = t.key ? byKey(t.key) : null;
-    if (sideLayoutOn() && sidePanel() === 'traffic' && !scopeIncludesSession(s)) return childRows(delegationIndex.children.get(id) || [], depth);
     const unread = !!(s && agentUnreadAt(s)), live = DelegationUI.isLive(t);
     const kids = delegationIndex.children.get(id) || [];
     const note = attentionNote(t) || (t.error ? String(t.error).slice(0, 80) : t.role || '');
@@ -3726,7 +3716,7 @@ async function renderAgentsPop(refetch) {
     if (!webGroups.has(id)) webGroups.set(id, []);
     webGroups.get(id).push(r);
   }
-  const webRuns = [...webGroups.values()].filter(rs => scopeIncludesSession(byKey(rs[0].fanoutRootKey || rs[0].key))).map(rs => {
+  const webRuns = [...webGroups.values()].map(rs => {
     const first = rs[0], key = first.fanoutRootKey || first.key;
     // Child RPC processes belong to this one parallel turn. Claim them so
     // they do not reappear as separate "other agents" rows below.
@@ -3736,7 +3726,7 @@ async function renderAgentsPop(refetch) {
       : (first.statusText || 'working…').slice(0, 18);
     return row(byKey(key), key, status, null, '', true);
   });
-  const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) })).filter(t => scopeIncludesSession(t.s));
+  const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) }));
   const termWork = termRows.filter(t => t.s && isActive(t.s));
   const termIdle = termRows.filter(t => !t.s || !isActive(t.s));
   const termStatus = t => {
@@ -3761,7 +3751,7 @@ async function renderAgentsPop(refetch) {
   const unreadSec = unread.map(s => row(s, s.key, unreadStatus(s), null, 'unread')).join('');
   // "Writing" claims only sessions with a busy live process behind them. A
   // warm web process at the prompt is not work and must not hide a result.
-  const writing = sessions.filter(s => scopeIncludesSession(s) && isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key) && !delegatedBy.has(s.key)
+  const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key) && !delegatedBy.has(s.key)
       && procByKey.has(s.key) && procByKey.get(s.key).busy !== false)
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const writeStatus = s => {
@@ -3779,7 +3769,7 @@ async function renderAgentsPop(refetch) {
     - Math.max(Number(agentReadState.read[a.key]) || 0, a.mtimeMs || 0));
   // Orchestrations with live workers whose launching conversation has no row
   // above: one row per orchestration, with its progress and expandable tree.
-  const delegatedSec = [...orchestrations.keys()].filter(k => scopeIncludesSession(byKey(k)) && orchProgress.get(k).live && !claimed.has(k)).map(k => {
+  const delegatedSec = [...orchestrations.keys()].filter(k => orchProgress.get(k).live && !claimed.has(k)).map(k => {
     if (!k) {
       const o = orchestration('');
       return `<div class="ag-row working off" data-key="">` +
@@ -3789,15 +3779,14 @@ async function renderAgentsPop(refetch) {
     const p = orchProgress.get(k);
     return row(byKey(k), k, p.live + ' working', null, '', true);
   }).join('');
-  const crossProjectWorkers = scoped ? [...delegatedBy.values()].filter(t => t.key && DelegationUI.isLive(t) && scopeIncludesSession(byKey(t.key)) && !scopeIncludesSession(byKey(t.parentKey)) && !claimed.has(t.key)).map(t => row(byKey(t.key), t.key, 'working', null, '', true)).join('') : '';
   const webSec = webRuns.join('');
   const workSec = termWork.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k), '', true)).join('');
   const idleSec = termIdle.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
   const writeSec = writing.map(s => row(s, s.key, writeStatus(s), (procByKey.get(s.key) || {}).pid, '', true)).join('');
   // Leftovers: processes no row above claimed — idle warm RPC sessions on
   // other conversations, server children, and untracked strays.
-  const others = agentsProcs.filter(p => scopeIncludesProcess(p) && !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !interruptedKeys.has(p.key));
-  const otherSec = others.map(p => `<div class="ag-row${p.busy === true ? ' working' : ''}" data-key="${esc(p.key || '')}">` +
+  const others = agentsProcs.filter(p => !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !interruptedKeys.has(p.key));
+  const processRows = procs => procs.map(p => `<div class="ag-row${p.busy === true ? ' working' : ''}" data-key="${esc(p.key || '')}">` +
     `<span class="ag-main"><span class="ag-title"><span>${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span></span>` +
     `<span class="ag-sub"><span class="ag-dir">${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(tinyAge(p.ageMs)) : ''}</span>` +
     `<span class="ag-age">pid ${p.pid}</span></span></span>` +
@@ -3816,10 +3805,9 @@ async function renderAgentsPop(refetch) {
     <span class="ag-recovery-actions">${r.canResume ? `<button data-recovery-id="${esc(r.id)}" data-recovery-action="resume"${r.state === 'resuming' ? ' disabled' : ''}>${r.state === 'resuming' ? 'Resuming…' : 'Resume'}</button>` : ''}
     <button data-recovery-id="${esc(r.id)}" data-recovery-action="dismiss" title="Remove from this list and cancel automatic recovery. Saved history is kept."${r.state === 'resuming' ? ' disabled' : ''}>Dismiss</button></span></div>`).join('');
   const network = agentsRecovery.network || {};
-  const recoverySection = interruptedSec || agentsRecovery.enabled ? `<details class="ag-recovery ag-notifications"${agentRecoveryOpen ? ' open' : ''}><summary>resume interrupted tasks<span class="ag-notify-count">${agentsRecovery.interrupted.length ? agentsRecovery.interrupted.length + ' interrupted' : 'automatic recovery on'}</span></summary>` + interruptedSec +
+  const recoverySection = interruptedSec || agentsRecovery.enabled ? `<details class="ag-recovery ag-notifications"${agentRecoveryOpen ? ' open' : ''}><summary>Connection recovery settings</summary>` +
     `<label class="ag-recovery-setting"><input id="agentAutoResume" type="checkbox"${agentsRecovery.enabled ? ' checked' : ''}> Resume connection failures automatically</label>` +
     `<div class="ag-recovery-help">${network.checkedAt ? esc(network.host + (network.state === 'reachable' ? ' reachable' : ' not reachable') + ' · checked ' + secs(now - network.checkedAt) + ' ago') + '. ' : ''}Checks run on the host laptop/server, even with this panel closed. Two successful checks before resuming. At most 3 attempts, within 24 hours. Deliberate stops and other errors stay stopped. Continuing can repeat work; check any uncertain results.</div></details>` : '';
-  const notificationsSec = jobsNotificationsHtml();
   // Browsing lists share the explicit scope. Inbox state never removes a
   // conversation from Chats: an unread/read chat still belongs to its project.
   const listed = pinnedKeys;
@@ -3842,40 +3830,37 @@ async function renderAgentsPop(refetch) {
       `<span class="ag-acts"><button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
   }).join('') + panelListMore('files', files.length);
   const readSec = panelListRows('read', recent).map(s => row(s, s.key, age(s), null, 'read')).join('') + panelListMore('read', recent.length);
-  const traffic = webSec + workSec + writeSec + delegatedSec + crossProjectWorkers + idleSec + otherSec;
+  const traffic = webSec + workSec + writeSec + delegatedSec + processRows(others.filter(p => p.busy === true));
+  const idleTraffic = idleSec + processRows(others.filter(p => p.busy !== true));
   const trafficCount = (traffic.match(/class="ag-row/g) || []).length;
   // Sections in order. Open ones flow from the top; folded ones dock at the
   // bottom with traffic and notifications (column only: the tray has no
   // free space to speak of, so there they stay in place).
-  const panel = sideLayoutOn() ? sidePanel() : 'tray';
   pop.dataset.panel = panel;
-  const filesHeading = panel === 'files' ? 'source' : 'files';
+  const filesHeading = ['files', 'recent-files'].includes(panel) ? 'source' : 'files';
   const filesBody = `<div class="ag-files-block"><div class="ag-files-head"><span class="ag-sub-sec">${filesHeading}</span><span class="ag-scope" role="group" aria-label="File activity source">${[['human', 'human'], ['agent', 'agents'], ['both', 'both']].map(([value, label]) => `<button data-files-actor="${value}" class="${fileActor === value ? 'on' : ''}" aria-pressed="${fileActor === value}" title="${value === 'human' ? 'Files opened or saved by a person in the editor' : value === 'agent' ? 'Files read, written or edited by agents, with successful tool results' : 'Human and agent activity, newest first'}">${label}</button>`).join('')}</span></div>${filesSec || '<div class="ag-empty">no matching file activity yet</div>'}</div>`;
   const recentConvBody = wroteSec || `<div class="ag-empty">${esc(scoped ? 'nothing written in ' + project + ' yet' : 'nothing written yet')}</div>`;
   const chatSections = [
     pinnedSec ? ['pinned', 'pinned', pinnedSec, { count: pinned.length, cls: 'ag-pinned' }] : null,
     ['recent', 'recent', recentConvBody, { count: wrote.length }],
   ].filter(Boolean);
-  const trafficSection = ['traffic', 'traffic', traffic, { count: trafficCount, cls: 'ag-traffic', dock: true, empty: 'no agent processes right now' }];
+  const trafficSection = ['traffic', 'Working now', traffic, { count: trafficCount, cls: 'ag-traffic', dock: true, empty: 'No agents working right now.' }];
   let flow, dock, tail = '', heading = '';
   const scopeCaption = `<div class="panel-scope-caption">${esc(ProjectScope.label(project))}</div>`;
-  if (panel === 'files') {
-    heading = '<div class="panel-title">Files</div>' + scopeCaption;
+  if (panel === 'files' || panel === 'recent-files') {
+    heading = '<div class="panel-title">' + (panel === 'files' ? 'Files' : 'Recent files') + '</div>' + (panel === 'files' ? scopeCaption : '<div class="panel-scope-caption">All projects on this machine</div>');
     flow = [['files', 'recent files', filesBody, { count: files.length }]]; dock = [];
   } else if (panel === 'traffic') {
-    heading = '<div class="panel-title">Agents</div>' + scopeCaption;
+    heading = '<div class="panel-title">Agents</div><div class="panel-scope-caption">All projects on this machine</div>';
     flow = [trafficSection]; dock = [];
+    tail = idleTraffic ? `<details class="ag-notifications"${agentIdleOpen ? ' open' : ''}><summary>Idle and other processes</summary>${idleTraffic}</details>` : '';
   } else if (panel === 'inbox') {
     const tab = inboxTab();
     heading = '<div class="panel-title">Inbox</div><div class="panel-scope-caption">All projects on this machine</div>' +
-      `<nav class="inbox-tabs" aria-label="Inbox sections">${[['unread', 'Unread' + (unread.length ? ' · ' + unread.length : '')], ['read', 'Read'], ['jobs', 'Jobs']].map(([id, label]) => `<button type="button" data-inbox-tab="${id}" aria-pressed="${tab === id}">${label}</button>`).join('')}</nav>`;
+      `<nav class="inbox-tabs" aria-label="Inbox sections">${[['unread', 'Unread' + (unread.length ? ' · ' + unread.length : '')], ['read', 'Read']].map(([id, label]) => `<button type="button" data-inbox-tab="${id}" aria-pressed="${tab === id}">${label}</button>`).join('')}</nav>`;
     flow = []; dock = [];
-    if (tab === 'jobs') {
-      const list = [...jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
-      tail = `<div class="ag-notification-list">${list.map(jobCardHtml).join('') || '<div class="ag-empty">No background jobs yet.</div>'}</div>`;
-    } else {
-      tail = `<section data-sec="${tab}"${tab === 'unread' ? ' class="ag-unread-tray"' : ''}><div class="ag-sec-body">${(tab === 'unread' ? unreadSec : readSec) || `<div class="ag-empty">${tab === 'unread' ? 'No unread replies.' : 'No read replies yet.'}</div>`}</div></section>` + (tab === 'unread' ? recoverySection : '');
-    }
+    tail = (tab === 'unread' && interruptedSec ? `<section class="ag-recovery"><div class="ag-sub-sec">Interrupted · needs attention</div>${interruptedSec}</section>` : '') +
+      `<section data-sec="${tab}"${tab === 'unread' ? ' class="ag-unread-tray"' : ''}><div class="ag-sec-body">${(tab === 'unread' ? unreadSec : readSec) || `<div class="ag-empty">${tab === 'unread' ? 'No unread replies.' : 'No read replies yet.'}</div>`}</div></section>` + (tab === 'unread' ? recoverySection : '');
   } else {
     heading = panel === 'tray'
       ? `<button type="button" class="tray-scope" data-project-scope-picker>${esc(ProjectScope.label(project))} ▾</button>`
@@ -3888,16 +3873,16 @@ async function renderAgentsPop(refetch) {
     const dockFolded = sideLayoutOn();
     flow = sections.filter(([id, , , o]) => !o.dock && (agentSecOpen(id) || !dockFolded));
     dock = sections.filter(([id, , , o]) => o.dock || (!agentSecOpen(id) && dockFolded));
-    if (panel === 'tray') tail = recoverySection + notificationsSec;
+    if (panel === 'tray') tail = interruptedSec + recoverySection;
   }
   $('agentsUnread').innerHTML = heading + flow.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('');
   $('agentsLegacy').innerHTML = dock.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('') + tail;
   renderPresenceMarks();
 
-  const recovery = pop.querySelector('.ag-recovery');
+  const recovery = pop.querySelector('details.ag-recovery');
   if (recovery) recovery.ontoggle = () => { agentRecoveryOpen = recovery.open; };
-  const notifications = pop.querySelector('.ag-notifications:not(.ag-recovery)');
-  if (notifications) notifications.ontoggle = () => { agentNotificationsOpen = notifications.open; };
+  const idle = pop.querySelector('.ag-notifications:not(.ag-recovery)');
+  if (idle) idle.ontoggle = () => { agentIdleOpen = idle.open; };
   const autoResume = $('agentAutoResume');
   if (autoResume) autoResume.onchange = async () => {
     autoResume.disabled = true;
@@ -3963,7 +3948,7 @@ function agentsPopKeydown(e) {
   if (e.key === 'Enter') {
     e.preventDefault();
     const row = selectAgentRow(agentsSelectedKey, false);
-    if (row) { toggleAgents(false); open(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined); }
+    if (row) { toggleAgents(false); openPanelConversation(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined); }
     return true;
   }
   // Inbox marks on the row under the cursor (design/42).
@@ -4013,7 +3998,7 @@ function toggleAgents(show) {
     agentsSelectedKey = null;
     renderAgentsPop(true);
     agentsTimer = setInterval(() => renderAgentsPop(true), 15000);
-  } else agentNotificationsOpen = false;
+  }
   delegationUI.visibilityChanged();
 }
 // One menu per conversation row: pin, mark unread, remove. Same surface as
@@ -4148,7 +4133,7 @@ $('agentsPop').onclick = async e => {
   if (!row || !row.dataset.key) return;
   toggleAgents(false);
   // An unread reply opens at the start of the answer, ready to read.
-  open(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined);
+  openPanelConversation(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined);
 };
 
 // Load the next page near its button. Closed sections never trigger this;
@@ -4467,7 +4452,7 @@ const PROJECT_LANE_H = 32;
 const PROJECT_GUTTER = 168;
 const PROJECT_GUTTER_PHONE = 34; // phones: thin strip, vertical names
 const projectGutterW = () => phoneDevice() ? PROJECT_GUTTER_PHONE : PROJECT_GUTTER;
-const LABEL_H = 18;   // top gutter for day labels
+const LABEL_H = 32;   // separate lines for date/time labels and the now marker
 const MARGIN_L = 8;
 const MARGIN_R = 60;  // room past "now" for labels
 const LANE_W = 42;    // horizontal pixels per lane (left layout)
@@ -5114,7 +5099,7 @@ function timelineGrid(list, rows) {
   const xFor = t => gutter + spanPx - (now - t) / DAY_MS * scale;
   pos1 = xFor;
   const nx = xFor(now);
-  const nowLine = `<g class="tnow"><line x1="${nx}" y1="0" x2="${nx}" y2="${chartH}"/><text x="${nx - 4}" y="11" text-anchor="end">now</text></g>`;
+  const nowLine = `<g class="tnow"><line x1="${nx}" y1="0" x2="${nx}" y2="${chartH}"/><text x="${nx + 6}" y="26">now</text></g>`;
   const projectRows = projects ? projects.map(row => {
     const y = LABEL_H + (row.baseLane + row.laneCount) * PROJECT_LANE_H;
     return `<g class="tday"><line x1="0" y1="${y}" x2="${chartW}" y2="${y}"/></g>`;
@@ -11050,9 +11035,13 @@ async function renderSettingsSnippets() {
   host.querySelectorAll('.snip-open').forEach(b => b.onclick = () => openDocument(b.dataset.path));
 }
 
+// Browser path only: inside the Android app the picker never reaches
+// this (the app decodes pictures natively and calls aiconvoAcceptImage).
+// A browser decodes the whole photo before the canvas shrinks it, so very
+// large files are refused up front rather than failing part-way.
 function fileToImage(file) {
   return new Promise((resolve, reject) => {
-    if (file && file.size > 12 * 1024 * 1024) return reject(new Error('Image is too large.'));
+    if (file && file.size > 48 * 1024 * 1024) return reject(new Error('That image is over 48 MB — too large to attach from a browser.'));
     const url = URL.createObjectURL(file);
     const im = new Image();
     im.onload = () => {
@@ -11081,7 +11070,8 @@ function fileToImage(file) {
     };
     im.onerror = () => {
       try { URL.revokeObjectURL(url); } catch {}
-      reject(new Error('Could not read image.'));
+      const name = file && file.name ? ` (${file.name})` : '';
+      reject(new Error(`This browser could not decode that image${name}. HEIC photos and very large photos need the Aiconvo app, or a JPEG/PNG copy.`));
     };
     im.src = url;
   });
@@ -11104,13 +11094,15 @@ async function addAgentFiles(files) {
   // Snapshot: a FileList is live. Clearing the input mid-loop (or a GC'd
   // DataTransfer) would drop every file after the first await.
   const picked = [...(files || [])];
-  try {
-    for (const file of picked) {
-      if (!file || (file.type && !String(file.type).startsWith('image/'))) continue;
-      if (window._agentImages.length >= 8) break;
-      window._agentImages.push(await fileToImage(file));
-    }
-  } catch (e) { errToast(e.message || 'Could not add image.'); }
+  let firstError = null;
+  for (const file of picked) {
+    if (!file || (file.type && !String(file.type).startsWith('image/'))) continue;
+    if (window._agentImages.length >= 8) { errToast('Up to 8 images per message.'); break; }
+    // One bad file must not drop the ones picked after it.
+    try { window._agentImages.push(await fileToImage(file)); }
+    catch (e) { firstError = firstError || e; }
+  }
+  if (firstError) errToast(firstError.message || 'Could not add image.');
   renderAgentThumbs();
 }
 
@@ -11198,16 +11190,19 @@ async function agentLiveKeys(data) {
   window._agentLiveOn = true;
 }
 
-window.aiconvoAcceptImage = function (mime, b64) {
+// The Android app attaches pictures through here: pasted ones, and those
+// picked with "Attach image" (the app decodes them itself; see
+// android/.../ImageIngest.kt). The page never sees the original file.
+window.aiconvoAcceptImage = function (mime, b64, name) {
   try {
     if (!b64) return;
     window._agentImages = window._agentImages || [];
-    if (window._agentImages.length >= 8) return;
+    if (window._agentImages.length >= 8) { errToast('Up to 8 images per message.'); return; }
     const kind = mime || 'image/jpeg';
     window._agentImages.push({
       mime: kind,
       data: b64,
-      name: 'paste.jpg',
+      name: (typeof name === 'string' && name) || 'paste.jpg',
       preview: 'data:' + kind + ';base64,' + b64,
     });
     renderAgentThumbs();
@@ -14356,6 +14351,7 @@ const SETTINGS_PANES = [
   ['machines', 'machines', 'Other aiconvo installs to switch to.'],
   ['people', 'people', 'Who is admitted on this machine, and their links.'],
   ['appearance', 'appearance', 'Colors for the app and for pi views.'],
+  ['jobs', 'background jobs', 'Routine indexing, notes, memory and other background work.'],
   ['advanced', 'advanced', 'Engine, settings file, overrides.'],
 ];
 
@@ -14735,7 +14731,7 @@ function paneAppearance() {
     </div>
     <h3>layout on this device</h3>
     ${setOptionsHtml('setLayout', [
-      { value: 'top', name: 'top bar', desc: 'One bar across the top; agents, replies, and notifications open as a tray (a).' },
+      { value: 'top', name: 'top bar', desc: 'One bar across the top; agents and replies open as a tray (a).' },
       { value: 'side', name: 'side panel', desc: 'A column on the left that stays open: home, new conversation, pinned and unread replies, agents, recent files. The top bar goes away; a conversation keeps its title strip. Phones keep the top bar.' },
     ], layoutPref())}
     <div class="set-help">Saved in this browser, like the theme, so a phone and a desk can differ.</div>
@@ -14793,6 +14789,23 @@ function bindPaneAdvanced(root) {
   };
 }
 
+function paneJobs() {
+  return '<h2>Background jobs</h2><p class="lead">Routine background work stays here. Only agent replies and failures ask for your attention.</p><div id="backgroundJobs"></div>';
+}
+function renderBackgroundJobs() {
+  const host = $('backgroundJobs');
+  if (!host) return;
+  const focused = document.activeElement?.closest('[data-job]')?.dataset.job;
+  const list = [...jobs.values()].sort((a, b) => b.startedAt - a.startedAt);
+  host.innerHTML = list.map(jobCardHtml).join('') || '<p class="hint">No background jobs yet.</p>';
+  host.querySelectorAll('[data-job]').forEach(card => {
+    card.tabIndex = 0; card.setAttribute('role', 'button');
+    card.onclick = () => openJobNotification(jobs.get(card.dataset.job));
+    card.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } };
+    if (card.dataset.job === focused) card.focus({ preventScroll: true });
+  });
+}
+
 const SETTINGS_PANE_RENDER = {
   model: [paneModel, bindPaneModel],
   sound: [paneSound, bindPaneSound],
@@ -14801,6 +14814,7 @@ const SETTINGS_PANE_RENDER = {
   machines: [paneMachines, bindPaneMachines],
   people: [panePeople, bindPanePeople],
   appearance: [paneAppearance, bindPaneAppearance],
+  jobs: [paneJobs, renderBackgroundJobs],
   advanced: [paneAdvanced, bindPaneAdvanced],
 };
 
@@ -14813,7 +14827,7 @@ function renderSettings() {
       <div class="sep"></div>
       <button type="button" data-go="usage" title="Tokens, cost estimates, and subscription value">usage and cost →</button>
     </nav>
-    <section class="settings-pane">${settingsState && settingsState.canEditSettings === false && !['people', 'appearance'].includes(settingsPane) ? `<div class="set-readonly hint">These are ${esc((settingsState.hostname || 'this machine'))}'s settings; only its owner or an admin can change them. Your appearance choices stay yours.</div>` : ''}${settingsState ? paint() : '<div class="empty">loading settings…</div>'}</section>
+    <section class="settings-pane">${settingsState && settingsState.canEditSettings === false && !['people', 'appearance', 'jobs'].includes(settingsPane) ? `<div class="set-readonly hint">These are ${esc((settingsState.hostname || 'this machine'))}'s settings; only its owner or an admin can change them. Your appearance choices stay yours.</div>` : ''}${settingsState ? paint() : '<div class="empty">loading settings…</div>'}</section>
   </div>`;
   const root = $('settingsRoot');
   root.querySelectorAll('.settings-nav [data-pane]').forEach(b => b.onclick = () => showSettingsPane(b.dataset.pane));
@@ -15002,6 +15016,33 @@ $('railMachine').onclick = e => {
   $('railMachine').setAttribute('aria-expanded', String(!$('machinePop').hidden));
 };
 $('sideHome').onclick = () => $('brand').click();
+// A check-in is a detour, not a replacement for the page being worked on.
+// Keep the original history entry even across several agent check-ins.
+let workReturnId = sessionStorage.getItem('aiconvo.workReturn') || null;
+function paintWorkReturn() {
+  const target = nav.entries().find(e => e.id === workReturnId);
+  if (!target || target.id === nav.current()?.id) { workReturnId = null; sessionStorage.removeItem('aiconvo.workReturn'); }
+  $('returnToWork').hidden = !workReturnId;
+  $('returnToWork').title = target ? 'Return to ' + (describeRoute(target.hash).title || target.title || 'Home') : 'Return to work';
+}
+function openAgentCheck(key, scroll) {
+  if (!key) return;
+  if (key !== activeRel || viewKind !== 'conversation') {
+    if (!workReturnId || nav.current()?.id === workReturnId) {
+      workReturnId = nav.current()?.id || null;
+      if (workReturnId) sessionStorage.setItem('aiconvo.workReturn', workReturnId);
+    }
+  }
+  return open(key, scroll);
+}
+function openPanelConversation(key, scroll) {
+  return !sideLayoutOn() || ['inbox', 'traffic'].includes(sidePanel()) ? openAgentCheck(key, scroll) : open(key, scroll);
+}
+$('returnToWork').onclick = () => {
+  const index = nav.entries().findIndex(e => e.id === workReturnId);
+  if (index >= 0) nav.go(index - nav.index());
+};
+nav.onChange(paintWorkReturn);
 // ‹ › in the bar and in the column: one stack, every pair in step.
 const navButtons = Navigation.mount(nav, {
   back: [$('navBack'), $('sideBack')], forward: [$('navFwd'), $('sideFwd')],
@@ -15028,7 +15069,8 @@ function renderSideNew() {
   const scope = workspaceScope();
   $('sideProject').hidden = false;
   $('sideProject').querySelector('span').textContent = ProjectScope.label(scope);
-  $('sideProject').title = 'Project scope: ' + ProjectScope.label(scope) + '. Applies to Chats, Files and Agents. Inbox always covers this machine.';
+  $('sideProject').title = 'Choose a project · ' + ProjectScope.label(scope) + '. Filters Chats and Files only. Inbox, Agents and Recent always cover all projects.';
+  $('sideProject').setAttribute('aria-label', $('sideProject').title);
 }
 let workspacePickerClose = null;
 function openWorkspaceProjectPicker(anchor = $('sideProject')) {
@@ -15036,7 +15078,7 @@ function openWorkspaceProjectPicker(anchor = $('sideProject')) {
   document.querySelectorAll('.mpick').forEach(el => el.remove());
   const pop = document.createElement('div');
   pop.className = 'mpick project-scope-picker'; pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Choose project scope');
-  pop.innerHTML = '<div class="mp-top"><input type="search" class="mp-filter" aria-label="Find a project" placeholder="Find a project"></div><div class="mp-list"></div><div class="mp-foot"><span class="hint">Scope for Chats, Files and Agents. Inbox always covers all projects on this machine.</span></div>';
+  pop.innerHTML = '<div class="mp-top"><input type="search" class="mp-filter" aria-label="Find a project" placeholder="Find a project"></div><div class="mp-list"></div><div class="mp-foot"><span class="hint">Open a project and browse its Chats and Files. Inbox, Agents and Recent always cover all projects.</span></div>';
   document.body.appendChild(pop); anchor.setAttribute('aria-expanded', 'true');
   const input = pop.querySelector('input'), list = pop.querySelector('.mp-list');
   const close = (focus = false) => {
@@ -15073,6 +15115,21 @@ function openWorkspaceProjectPicker(anchor = $('sideProject')) {
   loadSidebarProjectCatalog().then(paint);
 }
 $('sideProject').onclick = e => { e.stopPropagation(); openWorkspaceProjectPicker(); };
+function toggleHomeFilters() {
+  if (viewKind !== 'home') goHome();
+  const pop = $('filtersPop');
+  pop.hidden = !pop.hidden;
+  if (!pop.hidden) {
+    const anchor = $('projSort').checkVisibility() ? $('projSort') : document.querySelector('body > header');
+    const r = anchor.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8)) + 'px';
+    pop.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - pop.offsetHeight - 8)) + 'px';
+    $('src').focus();
+  }
+}
+$('homeFilters').onclick = e => { e.stopPropagation(); toggleHomeFilters(); };
+new MutationObserver(() => $('homeFilters').setAttribute('aria-expanded', String(!$('filtersPop').hidden)))
+  .observe($('filtersPop'), { attributes: true, attributeFilter: ['hidden'] });
 $('sideNew').onclick = startScopedConversation;
 $('sideNewMore').onclick = e => {
   e.stopPropagation();
@@ -15690,7 +15747,7 @@ function helpNow() {
   // Open panels sit on top of the view.
   if (settingsOpen) sections.push({ label: 'settings', keys: [['esc / ,', 'back to where you were']] });
   if (!$('filtersPop').hidden) sections.push({ label: 'filters', keys: [['esc / f', 'close the filters']] });
-  if (agentsTrayOpen()) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['p', 'pin / unpin'], ['u', 'mark unread / read'], ['del', 'remove from the inbox'], ['j', 'toggle notifications'], ['esc / a', sideLayoutOn() ? 'leave the side panel' : 'close the agents panel']] });
+  if (agentsTrayOpen()) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['p', 'pin / unpin'], ['u', 'mark unread / read'], ['del', 'remove from the inbox'], ['j', 'background jobs in Settings'], ['esc / a', sideLayoutOn() ? 'leave the side panel' : 'close the agents panel']] });
 
   // The view itself.
   if (document.body.classList.contains('file-full')) {
@@ -16019,15 +16076,7 @@ document.addEventListener('keydown', e => {
     }
     case '1': case '2': case '3': goHome(); setTab(['conv', 'notes', 'epics'][Number(e.key) - 1]); break;
     case '4': goHome(); setTab('repos'); break;
-    case 'f': {
-      // Filters narrow the home list; away from home the key goes home first.
-      e.preventDefault();
-      if (viewKind !== 'home') goHome();
-      const pop = $('filtersPop');
-      pop.hidden = !pop.hidden;
-      if (!pop.hidden) $('src').focus();
-      break;
-    }
+    case 'f': e.preventDefault(); toggleHomeFilters(); break;
     case '+': case '=': zoomBy(1.4); break;
     case '-': case '_': zoomBy(1 / 1.4); break;
     case '0': zoomTo(1); break;
@@ -16039,7 +16088,7 @@ document.addEventListener('keydown', e => {
       if (viewKind === 'conversation' && gotoMatch(-1)) e.preventDefault();
       break;
     case 'b': jumpToStart(); break;
-    case 't': if (!$('ganttBar').checkVisibility()) break; e.preventDefault(); $('ganttDate').focus(); break;
+    case 't': if (!$('ganttDate').checkVisibility()) break; e.preventDefault(); $('ganttDate').focus(); break;
     case 'a': toggleAgents(); break;
     case '`': e.preventDefault(); sideLayoutOn() ? setSideFold(!sideFolded()) : setBarFold(!barFolded()); break;
     case ',': e.preventDefault(); settingsOpen ? closeSettings() : showSettings(); break;
@@ -16320,21 +16369,8 @@ live.onmessage = ev => {
     if (d.job.status === 'done' && (!old || old.status === 'running' || (d.job.type === 'memory-health' && old.status === 'error')) && !d.job.parentId) {
       if (d.job.type === 'epic') relatedCache.clear();
       else if (d.job.key) relatedCache.delete(d.job.key);
-      const label = d.job.type === 'epic' ? 'epic saved' :
-        d.job.type === 'evidence' ? 'evidence ready' :
-        d.job.type === 'project-distill' ? 'all project notes ready' :
-        d.job.type === 'memory-extract' ? (d.job.result?.paused ? 'memory extraction paused' : 'memory leaves saved') :
-        d.job.type === 'memory-docs' ? 'memory documents regenerated' :
-        d.job.type === 'memory-backfill' ? (d.job.result?.paused ? 'leaf backfill paused' : 'leaf backfill finished') :
-        d.job.type === 'memory-health' ? 'memory model recovered' :
-        d.job.type === 'agent-run' ? 'model run finished' : 'note saved';
-      toast('✓ ' + label + ': ' + d.job.title, () => {
-        if (d.job.type === 'epic') showEpic(d.job.epicId);
-        else if (d.job.type === 'evidence' && (d.job.result?.sessionIds?.length === 1 || d.job.key)) showConversationEvidence(d.job.key || d.job.result.sessionIds[0]);
-        else if (d.job.type === 'project-distill' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') showProjectOverview(d.job.project);
-        else if (d.job.type === 'agent-run') open(d.job.key, 'bottom');
-        else if (d.job.type === 'distill') startDistill(d.job.key);
-      }, 'ok');
+      if (d.job.type === 'agent-run') toast('✓ Reply ready: ' + d.job.title,
+        () => openAgentCheck(d.job.fanoutRootKey || d.job.key, 'reply'), 'ok');
       if ((d.job.type === 'project-distill' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && d.job.project && viewKind === 'project' && projectOverviewName === d.job.project) {
         showProjectOverview(d.job.project);
       } else if (d.job.type === 'memory-extract' && viewKind === 'project' && projectOverviewName && projectMemoryJobTouches(d.job, projectOverviewName)) {
@@ -16344,8 +16380,8 @@ live.onmessage = ev => {
         showEpic(d.job.epicId);
       }
     }
-    if (d.job.status === 'error' && (!old || old.status === 'running') && !d.job.parentId) {
-      errToast((d.job.type === 'epic' ? 'epic failed: ' : d.job.type === 'project-distill' ? 'project notes failed: ' : d.job.type === 'memory-extract' ? 'leaf extraction failed: ' : d.job.type === 'memory-docs' ? 'document regeneration failed: ' : d.job.type === 'memory-backfill' ? 'leaf backfill failed: ' : d.job.type === 'memory-health' ? 'memory model paused: ' : d.job.type === 'agent-run' ? 'model run failed: ' : 'distillation failed: ') + (d.job.statusText || d.job.title || 'unknown error'));
+    if (d.job.type === 'agent-run' && d.job.status === 'error' && (!old || old.status === 'running') && !d.job.parentId) {
+      toast('Agent stopped: ' + (d.job.statusText || d.job.title || 'unknown error'), () => openAgentCheck(d.job.fanoutRootKey || d.job.key, 'bottom'), 'err');
     }
     return;
   }

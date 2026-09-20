@@ -77,6 +77,9 @@ class MainActivity : AppCompatActivity() {
     // The pending <input type=file> callback. The WebView contract: answer
     // exactly once, with null on cancel, or the page never opens a picker again.
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    // True when the input accepts only images: the picked files are then
+    // decoded here (see ImageIngest) instead of being handed to the page.
+    private var fileChooserWantsImages = false
     private var fullscreenView: View? = null
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
     private var visibleBarsBeforeFullscreen = 0
@@ -306,6 +309,8 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 fileChooserCallback?.onReceiveValue(null)
                 fileChooserCallback = callback
+                val accepts = params?.acceptTypes?.filter { it.isNotBlank() } ?: emptyList()
+                fileChooserWantsImages = accepts.isNotEmpty() && accepts.all { it.trim().startsWith("image/") }
                 val intent = try {
                     params?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
@@ -427,12 +432,40 @@ class MainActivity : AppCompatActivity() {
         if (requestCode != FILE_CHOOSER_REQUEST) return
         val cb = fileChooserCallback ?: return
         fileChooserCallback = null
+        val wantsImages = fileChooserWantsImages
+        fileChooserWantsImages = false
         val uris = mutableListOf<Uri>()
         if (resultCode == RESULT_OK && data != null) {
             data.clipData?.let { clip -> for (i in 0 until clip.itemCount) uris.add(clip.getItemAt(i).uri) }
             if (uris.isEmpty()) data.data?.let { uris.add(it) }
         }
-        cb.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
+        if (!wantsImages || uris.isEmpty()) {
+            cb.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray())
+            return
+        }
+        // Pictures never reach the page as files. The WebView would decode a
+        // 30 MB camera shot in full (and cannot read HEIC at all); the app
+        // decodes each one at a sampled size and attaches a small JPEG
+        // through the same hook that pasted images use. The input itself
+        // sees a cancel, which is the answer the WebView contract allows.
+        cb.onReceiveValue(null)
+        ingestPickedImages(uris)
+    }
+
+    private fun ingestPickedImages(uris: List<Uri>) {
+        Thread({
+            var failed = 0
+            for (uri in uris) {
+                val jpeg = try { ImageIngest.toJpeg(this, uri) } catch (_: Throwable) { null }
+                if (jpeg == null) { failed++; continue }
+                val name = (ImageIngest.displayName(this, uri) ?: "photo").substringBeforeLast('.') + ".jpg"
+                ImageIngest.inject(web, jpeg, name)
+            }
+            if (failed > 0) runOnUiThread {
+                val what = if (uris.size == 1) "that picture" else "$failed of ${uris.size} pictures"
+                Toast.makeText(this, "Could not read $what.", Toast.LENGTH_LONG).show()
+            }
+        }, "aiconvo-pick").start()
     }
 
     override fun onRequestPermissionsResult(

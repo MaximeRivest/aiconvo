@@ -2,12 +2,9 @@ package app.aiconvo
 
 import android.content.ClipboardManager
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.util.AttributeSet
-import android.util.Base64
 import android.view.ActionMode
 import android.view.KeyEvent
 import android.view.Menu
@@ -17,7 +14,6 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.InputContentInfo
 import android.webkit.WebView
-import java.io.ByteArrayOutputStream
 import kotlin.concurrent.thread
 
 class PasteSafeWebView @JvmOverloads constructor(
@@ -102,35 +98,11 @@ class PasteSafeWebView @JvmOverloads constructor(
             m.contains("jpg") || m.contains("webp")
     }
 
+    // Same decoder as the file picker: sampled, upright, HEIC-capable.
     private fun injectImageUri(uri: Uri) {
         thread(name = "aiconvo-paste") {
-            val jpeg = decodeSampledJpeg(uri) ?: return@thread
-            val b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
-            post {
-                evaluateJavascript(
-                    "window.aiconvoAcceptImage&&window.aiconvoAcceptImage('image/jpeg','$b64')",
-                    null
-                )
-            }
-        }
-    }
-
-    private fun decodeSampledJpeg(uri: Uri): ByteArray? {
-        val resolver = context.contentResolver
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sample = 1
-        val max = 960
-        while (bounds.outWidth / sample > max || bounds.outHeight / sample > max) sample *= 2
-        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        val bmp = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) } ?: return null
-        return try {
-            val out = ByteArrayOutputStream()
-            bmp.compress(Bitmap.CompressFormat.JPEG, 72, out)
-            out.toByteArray()
-        } finally {
-            bmp.recycle()
+            val jpeg = try { ImageIngest.toJpeg(context, uri) } catch (_: Throwable) { null } ?: return@thread
+            ImageIngest.inject(this, jpeg, "paste.jpg")
         }
     }
 }

@@ -45,6 +45,10 @@ test('one explicit project scope for browsing; a machine-wide Inbox; scope-aware
   assert.deepEqual(await ev(`[...document.querySelectorAll('.ag-file')].map(r=>r.dataset.path)`), [paths.alpha]);
   await pick('beta'); await ev(`setSidePanel('files');renderAgentsPop(false)`);
   assert.deepEqual(await ev(`[...document.querySelectorAll('.ag-file')].map(r=>r.dataset.path)`), [paths.beta]);
+  await ev(`setSidePanel('recent-files')`);
+  assert.deepEqual(await ev(`[...document.querySelectorAll('.ag-file')].map(r=>r.dataset.path).sort()`), Object.values(paths).sort(), 'Recent ignores project scope');
+  assert.equal(await ev(`document.querySelector('.ag-files-block').checkVisibility()`), true);
+  assert.equal(await ev(`workspaceScope()`), 'beta', 'global recents does not change the selected project');
   assert.equal(await ev(`$('sideNew').querySelector('span').textContent`), 'new here', 'new here follows the chosen project, not a stale chat');
   await pick(''); await ev(`setSidePanel('files');renderAgentsPop(false)`);
   assert.equal(await ev(`document.querySelectorAll('.ag-file').length`), 2);
@@ -80,10 +84,10 @@ test('one explicit project scope for browsing; a machine-wide Inbox; scope-aware
   assert.equal(await ev(`!!document.querySelector('[data-sec=unread],[data-sec=read]')`), false);
   assert.deepEqual(await ev(`[...document.querySelectorAll('#agentsPop .ag-row[data-key]')].map(r=>r.dataset.key)`), [keys.alpha], 'read history no longer steals a chat from its project list');
 
-  // Agents and their badges obey the same scope; unknown processes are global.
+  // Agents and their badges stay global even when browsing one project.
   await ev(`window.savedScopeProcs=agentsProcs;agentsProcs=[{pid:99101,key:${JSON.stringify(keys.alpha)},kind:'pi',owner:'fixture',busy:false,title:'alpha worker'},{pid:99102,key:${JSON.stringify(keys.beta)},kind:'pi',owner:'fixture',busy:false,title:'beta worker'},{pid:99103,kind:'pi',owner:'fixture',busy:false,title:'unknown worker'}];setSidePanel('traffic');updateActiveBtn()`);
-  assert.equal(await ev(`$('agentsPop').textContent.includes('beta worker') || $('agentsPop').textContent.includes('unknown worker')`), false);
-  assert.equal(await ev(`railBadgeState.traffic`), 1);
+  assert.equal(await ev(`$('agentsPop').textContent.includes('beta worker') && $('agentsPop').textContent.includes('unknown worker')`), true);
+  assert.equal(await ev(`railBadgeState.traffic`), 3);
   await pick(''); await ev(`setSidePanel('traffic');renderAgentsPop(false);updateActiveBtn()`);
   assert.equal(await ev(`$('agentsPop').textContent.includes('unknown worker')`), true);
   assert.equal(await ev(`railBadgeState.traffic`), 3);

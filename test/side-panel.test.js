@@ -111,8 +111,10 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   assert.equal(await evaluate(`document.querySelector('#agentsPop').hidden`), false);
   assert.equal(await evaluate(`document.querySelector('#settingsBtn').closest('#sideRail') !== null`), true, 'settings moved to the rail');
   assert.equal(await evaluate(`getComputedStyle(document.querySelector('#side')).width`), '344px');
-  // Two levels: a rail of sections with the machine on top, and one panel at a time.
-  assert.deepEqual(await evaluate(`[...document.querySelectorAll('#sideRail [data-rail]')].map(b=>b.dataset.rail+':'+b.getAttribute('aria-pressed'))`), ['projects:false', 'conversations:true', 'files:false', 'traffic:false', 'inbox:false']);
+  // Global work first; the project browser is secondary.
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('#sideRail [data-rail]')].map(b=>b.dataset.rail+':'+b.getAttribute('aria-pressed'))`), ['inbox:true', 'traffic:false', 'recent-files:false', 'projects:false', 'conversations:false', 'files:false']);
+  assert.equal(await evaluate(`$('agentsPop').dataset.panel`), 'inbox');
+  await evaluate(`setSidePanel('conversations')`);
   assert.equal(await evaluate(`$('railMachine').querySelector('.rail-initials').textContent.length>0 && $('railMachine').closest('#sideRail')!==null`), true, 'the machine anchors the rail like a workspace');
   assert.equal(await evaluate(`$('agentsPop').dataset.panel`), 'conversations');
   assert.equal(await evaluate(`!!document.querySelector('.ag-files-block')`), false, 'files are not mixed into the chats panel');
@@ -355,7 +357,9 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   await evaluate(`document.querySelector('#sideRail [data-rail=traffic]').click()`);
   assert.equal(await evaluate(`!!document.querySelector('[data-sec=traffic]') && !document.querySelector('.ag-unread-tray')`), true, 'traffic panel shows processes only');
   await evaluate(`toggleJobs(true)`);
-  assert.equal(await evaluate(`$('agentsPop').dataset.panel + '|' + !!document.querySelector('.ag-notification-list')`), 'inbox|true', 'j opens the Inbox Jobs tab');
+  assert.equal(await evaluate(`settingsOpen && settingsPane === 'jobs' && !!$('backgroundJobs')`), true, 'j opens Background jobs in Settings');
+  await evaluate(`closeSettings()`);
+  await until(`!settingsOpen`);
   await evaluate(`document.querySelector('#sideRail [data-rail=conversations]').click()`);
   assert.equal(await evaluate(`!document.querySelector('.ag-unread-tray') && !!document.querySelector('[data-sec=recent]') && !document.querySelector('[data-sec=traffic]') && !document.querySelector('.ag-notification-list')`), true, 'chats panel holds only conversations');
   assert.equal((await (await fetch(base + '/api/recent-files')).json()).files[0].kind, 'opened');

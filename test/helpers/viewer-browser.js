@@ -67,7 +67,9 @@ async function viewerBrowser(t) {
     await command('Emulation.setTouchEmulationEnabled', { enabled: mobile });
   };
   await command('Runtime.enable'); await command('Network.enable'); await command('Page.enable');
-  await size(1440, 1000); await command('Page.navigate', { url: base }); await until(`typeof openLiveFile==='function'`);
+  await size(1440, 1000); await command('Page.navigate', { url: base });
+  // openLiveFile is in an earlier external script; wait for the main app too.
+  await until(`typeof openLiveFile==='function' && typeof load==='function'`);
   const open = async (file, opts = {}) => {
     await evaluate(`openLiveFile(${JSON.stringify(path.join(work, file))}, ${JSON.stringify({ project: 'work', back: 'pi:fixture/media.jsonl', ...opts })})`);
   };
