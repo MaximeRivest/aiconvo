@@ -88,6 +88,13 @@ function loadLanToken() {
   return created;
 }
 let LAN_TOKEN = loadLanToken();
+// What stands in front of the sign-in once a door is open to the internet
+// (design/56): a limiter on failed proofs, a log of every outcome, and the
+// headers every answer carries.
+const authGuard = require('./authguard.js');
+const frontDoor = require('./frontdoor.js');
+const signInLimiter = authGuard.createLimiter();
+const signInLog = authGuard.createAuthLog(path.join(os.homedir(), '.local', 'share', 'aiconvo', 'sign-ins.jsonl'));
 function requestIp(req) {
   return String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
 }
@@ -3914,7 +3921,9 @@ const agentRecovery = new recoveryLib.AgentRecovery({
     return startAgentRun(r.key, {
       ...(slash > 0 ? { provider: r.model.slice(0, slash), modelId: r.model.slice(slash + 1) } : {}),
       expectedVersion: r.version, recoveryAttempts: attempts,
-      message: 'Continue the interrupted task from the saved conversation. First check the latest tool results and current state; do not repeat actions that already succeeded. If an action may have completed but its result is missing, verify its effects before retrying. If the task is already complete, report that instead.',
+      // Read at launch time, so a prompt saved in Settings applies to the
+      // next resume without a restart.
+      message: appSettings.resumePrompt || settingsLib.DEFAULT_RESUME_PROMPT,
     });
   },
 });
@@ -4610,13 +4619,23 @@ async function connectMachine(link) {
   return { name, url: parsed.url, registeredBack, why, myUrl };
 }
 
+// The doors as tailscale reports them, plus what the settings say. Cached
+// for five seconds: the settings page and the invite dialog both ask.
+let doorsCache = { at: 0, value: null };
+async function doorsResponse() {
+  if (Date.now() - doorsCache.at < 5000 && doorsCache.value) return doorsCache.value;
+  const state = await frontDoor.doorState({ exec: (f, a) => execText(f, a, { timeout: 8000 }), port: PORT });
+  const value = { ...state, wanted: !!appSettings.publicDoor, hasApiKey: !!appSettings.tailscaleApiKey, publicUrl: PUBLIC_URL || '' };
+  doorsCache = { at: Date.now(), value };
+  return value;
+}
 function settingsResponse(identity = ownerIdentity()) {
   const piDefault = readPiDefault();
   const manages = usersLib.canManageUsers(identity);
   return {
     // Members see the settings without the secrets: another machine's
     // token is the owner's to hold.
-    settings: manages ? appSettings : { ...appSettings, machines: (appSettings.machines || []).map(m => ({ name: m.name, url: m.url, token: '', publicKey: m.publicKey || '', hasToken: !!m.token })) },
+    settings: manages ? appSettings : { ...appSettings, tailscaleApiKey: '', machines: (appSettings.machines || []).map(m => ({ name: m.name, url: m.url, token: '', publicKey: m.publicKey || '', hasToken: !!m.token })) },
     me: usersLib.publicUser(identity.user),
     tier: identity.tier,
     users: publicUsers(),
@@ -8765,7 +8784,7 @@ function broadcastFileActivity(ev) {
     // People have this file open as a shared text: an agent's (or git's)
     // write on disk becomes one minimal edit in it, cursors kept.
     if (collab.has('file:' + ev.path)) {
-      fsp.readFile(ev.path, 'utf8').then(text => { if (!text.includes('\0')) collab.setText('file:' + ev.path, text); }).catch(() => {});
+      fsp.readFile(ev.path, 'utf8').then(text => { if (!text.includes('\0')) collab.fromDisk('file:' + ev.path, text); }).catch(() => {});
     }
   }, 250);
   ledgerBroadcastPending.set(key, { timer });
@@ -10283,8 +10302,10 @@ async function fileSaveResponse(body, user = null) {
       recentFilesTouch(abs, { project: String(body.project || ''), kind: actor === 'human' ? 'saved' : 'edited', actor });
     }
   }
-  // The shared copy, if anyone has this file open, follows the disk.
-  if (!body.fromCollab && collab.has('file:' + abs)) collab.setText('file:' + abs, text);
+  // The shared copy, if anyone has this file open, follows the disk. A save
+  // that came from the shared text itself is only remembered, so the
+  // watcher's echo of it is not mistaken for an outside change.
+  if (collab.has('file:' + abs)) { if (body.fromCollab) collab.markSaved('file:' + abs, text); else collab.fromDisk('file:' + abs, text); }
   return { ok: true, path: abs, sha: sha256Hex(text), historyWarning };
 }
 
@@ -10359,12 +10380,15 @@ async function docSaveResponse(body, user = null) {
       actor: DOC_ACTORS.has(body.actor) ? body.actor : 'human', input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
       archiveFrom, archiveTo: historyWarning ? null : fileArchive?.latestId(abs), user: body.actor === 'ai' ? null : user,
     });
-    if (!body.fromCollab && collab.has('file:' + abs)) collab.setText('file:' + abs, text);
     if (!DOC_ACTORS.has(body.actor) || body.actor !== 'runtime') {
       const actor = body.actor === 'ai' || body.actor === 'external-agent' ? 'agent' : 'human';
       recentFilesTouch(abs, { project: String(body.project || ''), kind: actor === 'human' ? 'saved' : 'edited', actor });
     }
   }
+  // The shared copy, if anyone has this file open, follows the disk. A save
+  // that came from the shared text itself is only remembered (the disk now
+  // holds it), so the watcher's echo of it is not taken for an outside change.
+  if (collab.has('file:' + abs)) { if (body.fromCollab) collab.markSaved('file:' + abs, text); else collab.fromDisk('file:' + abs, text); }
   return { ok: true, path: abs, sha: sha256Hex(text), changed: oldText !== text, historyWarning };
 }
 
@@ -13011,11 +13035,29 @@ async function handleRequest(req, res) {
     // Who is asking. A credential in the URL (an invite link, the install
     // token) or a signed handoff from a paired install becomes a cookie;
     // after that the cookie names the person on every request.
-    const setSignInCookie = (secret, next) => {
-      res.writeHead(302, {
-        Location: next || '/',
-        'Set-Cookie': `aiconvo=${encodeURIComponent(secret)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`,
-      });
+    const clientIp = authGuard.clientAddress(req);
+    const door = authGuard.doorOf(req);
+    for (const [k, v] of Object.entries(authGuard.securityHeaders(req))) res.setHeader(k, v);
+    const noteSignIn = (outcome, extra = {}, secret = null) => {
+      signInLog.record({ ip: clientIp, door, outcome, ...extra });
+      if (outcome === 'ok') signInLimiter.succeed(clientIp); else signInLimiter.fail(clientIp, Date.now(), secret);
+    };
+    // A proof is about to be checked: is this address still allowed to try?
+    // Only where something was presented; the login page itself is free.
+    const gate = async () => {
+      const g = signInLimiter.check(clientIp);
+      if (!g.ok) {
+        const secs = Math.ceil(g.retryAfterMs / 1000);
+        res.writeHead(429, { 'Content-Type': u.pathname.startsWith('/api/') ? 'application/json' : 'text/html; charset=utf-8', 'Retry-After': String(secs), 'Cache-Control': 'no-store' });
+        res.end(u.pathname.startsWith('/api/') ? JSON.stringify({ error: 'too many failed sign-ins from your address; wait ' + secs + ' seconds' }) : lanLoginPage('Too many failed sign-ins from your address. Wait ' + Math.ceil(secs / 60) + ' minute' + (secs > 60 ? 's' : '') + ' and try again.'));
+        return false;
+      }
+      if (g.slowMs) await new Promise(r => setTimeout(r, g.slowMs));
+      return true;
+    };
+    const setSignInCookie = (secret, next, who = null) => {
+      noteSignIn('ok', { user: who ? { id: who.id, name: who.name } : undefined, via: u.pathname });
+      res.writeHead(302, { Location: next || '/', 'Set-Cookie': authGuard.cookieHeader('aiconvo', secret, req) });
       res.end();
     };
     // An install joining as a person (aiconvo join): the credential is in
@@ -13030,15 +13072,17 @@ async function handleRequest(req, res) {
       try { p = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
       try {
         if (!LAN_TOKEN) throw new Error('this aiconvo is not reachable from other machines (settings → machines)');
+        if (!(await gate())) return;
         let user, projects;
         if (p.invite) {
-          const claimed = usersLib.claimInvite(roster, String(p.invite), { name: p.name });
+          let claimed;
+          try { claimed = usersLib.claimInvite(roster, String(p.invite), { name: p.name }); } catch (e) { noteSignIn('fail', { via: 'join-invite' }, p.invite); throw e; }
           user = claimed.user;
           applyInviteGrants(claimed.invite, user);
           projects = claimed.invite.projects;
         } else if (p.token) {
           user = usersLib.userForSecret(roster, String(p.token), LAN_TOKEN);
-          if (!user || user.disabled) throw new Error('that link does not name anyone here');
+          if (!user || user.disabled) { noteSignIn('fail', { via: 'join-token' }, p.token); throw new Error('that link does not name anyone here'); }
           projects = accessLib.objectsListing(accessRules, 'user:' + user.id).filter(o => o.object.startsWith('project:'))
             .map(o => { const name = o.object.slice('project:'.length); let id = null; try { id = projectIdFor(name).id; } catch {} return id ? { id, name, right: o.right } : null; }).filter(Boolean);
           if (!usersLib.isGuest(user) && p.projects) projects = (Array.isArray(p.projects) ? p.projects : []).map(name => { try { const r = projectIdFor(String(name)); return { id: r.id, name: r.name, right: 'act' }; } catch { return null; } }).filter(Boolean);
@@ -13054,6 +13098,7 @@ async function handleRequest(req, res) {
         }
         saveRoster();
         broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
+        noteSignIn('ok', { user: { id: user.id, name: user.name }, via: 'join' });
         json(res, 200, { ok: true, me: usersLib.publicUser(user), owner: usersLib.publicUser(usersLib.ownerOf(roster)), credential: secret, projects,
           host: { name: HOST_NAME, url: PUBLIC_URL || '', publicKey: installKey.publicKey }, peer: peer ? peer.id : null });
       } catch (e) { json(res, e.status || 400, { error: e.message }); }
@@ -13077,13 +13122,15 @@ async function handleRequest(req, res) {
         for await (const chunk of req) body += chunk;
         const form = new URLSearchParams(body);
         const secret = form.get('invite') || '';
+        if (!(await gate())) return;
         try {
           const claimed = usersLib.claimInvite(roster, secret, { name: form.get('name') || '' });
           applyInviteGrants(claimed.invite, claimed.user);
           saveRoster();
           broadcast({ type: 'users', users: publicUsers(), groups: roster.groups });
-          return setSignInCookie(claimed.secret, '/');
+          return setSignInCookie(claimed.secret, '/', claimed.user);
         } catch (e) {
+          noteSignIn('fail', { via: 'invite' }, secret);
           const invite = usersLib.findInvite(roster, secret);
           res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
           return res.end(invitePage({ secret, invite: usersLib.inviteState(invite) === 'open' ? invite : null, inviter: usersLib.ownerOf(roster).name, joinLink: projectInviteLink(secret), error: e.message }));
@@ -13091,19 +13138,23 @@ async function handleRequest(req, res) {
       }
       const tokenParam = u.searchParams.get('token');
       if (tokenParam) {
+        if (!(await gate())) return;
         const who = usersLib.userForSecret(roster, tokenParam, LAN_TOKEN);
-        if (who && !who.disabled) { saveRoster(); return setSignInCookie(tokenParam, landing); }
+        if (who && !who.disabled) { saveRoster(); return setSignInCookie(tokenParam, landing, who); }
+        noteSignIn('fail', { via: 'token-url' }, tokenParam);
       }
       const handoff = u.searchParams.get('handoff');
       if (handoff) {
+        if (!(await gate())) return;
         try {
           const claim = usersLib.verifyHandoff(handoff, { trustedPublicKeys: (appSettings.machines || []).map(m => m.publicKey).filter(Boolean) });
           const { user } = usersLib.upsertHandoffUser(roster, claim.user);
           if (user.disabled) throw new Error('this person is disabled here');
           const { secret } = usersLib.issueCredential(roster, user.id, { kind: 'session', label: 'handoff' });
           saveRoster();
-          return setSignInCookie(secret, landing);
+          return setSignInCookie(secret, landing, user);
         } catch (e) {
+          noteSignIn('fail', { via: 'handoff' }, handoff);
           res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
           return res.end(lanLoginPage('Could not sign you in from the other machine: ' + e.message + '. Enter a token instead.'));
         }
@@ -13112,14 +13163,23 @@ async function handleRequest(req, res) {
         let body = '';
         for await (const chunk of req) body += chunk;
         const posted = new URLSearchParams(body).get('token') || '';
+        if (!(await gate())) return;
         const who = usersLib.userForSecret(roster, posted, LAN_TOKEN);
-        if (who && !who.disabled) { saveRoster(); return setSignInCookie(posted, '/'); }
+        if (who && !who.disabled) { saveRoster(); return setSignInCookie(posted, '/', who); }
+        noteSignIn('fail', { via: 'login' }, posted);
         res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
         return res.end(lanLoginPage('That token is wrong. Try again.'));
       }
     }
     const identity = identifyRequest(req);
     if (!identity) {
+      // A credential was presented and named nobody: that is a guess. A bare
+      // visit to the page costs nothing.
+      const stale = cookieValue(req, 'aiconvo');
+      const presented = stale || String(req.headers.authorization || '');
+      if (presented) { if (!(await gate())) return; noteSignIn('fail', { via: stale ? 'cookie' : 'bearer' }, presented); }
+      // A stale cookie is cleared so the browser stops presenting it.
+      if (stale) res.setHeader('Set-Cookie', authGuard.cookieHeader('aiconvo', '', req, { maxAge: 0 }));
       if (u.pathname.startsWith('/api/')) return json(res, 401, { error: 'sign in first' });
       res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(lanLoginPage());
@@ -13127,7 +13187,7 @@ async function handleRequest(req, res) {
     req.identity = identity;
     requestContext.getStore().identity = identity;
     if (u.pathname === '/logout' && req.method === 'POST') {
-      res.writeHead(302, { Location: '/', 'Set-Cookie': 'aiconvo=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
+      res.writeHead(302, { Location: '/', 'Set-Cookie': authGuard.cookieHeader('aiconvo', '', req, { maxAge: 0 }) });
       return res.end();
     }
     if (u.pathname === '/manifest.webmanifest') {
@@ -14405,8 +14465,19 @@ async function handleRequest(req, res) {
         }
         const { secret, invite } = usersLib.issueProjectInvite(roster, { projects, right, scope: p.scope === 'household' && usersLib.isOwnerTier(identity) ? 'household' : 'guest', name: p.name, label: p.label, createdBy: identity.user.id });
         saveRoster();
-        json(res, 200, { invite: usersLib.publicInvite(invite), link: projectInviteLink(secret), markersWritten: markers,
-          runsAsAccount: right === 'act', isolation: false });
+        // Which door the link goes through. 'tailnet': also mint a Tailscale
+        // device invite, so the person can reach the https name at all;
+        // the two links are sent together. The aiconvo link itself is the
+        // same either way: one credential, whichever door it arrives by.
+        const doors = await doorsResponse();
+        let tailnetInvite = null, tailnetError = null;
+        if (p.door === 'tailnet') {
+          try { tailnetInvite = await frontDoor.mintDeviceInvite({ fetch, apiKey: appSettings.tailscaleApiKey, deviceId: doors.deviceId }); }
+          catch (e) { tailnetError = e.message; }
+        }
+        const link = doors.url && (p.door === 'tailnet' || doors.funnel) ? doors.url + '/?invite=' + encodeURIComponent(secret) : projectInviteLink(secret);
+        json(res, 200, { invite: usersLib.publicInvite(invite), link, markersWritten: markers, door: p.door === 'tailnet' ? 'tailnet' : doors.funnel ? 'public' : 'lan',
+          tailnetInvite, tailnetError, runsAsAccount: right === 'act', isolation: !!BWRAP });
       } catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/invites/revoke' && req.method === 'POST') {
       if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin can revoke invites' });
@@ -14442,6 +14513,28 @@ async function handleRequest(req, res) {
         const landed = await syncEngine.importItems(peer, projectId, Array.isArray(p.items) ? p.items : []);
         json(res, 200, { ok: true, landed });
       } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/doors' && req.method === 'GET') {
+      // The doors through Tailscale as they stand right now (design/56).
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin sees the doors' });
+      json(res, 200, await doorsResponse());
+    } else if (u.pathname === '/api/doors/public' && req.method === 'POST') {
+      if (!usersLib.isOwnerTier(identity)) return json(res, 403, { error: 'only the owner opens or closes the public door' });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        const on = p.on === true;
+        const r = await frontDoor.setFunnel(on, { exec: (f, a) => execText(f, a, { timeout: 20000 }), port: PORT });
+        doorsCache = { at: 0, value: null };
+        if (!r.ok) return json(res, 400, { error: r.message, code: r.code, enableUrl: r.enableUrl || null, ...(await doorsResponse()) });
+        appSettings = settingsLib.normalizeSettings({ ...appSettings, publicDoor: on });
+        saveAppSettings();
+        signInLog.record({ ip: authGuard.clientAddress(req), door: authGuard.doorOf(req), outcome: on ? 'public-door-opened' : 'public-door-closed', user: { id: identity.user.id, name: identity.user.name } });
+        json(res, 200, await doorsResponse());
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/doors/sign-ins' && req.method === 'GET') {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin sees sign-ins' });
+      json(res, 200, { recent: signInLog.recent(Math.min(500, Number(u.searchParams.get('n')) || 100)), limiter: signInLimiter.stats() });
     } else if (u.pathname === '/api/sync/peers' && req.method === 'GET') {
       if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin sees peers' });
       json(res, 200, { host: HOST_NAME, publicUrl: PUBLIC_URL || '', peers: syncEngine.peers.map(syncLib.publicPeer),

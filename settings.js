@@ -5,6 +5,10 @@ const { PROMPT: DEFAULT_SIMPLIFY_PROMPT } = require('./pisdk-rewrite');
 
 const DEFAULT_CONTEXT_TOKENS = 272000;
 
+// Sent as the user turn when an interrupted conversation is resumed, by the
+// Resume button or by automatic connection recovery. Editable in Settings.
+const DEFAULT_RESUME_PROMPT = 'Continue the interrupted task from the saved conversation. First check the latest tool results and current state; do not repeat actions that already succeeded. If an action may have completed but its result is missing, verify its effects before retrying. If the task is already complete, report that instead.';
+
 // One semantic namespace per user: the GPU index never mixes two installs.
 function defaultSemanticNs() {
   try { return String(os.userInfo().username || '').trim() || 'default'; }
@@ -36,6 +40,7 @@ const DEFAULT_SETTINGS = {
   simplifyAnswers: true,
   simplifyPrompt: DEFAULT_SIMPLIFY_PROMPT,
   autoResumeNetwork: false,
+  resumePrompt: DEFAULT_RESUME_PROMPT,
   // pi theme for hosted extension views (custom TUI components rendered
   // in the browser). 'light' matches aiconvo's paper look.
   piTheme: 'light',
@@ -59,6 +64,12 @@ const DEFAULT_SETTINGS = {
   // quarter of the memory, half the cores, 512 tasks. memory: a systemd
   // size (8G, 512M); cpu: a percentage of one core (200% = two cores).
   guestLimits: { memory: '', cpu: '', tasks: 0 },
+  // The doors through Tailscale (design/56). publicDoor: the Funnel switch
+  // as the owner last set it (the live state is asked of tailscale each
+  // time). tailscaleApiKey: an API access token, only to mint device
+  // invites for the tailnet door; never leaves the settings of the owner.
+  publicDoor: false,
+  tailscaleApiKey: '',
 };
 
 function normalizeGuestLimits(raw) {
@@ -210,6 +221,7 @@ function normalizeSettings(input) {
   const simplifyAnswers = src.simplifyAnswers !== false;
   const simplifyPrompt = typeof src.simplifyPrompt === 'string' && src.simplifyPrompt.trim() ? src.simplifyPrompt : DEFAULT_SIMPLIFY_PROMPT;
   const autoResumeNetwork = src.autoResumeNetwork === true;
+  const resumePrompt = typeof src.resumePrompt === 'string' && src.resumePrompt.trim() ? src.resumePrompt.trim().slice(0, 4000) : DEFAULT_RESUME_PROMPT;
   const piTheme = typeof src.piTheme === 'string' && src.piTheme.trim() ? src.piTheme.trim() : DEFAULT_SETTINGS.piTheme;
   const usageBilling = normalizeUsageBilling(src.usageBilling);
   const snippetTrigger = normalizeSnippetTrigger(src.snippetTrigger);
@@ -217,8 +229,10 @@ function normalizeSettings(input) {
   const machines = normalizeMachines(src.machines);
   const lan = src.lan === true ? true : src.lan === false ? false : null;
   const guestLimits = normalizeGuestLimits(src.guestLimits);
+  const publicDoor = src.publicDoor === true;
+  const tailscaleApiKey = typeof src.tailscaleApiKey === 'string' ? src.tailscaleApiKey.trim().slice(0, 200) : '';
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, simplifyAnswers, simplifyPrompt, autoResumeNetwork, piTheme, usageBilling, snippetTrigger, doneSound, machines, lan, guestLimits };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, simplifyAnswers, simplifyPrompt, autoResumeNetwork, resumePrompt, piTheme, usageBilling, snippetTrigger, doneSound, machines, lan, guestLimits, publicDoor, tailscaleApiKey };
   }
   return {
     usePiDefault: false,
@@ -233,6 +247,7 @@ function normalizeSettings(input) {
     simplifyAnswers,
     simplifyPrompt,
     autoResumeNetwork,
+    resumePrompt,
     piTheme,
     usageBilling,
     snippetTrigger,
@@ -240,6 +255,8 @@ function normalizeSettings(input) {
     machines,
     lan,
     guestLimits,
+    publicDoor,
+    tailscaleApiKey,
   };
 }
 
@@ -304,6 +321,7 @@ function applyResolvedContext(settings, models, piDefault) {
 
 module.exports = {
   DEFAULT_CONTEXT_TOKENS,
+  DEFAULT_RESUME_PROMPT,
   DEFAULT_SETTINGS,
   THINKING_LEVELS,
   DONE_SOUND_MODES,

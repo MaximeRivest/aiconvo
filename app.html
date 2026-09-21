@@ -14658,12 +14658,25 @@ function paneModel() {
     </details>
     <h3>interrupted conversations</h3>
     <label class="set-check"><input id="setAutoResumeNetwork" type="checkbox"${s.autoResumeNetwork ? ' checked' : ''}> resume connection failures automatically</label>
-    <div class="set-help">Off by default. The host checks the provider connection twice before resuming saved work, one conversation at a time. Up to 3 attempts within 24 hours. No automatic recovery for deliberate stops, login or usage limits, changed conversations, delegated work, or parallel answers. Continues the saved conversation rather than repeating your original prompt; uncertain tool actions can still be repeated. Disable this at any time to stop waiting retries. Already-running work is not stopped.</div>`;
+    <div class="set-help">Off by default. The host checks the provider connection twice before resuming saved work, one conversation at a time. Up to 3 attempts within 24 hours. No automatic recovery for deliberate stops, login or usage limits, changed conversations, delegated work, or parallel answers. Continues the saved conversation rather than repeating your original prompt; uncertain tool actions can still be repeated. Disable this at any time to stop waiting retries. Already-running work is not stopped.</div>
+    <details class="set-field">
+      <summary>Customize the resume message</summary>
+      <label for="setResumePrompt">Message sent when a conversation is resumed</label>
+      <textarea id="setResumePrompt" rows="5" style="width:100%;box-sizing:border-box;font:inherit">${esc(s.resumePrompt || '')}</textarea>
+      <div class="set-help">Used by the Resume button and by automatic connection recovery. It is sent as your next message, so write it as you would speak to the agent. Applies to resumes started after saving. An empty message restores the default.</div>
+      <button type="button" id="setResumePromptSave">Save message</button>
+      <button type="button" id="setResumePromptReset">Restore default</button>
+    </details>`;
 }
 
 function bindPaneModel(root) {
   $('setSimplifyPromptSave').onclick = () => saveSettings({ simplifyPrompt: $('setSimplifyPrompt').value }, 'rewrite prompt saved');
   $('setSimplifyPromptReset').onclick = () => saveSettings({ simplifyPrompt: '' }, 'default rewrite prompt restored');
+  $('setResumePromptSave').onclick = () => saveSettings({ resumePrompt: $('setResumePrompt').value }, 'resume message saved');
+  $('setResumePromptReset').onclick = async () => {
+    await saveSettings({ resumePrompt: '' }, 'default resume message restored');
+    $('setResumePrompt').value = settingsOf().resumePrompt || '';
+  };
   $('setAutoResumeNetwork').onchange = async () => {
     await saveSettings({ autoResumeNetwork: $('setAutoResumeNetwork').checked }, 'connection recovery updated');
     await loadAgentRecovery();
@@ -14852,6 +14865,7 @@ function paneMachines() {
            <div class="set-help">Anyone with a link can open this aiconvo. Share it only with your own devices.</div>`
         : '<div class="set-help">Off: only this computer can open it. Turn it on to get a link for your other devices. If you are reading this from another device, turning it off will cut you off.</div>'}
     </div>
+    ${settingsState && settingsState.canManageUsers ? `<div class="set-group" id="setDoors"><h3>doors through Tailscale</h3><div class="set-help" id="setDoorsBody">asking tailscale…</div></div>` : ''}
     <div class="set-group">
       <h3>connect to another machine</h3>
       <div class="set-field">
@@ -14893,6 +14907,7 @@ function bindPaneMachines(root) {
   };
   $('setMachConnect').onclick = connect;
   link.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); connect(); } };
+  if ($('setDoors') && typeof renderDoors === 'function') renderDoors();
   root.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await copyText(b.dataset.copy); flashCopied(b); } catch (e) { errToast(e.message); } });
   const saved = settingsOf().machines || [];
   const read = () => [...root.querySelectorAll('.mach-item')].map((el, i) => el.classList.contains('editing')

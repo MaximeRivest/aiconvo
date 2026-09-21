@@ -154,3 +154,18 @@ test('normalizeSettings keeps a valid doneSound and falls back to voice', () => 
   assert.strictEqual(normalizeSettings({ doneSound: 'loud' }).doneSound, 'voice');
   assert.strictEqual(normalizeSettings({ doneSound: 3 }).doneSound, 'voice');
 });
+
+test('the resume message is editable, trimmed, bounded, and defaults when blank', () => {
+  const { DEFAULT_RESUME_PROMPT } = require('../settings.js');
+  assert.ok(DEFAULT_RESUME_PROMPT.startsWith('Continue the interrupted task'));
+  for (const usePiDefault of [true, false]) {
+    const custom = normalizeSettings({ usePiDefault, resumePrompt: '  Reprends où tu étais.\nVérifie d’abord les résultats.  ' });
+    assert.equal(custom.resumePrompt, 'Reprends où tu étais.\nVérifie d’abord les résultats.');
+    assert.equal(normalizeSettings(custom).resumePrompt, custom.resumePrompt);
+    for (const resumePrompt of [undefined, '', '   ', null, 42]) {
+      assert.equal(normalizeSettings({ usePiDefault, resumePrompt }).resumePrompt, DEFAULT_RESUME_PROMPT);
+    }
+    assert.equal(normalizeSettings({ usePiDefault, resumePrompt: 'x'.repeat(5000) }).resumePrompt.length, 4000);
+  }
+  assert.equal(DEFAULT_SETTINGS.resumePrompt, DEFAULT_RESUME_PROMPT);
+});
