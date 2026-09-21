@@ -613,8 +613,15 @@ class MainActivity : AppCompatActivity() {
         when {
             fullscreenView != null -> hideFullscreenVideo()
             setup.visibility == View.VISIBLE -> super.onBackPressed()
-            web.canGoBack() -> web.goBack()
-            else -> { connectGeneration++; conn = Conn.IDLE; showSetup() }
+            // The page goes first (design/58): a sheet, a menu, a picker or a
+            // dialog closes; only with nothing open does history move.
+            else -> web.evaluateJavascript("!!(window.aiconvoBack&&window.aiconvoBack())") { handled ->
+                if (handled == "true") return@evaluateJavascript
+                when {
+                    web.canGoBack() -> web.goBack()
+                    else -> { connectGeneration++; conn = Conn.IDLE; showSetup() }
+                }
+            }
         }
     }
 }
