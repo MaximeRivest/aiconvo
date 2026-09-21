@@ -99,3 +99,48 @@ test('for real: inside the walls, the home is empty but the project, git, node a
   assert.equal(run('env | grep -c -E "^(DISPLAY|SSH_AUTH_SOCK|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS)=" || true'), '0');
   fs.rmSync(project, { recursive: true, force: true });
 });
+
+test('resource caps: derived from the machine, bounded by it, and settings on top', () => {
+  assert.deepEqual(sandbox.defaultLimits({ totalMem: 220 * 1024 ** 3, cores: 48 }), { memory: '55G', cpu: '2400%', tasks: 512 });
+  assert.deepEqual(sandbox.defaultLimits({ totalMem: 4 * 1024 ** 3, cores: 1 }), { memory: '2G', cpu: '100%', tasks: 512 }, 'never under 2 GiB and one core');
+  assert.deepEqual(sandbox.resolveLimits({ memory: '8g', cpu: '9999%', tasks: '64' }, { totalMem: 16 * 1024 ** 3, cores: 8 }), { memory: '8G', cpu: '800%', tasks: 64 }, 'cpu is bounded by the cores that exist');
+  assert.deepEqual(sandbox.resolveLimits({ memory: 'lots', cpu: '', tasks: 2 }, { totalMem: 16 * 1024 ** 3, cores: 8 }), { memory: '4G', cpu: '400%', tasks: 512 }, 'garbage falls back');
+  const props = sandbox.limitProperties({ memory: '1G', cpu: '50%', tasks: 32 });
+  assert.deepEqual(props, ['MemoryMax=1G', 'MemorySwapMax=0', 'CPUQuota=50%', 'CPUWeight=50', 'TasksMax=32']);
+  assert.equal(sandbox.guestSliceName('u_80caa4e25b928380'), 'aiconvo-guest-u_80caa4e25b928380.slice');
+  assert.equal(sandbox.guestSliceName('a b/c'), 'aiconvo-guest-a_20b_2fc.slice', 'unit-name safe');
+  const sb = sandbox.createSandbox({ bwrap: '/bin/bwrap', projectRoot: '/tmp/p', cgroup: { systemdRun: '/bin/systemd-run', slice: 'aiconvo-guest-x.slice' } });
+  const l = sb.launch('/bin/node', ['w.js']);
+  assert.equal(l.file, '/bin/systemd-run');
+  assert.deepEqual(l.args.slice(0, 11), ['--user', '--scope', '--quiet', '-p', 'CollectMode=inactive-or-failed', '--slice=aiconvo-guest-x.slice', '--', '/usr/bin/env', '-u', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR=/run/user/guest']);
+  assert.equal(l.args[11], '/bin/bwrap');
+  assert.equal(sb.slice, 'aiconvo-guest-x.slice');
+  const plain = sandbox.createSandbox({ bwrap: '/bin/bwrap', projectRoot: '/tmp/p', cgroup: null }).launch('/bin/node');
+  assert.equal(plain.file, '/bin/bwrap', 'no user manager: the walls stand without caps');
+  assert.equal(sandbox.findSystemdRun({ env: { PATH: '/x', AICONVO_NO_CGROUP: '1' }, exists: () => true }), null, 'the opt-out');
+});
+
+const systemdRun = sandbox.findSystemdRun();
+const userManager = systemdRun && spawnSync(systemdRun, ['--user', '--scope', '--quiet', '-p', 'CollectMode=inactive-or-failed', '--slice=aiconvo-guest.slice', '--', 'true']).status === 0;
+test('for real: a launch lands in the guest slice and the memory cap is the cgroup\'s', { skip: !(bwrap && userManager) && 'needs bubblewrap and a user systemd manager' }, () => {
+  const guest = 'u_test' + process.pid;
+  const slice = sandbox.guestSliceName(guest);
+  const home = os.homedir();
+  const project = fs.mkdtempSync(path.join(home, '.cache', 'aiconvo-sandbox-caps-'));
+  try {
+    assert.equal(spawnSync('systemctl', ['--user', 'set-property', slice, ...sandbox.limitProperties({ memory: '1G', cpu: '100%', tasks: 64 })]).status, 0);
+    const sb = sandbox.createSandbox({ bwrap, home, projectRoot: project, guest: { id: guest, name: 'Sam' }, cgroup: { systemdRun, slice },
+      env: sandbox.sandboxEnv({ hostEnv: process.env, guest: { id: guest, name: 'Sam' }, agentDir: path.join(home, '.pi', 'agent'), token: 't' }), aiconvoDir: path.join(__dirname, '..') });
+    const l = sb.launch('bash', ['-c', 'cat /proc/self/cgroup; echo "rt=$XDG_RUNTIME_DIR bus=$DBUS_SESSION_BUS_ADDRESS"'], { cwd: project });
+    const r = spawnSync(l.file, l.args, { env: l.env, encoding: 'utf8' });
+    assert.match(r.stdout, /rt=\/run\/user\/guest bus=$/m, 'the bus never crosses the walls');
+    assert.match(r.stdout, new RegExp(slice.replace(/\./g, '\\.') + '/'), 'the process runs inside its guest slice: ' + r.stdout + r.stderr);
+    const cg = r.stdout.split('\n')[0].split(':').pop();
+    const max = fs.readFileSync(path.join('/sys/fs/cgroup', cg.split('/').slice(0, -1).join('/'), 'memory.max'), 'utf8').trim();
+    assert.equal(max, String(1024 ** 3));
+  } finally {
+    spawnSync('systemctl', ['--user', 'stop', slice]);
+    spawnSync('systemctl', ['--user', 'revert', slice]);
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});

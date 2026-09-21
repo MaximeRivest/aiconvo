@@ -4024,6 +4024,53 @@ const { createKeyProxy } = require('./keyproxy.js');
 const GUESTS_DIR = path.join(os.homedir(), '.local', 'share', 'aiconvo', 'guests');
 const OWNER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
 const BWRAP = sandboxLib.findBwrap();
+// Resource caps (design/55): one systemd slice per guest. Probed once, the
+// first time a guest needs walls: a user manager must answer, or the walls
+// stand without caps and settings → people says so.
+const SYSTEMD_RUN = sandboxLib.findSystemdRun();
+let cgroupProbe = null; // Promise<boolean>
+let cgroupState = SYSTEMD_RUN ? null : false; // null: not probed yet
+function cgroupsAvailable() {
+  if (!SYSTEMD_RUN) return Promise.resolve(false);
+  if (!cgroupProbe) cgroupProbe = execText(SYSTEMD_RUN, ['--user', '--scope', '--quiet', '-p', 'CollectMode=inactive-or-failed', '--slice=aiconvo-guest.slice', '--', 'true'], { timeout: 8000 })
+    .then(() => { cgroupState = true; return true; }, e => { cgroupState = false; console.error('[guest caps] no user systemd manager, guests run uncapped:', String(e.message).split('\n')[0]); return false; });
+  return cgroupProbe;
+}
+const guestSliceApplied = new Map(); // guest id -> the property list last written
+function guestLimitsNow() { return sandboxLib.resolveLimits(appSettings.guestLimits); }
+// The slice's properties are unit drop-ins on disk (persistent): written
+// when they differ from what this process last wrote, so a settings change
+// reaches the next launch and an idle-then-collected slice comes back capped.
+async function guestCgroupFor(user) {
+  if (!(await cgroupsAvailable())) return null;
+  const slice = sandboxLib.guestSliceName(user.id);
+  const props = sandboxLib.limitProperties(appSettings.guestLimits);
+  const sig = props.join(' ');
+  if (guestSliceApplied.get(user.id) !== sig) {
+    try { await execText('systemctl', ['--user', 'set-property', slice, ...props], { timeout: 8000 }); guestSliceApplied.set(user.id, sig); }
+    catch (e) { console.error('[guest caps] set-property ' + slice + ':', String(e.message).split('\n')[0]); return null; }
+  }
+  return { systemdRun: SYSTEMD_RUN, slice };
+}
+// A settings change reaches guests already running: their slices are live
+// cgroups, and set-property applies to them at once.
+function reapplyGuestLimits() {
+  const props = sandboxLib.limitProperties(appSettings.guestLimits);
+  const sig = props.join(' ');
+  for (const [id, prev] of [...guestSliceApplied]) {
+    if (prev === sig) continue;
+    execText('systemctl', ['--user', 'set-property', sandboxLib.guestSliceName(id), ...props], { timeout: 8000 })
+      .then(() => guestSliceApplied.set(id, sig), e => console.error('[guest caps] reapply:', String(e.message).split('\n')[0]));
+  }
+}
+// Kill everything in the guest's slice (their scopes, and any process that
+// double-forked away from a scope's first child), then forget the slice.
+function killGuestSlice(userId, { revert = false } = {}) {
+  if (!SYSTEMD_RUN) return;
+  const slice = sandboxLib.guestSliceName(userId);
+  const run = args => execText('systemctl', ['--user', ...args], { timeout: 8000 }).catch(() => '');
+  run(['kill', '--signal=SIGKILL', slice]).then(() => run(['stop', slice])).then(() => { if (revert) { guestSliceApplied.delete(userId); return run(['revert', slice]); } });
+}
 const keyProxy = createKeyProxy({ log: msg => console.error(msg), onUsage: u => { try { recordGuestUsage(u); } catch {} } });
 const guestProxyTokens = new Map(); // guest id -> placeholder secret held by their sandboxes
 let guestProvidersCache = { at: 0, list: [] };
@@ -4086,8 +4133,9 @@ async function guestSandboxFor(user, project) {
   const piPkg = (() => { try { return require('./pisdk-runtime.js').piPackageDir(); } catch { return null; } })();
   const env = sandboxLib.sandboxEnv({ principalEnv: { AICONVO_USER: user.id, AICONVO_USER_NAME: user.name, AICONVO_PORT: String(PORT) }, guest: user, agentDir: insideAgentDir, piPackageDir: piPkg, token: guestApiTokenFor(user),
     extra: { PATH: agentPath(process.env.PATH), PI_CLAUDE_CODE_TRANSPORT: 'api', PI_CLAUDE_CODE_BASE_URL: proxyUrl + '/claude-code', AICONVO_GUEST_PROJECT: project, ...(hostFacts.claudeVersion ? { CLAUDE_CODE_VERSION: hostFacts.claudeVersion } : {}) } });
+  const cgroup = await guestCgroupFor(user);
   const sb = sandboxLib.createSandbox({ id: 'guest:' + user.id + ':' + projectRoot, bwrap: BWRAP, home: os.homedir(), projectRoot, guest: { id: user.id, name: user.name },
-    binds: [...prepared.binds, ...sessionBinds], env, piPackageDir: piPkg, aiconvoDir: __dirname, nodePath: process.execPath });
+    binds: [...prepared.binds, ...sessionBinds], env, piPackageDir: piPkg, aiconvoDir: __dirname, nodePath: process.execPath, cgroup });
   sb.sessionDir = mainSessionDir;
   return sb;
 }
@@ -4115,6 +4163,7 @@ function stopGuestProcesses(userId) {
   const token = guestProxyTokens.get(userId);
   if (token) { keyProxy.revoke(token); guestProxyTokens.delete(userId); }
   for (const child of [...guestChildren]) if (child.guestId === userId) { try { child.kill('SIGKILL'); } catch {} stopped++; }
+  killGuestSlice(userId);
   return stopped;
 }
 // Attribution for sends that cannot write into the session file (the
@@ -7993,6 +8042,41 @@ async function gitText(root, args) {
 // conversation ever had as its cwd. Without them those edits match no
 // repository and vanish from the file tree, the history and the reviews.
 const PROJECT_REPOSITORY_LIMIT = 60;
+// Per person, per project: conversations they wrote into, files they saved
+// or their agents changed, commits they made. Only what the asker may see;
+// never the asker themselves (the rule for presence: other people only).
+const peopleActivityLib = require('./people-activity.js');
+const projectCommitsCache = new Map(); // project -> { at, commits }
+async function projectCommitsFor(meta, sinceMs) {
+  const hit = projectCommitsCache.get(meta.project);
+  if (hit && Date.now() - hit.at < 30000) return hit.commits;
+  const commits = [];
+  const roots = (await projectGitRepositories(meta)).slice(0, 12);
+  await Promise.all(roots.map(async root => {
+    try { for (const c of (await loadGitRepository(root)).commits) if (Date.parse(c.ts) >= sinceMs) commits.push(c); } catch {}
+  }));
+  projectCommitsCache.set(meta.project, { at: Date.now(), commits });
+  return commits;
+}
+async function projectPeopleActivity(identity, project, days) {
+  const meta = projectMetaFor(project);
+  if (!meta) throw Object.assign(new Error('no such project'), { status: 404 });
+  const to = Date.now(), from = to - days * 86400e3;
+  const see = visibleKeysFor(identity);
+  const entries = meta.entries.filter(({ key }) => see(targetOf(key)));
+  const visibleKeys = new Set(entries.map(e => e.key));
+  const me = identity && identity.user ? usersLib.resolveId(roster, identity.user.id) : null;
+  const fileEvents = fileLedger ? fileLedger.stmts.windowProject.all(project, from, to).filter(ev => ev.actor !== 'ai' || !ev.conv_key || visibleKeys.has(ev.conv_key)) : [];
+  const commits = await projectCommitsFor(meta, from);
+  return peopleActivityLib.projectActivity({
+    project, from, to, entries, fileEvents, commits, exclude: me,
+    readMessages: async key => { const d = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8')); return d.messages; },
+    resolveId: id => usersLib.resolveId(roster, id),
+    userById,
+    idByName: name => { const u = name && roster.users.find(x => x.name === name); return u ? u.id : null; },
+  });
+}
+
 async function projectGitRepositories(meta) {
   const roots = new Set();
   for (const cwd of [...new Set(meta.entries.map(({ entry }) => entry.cwd).filter(Boolean))]) {
@@ -13364,6 +13448,14 @@ async function handleRequest(req, res) {
           .slice(0, 3);
         json(res, 200, data);
       } catch (e) { json(res, 404, { error: e.message }); }
+    } else if (u.pathname === '/api/project/people') {
+      // What each other person did in this project lately (design/55).
+      const project = u.searchParams.get('name') || '';
+      const days = Math.min(90, Math.max(1, Number(u.searchParams.get('days')) || 14));
+      try {
+        if (!projectVisible(identity, project)) return json(res, 403, { error: 'This project is not shared with you.' });
+        json(res, 200, await projectPeopleActivity(identity, project, days));
+      } catch (e) { json(res, e.status || 500, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/diffs') {
       const key = u.searchParams.get('id');
       if (!key || !index[key]) return json(res, 404, { error: 'not found' });
@@ -14205,7 +14297,9 @@ async function handleRequest(req, res) {
       return res.end(req.method === 'HEAD' ? undefined : bytes);
     } else if (u.pathname === '/api/users' && req.method === 'GET') {
       json(res, 200, { users: publicUsers(), groups: roster.groups, me: usersLib.publicUser(identity.user), tier: identity.tier, canManage: usersLib.canManageUsers(identity), aliases: roster.aliases || {},
-        walls: { available: !!BWRAP, keyProxy: !!guestProxyPort, providers: guestProvidersCache.list.map(p => p.id) },
+        walls: { available: !!BWRAP, keyProxy: !!guestProxyPort, providers: guestProvidersCache.list.map(p => p.id),
+          // enforced: null until the first guest launch probed the user manager.
+          limits: { ...guestLimitsNow(), enforced: cgroupState } },
         ...(usersLib.canManageUsers(identity) ? { guestActivity: guestUsage.slice(-200) } : {}) });
     } else if (u.pathname.startsWith('/api/users/') && req.method === 'POST') {
       // Members can edit their own profile and make their own device links;
@@ -14251,6 +14345,7 @@ async function handleRequest(req, res) {
         } else if (op === 'remove') {
           if (!manages || (isOwnerTarget)) throw Object.assign(new Error('only the owner or an admin can remove people'), { status: 403 });
           stopGuestProcesses(p.id);
+          killGuestSlice(p.id, { revert: true });
           guestApiSecrets.delete(p.id);
           out = { removed: usersLib.removeUser(roster, p.id).id };
           // Their grants go with them; a peer install that acted as them
@@ -14492,6 +14587,7 @@ async function handleRequest(req, res) {
       const prevLan = lanWanted();
       appSettings = settingsLib.applyResolvedContext(parsed, listed, piDefault);
       saveAppSettings();
+      reapplyGuestLimits();
       if (lanWanted() !== prevLan) {
         applyLanMode(lanWanted());
         // The links in the answer should already carry the Windows address.

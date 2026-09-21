@@ -220,6 +220,17 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   // The project page says who is in the project right now.
   await owner.go(base + '/#project=shared');
   await owner.until(`document.querySelector('#pHereNow') && !document.querySelector('#pHereNow').hidden && document.querySelector('#pHereNow').textContent.includes('Lilly')`, 8000);
+  // And what she did here: the file she saved by hand, opening on click.
+  await owner.until(`document.querySelector('#pPeopleDid') && !document.querySelector('#pPeopleDid').hidden && document.querySelector('#pPeopleDid .pdid-person[open] .pdid-name')?.textContent === 'Lilly'`, 12000);
+  assert.match(await owner.evaluate(`document.querySelector('#pPeopleDid .pdid-counts').textContent`), /1 file/);
+  assert.match(await owner.evaluate(`document.querySelector('#pPeopleDid [data-file]').textContent`), /code\.js[\s\S]*saved by hand/);
+  await owner.evaluate(`document.querySelector('#pPeopleDid [data-file]').click(); true`);
+  await owner.until('viewKind === "file" && fileWs && fileWs.path === ' + JSON.stringify(file), 12000);
+  // Lilly's own project page: the owner saved nothing recorded, so nothing to show — and never herself.
+  await lilly.go(base + '/#project=shared');
+  await lilly.until(`document.querySelector('#pHereNow') && document.querySelector('#pTitleBig')`, 8000);
+  await new Promise(r => setTimeout(r, 800));
+  assert.equal(await lilly.evaluate(`document.querySelector('#pPeopleDid').hidden`), true);
 
   assert.deepEqual(exceptions.filter(e => !/ResizeObserver/.test(e)), [], 'no uncaught errors in either browser');
 });

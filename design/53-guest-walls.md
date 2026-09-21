@@ -157,8 +157,8 @@ Projects | ~/.ssh does not exist`. The transcript names the guest.
 - **Network stays on.** A guest can reach anything on the LAN that trusts
   locality (the semantic server, local model endpoints). Those should
   require a token too; not done here.
-- **No resource caps yet.** A guest's agent can use all cores and memory;
-  `systemd-run --scope` with `MemoryMax`/`CPUQuota` is the next step.
+- **Resource caps** came the next day (design/55): one systemd slice per
+  guest, entered by `systemd-run --scope` at every launch.
 - **Git push does not work for guests** (no ssh keys inside). Their
   commits are local; the owner pushes. Correct, and said in the dialog.
 - **Delegation, notebook derivation and terminals are refused** for

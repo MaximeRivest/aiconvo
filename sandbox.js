@@ -127,13 +127,87 @@ function prepareGuestAgentDir({ dir, insideDir, ownerAgentDir, proxy, allowedPro
   return { dir, binds: [{ src: dir, dst: insideDir || dir, rw: true }, ...binds] };
 }
 
+// ---- resource caps (design/55) ----
+// The walls say where a guest's processes may look; the caps say how much
+// of the machine they may use. One systemd slice per guest under
+// aiconvo-guest.slice (the dash naming nests it), so three parallel runs
+// share one budget instead of tripling it. Properties are written as unit
+// drop-ins (`systemctl set-property` without --runtime): a slice that went
+// idle and was garbage-collected comes back capped, and `revert` removes
+// them when the guest goes. Every launch is `systemd-run --scope` into that
+// slice: systemd-run registers its own pid and execs bwrap, so the child
+// the server holds is still the sandbox, descriptors (the IPC channel)
+// included, and --die-with-parent still means the server.
+function findSystemdRun({ env = process.env, exists = fs.existsSync } = {}) {
+  if (env.AICONVO_NO_CGROUP === '1') return null;
+  for (const dir of String(env.PATH || '').split(':')) {
+    const p = path.join(dir, 'systemd-run');
+    if (dir && exists(p)) return p;
+  }
+  for (const p of ['/run/current-system/sw/bin/systemd-run', '/usr/bin/systemd-run', '/bin/systemd-run']) if (exists(p)) return p;
+  return null;
+}
+// Unit names allow [a-zA-Z0-9:_.\-]; a guest id is u_<hex>, anything else is escaped.
+function guestSliceName(guestId) {
+  const safe = String(guestId || 'guest').replace(/[^a-zA-Z0-9_]/g, c => '_' + c.charCodeAt(0).toString(16));
+  return 'aiconvo-guest-' + safe + '.slice';
+}
+const GiB = 1024 ** 3;
+// What a guest gets when the owner set nothing: a quarter of the memory
+// (never under 2 GiB, the floor a modern toolchain needs), half the cores as
+// a ceiling, and a task count that stops a fork bomb long before the
+// machine notices. Swap is refused outright: a guest at its cap is killed,
+// not allowed to swap the owner's work to disk.
+function defaultLimits({ totalMem = os.totalmem(), cores = os.cpus().length } = {}) {
+  const memBytes = Math.max(2 * GiB, Math.floor(totalMem / 4));
+  return { memory: Math.floor(memBytes / GiB) + 'G', cpu: Math.max(100, Math.floor(Math.max(1, cores) / 2) * 100) + '%', tasks: 512 };
+}
+// The owner's settings on top of the defaults. Strings systemd accepts:
+// memory like 8G / 512M, cpu as a percentage of one core (200% = two cores).
+function resolveLimits(configured, machine) {
+  const d = defaultLimits(machine);
+  const c = configured && typeof configured === 'object' ? configured : {};
+  const memory = /^\d+(?:\.\d+)?[KMGT]?$/i.test(String(c.memory || '').trim()) ? String(c.memory).trim().toUpperCase() : d.memory;
+  const cpuN = parseInt(String(c.cpu || '').replace('%', ''), 10);
+  const cores = machine && machine.cores || os.cpus().length;
+  const cpu = cpuN > 0 ? Math.min(cpuN, Math.max(1, cores) * 100) + '%' : d.cpu;
+  const tasksN = parseInt(c.tasks, 10);
+  const tasks = tasksN >= 16 ? Math.min(tasksN, 32768) : d.tasks;
+  return { memory, cpu, tasks };
+}
+function limitProperties(limits) {
+  const l = resolveLimits(limits);
+  // CPUWeight=50 (default 100): under contention the owner's work wins even
+  // before the quota bites. MemorySwapMax=0: see defaultLimits.
+  return ['MemoryMax=' + l.memory, 'MemorySwapMax=0', 'CPUQuota=' + l.cpu, 'CPUWeight=50', 'TasksMax=' + l.tasks];
+}
+// The argv prefix that puts a launch into the guest's slice. systemd-run
+// runs outside the walls and needs the user bus (XDG_RUNTIME_DIR, or
+// DBUS_SESSION_BUS_ADDRESS); those ride in the spawn environment and are
+// stripped again by `env -u` right before bwrap, so nothing inside sees
+// the host's runtime directory or bus. /usr/bin/env is the one FHS path
+// every distribution, NixOS included, keeps.
+const BUS_VARS = ['XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'];
+function scopePrefix(systemdRun, slice, { insideRuntimeDir = '/run/user/guest' } = {}) {
+  return [systemdRun, '--user', '--scope', '--quiet', '-p', 'CollectMode=inactive-or-failed', '--slice=' + slice, '--',
+    '/usr/bin/env', '-u', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR=' + insideRuntimeDir];
+}
+function busEnv(hostEnv = process.env) {
+  const out = {};
+  for (const k of BUS_VARS) if (hostEnv[k]) out[k] = hostEnv[k];
+  return out;
+}
+
 // ---- the sandbox ----
 // spec: { bwrap, home, projectRoot, guest: {id, name}, agentDir (inside home path),
-//         binds: [{src, dst, rw}], env: {...}, piPackageDir, aiconvoDir }
+//         binds: [{src, dst, rw}], env: {...}, piPackageDir, aiconvoDir,
+//         cgroup: { systemdRun, slice } | null }
 function createSandbox(spec) {
   if (!spec.bwrap) throw new Error('bubblewrap is not installed on this machine, so guests cannot run anything here');
   const home = spec.home || os.homedir();
   const id = spec.id || 'sb_' + crypto.randomBytes(6).toString('hex');
+  const prefix = spec.cgroup && spec.cgroup.systemdRun && spec.cgroup.slice ? scopePrefix(spec.cgroup.systemdRun, spec.cgroup.slice) : [];
+  const bus = prefix.length ? busEnv(spec.cgroup.hostEnv || process.env) : {};
   const args = ['--die-with-parent', '--new-session', '--unshare-pid', '--unshare-uts', '--unshare-ipc', '--hostname', 'aiconvo-guest'];
   for (const p of SYSTEM_RO) if (fs.existsSync(p)) args.push('--ro-bind', p, p);
   args.push('--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--tmpfs', '/run/user', '--tmpfs', home);
@@ -159,11 +233,14 @@ function createSandbox(spec) {
   // spawn time, and clearing them inside would leave the worker mute.
   const env = { HOME: home, XDG_RUNTIME_DIR: '/run/user/guest', TMPDIR: '/tmp', ...spec.env };
   return {
-    id, guest: spec.guest, projectRoot: spec.projectRoot,
-    // What to spawn instead of `file args`: bwrap with the walls, then the command.
+    id, guest: spec.guest, projectRoot: spec.projectRoot, slice: spec.cgroup && spec.cgroup.slice || null,
+    // What to spawn instead of `file args`: (the slice, then) bwrap with the
+    // walls, then the command.
     launch(file, fileArgs = [], { cwd } = {}) {
       const dir = cwd && inside(cwd, spec.projectRoot) ? cwd : spec.projectRoot;
-      return { file: spec.bwrap, args: [...args, '--chdir', dir, '--', file, ...fileArgs], env: { ...env, PATH: env.PATH || '' } };
+      const walled = [spec.bwrap, ...args, '--chdir', dir, '--', file, ...fileArgs];
+      const argv = prefix.length ? [...prefix, ...walled] : walled;
+      return { file: argv[0], args: argv.slice(1), env: { ...env, ...bus, PATH: env.PATH || '' } };
     },
     args: () => [...args], env: () => ({ ...env }),
   };
@@ -190,4 +267,5 @@ function sandboxEnv({ hostEnv = process.env, principalEnv = {}, guest, agentDir,
   return { ...env, ...extra };
 }
 
-module.exports = { ENV_ALLOW, SYSTEM_RO, findBwrap, piSessionDirName, projectSessionDirs, guestAgentDirFor, prepareGuestAgentDir, createSandbox, sandboxEnv, inside, OAUTH_SHAPED };
+module.exports = { ENV_ALLOW, SYSTEM_RO, findBwrap, piSessionDirName, projectSessionDirs, guestAgentDirFor, prepareGuestAgentDir, createSandbox, sandboxEnv, inside, OAUTH_SHAPED,
+  findSystemdRun, guestSliceName, defaultLimits, resolveLimits, limitProperties, scopePrefix, busEnv, BUS_VARS };

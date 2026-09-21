@@ -74,6 +74,7 @@ function peopleLiveEvent(d) {
     return true;
   }
   if (d.type === 'presence') { peopleState.people = d.people || []; renderPeopleHeader(); renderPresenceMarks(); return true; }
+  if (d.type === 'file-activity' || d.type === 'index' || d.type === 'new' || d.type === 'update' || d.type === 'response') peopleActivityMaybeRefresh(d);
   if (d.type === 'users') {
     peopleState.users = d.users || []; peopleState.groups = d.groups || [];
     peopleState.me = peopleUserById(peopleState.me?.id) || peopleState.me;
@@ -455,6 +456,16 @@ function renderFollowChip() {
   chip.title = (peopleFollow.away ? u.name + ' is not here right now; you will follow when they return.' : 'You go where ' + u.name + ' goes.') + ' Click to stop.';
 }
 
+// "…may use up to 55G of memory and 24 cores" — or why not.
+function guestLimitsSentence(walls) {
+  const l = walls && walls.limits;
+  if (!l) return '';
+  const cores = Math.max(1, Math.round(parseInt(l.cpu, 10) / 100));
+  const what = `${l.memory.replace(/G$/, ' GiB').replace(/M$/, ' MiB')} of memory, ${cores} core${cores === 1 ? '' : 's'} and ${l.tasks} processes`;
+  if (l.enforced === false) return `Resource caps (${what}) are <b>not enforced</b> here: no user systemd manager answered.`;
+  return `All their processes together may use up to ${what}${l.enforced === null ? ' (enforced from their first launch on)' : ''}.`;
+}
+
 /* ---- the project page: who is in this project right now ---- */
 function peopleInProject(name) {
   const cwd = typeof projectOverview !== 'undefined' && projectOverview && projectOverview.project === name ? String(projectOverview.cwd || '').replace(/\/$/, '') : '';
@@ -473,7 +484,71 @@ function renderProjectPresence() {
   host.hidden = !here.length;
   host.innerHTML = here.map(p => { const { where, doing } = peopleWhereLabel(p); return `<button type="button" class="here-now" data-person="${esc(peopleCanonicalId(p.user.id))}" title="${esc(p.user.name + ' is ' + doing + ' ' + where + ' — go there')}">${userBubble(p.user, p.kind === 'typing' ? 'typing' : '')}<span>${esc(p.user.name)}</span><span class="hint">${esc(doing)} · ${esc(where)}</span></button>`; }).join('');
   host.querySelectorAll('.here-now').forEach(b => b.onclick = () => { const p = here.find(x => peopleCanonicalId(x.user.id) === b.dataset.person); if (p) peopleGoTo(p); });
+  // The live mark on their activity row, in place: a presence tick must not
+  // rebuild the strip under a click.
+  for (const el of document.querySelectorAll('#pPeopleDid .pdid-person[data-person] > summary > .user-bubble')) el.classList.toggle('typing', here.some(x => peopleCanonicalId(x.user.id) === el.closest('.pdid-person').dataset.person));
 }
+/* ---- the project page: what other people did here lately (design/55) ---- */
+// One row per person, newest first: bubble, name, a count line, and the
+// three lists behind a disclosure — their conversations (opening at their
+// last message), the files they saved or their agents changed, and their
+// commits. Hidden when nobody else did anything: no noise for solo use.
+const peopleActivity = { project: null, days: 14, data: null, at: 0, timer: null, open: null }; // open: null until the person chose
+async function loadProjectPeopleActivity(project) {
+  if (!project) return;
+  if (peopleActivity.project !== project) peopleActivity.open = null;
+  peopleActivity.project = project;
+  try {
+    const r = await fetch('/api/project/people?name=' + encodeURIComponent(project) + '&days=' + peopleActivity.days);
+    const d = await r.json();
+    if (peopleActivity.project !== project) return; // moved on meanwhile
+    peopleActivity.data = d.error ? null : d;
+    peopleActivity.at = Date.now();
+  } catch { peopleActivity.data = null; }
+  renderProjectPeopleActivity();
+}
+// Live events that change the answer: a message, a save, a commit. One
+// refresh per ten seconds at most, and only while the page is open.
+function peopleActivityMaybeRefresh(d) {
+  if (typeof viewKind === 'undefined' || viewKind !== 'project' || !peopleActivity.project) return;
+  if (d.type === 'file-activity' && d.project && d.project !== peopleActivity.project) return;
+  if (peopleActivity.timer) return;
+  peopleActivity.timer = setTimeout(() => { peopleActivity.timer = null; loadProjectPeopleActivity(peopleActivity.project); }, Math.max(1000, 10000 - (Date.now() - peopleActivity.at)));
+}
+function peopleActivityAgo(ts) { return typeof ago === 'function' ? ago(Date.now() - ts) + ' ago' : new Date(ts).toLocaleString(); }
+function peopleActivityRel(p, root) {
+  const cwd = typeof projectOverview !== 'undefined' && projectOverview && projectOverview.cwd ? String(projectOverview.cwd).replace(/\/$/, '') : '';
+  const base = root && p.startsWith(root + '/') ? root : cwd && p.startsWith(cwd + '/') ? cwd : '';
+  return base ? p.slice(base.length + 1) : p;
+}
+function renderProjectPeopleActivity() {
+  const host = $('pPeopleDid');
+  if (!host) return;
+  const d = peopleActivity.data;
+  const people = d && typeof projectOverviewName !== 'undefined' && d.project === projectOverviewName ? d.people.filter(p => p.counts.messages || p.counts.files || p.counts.commits) : [];
+  if (!people.length) { host.hidden = true; host.innerHTML = ''; return; }
+  const n = (k, one, many) => k + ' ' + (k === 1 ? one : many);
+  const countLine = p => [p.counts.messages ? n(p.counts.messages, 'message', 'messages') + (p.counts.conversations > 1 ? ' in ' + n(p.counts.conversations, 'conversation', 'conversations') : '') : '',
+    p.counts.files ? n(p.counts.files, 'file', 'files') : '', p.counts.commits ? n(p.counts.commits, 'commit', 'commits') : ''].filter(Boolean).join(' · ');
+  const here = typeof peopleInProject === 'function' ? peopleInProject(projectOverviewName) : [];
+  const isHere = id => here.some(x => peopleCanonicalId(x.user.id) === id);
+  // Few people: everything open. Many: the newest one.
+  const openByDefault = (p, i) => peopleActivity.open ? peopleActivity.open.has(p.user.id) : people.length <= 2 || i === 0;
+  host.innerHTML = `<h3>people <span class="dim">what others did here in the last ${peopleActivity.days} days</span></h3>
+    <div class="pdid-rows">${people.map((p, i) => `<details class="pdid-person" data-person="${esc(p.user.id)}"${openByDefault(p, i) ? ' open' : ''}>
+      <summary>${userBubble(p.user, isHere(p.user.id) ? 'typing' : '')}<span class="pdid-name">${esc(p.user.name)}${p.user.scope === 'guest' ? '<span class="badge-guest">guest</span>' : ''}</span><span class="pdid-counts hint">${esc(countLine(p))}</span><span class="pdid-when hint" title="${esc(new Date(p.lastTs).toLocaleString())}">${esc(peopleActivityAgo(p.lastTs))}</span></summary>
+      <div class="pdid-body">
+        ${p.conversations.length ? `<div class="pdid-col"><div class="pdid-h">conversations</div>${p.conversations.map(c => `<a href="#" class="pdid-item" data-conv="${esc(c.key)}" data-entry="${esc(c.lastEntry || '')}" title="Open at ${esc(p.user.name)}'s last message"><span class="pdid-t">${esc(c.title)}</span><span class="hint">${c.messages ? n(c.messages, 'message', 'messages') + ' · ' : ''}${c.started ? 'started it · ' : ''}${esc(peopleActivityAgo(c.lastTs))}</span></a>`).join('')}${p.counts.conversations > p.conversations.length ? `<div class="hint">and ${p.counts.conversations - p.conversations.length} more</div>` : ''}</div>` : ''}
+        ${p.files.length ? `<div class="pdid-col"><div class="pdid-h">files</div>${p.files.map(f => `<a href="#" class="pdid-item" data-file="${esc(f.path)}" title="${esc(f.path)}"><span class="pdid-t">${esc(peopleActivityRel(f.path, f.repoRoot))}</span><span class="hint">${f.added || f.removed ? `<span class="pdid-add">+${f.added}</span> <span class="pdid-del">−${f.removed}</span> · ` : ''}${f.via === 'agent' ? 'their agent' : 'saved by hand'}${f.n > 1 ? ' · ' + f.n + '×' : ''} · ${esc(peopleActivityAgo(f.ts))}</span></a>`).join('')}${p.counts.files > p.files.length ? `<div class="hint">and ${p.counts.files - p.files.length} more</div>` : ''}</div>` : ''}
+        ${p.commits.length ? `<div class="pdid-col"><div class="pdid-h">commits</div>${p.commits.map(c => `<a href="#" class="pdid-item" data-commit="${esc(c.hash)}" data-repo="${esc(c.repoRoot)}" title="Copy the hash — git show ${esc(c.shortHash)} in ${esc(c.repoRoot)}"><span class="pdid-t"><code>${esc(c.shortHash)}</code> ${esc(c.subject)}</span><span class="hint">${c.files ? n(c.files, 'file', 'files') + ' · ' : ''}${esc(peopleActivityAgo(c.ts))}</span></a>`).join('')}</div>` : ''}
+      </div></details>`).join('')}</div>`;
+  host.hidden = false;
+  host.querySelectorAll('details.pdid-person').forEach(el => el.addEventListener('toggle', () => { peopleActivity.open = new Set([...host.querySelectorAll('details.pdid-person[open]')].map(x => x.dataset.person)); }));
+  host.querySelectorAll('[data-conv]').forEach(a => a.onclick = e => { e.preventDefault(); peopleGoTo({ route: 'conversation:' + a.dataset.conv, position: a.dataset.entry ? { entry: a.dataset.entry } : null }); });
+  host.querySelectorAll('[data-file]').forEach(a => a.onclick = e => { e.preventDefault(); peopleGoTo({ route: 'file:' + a.dataset.file, position: null }); });
+  host.querySelectorAll('[data-commit]').forEach(a => a.onclick = async e => { e.preventDefault(); try { await copyText(a.dataset.commit); toast('commit hash copied — git -C ' + a.dataset.repo + ' show ' + a.dataset.commit.slice(0, 7)); } catch (err) { errToast(err.message); } });
+}
+
 // "Lilly is typing…" under the conversation title; bubbles on list rows.
 function renderConversationPresence() {
   const host = $('convPresence');
@@ -626,7 +701,7 @@ function bindInviteSection(dlg, project) {
   // What "act" means here depends on whether this machine can build walls.
   const walls = peopleState.walls || {};
   warn.innerHTML = walls.available
-    ? `With <b>act</b>, everything they run — agents, commands, notebook cells — starts inside a sandbox: this project's folder read-write, the rest of this machine invisible (no <code>~/.ssh</code>, no other projects, no keys). Their agents use your model subscriptions through a key proxy that never lets the key into the sandbox${walls.providers && walls.providers.length ? ' (' + walls.providers.slice(0, 4).join(', ') + (walls.providers.length > 4 ? '…' : '') + ')' : ''}. Files they write are owned by your account; their commits carry their name.`
+    ? `With <b>act</b>, everything they run — agents, commands, notebook cells — starts inside a sandbox: this project's folder read-write, the rest of this machine invisible (no <code>~/.ssh</code>, no other projects, no keys). Their agents use your model subscriptions through a key proxy that never lets the key into the sandbox${walls.providers && walls.providers.length ? ' (' + walls.providers.slice(0, 4).join(', ') + (walls.providers.length > 4 ? '…' : '') + ')' : ''}. Files they write are owned by your account; their commits carry their name. ${guestLimitsSentence(walls)}`
     : `With <b>act</b>, their agents run as <b>your account</b> on this machine with no sandbox (bubblewrap is not installed here): hidden things stay hidden in the app, but an agent they drive could read files outside this project. Give <b>read</b> to someone you do not fully trust, or install bubblewrap first.`;
   right.onchange = () => { warn.hidden = right.value !== 'act'; };
   dlg.querySelector('#invMake').onclick = async () => {
@@ -837,14 +912,42 @@ function panePeople() {
       <div class="set-status" id="setPeopleStatus"></div>
     </div>
     ${manages ? panePeersHtml() : ''}
+    ${manages ? paneGuestLimitsHtml() : ''}
     ${manages ? `<div class="set-group">
       <div class="set-group-head"><h3>groups</h3><button type="button" class="ghost" id="setGroupAdd">new group</button></div>
       <div id="setGroupList">${peopleState.groups.length ? peopleState.groups.map(g => `<div class="person-row" data-gid="${esc(g.id)}"><span class="user-bubble group">#</span><div class="person-main"><b>${esc(g.name)}</b><div class="hint">${esc(g.id)} · ${peopleState.users.filter(u => u.groups.includes(g.id)).map(u => u.name).join(', ') || 'nobody yet'}</div></div><div class="person-actions"><button type="button" class="ghost" data-gact="remove">✕</button></div></div>`).join('') : '<span class="hint">none — a group lets you share a project with several people at once (say, a department).</span>'}</div>
     </div>` : ''}
     <details class="set-more"><summary>how sharing works</summary><p>Everything on a machine is shared with everyone admitted to it, unless its owner hides it (the ⊘ button on a conversation or a project). Hidden things leave the lists, search and memory of the people they are hidden from. The owner of the machine — the account the agents run as — always sees everything on it; these are polite walls between people who share a computer, not vaults. Who typed each message, saved each file and vouched each note is recorded by name.</p><p>A <b>guest</b> is the other way round: someone invited to one project (from the project's sharing dialog) sees nothing on this machine except what is listed for them, and everything they run here starts inside a sandbox that holds only that project's folder${peopleState.walls && peopleState.walls.available ? '' : ' (<b>not on this machine</b>: bubblewrap is not installed, so guest agents would run unwalled)'}. Guests may connect their own aiconvo; the project's conversations and memory then copy both ways, and each machine only ever writes its own.</p></details>`;
 }
+// What one guest may use of this machine (design/55). Empty = derived
+// from the machine; the server reports what is in force either way.
+function paneGuestLimitsHtml() {
+  const walls = peopleState.walls || {};
+  const l = walls.limits || {};
+  const set = typeof settingsOf === 'function' ? (settingsOf().guestLimits || {}) : {};
+  const state = !walls.available ? 'no sandbox on this machine (bubblewrap is not installed), so nothing to cap'
+    : l.enforced === false ? '<b>not enforced</b>: no user systemd manager answered on this machine'
+    : l.enforced === null ? 'enforced from a guest\'s first launch on' : 'enforced by the kernel (one cgroup per guest)';
+  return `<div class="set-group" id="setGuestLimits">
+      <div class="set-group-head"><h3>guest limits</h3><span class="hint">${state}</span></div>
+      <div class="row">
+        <label>memory <input id="glMemory" size="6" placeholder="${esc(l.memory || '')}" value="${esc(set.memory || '')}" title="A systemd size: 8G, 512M. Empty: a quarter of this machine's memory."></label>
+        <label>cpu <input id="glCpu" size="6" placeholder="${esc(l.cpu || '')}" value="${esc(set.cpu || '')}" title="Percent of one core: 200% is two cores. Empty: half the cores."></label>
+        <label>processes <input id="glTasks" size="5" placeholder="${esc(String(l.tasks || ''))}" value="${esc(set.tasks ? String(set.tasks) : '')}" title="Empty: 512."></label>
+        <button type="button" class="ghost" id="glSave">save</button>
+      </div>
+      <p class="hint">Everything one guest runs here — agents, commands, cells — shares one budget; a guest at the memory cap is stopped, never swapped. Changes apply to guests already running.</p>
+    </div>`;
+}
 function bindPanePeople(root) {
   const status = t => { const el = $('setPeopleStatus'); if (el) el.innerHTML = t; };
+  const glSave = $('glSave');
+  if (glSave) glSave.onclick = async () => {
+    const guestLimits = { memory: $('glMemory').value.trim(), cpu: $('glCpu').value.trim(), tasks: parseInt($('glTasks').value, 10) || 0 };
+    await saveSettings({ guestLimits }, 'guest limits saved');
+    try { const d = await (await fetch('/api/users')).json(); peopleState.walls = d.walls || peopleState.walls; } catch {}
+    renderSettings();
+  };
   const showLink = (link, who) => {
     status(`<div class="invite-box"><b>${esc(who)}'s link</b> — open it on their device, once. It is shown only now.<div class="row"><code class="mach-link">${esc(link)}</code><button type="button" class="ghost" data-copy="${esc(link)}">copy</button></div></div>`);
     const b = root.querySelector('#setPeopleStatus [data-copy]');

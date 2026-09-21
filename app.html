@@ -7578,6 +7578,7 @@ function renderProjectPanel(d) {
     ${miniGanttHtml(heroRows)}
     <div class="ptitle"><h1 id="pTitleBig" title="${esc(pTitleHint(displayTitle))}">${esc(displayTitle)}</h1><button id="pNew" class="primary pnewbtn" title="Start a new conversation in ${esc(d.project)} — you review the context before it goes">+ new in ${esc(d.project)}</button></div>
     <div id="pHereNow" class="here-now-strip" hidden aria-label="People in this project right now"></div>
+    <section id="pPeopleDid" class="psection pdid" hidden aria-label="What other people did in this project lately"></section>
     <section class="psection pdesc">
       <div class="pmeta ps-path">${esc(d.cwd || '')}</div>
       ${!d.conversations ? '<p>No conversations yet. Start a conversation when you are ready.</p>' : ''}
@@ -7615,6 +7616,7 @@ function renderProjectPanel(d) {
   wireMiniGantt($('view'), heroRows, color, 'p:' + d.project);
   wireProjectSwitch(d.project);
   if (typeof renderProjectPresence === 'function') renderProjectPresence();
+  if (typeof loadProjectPeopleActivity === 'function') loadProjectPeopleActivity(d.project);
   $('pPurpose').onclick = () => editProjectPurpose(d.project);
   if (!d.conversations) $('pNew').textContent = 'Start conversation';
   $('pTitleBig').ondblclick = e => { e.preventDefault(); startProjectTitleEdit(d.project); };

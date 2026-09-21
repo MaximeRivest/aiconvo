@@ -55,7 +55,7 @@ test('a guest runs commands only inside the project, and cannot reach the machin
   let log = '';
   const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: String(tlsPort), AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1', AICONVO_NO_SYNC: '1',
     AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent,
-    AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_PUBLIC_URL: '', AICONVO_TOKEN: 'install-tok', AICONVO_BWRAP: bwrap }, stdio: ['ignore', 'pipe', 'pipe'] });
+    AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_PUBLIC_URL: '', AICONVO_TOKEN: 'install-tok', AICONVO_BWRAP: bwrap, AICONVO_NO_CGROUP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', b => log += b); child.stderr.on('data', b => log += b);
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const local = 'http://127.0.0.1:' + port, remote = 'http://' + lanIp() + ':' + port;
@@ -116,4 +116,17 @@ test('a guest runs commands only inside the project, and cannot reach the machin
   const previewText = JSON.stringify(preview);
   assert.doesNotMatch(previewText, /secret plan/);
   assert.match(previewText, /open project/);
+
+  // The project page tells the owner what Sam did here: the commit above,
+  // by the sandbox's email. Sam's own page never lists Sam.
+  const did = await (await fetch(local + '/api/project/people?name=open')).json();
+  const samDid = (did.people || []).find(p => p.user.name === 'Sam');
+  assert.ok(samDid, JSON.stringify(did));
+  assert.equal(samDid.counts.commits, 1);
+  assert.equal(samDid.commits[0].subject, 'sam');
+  assert.equal(samDid.user.scope, 'guest');
+  const samSees = await (await fetch(remote + '/api/project/people?name=open', { headers: { Cookie: sam } })).json();
+  assert.ok(!(samSees.people || []).some(p => p.user.name === 'Sam'), 'other people only');
+  const denied = await fetch(remote + '/api/project/people?name=secret', { headers: { Cookie: sam } });
+  assert.equal(denied.status, 403);
 });

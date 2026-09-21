@@ -54,7 +54,22 @@ const DEFAULT_SETTINGS = {
   // app, so the service environment (AICONVO_LAN=1) decides. Once someone
   // flips the switch in settings → machines, that choice wins and persists.
   lan: null,
+  // What one guest may use of this machine, all their processes together
+  // (design/55). Empty strings and 0 mean "derive from the machine": a
+  // quarter of the memory, half the cores, 512 tasks. memory: a systemd
+  // size (8G, 512M); cpu: a percentage of one core (200% = two cores).
+  guestLimits: { memory: '', cpu: '', tasks: 0 },
 };
+
+function normalizeGuestLimits(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const memory = /^\d+(?:\.\d+)?[KMGT]?$/i.test(String(src.memory || '').trim()) ? String(src.memory).trim().toUpperCase() : '';
+  const cpuN = parseInt(String(src.cpu || '').replace('%', ''), 10);
+  const cpu = cpuN > 0 && cpuN <= 100000 ? cpuN + '%' : '';
+  const tasksN = parseInt(src.tasks, 10);
+  const tasks = tasksN >= 16 && tasksN <= 32768 ? tasksN : 0;
+  return { memory, cpu, tasks };
+}
 
 // Keep only well-formed machine entries: a name, an http(s) URL without a
 // trailing slash, and a token string (may be empty for a local-only URL).
@@ -201,8 +216,9 @@ function normalizeSettings(input) {
   const doneSound = DONE_SOUND_MODES.includes(src.doneSound) ? src.doneSound : DEFAULT_SETTINGS.doneSound;
   const machines = normalizeMachines(src.machines);
   const lan = src.lan === true ? true : src.lan === false ? false : null;
+  const guestLimits = normalizeGuestLimits(src.guestLimits);
   if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, simplifyAnswers, simplifyPrompt, autoResumeNetwork, piTheme, usageBilling, snippetTrigger, doneSound, machines, lan };
+    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, simplifyAnswers, simplifyPrompt, autoResumeNetwork, piTheme, usageBilling, snippetTrigger, doneSound, machines, lan, guestLimits };
   }
   return {
     usePiDefault: false,
@@ -223,6 +239,7 @@ function normalizeSettings(input) {
     doneSound,
     machines,
     lan,
+    guestLimits,
   };
 }
 
@@ -299,6 +316,7 @@ module.exports = {
   normalizeUsageBilling,
   normalizeMachines,
   normalizeSettings,
+  normalizeGuestLimits,
   buildPiArgs,
   modelLabel,
   resolveContextTokens,
