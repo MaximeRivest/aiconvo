@@ -15224,7 +15224,10 @@ async function handleRequest(req, res) {
           runs: [...agentRunJobs.values()].filter(j => j.status === 'running').map(j => j.id),
         }) + '\n\n');
       } catch {}
-      const beat = setInterval(() => res.write(': ping\n\n'), 30000);
+      // A named event, not a comment: the browser cannot see comment lines,
+      // and the page uses this beat to notice a stream that died quietly
+      // (a phone that slept, a network that changed) and reconnect.
+      const beat = setInterval(() => { try { res.write('event: ping\ndata: {}\n\n'); } catch {} }, 25000);
       req.on('close', () => { clearInterval(beat); sseClients.delete(res); sseByConn.delete(conn); if (presence.remove(conn)) broadcastPresence(); });
     } else if (u.pathname.startsWith('/api/records/') && req.method === 'GET') {
       // The agent-facing read API: same text the CLI and the Pi tools print.

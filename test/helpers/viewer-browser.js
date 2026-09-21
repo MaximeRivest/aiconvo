@@ -24,11 +24,14 @@ async function viewerBrowser(t) {
   t.after(async () => { ws?.close(); await stop(browser); await stop(server); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
   const socket = net.createServer(); await new Promise(r => socket.listen(0, '127.0.0.1', r)); const port = socket.address().port; await new Promise(r => socket.close(r));
   const base = 'http://127.0.0.1:' + port; let log = '';
+  // Since the console needs the token (design/53), the harness signs in
+  // like a client: Bearer on its own calls, ?token= for the browser's cookie.
+  const token = 'viewer-test-token', auth = { Authorization: 'Bearer ' + token };
   server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: '0', AICONVO_HOST: '127.0.0.1', AICONVO_TOKEN: 'viewer-test-token', AICONVO_NO_WATCH: '1', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', b => log += b); server.stderr.on('data', b => log += b);
   let ready = false;
   for (let i = 0; i < 150; i++) {
-    try { const rows = await (await fetch(base + '/api/sessions')).json(); if (rows.some(s => s.key === 'pi:fixture/media.jsonl')) { ready = true; break; } } catch {}
+    try { const rows = await (await fetch(base + '/api/sessions', { headers: auth })).json(); if (rows.some(s => s.key === 'pi:fixture/media.jsonl')) { ready = true; break; } } catch {}
     if (server.exitCode !== null) break;
     await new Promise(r => setTimeout(r, 100));
   }
@@ -67,7 +70,7 @@ async function viewerBrowser(t) {
     await command('Emulation.setTouchEmulationEnabled', { enabled: mobile });
   };
   await command('Runtime.enable'); await command('Network.enable'); await command('Page.enable');
-  await size(1440, 1000); await command('Page.navigate', { url: base });
+  await size(1440, 1000); await command('Page.navigate', { url: base + '/?token=' + token });
   // openLiveFile is in an earlier external script; wait for the main app too.
   await until(`typeof openLiveFile==='function' && typeof load==='function'`);
   const open = async (file, opts = {}) => {
@@ -89,7 +92,7 @@ async function viewerBrowser(t) {
     return { id: world.result.executionContextId, session };
   };
   const screenshot = async name => { const shot = await command('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(os.tmpdir(), name), Buffer.from(shot.result.data, 'base64')); };
-  return { home, work, base, command, evaluate, until, size, open, frameContext, screenshot, exceptions, requests };
+  return { home, work, base, token, auth, command, evaluate, until, size, open, frameContext, screenshot, exceptions, requests };
 }
 
 function samplePDF(padding = 0) {

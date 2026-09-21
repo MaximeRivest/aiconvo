@@ -366,12 +366,12 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   const shot = await send('Page.captureScreenshot', { format: 'png' }, sid);
   fs.writeFileSync(path.join(os.tmpdir(), 'side-panel-desktop.png'), Buffer.from(shot.result.data, 'base64'));
 
-  // A phone keeps the top bar whatever the choice says; a desk gets the column back.
+  // A phone gets the bottom bar whatever the choice says; a desk gets the column back.
   await size(390, 844);
-  await until(`!document.body.classList.contains('side-layout')`, 'phone falls back to the top bar');
-  assert.equal(await evaluate(`document.querySelector('#agentsPop').parentElement.tagName`), 'BODY', 'the tray returned to the page');
-  assert.equal(await evaluate(`document.querySelector('#agentsPop').hidden && document.querySelector('#settingsBtn').closest('header') !== null`), true);
-  assert.equal(await evaluate(`getComputedStyle(document.querySelector('body > header')).display !== 'none'`), true);
+  await until(`!document.body.classList.contains('side-layout') && document.body.classList.contains('phone-shell')`, 'phone falls back to the phone shell');
+  assert.equal(await evaluate(`document.querySelector('#agentsPop').parentElement.tagName`), 'BODY', 'the sheet returned to the page');
+  assert.equal(await evaluate(`document.querySelector('#agentsPop').hidden && document.querySelector('#settingsBtn').closest('#phoneBar') !== null`), true, 'the sheet starts closed; You lives in the bar');
+  assert.equal(await evaluate(`getComputedStyle(document.querySelector('body > header')).display !== 'none' && getComputedStyle($('phoneBar')).display === 'flex'`), true);
   await size(1440, 1000);
   await until(`document.body.classList.contains('side-layout') && document.querySelector('#agentsPop').parentElement.id === 'sideAgents'`, 'column back on a wide screen');
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);

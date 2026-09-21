@@ -37,6 +37,7 @@ test('floating bordered surfaces have an explicit shape contract', () => {
     ['.ls-livechip', 'inherits the button shape'], ['.md-run', 'inherits the button shape'],
     ['#gRecenter', 'inherits the button shape'], ['body.zen:not(.home) #zenExit', 'inherits the button shape'],
     ['.project-new-cell', 'flush timeline header cell'], ['.msg .unfold', 'inherits the button shape'],
+    ['body.phone-shell #phoneBar', 'flush bottom bar (design/58)'], ['body.side-layout #rightFilePanel', 'edge-attached overlay panel'],
   ]);
   const missing = [];
   for (const [, selectors, declarations] of css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
@@ -222,9 +223,12 @@ test('real app surfaces follow the theme together, including nested painted edge
   assert.equal(await evaluate(`getComputedStyle(gallery.querySelector('.cr-file')).overflow`), 'visible', 'cards do not clip escaping menus');
   assert.equal(await evaluate(`getComputedStyle(gallery.querySelector('.cr-file > summary')).borderTopLeftRadius`), '5px', 'summary follows card corners');
   await size(390, 844);
+  // On a phone the agent tray is a full-screen sheet (design/58): edge to
+  // edge, so no corners to round.
+  const phoneSquare = new Set(['agent tray']);
   for (const theme of ['light', 'eink']) {
     await evaluate(`selectTheme(${JSON.stringify(theme)})`);
-    for (const item of await radii()) assert.deepEqual(item.r, Array(4).fill((theme === 'eink' ? 0 : defaults[item.kind]) + 'px'), 'phone ' + theme + ': ' + item.name);
+    for (const item of await radii()) assert.deepEqual(item.r, Array(4).fill((theme === 'eink' || phoneSquare.has(item.name) ? 0 : defaults[item.kind]) + 'px'), 'phone ' + theme + ': ' + item.name);
   }
   // Render real live work, not hand-written replicas of its nested markup.
   await evaluate(`gallery.remove();

@@ -285,8 +285,8 @@ body.side-layout #agentsPop .ag-row.current { background: var(--surface-2); }
 body.side-layout #agentsPop .ag-row.current .ag-title { color: var(--accent); }
 body.side-layout #agentsPop .ag-row.kbd-selected { outline: 1px solid var(--accent); outline-offset: -1px; }
 body.side-layout #agentsPop:not(.kbd) .ag-row.kbd-selected { outline: 0; }
-/* File activity lives in the right column; phones keep their existing file views. */
-body:not(.side-layout) .ag-files-block { display: none; }
+/* File activity lives in the right column, or in the phone's Files sheet. */
+body:not(.side-layout):not(.phone-shell) .ag-files-block { display: none; }
 .ag-sec-body[hidden] { display: none; }
 /* Sections are separated by space, not lines. A head is a quiet label; it
    folds on click (the fold is remembered) and shows a count when folded. */
@@ -1772,6 +1772,10 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 
 /* ---- phone layout: a separate reading surface, not a scaled desktop ---- */
 .mobile-only { display: none; }
+/* Phone shell (design/58). Off everywhere by default; body.phone-shell turns
+   it on inside the phone media query below. */
+#phoneBar, #agentsSheetHead, #phoneMore { display: none; }
+:root { --phone-bar-h: 0px; }
 .mobile-home section > h2 { margin: 0; padding: 10px 12px 7px; border-bottom: 1px solid var(--border-strong); color: var(--text-dim); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: .06em; }
 .mobile-project { min-height: 72px; align-items: center; }
 .mobile-project-main, .mobile-work-body { flex: 1; min-width: 0; }
@@ -1819,9 +1823,86 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
   body.home #filtersPop, body.home #agentsPop { top: 108px; }
   #filtersPop { min-width: 0; }
   body.home #left { padding-bottom: 0; }
+
+  /* ---- phone shell (design/58): bottom bar, full-screen sheets, a one-row
+     conversation head. body.phone-shell is set by applyPhoneShell(). ---- */
+  body.phone-shell { --phone-bar-h: calc(54px + env(safe-area-inset-bottom)); }
+  /* Reading and typing own the screen: the bar leaves with the top bar
+     (scroll down, or the keyboard) and returns the same way. A sheet keeps
+     it, so the way out is always on screen. */
+  body.phone-shell.chrome-min:not(.home):not(.phone-sheet) { --phone-bar-h: 0px; }
+  body.phone-shell #phoneBar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 48; height: var(--phone-bar-h); padding: 0 2px env(safe-area-inset-bottom); background: var(--surface-1); border-top: 1px solid var(--border); box-shadow: 0 -1px 0 var(--shadow-color); }
+  body.phone-shell.chrome-min:not(.home):not(.phone-sheet) #phoneBar { display: none; }
+  body.phone-shell.zen:not(.home) #phoneBar { display: none; }
+  #phoneBar > button, #phoneBar > .pb-slot { position: relative; flex: 1 1 0; min-width: 0; height: 54px; min-height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; color: var(--text-dim); font-size: 10px; font-weight: 600; letter-spacing: .02em; line-height: 1; }
+  #phoneBar > button:hover { background: transparent; }
+  #phoneBar > button:active { background: var(--surface-2); }
+  #phoneBar .pb-icon { display: block; font-size: 21px; line-height: 20px; height: 20px; }
+  #phoneBar [data-phone-tab="new"] .pb-icon { font-size: 26px; font-weight: 300; }
+  #phoneBar .pb-label { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #phoneBar > button[aria-pressed="true"] { color: var(--accent); }
+  #phoneBar > button.work .pb-icon { color: var(--live); }
+  #phoneBar .pb-badge { position: absolute; top: 5px; left: calc(50% + 4px); min-width: 17px; height: 17px; padding: 0 5px; border-radius: var(--r-pill); background: var(--accent-strong); color: var(--accent-ink); font-size: 10px; line-height: 17px; font-weight: 700; text-align: center; }
+  #phoneBar .pb-badge[hidden] { display: none; }
+  :root[data-theme-mode="binary"] #phoneBar .pb-badge { background: var(--text); color: var(--bg); }
+  /* The profile button is the same element as everywhere else; here it is
+     a tab: bubble above a label. */
+  #phoneBar .pb-slot > #settingsBtn { width: 100%; height: 54px; min-height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; color: var(--text-dim); font-size: 10px; font-weight: 600; }
+  #phoneBar .pb-slot > #settingsBtn::after { content: 'You'; display: block; line-height: 1; letter-spacing: .02em; }
+  #phoneBar .pb-slot > #settingsBtn.on { color: var(--accent); }
+  #phoneBar .pb-slot > #settingsBtn .user-bubble { width: 20px; height: 20px; font-size: 10px; }
+
+  /* Everything below the bar moves up by its height. */
+  body.phone-shell .composer-dock { bottom: var(--phone-bar-h); }
+  body.phone-shell:not(.home) #view { padding-bottom: calc(20px + var(--phone-bar-h) + env(safe-area-inset-bottom)); }
+  body.phone-shell:not(.home) #view:has(.agent-compose) { padding-bottom: calc(var(--compose-h, 174px) + var(--phone-bar-h) + 16px + env(safe-area-inset-bottom)); }
+  body.phone-shell:not(.chrome-min) .agent-compose { padding-bottom: 8px; }
+  body.phone-shell.home #left { padding-bottom: var(--phone-bar-h); }
+  body.phone-shell #gRecenter { bottom: calc(12px + var(--phone-bar-h)); }
+  body.phone-shell #tabs { bottom: calc(8px + var(--phone-bar-h)); }
+  body.phone-shell #cornerStack { bottom: calc(10px + var(--phone-bar-h)); }
+  body.phone-shell .mpick { bottom: var(--phone-bar-h); }
+  body.phone-shell #filtersPop { top: auto; bottom: var(--phone-bar-h); max-height: 70dvh; }
+
+  /* The top bar keeps only what the bar does not do: back, the title, and
+     one ⋯ with the rest. The old row of nine controls squeezed the title
+     to three letters. */
+  body.phone-shell header { padding: 4px 8px; gap: 4px; }
+  body.phone-shell #newLoose, body.phone-shell #brand, body.phone-shell #activeBtn, body.phone-shell #machineBtn,
+  body.phone-shell #barFold, body.phone-shell #chNew, body.phone-shell #chMove, body.phone-shell #shareBtn, body.phone-shell #ticker { display: none !important; }
+  body.phone-shell.conv #phoneMore { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--text-dim); font-size: 22px; }
+  body.phone-shell.conv #phoneMore[aria-expanded="true"] { color: var(--accent); }
+  body.phone-shell.conv #chTitle { flex: 1 1 auto; min-width: 0; max-width: none; font-size: 15px; line-height: 1.3; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
+  body.phone-shell.conv #chTitle input { width: 100%; }
+  body.phone-shell.conv #convPresence:not([hidden]) { flex: 0 0 auto; }
+  body.phone-shell #peopleBtn { height: 44px; }
+  body.phone-shell.conv #headSpace { display: none; }
+
+  /* Sheets: Agents and Files fill the screen above the bar. Same content and
+     rules as the desktop column (Unread → Read scroll; Working docked with
+     its own scroll, so a long history never pushes it out of reach). */
+  body.phone-shell #agentsPop { position: fixed; top: 0; left: 0; right: 0; bottom: var(--phone-bar-h); width: auto; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; z-index: 47; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+  body.phone-shell #agentsPop[hidden] { display: none; }
+  body.phone-shell #agentsSheetHead, body.phone-shell .right-file-head { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-height: 48px; padding: 4px 8px 4px 14px; border-bottom: 1px solid var(--border); background: var(--surface-1); }
+  #agentsSheetHead .sheet-title, body.phone-shell #rightFileTitle { flex: 1 1 auto; min-width: 0; font-size: var(--fs-title); font-weight: 700; }
+  #agentsSheetClose, body.phone-shell #rightFileClose { flex: 0 0 auto; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--text-dim); font-size: 18px; }
+  body.phone-shell #agentsPop #agentsUnread { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 4px; }
+  body.phone-shell #agentsPop #agentsLegacy { flex: 0 0 auto; max-height: 42%; overflow: auto; overscroll-behavior: contain; padding: 0 4px 6px; border-top: 1px solid var(--border-strong); background: var(--surface-1); }
+  body.phone-shell #agentsPop .ag-row { min-height: 52px; }
+  body.phone-shell #agentsPop .ag-row.current { background: var(--surface-2); }
+  body.phone-shell #agentsPop .ag-row.current .ag-title { color: var(--accent); }
+  body.phone-shell .read-scope button { min-height: 34px; }
+  body.phone-shell.phone-files > #rightFiles { display: flex; flex-direction: column; position: fixed; top: 0; left: 0; right: 0; bottom: var(--phone-bar-h); z-index: 47; background: var(--bg); }
+  body.phone-shell.phone-files #rightFilePanel { flex: 1 1 auto; min-height: 0; }
+  body.phone-shell #rightFileList { padding: 0 4px 8px; overscroll-behavior: contain; }
+  body.phone-shell .file-scope-switch { padding-top: 8px; }
+  body.phone-shell .file-scope-switch button { min-height: 38px; }
+  /* The desktop's floating Files icon and folded-column button have no job here. */
+  body.phone-shell > #filesToggle, body.phone-shell #sideUnfold { display: none !important; }
+  /* Menus opened by a finger: rows tall enough to hit. */
+  body.phone-shell .file-action-menu button { min-height: 44px; padding: 8px 12px; font-size: var(--fs-label); }
   /* phone dashboard: the app opens on the chart and nothing else */
   body.home header, body.home #tabs { display: none !important; }
-  body.home #list { touch-action: pan-x pan-y; }
   body.home #gRecenter { display: flex; }
   /* the tab switcher floats in the corner instead of owning a full-width bar */
   #tabs { position: fixed; left: auto; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 35; width: auto; height: auto; padding: 2px; background: var(--surface-1); border: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); box-shadow: 0 2px 12px var(--shadow-color); }
@@ -2091,11 +2172,12 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <button id="activeBtn" hidden title="Agents and replies (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
   <button id="machineBtn" hidden title="Switch to another aiconvo machine"></button>
   <button id="settingsBtn" title="Your profile and Settings (,)" aria-label="Open settings and profile"><span class="user-bubble me">?</span></button>
+  <button id="phoneMore" title="More for this conversation" aria-label="More for this conversation" aria-haspopup="menu">⋯</button>
   <button id="barFold" title="Fold the top bar — click the rail to bring it back (`)">▴</button>
 </header>
 <button id="zenExit" title="Leave zen mode (z)">zen ✕</button>
 <button id="gRecenter" title="Jump to now" aria-label="Jump to now">⌖</button>
-<div id="agentsPop" hidden><div id="agentsUnread"></div><div id="agentsLegacy"></div></div>
+<div id="agentsPop" hidden><div id="agentsSheetHead"><span class="sheet-title">Agents</span><button id="agentsSheetClose" type="button" title="Close" aria-label="Close agents">✕</button></div><div id="agentsUnread"></div><div id="agentsLegacy"></div></div>
 <div id="machinePop" hidden></div>
 <aside id="side" hidden aria-label="Navigation and agents">
   <div id="sidePanel">
@@ -2125,6 +2207,15 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   </div>
 </aside>
 <button id="sideUnfold" type="button" title="Show side panel (`)" aria-label="Show side panel" aria-controls="sidePanel" aria-expanded="false"><span class="rail-icon">▸</span><span class="rail-badge" hidden></span></button>
+<!-- Phone shell (design/58): one bottom bar carries the destinations the
+     desktop keeps in its side column. Hidden above 700px and on e-ink. -->
+<nav id="phoneBar" hidden aria-label="Main">
+  <button type="button" data-phone-tab="agents" aria-pressed="false" aria-controls="agentsPop" title="Agents and replies"><span class="pb-icon">⚇</span><span class="pb-label">Agents</span><span class="pb-badge" hidden></span></button>
+  <button type="button" data-phone-tab="gantt" aria-pressed="false" title="Gantt — conversations on a timeline"><svg class="pb-icon pb-svg" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 4h8M7 10h11M3 16h10" fill="none" stroke="currentColor" stroke-width="3"/></svg><span class="pb-label">Gantt</span></button>
+  <button type="button" data-phone-tab="new" aria-pressed="false" title="New conversation"><span class="pb-icon">+</span><span class="pb-label">New</span></button>
+  <button type="button" data-phone-tab="files" aria-pressed="false" aria-controls="rightFilePanel" title="Recent files"><span class="pb-icon">▤</span><span class="pb-label">Files</span></button>
+  <span id="phoneMeSlot" class="pb-slot"></span>
+</nav>
 <button id="filesToggle" type="button" aria-label="Open files" title="Open files" aria-expanded="false" aria-controls="rightFilePanel">▤</button>
 <aside id="rightFiles" hidden aria-label="Files">
   <section id="rightFilePanel" hidden aria-labelledby="rightFileTitle">
@@ -3441,6 +3532,7 @@ function updateActiveBtn() {
   side.dataset.unread = unread.length ? String(unread.length) : '';
   if (sideLayoutOn()) paintRailBadges({ unread: unread.length,
     working: activeRuns.size > 0 || sessions.some(isWorking) || agentsProcs.some(p => p.busy === true) });
+  if (typeof paintPhoneBar === 'function' && document.body.classList.contains('phone-shell')) paintPhoneBar();
 }
 
 // The panel is built from LIVE client state — sessions (mtimes), runningKeys
@@ -3635,10 +3727,13 @@ function setSidePanel(id, { remember = true } = {}) {
   renderAgentsPop(false);
 }
 function paintRightFilesFrame() {
-  const visible = sideLayoutOn() && rightFilesOpen;
-  document.body.classList.toggle('file-side-open', visible);
+  const phone = typeof phoneShellOn === 'function' && phoneShellOn();
+  const visible = (sideLayoutOn() || phone) && rightFilesOpen;
+  document.body.classList.toggle('file-side-open', sideLayoutOn() && rightFilesOpen);
+  if (phone) $('rightFiles').hidden = !visible;
   $('rightFilePanel').hidden = !visible;
   $('filesToggle').setAttribute('aria-expanded', String(visible));
+  if (phone) paintPhoneBar();
 }
 function setRightFiles(mode, open = true) {
   if (!['files', 'recent-files'].includes(mode)) return;
@@ -3669,7 +3764,7 @@ function fileActivityHtml(project) {
 }
 let rightFilesScopeKey = null;
 function renderRightFiles() {
-  if (!sideLayoutOn() || !rightFilesOpen) return;
+  if (!(sideLayoutOn() || (typeof phoneShellOn === 'function' && phoneShellOn())) || !rightFilesOpen) return;
   const host = $('rightFileList');
   const project = rightFilesMode === 'recent-files' ? '' : workspaceScope();
   const scopeKey = rightFilesMode + ':' + project;
@@ -3793,7 +3888,9 @@ async function renderAgentsPop(refetch) {
     return `<a class="ag-project" href="#project=${encodeURIComponent(project)}" data-open-project="${esc(project)}" title="${esc('Open project · ' + project + (s.cwd ? '\n' + s.cwd : ''))}">${esc(ProjectScope.label(project))}</a>`;
   };
   const busyNow = agentBusyKeys();
-  const panel = sideLayoutOn() ? sidePanel() : 'tray';
+  // The phone sheet is the desktop inbox, not the old tray: Unread, then Read
+  // (paged), with Working docked underneath where it stays reachable.
+  const panel = sideLayoutOn() ? sidePanel() : phoneShellOn() ? 'inbox' : 'tray';
   const project = workspaceScope(), scoped = !!project;
   // One row per orchestration, not one per worker. Workers fold under the
   // conversation that launched them; that row shows progress and expands on
@@ -4153,9 +4250,12 @@ function toggleAgents(show) {
   clearInterval(agentsTimer);
   if (!pop.hidden) {
     agentsSelectedKey = null;
+    // The phone sheet opens at the top: interruptions and unread first.
+    if (phoneShellOn()) { $('agentsUnread').scrollTop = 0; $('agentsLegacy').scrollTop = 0; }
     renderAgentsPop(true);
     agentsTimer = setInterval(() => renderAgentsPop(true), 15000);
   }
+  if (phoneShellOn()) paintPhoneBar();
   delegationUI.visibilityChanged();
 }
 // One menu per conversation row: pin, mark unread, remove. Same surface as
@@ -4252,6 +4352,7 @@ $('rightFileList').onclick = $('agentsPop').onclick = async e => {
   if (fileRow) {
     e.stopPropagation();
     if (sideLayoutOn()) setAgentsKbd(false); else toggleAgents(false);
+    if (typeof closePhoneSheets === 'function') closePhoneSheets();
     openLiveFile(fileRow.dataset.path, { project: fileRow.dataset.project || null, back: fileRow.dataset.fileConv || null });
     return;
   }
@@ -8528,6 +8629,7 @@ function fileControlContext(button) {
 function closeFileActionMenu() {
   const menu = document.querySelector('.file-action-menu');
   if (menu) menu.remove();
+  $('phoneMore')?.setAttribute('aria-expanded', 'false');
 }
 
 function viewFileChange(ctx) {
@@ -15247,7 +15349,7 @@ function sideLayoutOn() { return document.body.classList.contains('side-layout')
 let sideApplied = false;
 function applyLayout() {
   const on = layoutPref() === 'side' && SIDE_LAYOUT_MQ.matches;
-  if (on === sideApplied) { document.body.classList.toggle('side-layout', on); return; }
+  if (on === sideApplied) { document.body.classList.toggle('side-layout', on); applyPhoneShell(); return; }
   sideApplied = on;
   const pop = $('agentsPop'), side = $('side');
   clearInterval(agentsTimer);
@@ -15291,6 +15393,7 @@ function applyLayout() {
     setAgentsKbd(false);
   }
   document.body.classList.remove('chrome-min');
+  applyPhoneShell();
   if ($('agentCompose')) observeComposeHeight();
   delegationUI.visibilityChanged();
 }
@@ -15483,6 +15586,140 @@ $('sideNewMore').onclick = e => {
   menu.querySelector('button').focus();
 };
 SIDE_LAYOUT_MQ.addEventListener('change', applyLayout);
+
+// ---- phone shell (design/58) ----
+// A phone has no side column and no room for nine header controls. One
+// bottom bar carries the destinations (Agents, Gantt, New, Files, You); the
+// Agents and Files panels open as full-screen sheets above it and are the
+// same elements, filled by the same renderers, as the desktop column.
+const PHONE_MQ = matchMedia('(max-width: 700px), (max-height: 700px) and (pointer: coarse)');
+function phoneShellOn() { return document.body.classList.contains('phone-shell'); }
+function phoneSheetOpen() { return phoneShellOn() && (!$('agentsPop').hidden || rightFilesOpen); }
+function applyPhoneShell() {
+  const on = phoneLayout() && !sideLayoutOn() && !isEink();
+  if (on === phoneShellOn()) { paintPhoneBar(); return; }
+  document.body.classList.toggle('phone-shell', on);
+  $('phoneBar').hidden = !on;
+  if (on) {
+    $('phoneMeSlot').append($('settingsBtn'));
+    // The tray never carries over: the sheet starts closed, like the panel
+    // on a fresh desktop page, and the files sheet remembers only its mode.
+    $('agentsPop').hidden = true;
+    clearInterval(agentsTimer);
+    rightFilesOpen = false;
+  } else {
+    if ($('settingsBtn').closest('#phoneBar')) $('barFold').before($('settingsBtn'));
+    document.body.classList.remove('phone-sheet', 'phone-files');
+    closeFileActionMenu();
+  }
+  paintRightFilesFrame();
+  paintPhoneBar();
+  if ($('agentCompose')) observeComposeHeight();
+}
+function paintPhoneBar() {
+  if (!phoneShellOn()) return;
+  const bar = $('phoneBar');
+  const agentsOpen = !$('agentsPop').hidden, filesOpen = rightFilesOpen;
+  document.body.classList.toggle('phone-sheet', agentsOpen || filesOpen);
+  document.body.classList.toggle('phone-files', filesOpen);
+  const set = (tab, pressed) => bar.querySelector(`[data-phone-tab="${tab}"]`).setAttribute('aria-pressed', String(!!pressed));
+  set('agents', agentsOpen);
+  set('files', filesOpen);
+  set('gantt', !agentsOpen && !filesOpen && document.body.classList.contains('home'));
+  set('new', !agentsOpen && !filesOpen && viewKind === 'draft');
+  const agents = bar.querySelector('[data-phone-tab="agents"]');
+  const unread = finishedUnreadSessions().length, interrupted = agentsRecovery.interrupted.length;
+  const badge = agents.querySelector('.pb-badge');
+  badge.hidden = !unread && !interrupted;
+  badge.textContent = unread ? String(unread) + (interrupted ? '!' : '') : '!';
+  agents.classList.toggle('work', $('activeBtn').classList.contains('work'));
+  agents.title = (unread ? `${unread} unread ${unread === 1 ? 'reply' : 'replies'}` : 'Agents and replies') + (interrupted ? ` · ${interrupted} interrupted` : '');
+  const p = sideNewProject();
+  bar.querySelector('[data-phone-tab="new"]').title = p ? 'New conversation in ' + p : 'New conversation — a blank page, no project';
+}
+function closePhoneSheets() {
+  if (!phoneShellOn()) return;
+  if (!$('agentsPop').hidden) toggleAgents(false);
+  if (rightFilesOpen) setRightFiles(rightFilesMode, false);
+  paintPhoneBar();
+}
+$('phoneBar').onclick = e => {
+  const button = e.target.closest('[data-phone-tab]');
+  // "You" is #settingsBtn itself (its own handler ran first): one thing at a time.
+  if (!button) { if (e.target.closest('#settingsBtn')) closePhoneSheets(); return; }
+  e.stopPropagation();
+  closeFileActionMenu();
+  const tab = button.dataset.phoneTab;
+  if (tab === 'agents') {
+    if (rightFilesOpen) setRightFiles(rightFilesMode, false);
+    toggleAgents();
+  } else if (tab === 'files') {
+    const open = !rightFilesOpen;
+    if (open && !$('agentsPop').hidden) toggleAgents(false);
+    setRightFiles(rightFilesMode, open);
+    if (open) { $('rightFiles').hidden = false; loadRecentFiles(); }
+  } else if (tab === 'gantt') {
+    closePhoneSheets();
+    if (!document.body.classList.contains('home')) goHome();
+  } else if (tab === 'new') {
+    closePhoneSheets();
+    startScopedConversation();
+  }
+  paintPhoneBar();
+};
+$('agentsSheetClose').onclick = e => { e.stopPropagation(); toggleAgents(false); };
+// A sheet is a detour: leaving for a page (a row, a project link, Back)
+// closes it. Settings is a modal over the page and keeps the sheet.
+window.addEventListener('aiconvo:route', () => { if (phoneSheetOpen() && viewKind !== 'settings') closePhoneSheets(); else paintPhoneBar(); });
+PHONE_MQ.addEventListener('change', applyPhoneShell);
+// The Android app asks the page first when the back button is pressed:
+// anything transient (a menu, a picker, a sheet, a dialog) closes; only
+// with nothing open does the app move through the page history.
+window.aiconvoBack = () => {
+  const esc = el => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  const pop = document.querySelector('.file-action-menu, .mpick, .thinking-picker');
+  if (pop) { esc(pop); if (pop.isConnected) pop.remove(); return true; }
+  const tools = document.querySelector('.compose-tools[open]');
+  if (tools) { tools.open = false; return true; }
+  if (phoneSheetOpen()) { closePhoneSheets(); return true; }
+  // Dialogs built on the fly (review the context, pick a project…) listen
+  // for Escape on themselves; the fixed ones are handled at the document.
+  const overlay = [...document.querySelectorAll('.overlay')].find(o => !o.hidden && getComputedStyle(o).display !== 'none');
+  if (overlay) { esc(overlay); return true; }
+  const transient = searchModalOpenNow() || readOverlayOpen() || settingsOpen || !$('markPop').hidden || !$('filtersPop').hidden || agentsTrayOpen();
+  if (transient) { esc(document); return true; }
+  return false;
+};
+// ⋯ in the phone's conversation head: the controls the one-row head has no
+// room for, in the same words the desktop uses.
+$('phoneMore').onclick = e => {
+  e.stopPropagation();
+  if (document.querySelector('.file-action-menu.phone-more-menu')) { closeFileActionMenu(); return; }
+  closeFileActionMenu();
+  const project = current ? projectOf(current) : '';
+  const inProject = project && project !== '?' && project !== LOOSE_PROJECT;
+  const items = [
+    inProject && !current?.draft ? ['New here · ' + project, () => $('chNew').click()] : null,
+    inProject ? ['Open project · ' + project, () => showProjectOverview(project)] : null,
+    !current?.draft ? ['Rename', () => startTitleEdit()] : null,
+    !$('shareBtn').hidden ? ['Who can see this', () => $('shareBtn').click()] : null,
+    !current?.draft ? ['Move to another project', () => $('chMove').click()] : null,
+    !current?.draft ? ['Conversation tree', () => $('agentTree')?.click()] : null,
+    inProject ? ['Browse project files', () => $('conversationFiles').click()] : null,
+    !$('machineBtn').hidden ? ['Switch machine', () => $('machineBtn').click()] : null,
+  ].filter(Boolean);
+  const menu = document.createElement('div');
+  menu.className = 'file-action-menu ag-menu phone-more-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = items.map((item, i) => `<button type="button" role="menuitem" data-ag-action="${i}">${esc(item[0])}</button>`).join('');
+  document.body.appendChild(menu);
+  const r = $('phoneMore').getBoundingClientRect();
+  menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+  menu.style.top = (r.bottom + 2) + 'px';
+  $('phoneMore').setAttribute('aria-expanded', 'true');
+  menu.querySelectorAll('[data-ag-action]').forEach(b => b.onclick = ev => { ev.stopPropagation(); closeFileActionMenu(); items[Number(b.dataset.agAction)][1](); });
+  menu.querySelector('button')?.focus();
+};
 
 // ---- recent files: separate human/agent observations, combined on request ----
 // Shared across devices (server store, SSE); filtered before deduplication.
@@ -16523,8 +16760,35 @@ function toast(text, onClick, kind = '') {
 }
 
 // ---- live updates ----
-const live = new EventSource('/api/events');
-live.addEventListener('delegation-update', () => delegationUI.invalidate());
+// One stream, replaced when it dies quietly. EventSource reconnects by
+// itself only when it notices an error; a phone that slept or a network that
+// changed underneath can leave a socket that never errors and never delivers
+// ("streaming stopped"). The server sends a `ping` event every 25 s: no beat
+// for 70 s while the page is visible, or a stale beat on wake, means reconnect.
+let live = null, liveLast = Date.now();
+const LIVE_STALE_MS = 70000;
+const liveListeners = [['delegation-update', () => delegationUI.invalidate()]];
+function liveBeat() { liveLast = Date.now(); }
+function connectLive() {
+  const prev = live;
+  if (prev) { try { prev.close(); } catch {} }
+  live = new EventSource('/api/events');
+  if (prev) { live.onopen = prev.onopen; live.onmessage = prev.onmessage; }
+  for (const [type, fn] of liveListeners) live.addEventListener(type, fn);
+  live.addEventListener('ping', liveBeat);
+  live.addEventListener('message', liveBeat);
+  live.addEventListener('open', liveBeat);
+  liveLast = Date.now();
+}
+function liveCheck() {
+  if (document.hidden || !live) return;
+  if (live.readyState === EventSource.CLOSED || Date.now() - liveLast > LIVE_STALE_MS) connectLive();
+}
+connectLive();
+setInterval(liveCheck, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) liveCheck(); });
+window.addEventListener('online', () => { liveLast = 0; liveCheck(); });
+window.addEventListener('pageshow', e => { if (e.persisted) { liveLast = 0; liveCheck(); } });
 // On every (re)connect, reconcile jobs and run cards: a restart between
 // connections may have ended runs without their final run-event.
 let liveConnectedOnce = false;
