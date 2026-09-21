@@ -4656,6 +4656,7 @@ function settingsResponse(identity = ownerIdentity()) {
     path: SETTINGS_FILE,
     // Which install the page is talking to; the header machine switcher shows it.
     hostname: os.hostname(),
+    port: PORT,
     connectLinks: connectLinks(),
     // The reach switch as it stands right now (after any runtime flip), and
     // whether the operator pinned the address so the switch cannot move it.

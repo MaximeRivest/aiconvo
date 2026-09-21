@@ -466,6 +466,58 @@ function guestLimitsSentence(walls) {
   return `All their processes together may use up to ${what}${l.enforced === null ? ' (enforced from their first launch on)' : ''}.`;
 }
 
+/* ---- the doors through Tailscale (design/56): settings → machines ---- */
+const doorsState = { data: null };
+async function loadDoors(force) {
+  if (doorsState.data && !force) return doorsState.data;
+  try { const d = await (await fetch('/api/doors')).json(); doorsState.data = d.error ? { error: d.error } : d; } catch (e) { doorsState.data = { error: e.message }; }
+  return doorsState.data;
+}
+async function renderDoors() {
+  const host = $('setDoorsBody');
+  if (!host) return;
+  const d = await loadDoors(true);
+  if (!$('setDoorsBody')) return;
+  const owner = peopleIsOwner();
+  if (d.error) { host.innerHTML = esc(d.error); return; }
+  if (!d.installed) { host.innerHTML = 'Tailscale is not installed on this machine. With it, this aiconvo gets a stable https name for your own devices, and can open one door to the internet for a guest who installs nothing.'; return; }
+  if (!d.running) { host.innerHTML = 'Tailscale is installed but ' + esc(d.why || 'not running') + '.'; return; }
+  const set = typeof settingsOf === 'function' ? settingsOf() : {};
+  host.innerHTML = `
+    <div class="row"><code class="mach-link">${esc(d.url)}</code><button type="button" class="ghost" data-copy="${esc(d.url)}">copy</button></div>
+    <div class="set-help">${d.serve ? 'The <b>tailnet door</b> is open: anyone on your Tailscale network reaches this name, with a real certificate, and still needs their aiconvo link to get in.' : 'This name is not pointing at aiconvo yet. Once, on this machine: <code>tailscale serve --bg --https=443 http://127.0.0.1:' + esc(String((settingsState && settingsState.port) || 7433)) + '</code>.'}</div>
+    <label class="set-check"><input id="setPublicDoor" type="checkbox"${d.funnel ? ' checked' : ''}${owner && d.serve ? '' : ' disabled'}> open the <b>public door</b>: the same name reachable from the whole internet</label>
+    <div class="set-help" id="setPublicDoorHelp">${d.funnel
+      ? 'Open. Anyone on the internet can reach the sign-in page; only a valid invite link or token gets past it. Ten wrong tries lock an address out for fifteen minutes; every sign-in is logged below. Close it when the guest is done.'
+      : owner ? 'Closed. Open it to send a guest a link that works with nothing installed on their side. The sign-in page becomes reachable from the internet; nothing else does without a credential.' : 'Closed. Only the owner opens it.'}${d.wanted && !d.funnel ? ' <b>Settings say open, but tailscale says closed</b> — the tailnet may have disabled Funnel; flip the switch to retry.' : ''}</div>
+    <div class="set-field"><label for="setTsKey">Tailscale API access token <span class="hint">(optional — lets the invite dialog offer a “join through Tailscale” link, which shares only this machine with the person; make one at login.tailscale.com → settings → keys, scope <code>devices</code>)</span></label>
+      <div class="row"><input id="setTsKey" type="password" placeholder="${d.hasApiKey ? '•••• saved' : 'tskey-api-…'}" value="${esc(set.tailscaleApiKey || '')}" autocomplete="off" spellcheck="false"${owner ? '' : ' disabled'}><button type="button" class="ghost" id="setTsKeySave"${owner ? '' : ' disabled'}>save</button></div></div>
+    <details class="set-more" id="setSignIns"><summary>recent sign-ins</summary><div id="setSignInsBody" class="hint">…</div></details>`;
+  host.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await copyText(b.dataset.copy); toast('copied'); } catch (e) { errToast(e.message); } });
+  const sw = $('setPublicDoor');
+  if (sw) sw.onchange = async () => {
+    sw.disabled = true;
+    const on = sw.checked;
+    if (on && !confirm('Open this aiconvo\'s sign-in page to the whole internet? Only a valid invite link or token gets past it, and you can close the door any time.')) { sw.checked = false; sw.disabled = false; return; }
+    const r = await postJson('/api/doors/public', { on });
+    if (r.error) { errToast(r.error); if (r.enableUrl) $('setPublicDoorHelp').innerHTML = esc(r.error) + ` <a href="${esc(r.enableUrl)}" target="_blank" rel="noopener">Enable Funnel on the tailnet</a>, then flip the switch again.`; else $('setPublicDoorHelp').textContent = r.error; sw.checked = !on; sw.disabled = false; return; }
+    toast(on ? 'public door open' : 'public door closed');
+    renderDoors();
+  };
+  const keySave = $('setTsKeySave');
+  if (keySave) keySave.onclick = async () => { await saveSettings({ tailscaleApiKey: $('setTsKey').value.trim() }, 'Tailscale API token saved'); renderDoors(); };
+  const det = $('setSignIns');
+  if (det) det.ontoggle = async () => {
+    if (!det.open) return;
+    const body = $('setSignInsBody');
+    try {
+      const d2 = await (await fetch('/api/doors/sign-ins?n=60')).json();
+      const rows = (d2.recent || []);
+      body.innerHTML = rows.length ? `<table class="signins">${rows.map(r => `<tr class="${esc(r.outcome)}"><td>${esc(new Date(r.ts).toLocaleString())}</td><td>${esc(r.outcome)}</td><td>${esc(r.door || '')}</td><td>${esc(r.ip || '')}</td><td>${esc(r.user ? r.user.name : '')}${r.via ? ' <span class="hint">' + esc(r.via) + '</span>' : ''}</td></tr>`).join('')}</table><div class="hint">${d2.limiter ? d2.limiter.recentFailures + ' failed in the last fifteen minutes' : ''}</div>` : 'none yet';
+    } catch (e) { body.textContent = e.message; }
+  };
+}
+
 /* ---- the project page: who is in this project right now ---- */
 function peopleInProject(name) {
   const cwd = typeof projectOverview !== 'undefined' && projectOverview && projectOverview.project === name ? String(projectOverview.cwd || '').replace(/\/$/, '') : '';
@@ -687,6 +739,7 @@ function inviteSectionHtml(project) {
     <h3>Invite someone to ${esc(project)}</h3>
     <p class="hint">For a collaborator or a hire who is not part of this household: they get this project only. They can work in the browser here right away, and connect their own aiconvo later so the project's conversations and memory copy both ways.</p>
     <div class="row"><input type="text" id="invName" placeholder="their name" maxlength="60"><select id="invRight"><option value="see">can read</option><option value="act">can read and act</option></select><button type="button" id="invMake">make invite link</button></div>
+    <div class="row inv-door" id="invDoorRow" hidden><span class="hint">through</span><select id="invDoor"></select><span class="hint" id="invDoorHint"></span></div>
     <div class="warn" id="invWarn" hidden></div>
     <div id="invOut"></div>
     <details class="set-more" id="invPolicy"><summary>what leaves this machine when the project syncs</summary><p class="hint">Conversations hold tool output. Before one is copied to a collaborator's machine, tool steps that touched files outside the project folder — or that look like they could hold a secret — are blanked.</p>
@@ -704,15 +757,33 @@ function bindInviteSection(dlg, project) {
     ? `With <b>act</b>, everything they run — agents, commands, notebook cells — starts inside a sandbox: this project's folder read-write, the rest of this machine invisible (no <code>~/.ssh</code>, no other projects, no keys). Their agents use your model subscriptions through a key proxy that never lets the key into the sandbox${walls.providers && walls.providers.length ? ' (' + walls.providers.slice(0, 4).join(', ') + (walls.providers.length > 4 ? '…' : '') + ')' : ''}. Files they write are owned by your account; their commits carry their name. ${guestLimitsSentence(walls)}`
     : `With <b>act</b>, their agents run as <b>your account</b> on this machine with no sandbox (bubblewrap is not installed here): hidden things stay hidden in the app, but an agent they drive could read files outside this project. Give <b>read</b> to someone you do not fully trust, or install bubblewrap first.`;
   right.onchange = () => { warn.hidden = right.value !== 'act'; };
+  // Which door the link goes through: what is open right now decides what
+  // is offered; the hint says what the person on the other side must have.
+  const doorRow = dlg.querySelector('#invDoorRow'), doorSel = dlg.querySelector('#invDoor'), doorHint = dlg.querySelector('#invDoorHint');
+  const doorHints = { lan: 'works on your network and your Tailscale devices (a phone on the road needs the tailnet or public door)', public: 'works from anywhere, with nothing installed on their side; the sign-in page is on the internet while the door is open', tailnet: 'they install Tailscale (two minutes, free) and accept a share of this one machine; nothing of yours is on the internet' };
+  loadDoors().then(d => {
+    if (!d || d.error || !d.running || !d.serve) return;
+    const opts = [];
+    if (d.funnel) opts.push(['public', 'the public door']);
+    if (d.hasApiKey) opts.push(['tailnet', 'Tailscale (share this machine with them)']);
+    if (!d.funnel) opts.push(['lan', 'your network only']);
+    if (!opts.length) return;
+    doorSel.innerHTML = opts.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
+    doorHint.textContent = doorHints[opts[0][0]];
+    doorSel.onchange = () => { doorHint.textContent = doorHints[doorSel.value] || ''; };
+    doorRow.hidden = false;
+  });
   dlg.querySelector('#invMake').onclick = async () => {
     const name = dlg.querySelector('#invName').value.trim();
-    const r = await postJson('/api/invites', { project, right: right.value, name });
+    const door = doorRow.hidden ? undefined : doorSel.value;
+    const r = await postJson('/api/invites', { project, right: right.value, name, door });
     if (r.error) return errToast(r.error);
     out.innerHTML = `<div class="invite-box"><b>${esc(name || 'Their')}${name ? "'s" : ''} invite link</b> — send it to them, once. It is shown only now and works for 14 days.
       <div class="row"><code class="mach-link">${esc(r.link)}</code><button type="button" class="ghost" data-copy="${esc(r.link)}">copy</button></div>
+      ${r.door === 'tailnet' ? (r.tailnetInvite ? `<div class="hint">First, they accept this Tailscale share (it lets their Tailscale login reach this one machine, nothing else), then open the link above:</div><div class="row"><code class="mach-link">${esc(r.tailnetInvite.url)}</code><button type="button" class="ghost" data-copy="${esc(r.tailnetInvite.url)}">copy</button></div>` : `<div class="warn">Could not make the Tailscale share: ${esc(r.tailnetError || 'unknown')}. The aiconvo link above still works for anyone already on your tailnet.</div>`) : ''}
+      ${r.door === 'public' ? '<div class="hint">Goes through the public door: works from anywhere with nothing installed. Close the door in settings → machines when they are done.</div>' : ''}
       ${r.markersWritten.length ? `<div class="hint">Wrote <code>${esc(r.markersWritten[0].replace(/^.*\/(?=\.aiconvo)/, ''))}</code> into the checkout — commit it, so their clone carries the same project id.</div>` : ''}</div>`;
-    const b = out.querySelector('[data-copy]');
-    if (b) b.onclick = async () => { try { await copyText(r.link); toast('link copied'); } catch (e) { errToast(e.message); } };
+    out.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await copyText(b.dataset.copy); toast('copied'); } catch (e) { errToast(e.message); } });
   };
   fetch('/api/project-id?project=' + encodeURIComponent(project)).then(r => r.json()).then(info => {
     if (info.error) return;
