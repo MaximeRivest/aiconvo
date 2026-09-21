@@ -229,18 +229,28 @@ function createPiSdkProxy(options = {}) {
     child.on('message', message => receive(W, message));
     child.on('error', error => fail(W, error));
     child.on('disconnect', () => {
-      if (!W.stopping) fail(W, new Error('Pi worker disconnected'));
+      if (W.stopping) return;
+      // Give the exit event a tick: it carries the reason from stderr.
+      setImmediate(() => { if (!W.exited) fail(W, new Error('Pi worker disconnected')); });
     });
     child.on('exit', (code, signal) => {
       W.exited = true;
       W.exitDone.resolve();
       clearTimeout(W.stopTimer);
       children.delete(W);
-      fail(W, new Error('Pi worker exited' + (signal ? ' (' + signal + ')' : ' (code ' + code + ')')));
+      const why = W.stderrTail && W.stderrTail();
+      fail(W, new Error('Pi worker exited' + (signal ? ' (' + signal + ')' : ' (code ' + code + ')') + (why ? ': ' + why.split('\n').filter(l => !/differs from the tested/.test(l)).slice(-3).join(' | ') : '')));
     });
     // Drain stderr to avoid a blocked worker. Do not retain extension output,
     // which can contain user data. Fatal IPC errors carry a bounded message.
-    child.stderr?.resume();
+    // A sandboxed worker keeps its last lines: when the walls themselves
+    // refuse to stand (a missing bind, a bwrap error), that is the only
+    // place the reason appears.
+    if (target.sandbox) {
+      let tail = '';
+      child.stderr?.on('data', d => { tail = (tail + String(d)).slice(-2000); });
+      W.stderrTail = () => tail.trim();
+    } else child.stderr?.resume();
     return W;
   }
   function wireTarget(target) {

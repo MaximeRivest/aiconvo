@@ -25,11 +25,13 @@ const crypto = require('crypto');
 // agent gets what a fresh login shell would, plus what Pi and aiconvo need.
 const ENV_ALLOW = new Set(['PATH', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'USER', 'LOGNAME', 'SHELL', 'COLORTERM',
   'SSL_CERT_FILE', 'NIX_SSL_CERT_FILE', 'NIX_PATH', 'NIX_PROFILES', 'CURL_CA_BUNDLE', 'GIT_SSL_CAINFO', 'NODE_EXTRA_CA_CERTS']);
-const ENV_ALLOW_PREFIX = /^(?:PI_|AICONVO_|NODE_CHANNEL_|NODE_OPTIONS$)/;
+const ENV_ALLOW_PREFIX = /^(?:PI_|AICONVO_|NODE_CHANNEL_|NODE_OPTIONS$|CLAUDE_CODE_VERSION$)/;
 
 // System trees a process needs to run at all. Read-only, bound only when
 // they exist (NixOS and FHS distributions differ).
-const SYSTEM_RO = ['/nix', '/run/current-system', '/run/wrappers', '/run/opengl-driver', '/etc', '/bin', '/sbin', '/usr', '/lib', '/lib32', '/lib64', '/opt', '/snap'];
+// /run/systemd/resolve and /run/nscd: where NixOS keeps resolv.conf and the
+// name-service cache socket; without them nothing inside resolves a name.
+const SYSTEM_RO = ['/nix', '/run/current-system', '/run/wrappers', '/run/opengl-driver', '/run/systemd/resolve', '/run/nscd', '/etc', '/bin', '/sbin', '/usr', '/lib', '/lib32', '/lib64', '/opt', '/snap'];
 
 function findBwrap({ env = process.env, exists = fs.existsSync } = {}) {
   if (env.AICONVO_BWRAP && exists(env.AICONVO_BWRAP)) return env.AICONVO_BWRAP;
@@ -84,7 +86,9 @@ function defaultReadHead(dir) {
 // proxy, the owner's settings minus what a guest must not inherit, and the
 // owner's extensions, skills and guidance read-only. Rebuilt on every
 // launch so a changed roster or proxy port never leaves a stale copy.
-const OAUTH_SHAPED = new Set(['anthropic']); // pi shapes the request as OAuth when the key looks like one
+// pi (and the Claude Code provider extension) shape the request as OAuth
+// when the key looks like one: Bearer header, Claude Code identity.
+const OAUTH_SHAPED = new Set(['anthropic', 'claude-code']);
 function guestAgentDirFor(base, guestId) { return path.join(base, guestId, 'agent'); }
 
 // `dir` is the real folder on disk; `insideDir` is where it appears in the
@@ -137,7 +141,11 @@ function createSandbox(spec) {
   // for nesting: a directory before what goes under it.
   const binds = [];
   binds.push({ src: spec.projectRoot, dst: spec.projectRoot, rw: true });
-  for (const p of [spec.piPackageDir, spec.aiconvoDir].filter(Boolean)) if (!inside(p, spec.projectRoot)) binds.push({ src: p, dst: p, rw: false });
+  // The node that runs the worker may live in the home (nvm, a tarball
+  // install); its prefix rides in read-only. Under /nix or /usr it is
+  // already there.
+  const nodePrefix = spec.nodePath ? path.dirname(path.dirname(spec.nodePath)) : null;
+  for (const p of [spec.piPackageDir, spec.aiconvoDir, nodePrefix && inside(nodePrefix, home) ? nodePrefix : null].filter(Boolean)) if (!inside(p, spec.projectRoot)) binds.push({ src: p, dst: p, rw: false });
   binds.push(...(spec.binds || []));
   const seen = new Set();
   for (const b of binds.sort((a, b) => a.dst.length - b.dst.length)) {
@@ -145,9 +153,11 @@ function createSandbox(spec) {
     seen.add(b.dst);
     args.push(b.rw ? '--bind' : '--ro-bind', b.src, b.dst);
   }
-  args.push('--clearenv');
+  // The environment is the one the caller spawns bwrap with (launch()
+  // returns it): bubblewrap passes it through untouched. Not --clearenv:
+  // node adds the IPC channel variables to the child's environment at
+  // spawn time, and clearing them inside would leave the worker mute.
   const env = { HOME: home, XDG_RUNTIME_DIR: '/run/user/guest', TMPDIR: '/tmp', ...spec.env };
-  for (const [k, v] of Object.entries(env)) if (v != null) args.push('--setenv', k, String(v));
   return {
     id, guest: spec.guest, projectRoot: spec.projectRoot,
     // What to spawn instead of `file args`: bwrap with the walls, then the command.

@@ -4085,14 +4085,22 @@ async function guestSandboxFor(user, project) {
   if (!sessionBinds.some(b => b.src === mainSessionDir)) sessionBinds.push({ src: mainSessionDir, dst: mainSessionDir, rw: true });
   const piPkg = (() => { try { return require('./pisdk-runtime.js').piPackageDir(); } catch { return null; } })();
   const env = sandboxLib.sandboxEnv({ principalEnv: { AICONVO_USER: user.id, AICONVO_USER_NAME: user.name, AICONVO_PORT: String(PORT) }, guest: user, agentDir: insideAgentDir, piPackageDir: piPkg, token: guestApiTokenFor(user),
-    extra: { PATH: agentPath(process.env.PATH), PI_CLAUDE_CODE_TRANSPORT: 'api', AICONVO_GUEST_PROJECT: project } });
+    extra: { PATH: agentPath(process.env.PATH), PI_CLAUDE_CODE_TRANSPORT: 'api', PI_CLAUDE_CODE_BASE_URL: proxyUrl + '/claude-code', AICONVO_GUEST_PROJECT: project, ...(hostFacts.claudeVersion ? { CLAUDE_CODE_VERSION: hostFacts.claudeVersion } : {}) } });
   const sb = sandboxLib.createSandbox({ id: 'guest:' + user.id + ':' + projectRoot, bwrap: BWRAP, home: os.homedir(), projectRoot, guest: { id: user.id, name: user.name },
-    binds: [...prepared.binds, ...sessionBinds], env, piPackageDir: piPkg, aiconvoDir: __dirname });
+    binds: [...prepared.binds, ...sessionBinds], env, piPackageDir: piPkg, aiconvoDir: __dirname, nodePath: process.execPath });
   sb.sessionDir = mainSessionDir;
   return sb;
 }
 let guestProxyPort = 0;
 keyProxy.url().then(u => { guestProxyPort = Number(new URL(u).port); return guestProviderList(); }).catch(e => console.error('[key proxy]', e.message));
+// Facts an extension would ask the host for, answered once out here: the
+// Claude Code provider extension runs `claude --version` at load, and no
+// `claude` exists inside the walls.
+const hostFacts = (() => {
+  let claudeVersion = '';
+  try { claudeVersion = (String(execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 4000 })).match(/\b\d+\.\d+\.\d+\b/) || [''])[0]; } catch {}
+  return { claudeVersion };
+})();
 const guestUsage = []; // recent proxy usage rows, for the people pane
 function recordGuestUsage(u) {
   guestUsage.push({ at: Date.now(), guest: u.guest, provider: u.provider, status: u.status, ms: u.ms, bytesIn: u.bytesIn, bytesOut: u.bytesOut });

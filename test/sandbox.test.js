@@ -64,11 +64,11 @@ test('the argument list: system read-only, home hidden, project read-write, envi
   assert.ok(has('--ro-bind', '/pkg/pi', '/pkg/pi'));
   assert.ok(has('--bind', '/data/guest/agent', '/home/x/.pi/agent'));
   assert.ok(a.indexOf('/home/x/.pi/agent/extensions') > a.indexOf('/data/guest/agent'), 'nested binds come after their parent');
-  assert.ok(has('--unshare-pid') && has('--die-with-parent') && has('--clearenv') && has('--tmpfs', '/tmp'));
+  assert.ok(has('--unshare-pid') && has('--die-with-parent') && has('--tmpfs', '/tmp'));
   assert.ok(has('--chdir', '/home/x/Projects/app/src'));
   assert.ok(has('--', 'bash', '-lc', 'ls'));
   assert.equal(sb.launch('bash', [], { cwd: '/home/x/other' }).args.at(-3), '/home/x/Projects/app', 'a cwd outside the project falls back to the project root');
-  const env = Object.fromEntries(a.map((x, i) => x === '--setenv' ? [a[i + 1], a[i + 2]] : null).filter(Boolean));
+  const env = l.env;
   assert.equal(env.DISPLAY, undefined); assert.equal(env.SSH_AUTH_SOCK, undefined); assert.equal(env.ANTHROPIC_API_KEY, undefined); assert.equal(env.WAYLAND_DISPLAY, undefined);
   assert.equal(env.PI_FOO, '1'); assert.equal(env.LANG, 'C.UTF-8'); assert.equal(env.AICONVO_TOKEN, 'guest-secret'); assert.equal(env.AICONVO_USER, 'u_g');
   assert.equal(env.PI_CODING_AGENT_DIR, '/home/x/.pi/agent'); assert.equal(env.AICONVO_PI_PACKAGE_DIR, '/pkg/pi');
