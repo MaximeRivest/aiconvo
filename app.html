@@ -9280,6 +9280,82 @@ async function postJsonMethod(url, method, body) {
 }
 const postJson = (url, body) => postJsonMethod(url, 'POST', body);
 
+// Model ordering is a browsing preference, not a benchmark. Keep these tiers
+// strongest-first; versions are compared only inside the same model family.
+const MODEL_POWER_TIERS = [
+  ['astra', 'sol', 'terra', 'luna'],
+  ['fable', 'opus', 'sonnet', 'haiku'],
+  ['ultra', 'pro', 'flash', 'flash-lite'],
+];
+const modelNameOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+function modelOrderKey(model) {
+  // Routing prefixes and billing variants must not change family or generation.
+  const [base, ...variant] = String(model).toLowerCase().split(':');
+  const name = base.split('/').pop();
+  let family = name, version = [], rest = name;
+  const claude = name.match(/^claude-(?:(fable|opus|sonnet|haiku)-)?(\d+(?:[.-]\d{1,2})*)(?=-|$)/);
+  // Explicit family patterns avoid mistaking parameter counts, context sizes,
+  // snapshot dates or an unrelated model's numbers for generation numbers.
+  const numbered = name.match(/^(gpt|grok|gemini|gemma|glm|qwen|deepseek|kimi-k|minimax-m|k)(?:-?v?)(\d+(?:[.p]\d+)*)(o)?(?=-|$)/);
+  if (claude) {
+    family = 'claude';
+    version = claude[2].split(/[.-]/).map(Number);
+    rest = [claude[1], name.slice(claude[0].length)].filter(Boolean).join('-');
+  } else if (numbered) {
+    family = numbered[1];
+    version = numbered[2].split(/[.p]/).map(Number);
+    rest = name.slice(numbered[0].length);
+    // 4o is a distinct branch, not a decimal version of GPT-4.
+    if (numbered[3]) rest = 'o-' + rest;
+  } else {
+    // Unversioned aliases stay together after numbered releases, without
+    // claiming that a name ending in "latest" identifies a known generation.
+    const alias = name.match(/^(claude|gpt|grok|gemini|gemma|glm|qwen|deepseek|kimi|minimax)(?=-|$)/);
+    if (alias) { family = alias[1]; rest = name.slice(alias[0].length); }
+  }
+  rest = rest.replace(/^-+|-+$/g, '');
+  const tier = MODEL_POWER_TIERS.map(tiers => {
+    // Match compound tiers first so flash-lite cannot be mistaken for flash.
+    // Separate axes also put Astra Pro before Astra without losing Astra's rank.
+    const found = [...tiers].sort((a, b) => b.length - a.length).find(t =>
+      new RegExp('(^|-)' + t + '(?=-|$)').test(rest));
+    return found ? tiers.indexOf(found) : 100;
+  });
+  // Keep snapshots/editions beside their model, with the unsuffixed model first.
+  const snapshot = rest.match(/(?:^|-)(\d{8}|\d{4}-\d{2}-\d{2})$/);
+  const core = snapshot ? rest.slice(0, snapshot.index) : rest;
+  return { family, version, tier, core, snapshot: snapshot ? snapshot[1].replaceAll('-', '') : '', variant: variant.join(':') };
+}
+function compareModelOrderKeys(a, b) {
+  let order = modelNameOrder.compare(a.family, b.family);
+  if (order) return order;
+  if (!!a.version.length !== !!b.version.length) return a.version.length ? -1 : 1;
+  for (let i = 0; i < Math.max(a.version.length, b.version.length); i++) {
+    order = (b.version[i] || 0) - (a.version[i] || 0);
+    if (order) return order;
+  }
+  for (let i = 0; i < a.tier.length; i++) {
+    order = a.tier[i] - b.tier[i];
+    if (order) return order;
+  }
+  return modelNameOrder.compare(a.core, b.core)
+    || (!!a.snapshot - !!b.snapshot)
+    || modelNameOrder.compare(b.snapshot, a.snapshot)
+    || (!!a.variant - !!b.variant)
+    || modelNameOrder.compare(a.variant, b.variant);
+}
+function sortedPickerModels(catalog) {
+  const ready = new Set(catalog.readyProviders || []);
+  // Compute keys once per catalog, not on every comparator call or search.
+  return (catalog.models || []).map(model => ({ model, key: modelOrderKey(model.model) }))
+    .sort((a, b) => (ready.has(b.model.provider) - ready.has(a.model.provider))
+      || modelNameOrder.compare(a.model.provider, b.model.provider)
+      || compareModelOrderKeys(a.key, b.key)
+      || modelNameOrder.compare(a.model.model, b.model.model)
+      || a.model.model.localeCompare(b.model.model))
+    .map(row => row.model);
+}
+
 // Floating model picker. opts: { multi, selected:Set of 'provider/model',
 // pickReplaces }. onPick receives [{ provider, modelId }].
 // pickReplaces: a plain pick REPLACES the whole selection (the common "change
@@ -9301,8 +9377,7 @@ async function openModelPicker(anchor, opts, onPick) {
   catch { pop.remove(); return errToast('could not load the model list'); }
   if (!pop.isConnected) return;
   let ready = new Set(cat.readyProviders || []);
-  let models = [...(cat.models || [])].sort((a, b) =>
-    (ready.has(b.provider) - ready.has(a.provider)) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
+  let models = sortedPickerModels(cat);
   let showAll = false;
   let provFilter = '';
   // The open conversation's context footprint previews the fit per model.
@@ -9408,8 +9483,7 @@ async function openModelPicker(anchor, opts, onPick) {
     try {
       cat = await modelCatalog(true);
       ready = new Set(cat.readyProviders || []);
-      models = [...(cat.models || [])].sort((a, b) =>
-        (ready.has(b.provider) - ready.has(a.provider)) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
+      models = sortedPickerModels(cat);
       refreshBtn.title = 'Reload the list from pi (ctrl+r) · fetched ' + ageLabel();
       paintProvs();
       apply();
