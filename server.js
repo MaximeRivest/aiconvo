@@ -13249,6 +13249,7 @@ async function handleRequest(req, res) {
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/navigation.js': { file: 'navigation.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/timeline-chart.js': { file: 'timeline-chart.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/files-browser.js': { file: 'files-browser.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.js': { file: 'live-file.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.css': { file: 'live-file.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },

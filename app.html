@@ -605,6 +605,12 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 /* Horizontal timeline: now is at the right edge. Older work extends left. */
 .timeline { position: relative; min-width: 100%; background: var(--surface-1); cursor: crosshair; user-select: none; -webkit-user-select: none; }
 .timeline svg { display: block; overflow: visible; }
+/* While a chart is mounted (timeline-chart.js) it owns touch: one finger pans,
+   two fingers pinch. The browser and the e-ink reading gestures stay out. */
+.timeline-scroller { touch-action: none; overflow-anchor: none; }
+/* The row-label column scrolls with the rows but stays put while panning in time. */
+.timeline-label-layer { position: sticky; left: 0; z-index: 4; pointer-events: none; }
+.timeline-label-layer:empty { display: none; }
 .project-labels { position: sticky; left: 0; top: 0; width: 168px; height: 100%; max-height: 100%; z-index: 4; pointer-events: none; align-self: flex-start; }
 .project-labels::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 168px; background: var(--surface-1); border-right: 1px solid var(--border-strong); pointer-events: auto; z-index: -1; }
 .project-row-label { position: absolute; left: 0; width: 168px; padding: 5px 8px; border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border); background: var(--surface-1); overflow: hidden; display: block !important; }
@@ -637,6 +643,7 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .tmark.rowhl .duration { stroke: var(--text) !important; opacity: 1; }
 .project-row-bg { fill: transparent; pointer-events: none; }
 .project-row-bg.hl { fill: color-mix(in srgb, var(--accent) 7%, transparent); }
+.timeline-band-edge { stroke: var(--border); }
 #selRect { position: absolute; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; z-index: 3; }
 .tday line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 4; }
 .tday.major line { stroke: var(--border-strong); stroke-dasharray: none; }
@@ -651,8 +658,6 @@ body:not(.home) #left, body:not(.home) #ganttResize { display: none !important; 
 .tmark.selected .violin { stroke: var(--success) !important; stroke-width: 2.5; }
 .tmark.note .violin { fill: var(--success); stroke: var(--success); opacity: .8; }
 .tmark.note .duration { stroke: var(--success); }
-.timeline-note-hits { position: sticky; top: 0; z-index: 2; background: var(--surface-1); border-bottom: 1px solid var(--border-strong); }
-.timeline-note-hits .item { background: var(--surface-1); }
 .item { padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; gap: 10px; align-items: flex-start; }
 .item:hover { background: var(--surface-2); }
 .item.active { background: var(--accent-strong); color: var(--accent-ink); }
@@ -720,10 +725,6 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .mgantt[data-mg-open] .mg-scroll { flex: 1; min-height: 0; overscroll-behavior: contain; }
 .mgantt[data-mg-open] .tmark text { font-size: 12px; }
 .mgantt .mg-search { width: clamp(140px, 24vw, 320px); min-width: 0; }
-.mgantt .mg-tick line { stroke: var(--border); }
-.mgantt .mg-tick.major line { stroke: var(--border-strong); }
-.mgantt .mg-tick text { fill: var(--text-dim); font: 9px var(--font); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
-.mgantt .mg-now { stroke: var(--accent); stroke-dasharray: 2 3; }
 /* redesigned project/epic panel */
 .ptitle { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-3) 0 var(--sp-2); }
 .ptitle h1 { flex: 1; min-width: 12ch; margin: 0; font-size: calc(var(--fs-title) * 1.7); line-height: 1.2; font-weight: 700; cursor: text; overflow-wrap: anywhere; }
@@ -2309,6 +2310,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <script src="/conversation-flow.js"></script>
 <script src="/conversation-reader.js"></script>
 <script src="/navigation.js"></script>
+<script src="/timeline-chart.js"></script>
 <script src="/context-panel.js"></script>
 <script src="/conversation-draft.js"></script>
 <script src="/file-completion-ui.js"></script>
@@ -2411,6 +2413,11 @@ function setRouteKind(kind) {
   navRememberScroll();
   stopReaderLanding();
   if (navHold) { navHold(); navHold = null; }
+  // Charts own observers and gesture listeners. The project chart's host is
+  // about to be replaced: release the chart, keep only its view state (mgUI).
+  // The home chart stays mounted behind the route; it just stops moving.
+  mgDestroyChart();
+  homeTimeline?.stop();
   // Leaving a document flushes its pending autosave and destroys the editor.
   // The file workspace flushes itself when it swaps one document for another.
   if (kind !== 'file' && kind !== 'files-project' && typeof docState !== 'undefined' && docState) flushAndCloseDocument();
@@ -4702,32 +4709,27 @@ const isWorking = s => !!(s && s.key) && (hasLiveRun(s.key) ||
 // ticker and the agents dot carry the live signal now.
 function updateLiveBadges() { updateActiveBtn(); }
 
-// ---- vertical Gantt timeline ----
+// ---- horizontal conversation timeline ----
 const DAY_MS = 86400000;
-const HOUR_MS = 3600000;
-const WEEK_MS = 7 * DAY_MS;
-// Continuous zoom: a multiplier on the base density (1 = the days preset).
-// Base: 160 px/day horizontal, 180 px/day vertical. Range: 0.08x to 8x.
-const PX_DAY_BASE = { h: 160, v: 180 };
+// Continuous zoom: a multiplier on the days preset (160 px/day). The chart
+// itself (timeline-chart.js) works in px/day; the multiplier is what the
+// presets, the keys, and the saved setting speak.
+const PX_DAY_BASE = 160;
 const ZOOM_MIN = 0.08, ZOOM_MAX = 8;
 const ZOOM_PRESETS = { hours: 6, days: 1, weeks: 0.15 };
 let ganttZoom = Number(localStorage.getItem('aiconvo.ganttZoom')) || 0;
 if (!ganttZoom) { // migrate the old discrete scale setting
   ganttZoom = ZOOM_PRESETS[localStorage.getItem('aiconvo.ganttScale')] || 1;
 }
-const pxDay = () => PX_DAY_BASE[ganttMode === 'v' ? 'v' : 'h'] * ganttZoom;
 const nearPreset = () => Object.entries(ZOOM_PRESETS).find(([, z]) => Math.abs(Math.log(ganttZoom / z)) < 0.18)?.[0] || null;
 const LANE_H = 26;    // vertical pixels per lane
 const PROJECT_LANE_H = 32;
 const PROJECT_GUTTER = 168;
 const PROJECT_GUTTER_PHONE = 34; // phones: thin strip, vertical names
 const projectGutterW = () => phoneDevice() ? PROJECT_GUTTER_PHONE : PROJECT_GUTTER;
-const LABEL_H = 32;   // separate lines for date/time labels and the now marker
+const LABEL_H = TimelineChart.HEADER_HEIGHT; // the date strip above the first lane
 const MARGIN_L = 8;
 const MARGIN_R = 60;  // room past "now" for labels
-const LANE_W = 42;    // horizontal pixels per lane (left layout)
-const SIDE_W = 42;
-const LABEL_V = 20;
 // Home is the timeline. Older builds stored left/full/off; full hid #view.
 let ganttMode = 'h';
 try {
@@ -4964,9 +4966,9 @@ function timelineProjectLanes(items) {
   }
   const projects = [...byProject.values()];
   sortProjectRows(projects);
-  // Keep a small visual gap between adjacent marks. This also separates spans
-  // that nearly overlap after time is converted to pixels.
-  const gapMs = 8 / Math.max(1, pxDay()) * DAY_MS;
+  // Stable time separation: labels may hide when crowded, but zoom must
+  // never repack lanes and shift every project below this one.
+  const gapMs = CLOSE_MS;
   let baseLane = 0;
   for (const row of projects) {
     const laneEnds = [];
@@ -4984,21 +4986,12 @@ function timelineProjectLanes(items) {
   return { projects, laneCount: baseLane };
 }
 
-function visibleTimelineRows(rows, pos, chartW, list) {
-  if (pos.type === 'v') return rows;
-  const viewport = Math.max(1, list.clientWidth);
-  const left = list.dataset.initScroll ? list.scrollLeft : Math.max(0, chartW - viewport);
-  const pad = viewport * 0.75;
-  list.dataset.renderWindow = String(Math.floor(left / Math.max(1, viewport / 2)));
-  return rows.filter(row => pos.xFor(row.end) >= left - pad && pos.xFor(row.start) <= left + viewport + pad);
-}
-
-function projectLabelsHtml(pos) {
-  if (pos.type !== 'project') return '';
+function projectLabelsHtml(layout) {
+  if (!layout.projects) return '';
   const phone = phoneDevice();
   // A new project is a new row, so the entry point heads the row column.
   const bornCell = `<div class="project-new-cell" data-new-project tabindex="0" title="Create a project or add an existing folder (P)">${phone ? '+' : '+ new project'}</div>`;
-  return `<div class="project-labels${phone ? ' narrow' : ''}">${bornCell}${pos.projects.map(row => {
+  return `<div class="project-labels${phone ? ' narrow' : ''}">${bornCell}${layout.projects.map(row => {
     const top = LABEL_H + row.baseLane * PROJECT_LANE_H;
     const height = row.laneCount * PROJECT_LANE_H;
     const main = row.mode ? row.title : row.project;
@@ -5011,14 +5004,9 @@ function projectLabelsHtml(pos) {
     const foldChip = sug ? `<span class="rowfold" data-fold-from="${esc(sug.from)}" data-fold-into="${esc(sug.into)}" title="${esc(sug.reason)} · fold ${esc(sug.from)} into ${esc(sug.into)}">⇄ ${esc(sug.into)}?</span>` : '';
     const body = phone ? `<strong>${esc(main)}</strong>`
       : `<strong>${esc(main)}</strong><span>${esc(detail)}</span>${repoLink}${foldChip}`;
-    return `<div class="project-row-label item" data-project="${esc(main)}" style="top:${top}px;height:${height}px" title="${esc(main)} · ${esc(detail)} · click to select the row · double click for the project overview">
+    return `<div class="project-row-label item${row.project === rowHlProject ? ' hl' : ''}" data-project="${esc(main)}" style="top:${top}px;height:${height}px" title="${esc(main)} · ${esc(detail)} · click to select the row · double click for the project overview">
       ${body}</div>`;
   }).join('')}</div>`;
-}
-
-function projectRowsSvg(pos, chartW) {
-  if (pos.type !== 'project') return '';
-  return pos.projects.map(row => `<rect class="project-row-bg" data-project-bg="${esc(row.project)}" x="0" y="${LABEL_H + row.baseLane * PROJECT_LANE_H}" width="${chartW}" height="${row.laneCount * PROJECT_LANE_H}"/>`).join('');
 }
 
 function clusterProfile(members, field, start, end) {
@@ -5098,6 +5086,7 @@ function mobileConversationCard(s) {
 }
 
 function renderMobileConversations() {
+  disposeHomeTimeline();
   const list = $('list');
   const rows0 = shown.filter(s => s.key);
   const rows = (showBranchRows() ? rows0 : collapseFamilies(rows0)).slice().sort((a, b) =>
@@ -5128,7 +5117,6 @@ function renderMobileConversations() {
     <section><h2>projects</h2>${visibleProjects || '<div class="empty">no projects match.</div>'}${moreProjects}</section>
     <section><h2>recent work</h2>${recent || '<div class="empty">no conversations match.</div>'}</section>
   </div>`;
-  timelineGeom = null;
 }
 
 // Horizontal violin: message density becomes vertical thickness along the bar.
@@ -5152,8 +5140,6 @@ function renderTimeline() {
   // Other squat layouts keep the card list in portrait.
   if (phoneLayout() && !phoneDevice() && !window.matchMedia('(orientation: landscape)').matches) return renderMobileConversations();
   const list = $('list');
-  const st = list.scrollTop, sl = list.scrollLeft;
-  const noteHits = shown.filter(s => s.kind === 'note');
   let convRows = shown.filter(s => s.key && s.firstTs);
   // The magnifier next to the sort buttons narrows the home rows by project.
   if (viewKind === 'home' && projFilterActive()) convRows = convRows.filter(s => projFuzzyMatch(projectOf(s)));
@@ -5162,15 +5148,17 @@ function renderTimeline() {
     return { s, start: Math.min(first, last), end: Math.max(first, last) };
   }).filter(x => Number.isFinite(x.start) && Number.isFinite(x.end));
   const rows = collapseShortRows(rawRows);
-  const { chartH, chartW, pos, daysSvg, nowLine } = timelineGrid(list, rows);
-  const paintedRows = visibleTimelineRows(rows, pos, chartW, list);
-  const marks = paintedRows.map(({ s, start, end, lane, clusterId, members, project: rowProject }) => {
+  const layout = homeTimelineLayout(rows);
+  const color = projectColor('');
+  // Everything a mark shows that does not move with the camera is decided
+  // here, once per data change: selection, the highlighted project row, live
+  // state. The chart only ever repositions these marks.
+  const marks = rows.map(row => {
+    const { s, start, end, lane, clusterId, members, project: rowProject } = row;
     const profile = ($('densityTools').checked ? s.densityAll : s.densityChat) || [];
     const bins = end > start && profile.length ? profile : [Math.max(1, ...(profile || []))];
-    const g = markGeom(pos, start, end, lane, bins, !!clusterId);
     const src = s.source || 'claude';
     const project = rowProject || projectOf(s);
-    const color = projectColor(project);
     const fam = s._famMembers || null;
     const famTip = fam ? `\n⤑ ${fam.length} linked branches (fan-out / forks — one conversation family):\n` + fam.slice(0, 8).map(m => '• ' + (m.title || '(untitled)')).join('\n') + (fam.length > 8 ? `\n… ${fam.length - 8} more` : '') : '';
     const shortTitle = String(s.timelineTitle || fallbackTimelineTitle(s)).slice(0, 10) + (fam ? ' ⤑' + fam.length : '');
@@ -5178,203 +5166,97 @@ function renderTimeline() {
     const tip = `${s.title || s.timelineTitle || '(untitled)'}\nProject: ${project}\nSource: ${src}\n${fmtDate(s.firstTs)} → ${fmtDate(s.lastTs)}\n${s.userCount || 0} user · ${s.assistantCount || 0} assistant${$('densityTools').checked ? ' · tool calls included' : ''}${isWorking(s) ? '\n● working now' : isActive(s) ? '\n○ active in the last 5 min' : ''}${famTip}${clusterTitles}`;
     const live = clusterId ? members.some(r => isActive(r.s)) : (isActive(s) || (fam || []).some(isActive));
     const work = clusterId ? members.some(r => isWorking(r.s)) : (isWorking(s) || (fam || []).some(isWorking));
-    // Live dot at the 'now' end of the duration line (all themes, no blink):
-    // filled ● = working right now, hollow ○ = active in the last 5 min.
-    // Active frame shows only on e-ink, where the colored stroke is invisible.
-    return `<g class="tmark${famIsActive(s) ? ' active' : ''}${s.key && selected.has(s.key) ? ' selected' : ''}" ${clusterId ? `data-cluster="${esc(clusterId)}"` : `data-rel="${esc(s._openKey || s.key)}"`} tabindex="0">
-      <title>${esc(tip)}</title><line class="duration" style="stroke:${color.stroke}" ${g.line}/>
-      <path class="violin" style="fill:${color.fill};stroke:${color.stroke}" d="${g.d}"/>
-      ${live || work ? `<circle class="livedot${work ? '' : ' idle'}" cx="${pos.type !== 'v' ? g.x1 : g.c}" cy="${pos.type !== 'v' ? g.c : g.x0}" r="3.5"/>` : ''}
-      ${famIsActive(s) ? `<rect class="activeframe" x="${pos.type !== 'v' ? g.x0 - 3 : g.c - g.w / 2 + 1}" y="${pos.type !== 'v' ? g.c - g.w / 2 + 1 : g.x0 - 3}" width="${pos.type !== 'v' ? g.x1 - g.x0 + 6 : g.w - 2}" height="${pos.type !== 'v' ? g.w - 2 : g.x1 - g.x0 + 6}"/>` : ''}
-      ${pxDay() < 40 ? '' : `<text ${g.text}>${esc(shortTitle)}</text>`}
-    </g>`;
-  }).join('');
-  timelineGeom = { rows: paintedRows, pos }; // only visible marks can be rubber-band selected
+    return {
+      id: clusterId ? 'cluster:' + clusterId : 'conversation:' + s.key,
+      attributes: clusterId ? { 'data-cluster': clusterId } : { 'data-rel': s._openKey || s.key },
+      className: `tmark${famIsActive(s) ? ' active' : ''}${s.key && selected.has(s.key) ? ' selected' : ''}${project === rowHlProject ? ' rowhl' : ''}`,
+      row, start, end, y: LABEL_H + (lane + 0.5) * layout.laneHeight,
+      laneHeight: layout.laneHeight, bins, fat: !!clusterId, color,
+      title: tip, label: shortTitle, live, working: work, active: famIsActive(s),
+    };
+  });
   // Home lenses: notes and epics are direct marks on the project rows.
   // A click lowers straight to the note or the epic — no tab switch needed.
-  let glyphs = '';
-  if (pos.type === 'project' && pos.projects && pxDay() >= 8) {
-    const projRow = new Map(pos.projects.map(row => [row.project, row]));
+  if (layout.projects) {
+    const projRow = new Map(layout.projects.map(row => [row.project, row]));
     const sessionByKey = new Map(sessions.map(s => [s.key, s]));
-    glyphs += (epicsList || []).map(epic => {
+    for (const epic of epicsList || []) {
       const s0 = (epic.sessionIds || []).map(id => sessionByKey.get(id)).find(Boolean);
       const row = s0 && projRow.get(projectOf(s0));
       const t = epic.updatedAt || 0;
-      if (!row || !t) return '';
-      const x = pos.xFor(t);
-      const y = LABEL_H + row.baseLane * PROJECT_LANE_H + 8;
-      return `<g class="tl-glyph tmark" data-epic="${esc(epic.id)}" tabindex="0"><title>▸ epic · ${esc(epic.title)}\n${(epic.sessionIds || []).length} conversations · ${fmtDate(t)}\nclick to open</title><path d="M ${x - 4.5},${y} L ${x + 4.5},${y} L ${x},${y - 8} Z" fill="var(--accent)"/></g>`;
-    }).join('');
-    glyphs += shown.filter(s => s.key && s.notePath).map(s => {
+      if (!row || !t) continue;
+      marks.push({ id: 'epic:' + epic.id, attributes: { 'data-epic': epic.id },
+        className: 'tl-glyph tmark', glyph: 'triangle', start: t, end: t,
+        y: LABEL_H + row.baseLane * PROJECT_LANE_H + 8, color: { fill: 'var(--accent)' },
+        title: `▸ epic · ${epic.title}\n${(epic.sessionIds || []).length} conversations · ${fmtDate(t)}\nclick to open` });
+    }
+    for (const s of shown.filter(s => s.key && s.notePath)) {
       const row = projRow.get(projectOf(s));
-      if (!row) return '';
+      if (!row) continue;
       const t = s.notedAt || Date.parse(s.lastTs || '') || 0;
-      if (!t) return '';
-      const x = pos.xFor(t);
+      if (!t) continue;
       const y = LABEL_H + (row.baseLane + row.laneCount) * PROJECT_LANE_H - 6;
       const file = String(s.notePath).split('/').pop();
-      return `<g class="tl-glyph tmark" data-note="${esc(file)}" tabindex="0"><title>✓ note · ${esc(file)}\nfrom: ${esc(s.title || '(untitled)')}\nclick to read</title><rect x="${x - 3}" y="${y - 3}" width="6" height="6" fill="var(--green)"/></g>`;
-    }).join('');
+      marks.push({ id: 'note:' + s.key, attributes: { 'data-note': file },
+        className: 'tl-glyph tmark', glyph: 'square', start: t, end: t, y,
+        color: { fill: 'var(--green)' }, title: `✓ note · ${file}\nfrom: ${s.title || '(untitled)'}\nclick to read` });
+    }
   }
-  const notes = noteHits.length ? `<div class="timeline-note-hits">${noteHits.map(s => `<div class="item" data-note="${esc(s.file)}"><div><div class="title"><span class="note-sig">✓</span> ${esc(s.title)}</div><div class="snip">${esc(s.snippet || '')}</div></div></div>`).join('')}</div>` : '';
-  // The hatch pattern paints selected violins on binary themes.
-  const defs = `<defs><pattern id="selHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="var(--bg)"/><line x1="0" y1="0" x2="0" y2="5" stroke="var(--text)" stroke-width="1.6"/></pattern></defs>`;
-  list.innerHTML = notes + (rows.length ? `<div class="timeline" style="width:${chartW}px;height:${chartH}px">${projectLabelsHtml(pos)}${svgTagFor(list, chartW, chartH)}${defs}${projectRowsSvg(pos, chartW)}${daysSvg}${nowLine}${marks}${glyphs}</svg></div>` : `<div class="empty">no conversations match.</div>`);
-  // Order buttons live in the top-left gutter of the home project chart.
-  const showSort = viewKind === 'home' && pos && pos.type === 'project' && (rows.length > 0 || projFilterOn);
+  if (!rows.length && !layout.projects?.length) {
+    disposeHomeTimeline();
+    list.innerHTML = '<div class="empty">no conversations match.</div>';
+  } else paintHomeTimeline(rows, layout, marks);
+  const showSort = viewKind === 'home' && layout.projects && (rows.length > 0 || projFilterOn);
   $('projSort').hidden = !showSort;
   if (showSort) { renderProjSortBtns(); ensureProjectStats(); }
-  applyProjectRowHl();
-  scrollTimeline(list, st, sl);
 }
 
-// The <svg> element covers only the visible window, not the whole chart.
-// At hrs zoom the full chart is >100k px wide; with tall project rows the
-// browser refuses to rasterize such a layer — layout and hit-testing keep
-// working but nothing paints. The window uses the same 0.75-viewport pad as
-// the mark culling, and the scroll handler re-renders when the window moves.
-// overflow:hidden keeps stray full-width lines from re-inflating the layer.
-function svgTagFor(list, chartW, chartH) {
-  if (ganttMode === 'v') return `<svg width="${chartW}" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}">`;
-  const viewport = Math.max(1, list.clientWidth);
-  const left = list.dataset.initScroll ? list.scrollLeft : Math.max(0, chartW - viewport);
-  const pad = viewport * 0.75;
-  const x = Math.max(0, Math.floor(left - pad));
-  const w = Math.max(1, Math.min(chartW - x, Math.ceil(viewport + 2 * pad)));
-  return `<svg width="${w}" height="${chartH}" viewBox="${x} 0 ${w} ${chartH}" style="position:absolute;left:${x}px;top:0;overflow:hidden">`;
+// ---- the home chart: one TimelineChart shared by the conversations and
+// notes tabs. These adapters prepare data when it changes; the chart owns the
+// camera and the repaint loop, so nothing here runs during a zoom or a pan.
+// A new chart opens at "now"; while it lives, data updates keep the view.
+let homeTimeline = null;
+function disposeHomeTimeline() {
+  homeTimeline?.destroy();
+  homeTimeline = null;
+  timelineGeom = null;
 }
-
-// First paint with real content scrolls to "now" (right edge or top).
-// Later renders keep the scroll position. An empty chart never counts as first paint.
-function scrollTimeline(list, st, sl) {
-  if (list.dataset.initScroll) {
-    list.scrollTop = st; list.scrollLeft = sl;
-    return;
-  }
-  const hasContent = list.scrollWidth > list.clientWidth + 10 || list.scrollHeight > list.clientHeight + 10;
-  if (!hasContent) return;
-  if (ganttMode === 'v') { list.scrollTop = 0; list.scrollLeft = 0; }
-  else { list.scrollTop = st; list.scrollLeft = list.scrollWidth; }
-  list.dataset.initScroll = '1';
+// projects: rows of the project layout, or null for compact lanes.
+function homeTimelineLayout(rows) {
+  const grouped = ganttGroup === 'project' ? timelineProjectLanes(rows) : null;
+  return grouped
+    ? { projects: grouped.projects, laneCount: grouped.laneCount, laneHeight: PROJECT_LANE_H }
+    : { projects: null, laneCount: timelineLanes(rows), laneHeight: LANE_H };
 }
-
-// Vertical violin for the left layout.
-function violinPathV(cx, top, bottom, bins, fat = false) {
-  const n = Math.max(2, bins.length);
-  const max = Math.max(1, ...bins);
-  const span = Math.max(4, bottom - top);
-  const width = fat ? 16 : 12;
-  const pts = bins.map((v, i) => ({
-    y: top + (i + .5) / n * span,
-    w: (fat ? 4 : 2.5) + width * Math.sqrt(v / max),
-  }));
-  const left = pts.map(p => `${cx - p.w},${p.y}`).join(' L ');
-  const right = [...pts].reverse().map(p => `${cx + p.w},${p.y}`).join(' L ');
-  return `M ${cx},${top} L ${left} L ${cx},${bottom} L ${right} Z`;
-}
-
-// Orientation-aware mark geometry. pos comes from timelineGrid.
-function markGeom(pos, start, end, lane, bins, fat = false) {
-  if (pos.type === 'h' || pos.type === 'project') {
-    const x0 = pos.xFor(start), x1 = Math.max(x0 + 6, pos.xFor(end));
-    const laneH = pos.type === 'project' ? PROJECT_LANE_H : LANE_H;
-    const cy = LABEL_H + lane * laneH + laneH / 2;
-    return {
-      line: `x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}"`,
-      d: violinPath(x0, x1, cy, bins, fat),
-      text: `x="${x0}" y="${cy - 10}"`,
-      x0, x1, c: cy, w: laneH, // raw coords for live dots and active frames
-    };
-  }
-  const cx = SIDE_W + lane * LANE_W + LANE_W / 2;
-  const top = pos.yFor(end), bottom = Math.max(top + 5, pos.yFor(start));
-  return {
-    line: `x1="${cx}" y1="${top}" x2="${cx}" y2="${bottom}"`,
-    d: violinPathV(cx, top, bottom, bins, fat),
-    text: `x="${cx + 18}" y="${top + 4}" text-anchor="end" transform="rotate(-90 ${cx + 18} ${top + 4})"`,
-    x0: top, x1: bottom, c: cx, w: LANE_W,
-  };
-}
-
-// Grid ticks derive from the effective px/day, not from a mode.
-// >= 480 px/day: a tick every hour (solid with date at midnight, label every 3 h).
-// >= 40 px/day: a tick every day. Below: a tick every Monday.
-function timelineTicks(oldest, newest) {
-  const fmtDay = t => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  const out = [];
-  const pd = pxDay();
-  if (pd >= 480) {
-    const t0 = new Date(newest); t0.setMinutes(0, 0, 0);
-    for (let t = +t0; t >= oldest - HOUR_MS; t -= HOUR_MS) {
-      const hr = new Date(t).getHours();
-      out.push({ t, major: hr === 0, label: hr === 0 ? fmtDay(t) : (hr % 3 === 0 ? String(hr).padStart(2, '0') + ':00' : null) });
-    }
-  } else if (pd < 40) {
-    const t0 = new Date(newest); t0.setHours(0, 0, 0, 0);
-    t0.setDate(t0.getDate() - ((t0.getDay() + 6) % 7)); // Monday
-    for (let t = +t0; t >= oldest - WEEK_MS; t -= WEEK_MS) out.push({ t, major: true, label: fmtDay(t) });
-  } else {
-    const t0 = new Date(newest); t0.setHours(0, 0, 0, 0);
-    for (let t = +t0; t >= oldest - DAY_MS; t -= DAY_MS) out.push({ t, major: true, label: fmtDay(t) });
-  }
-  return out;
-}
-
-// Shared geometry + time grid for the timeline (conversations and notes).
-// Returns pos: { type:'h', xFor } or { type:'v', yFor } depending on ganttMode.
-function timelineGrid(list, rows) {
-  const grouped = (ganttMode === 'h' || ganttMode === 'full') && ganttGroup === 'project';
-  const projectLayout = grouped ? timelineProjectLanes(rows) : null;
-  const projects = projectLayout && projectLayout.projects;
-  const laneCount = projectLayout ? projectLayout.laneCount : timelineLanes(rows);
+// The hatch pattern paints selected violins on binary themes.
+const SELECTION_HATCH = '<pattern id="selHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="var(--bg)"/><line x1="0" y1="0" x2="0" y2="5" stroke="var(--text)" stroke-width="1.6"/></pattern>';
+function paintHomeTimeline(rows, layout, marks) {
+  const list = $('list');
+  if (homeTimeline && !homeTimeline.surface.isConnected) disposeHomeTimeline(); // another view took the list
+  if (!homeTimeline) homeTimeline = new TimelineChart({
+    scroller: list, scale: PX_DAY_BASE * ganttZoom,
+    minScale: PX_DAY_BASE * ZOOM_MIN, maxScale: PX_DAY_BASE * ZOOM_MAX,
+    onInteract: () => { hideMarkPop(); cancelTimelineBand(); },
+    onChange: state => {
+      const zoom = state.scale / PX_DAY_BASE;
+      if (zoom !== ganttZoom) { ganttZoom = zoom; updateScaleSeg(); }
+    },
+    onSettle: () => { try { localStorage.setItem('aiconvo.ganttZoom', ganttZoom); } catch {} },
+    // Only drawn marks can be hit by the rubber band or asked for details.
+    onDraw: frame => { timelineGeom = { marks: frame.marks.filter(mark => mark.row) }; },
+  });
   const now = Date.now();
-  const oldest = rows.length ? Math.min(...rows.map(x => x.start)) : now;
-  const newest = rows.length ? Math.max(...rows.map(x => x.end)) : now;
-  // Do not create years of invisible SVG grid lines at hour zoom. Only paint
-  // the time range near the current viewport, plus a small buffer.
-  let tickOldest = oldest, tickNewest = now;
-  if (ganttMode !== 'v' && list.clientWidth && pxDay()) {
-    const visibleStart = now - Math.max(0, (list.scrollWidth - list.scrollLeft - list.clientWidth + MARGIN_R) / pxDay()) * DAY_MS;
-    const visibleEnd = now - Math.max(0, (list.scrollWidth - list.scrollLeft - MARGIN_R) / pxDay()) * DAY_MS;
-    const pad = list.clientWidth / pxDay() * DAY_MS;
-    tickOldest = Math.max(oldest, visibleStart - pad);
-    tickNewest = Math.min(now, Math.max(newest, visibleEnd + pad));
-  }
-  const scale = pxDay();
-  const tickSvg = (line, x, y, anchor) => timelineTicks(tickOldest, tickNewest).map(({ t, major, label }) => {
-    const p = pos1(t);
-    if (p < 0 || p > line) return '';
-    const txt = label == null ? '' : (anchor === 'h'
-      ? `<text x="${p + 4}" y="11">${esc(label)}</text>`
-      : `<text x="4" y="${p + 11}">${esc(label)}</text>`);
-    return anchor === 'h'
-      ? `<g class="tday${major ? ' major' : ''}"><line x1="${p}" y1="0" x2="${p}" y2="${x}"/>${txt}</g>`
-      : `<g class="tday${major ? ' major' : ''}"><line x1="0" y1="${p}" x2="${y}" y2="${p}"/>${txt}</g>`;
-  }).join('');
-  let pos1;
-  if (ganttMode === 'v') {
-    const chartH = Math.max(list.clientHeight, LABEL_V + (now - oldest) / DAY_MS * scale + 40);
-    const chartW = Math.max(list.clientWidth, SIDE_W + laneCount * LANE_W + 18);
-    document.documentElement.style.setProperty('--list-w', Math.max(190, chartW + 1) + 'px');
-    const yFor = t => LABEL_V + Math.max(0, now - t) / DAY_MS * scale;
-    pos1 = yFor;
-    const nowLine = `<g class="tnow"><line x1="0" y1="${LABEL_V}" x2="${chartW}" y2="${LABEL_V}"/><text x="4" y="${LABEL_V - 5}">now</text></g>`;
-    return { chartH, chartW, pos: { type: 'v', yFor, pd: scale, nowT: now }, daysSvg: tickSvg(chartH, 0, chartW, 'v'), nowLine };
-  }
-  const spanPx = (now - oldest) / DAY_MS * scale;
-  const gutter = projects ? projectGutterW() : MARGIN_L;
-  const chartW = Math.max(list.clientWidth, gutter + spanPx + MARGIN_R);
-  const laneH = projects ? PROJECT_LANE_H : LANE_H;
-  const chartH = Math.max(list.clientHeight, LABEL_H + laneCount * laneH + 10);
-  const xFor = t => gutter + spanPx - (now - t) / DAY_MS * scale;
-  pos1 = xFor;
-  const nx = xFor(now);
-  const nowLine = `<g class="tnow"><line x1="${nx}" y1="0" x2="${nx}" y2="${chartH}"/><text x="${nx + 6}" y="26">now</text></g>`;
-  const projectRows = projects ? projects.map(row => {
-    const y = LABEL_H + (row.baseLane + row.laneCount) * PROJECT_LANE_H;
-    return `<g class="tday"><line x1="0" y1="${y}" x2="${chartW}" y2="${y}"/></g>`;
-  }).join('') : '';
-  return { chartH, chartW, pos: { type: projects ? 'project' : 'h', xFor, pd: scale, nowT: now, projects }, daysSvg: projectRows + tickSvg(chartW, chartH, 0, 'h'), nowLine };
+  homeTimeline.setData({
+    start: rows.reduce((t, row) => Math.min(t, row.start), now), end: now, marks,
+    height: LABEL_H + layout.laneCount * layout.laneHeight + 10,
+    gutter: layout.projects ? projectGutterW() : MARGIN_L, rightPad: MARGIN_R,
+    labelsHtml: projectLabelsHtml(layout),
+    bands: (layout.projects || []).map(row => ({
+      key: row.project, className: 'project-row-bg' + (row.project === rowHlProject ? ' hl' : ''),
+      y: LABEL_H + row.baseLane * PROJECT_LANE_H, height: row.laneCount * PROJECT_LANE_H,
+    })),
+    defs: SELECTION_HATCH,
+  });
 }
 
 let timelineResizeTimer;
@@ -5432,7 +5314,7 @@ $('list').addEventListener('click', e => {
     const name = item.dataset.project;
     // Touch has no dblclick: a second tap on the highlighted label opens.
     if (matchMedia('(pointer: coarse)').matches && rowHlProject === name) {
-      rowHlProject = null; applyProjectRowHl();
+      rowHlProject = null; render();
       return showProjectOverview(name);
     }
     return toggleProjectRowHl(name);
@@ -5467,7 +5349,7 @@ function hideMarkPop() {
   delete pop.dataset.rel;
 }
 function showMarkPop(item, rel) {
-  const row = ((timelineGeom && timelineGeom.rows) || []).find(r => (r.s._openKey || r.s.key) === rel);
+  const row = timelineGeom?.marks.find(mark => (mark.row.s._openKey || mark.row.s.key) === rel)?.row;
   if (!row) return open(rel);
   const s = row.s;
   const fam = s._famMembers || null;
@@ -5493,37 +5375,32 @@ $('markPop').addEventListener('click', () => {
 });
 
 // Click a project label to light up its whole row; double click opens it.
+// The highlight is part of the chart data (label, band, and mark classes),
+// so a change is a render, like a selection change.
 let rowHlProject = null;
 function toggleProjectRowHl(name) {
   rowHlProject = rowHlProject === name ? null : name;
-  applyProjectRowHl();
-}
-function applyProjectRowHl() {
-  document.querySelectorAll('.project-row-label').forEach(el =>
-    el.classList.toggle('hl', el.dataset.project === rowHlProject));
-  document.querySelectorAll('.project-row-bg').forEach(el =>
-    el.classList.toggle('hl', el.dataset.projectBg === rowHlProject));
-  for (const r of ((timelineGeom && timelineGeom.rows) || [])) {
-    const key = String(r.s._openKey || r.s.key || '');
-    if (!key) continue;
-    const el = document.querySelector(`.tmark[data-rel="${CSS.escape(key)}"]`);
-    if (el) el.classList.toggle('rowhl', (r.project || projectOf(r.s)) === rowHlProject);
-  }
+  render();
 }
 
 // Double click: a project label opens the overview, a mark opens the conversation.
 $('list').addEventListener('dblclick', e => {
   if (e.timeStamp < suppressClickUntil) return; // a rubber-band drag ended here
   const label = e.target.closest('.project-row-label');
-  if (label) { rowHlProject = null; return showProjectOverview(label.dataset.project); }
+  if (label) { rowHlProject = null; render(); return showProjectOverview(label.dataset.project); }
   const mark = e.target.closest('.tmark');
   if (mark && viewKind === 'home' && mark.dataset.rel) { hideMarkPop(); return open(mark.dataset.rel); }
 });
 
 // ---- rubber-band selection on the timeline ----
-let timelineGeom = null;      // { rows, xFor } from the last timeline paint
+let timelineGeom = null;      // { marks } drawn by the last chart paint; each mark carries its row and x0/x1
 let band = null;              // active drag state
 let suppressClickUntil = 0;
+function cancelTimelineBand() {
+  if (band?.active) suppressClickUntil = performance.now() + 500;
+  band = null;
+  $('selRect')?.remove();
+}
 
 $('list').addEventListener('mousedown', e => {
   if ((tab !== 'conv' && tab !== 'notes') || e.button !== 0) return;
@@ -5558,23 +5435,15 @@ window.addEventListener('mouseup', e => {
   if (el) el.remove();
   if (!b.active) return; // a click, not a drag
   suppressClickUntil = e.timeStamp + 500;
+  if (!timelineGeom) return; // the chart went away under the drag
   const rx0 = Math.min(b.x0, b.x1), rx1 = Math.max(b.x0, b.x1);
   const ry0 = Math.min(b.y0, b.y1), ry1 = Math.max(b.y0, b.y1);
   if (!b.additive) selected.clear();
   let n = 0;
-  for (const row of timelineGeom.rows) {
-    let x0, x1, y0, y1;
-    if (timelineGeom.pos.type !== 'v') {
-      x0 = timelineGeom.pos.xFor(row.start);
-      x1 = Math.max(x0 + 6, timelineGeom.pos.xFor(row.end));
-      const laneH = timelineGeom.pos.type === 'project' ? PROJECT_LANE_H : LANE_H;
-      y0 = LABEL_H + row.lane * laneH; y1 = y0 + laneH;
-    } else {
-      y0 = timelineGeom.pos.yFor(row.end);
-      y1 = Math.max(y0 + 5, timelineGeom.pos.yFor(row.start));
-      x0 = SIDE_W + row.lane * LANE_W; x1 = x0 + LANE_W;
-    }
-    if (x1 < rx0 || x0 > rx1 || y1 < ry0 || y0 > ry1) continue;
+  for (const mark of timelineGeom.marks) {
+    const { row } = mark;
+    const y0 = mark.y - mark.laneHeight / 2, y1 = y0 + mark.laneHeight;
+    if (mark.x1 < rx0 || mark.x0 > rx1 || y1 < ry0 || y0 > ry1) continue;
     if (tab === 'notes') {
       // Dragging notes selects the conversations behind them.
       if (row.s && row.s.key && !selected.has(row.s.key)) { selected.add(row.s.key); n++; }
@@ -7270,8 +7139,17 @@ function miniGanttHtml(rows, color) {
   return `<div class="mgantt" data-mg-host></div>`;
 }
 
-let mgUI = { key: null, expanded: false, zoom: 1, center: null };
-let mgLive = null; // { host, items, color } — lets Esc collapse the open hero
+// View state of the open chart per project, so it survives a re-render and a
+// round trip through a conversation: scale is null until the first open.
+let mgUI = { key: null, expanded: false, query: '', scale: null, center: null, top: 0 };
+let mgLive = null; // { host, items, color, chart } — the mounted masthead; chart only while open
+const MG_LANE_H = 44;
+const MG_INITIAL_SPAN_MS = 7 * DAY_MS; // the first open shows about a week, ending now
+
+function mgDestroyChart() {
+  mgLive?.chart?.destroy();
+  if (mgLive) mgLive.chart = null;
+}
 
 function wireMiniGantt(root, rows, color, stateKey) {
   const host = root.querySelector('[data-mg-host]');
@@ -7282,8 +7160,9 @@ function wireMiniGantt(root, rows, color, stateKey) {
     return { ...r, a, b };
   }).filter(r => r.a).sort((x, y) => x.a - y.a);
   if (!items.length) { host.remove(); return; }
-  if (mgUI.key !== (stateKey || null)) mgUI = { key: stateKey || null, expanded: false, zoom: 1, center: null };
-  mgLive = { host, items, color };
+  mgDestroyChart();
+  if (mgUI.key !== (stateKey || null)) mgUI = { key: stateKey || null, expanded: false, query: '', scale: null, center: null, top: 0 };
+  mgLive = { host, items, color, chart: null };
   mgPaint(host, items, color);
 }
 
@@ -7309,6 +7188,7 @@ function mgTip(it, s) {
 }
 
 function mgPaintClosed(host, items, color) {
+  mgDestroyChart();
   const now = Date.now();
   host.removeAttribute('data-mg-open');
   host.title = 'Timeline — click to open the conversation picker';
@@ -7361,82 +7241,67 @@ function mgPaintClosed(host, items, color) {
   host.onclick = expand;
 }
 
+// The open masthead mounts the shared chart once; a search keystroke only
+// hands it new data, so the input, the scroller, and the camera stay put.
 function mgPaintOpen(host, items, color) {
   host.setAttribute('data-mg-open', '1');
-  const oldTop = host.querySelector('.mg-scroll')?.scrollTop || 0;
-  const allItems = items;
-  const query = (mgUI.query || '').trim().toLowerCase();
+  host.removeAttribute('title');
+  const query = mgUI.query.trim().toLowerCase();
   const catalog = new Map(sessions.map(s => [s.key, s]));
   const matches = items.filter(it => {
     const s = catalog.get(it.key) || it;
     return !query || `${s.title || ''} ${s.timelineTitle || ''} ${it.title || ''}`.toLowerCase().includes(query);
   });
-  const now = Date.now();
   const coarse = matchMedia('(pointer: coarse)').matches;
-  const viewW = Math.max(320, host.clientWidth || 800);
-  const maxZoom = Math.max(1, Math.floor(60000 / viewW)); // SVG width cap: e-ink and mobile rasterizers
-  mgUI.zoom = Math.min(Math.max(1, mgUI.zoom), maxZoom);
-  const t0 = items[0].a;
-  const t1 = Math.max(now, ...items.map(i => i.b));
-  const span = Math.max(t1 - t0, 3600000);
-  if (!mgUI.opened) {
-    mgUI.zoom = Math.min(maxZoom, Math.max(1, span / (7 * 86400000)));
-    mgUI.opened = true;
-  }
-  const W = Math.round(viewW * mgUI.zoom);
-  const PAD = 8, TICK_H = 28;
-  const xFor = t => PAD + ((t - t0) / span) * (W - 2 * PAD);
-  const tFor = x => t0 + ((x - PAD) / (W - 2 * PAD)) * span;
-  // Lane packing with room for a short title after each mark.
-  const laneEnds = [];
-  const gapT = span * (24 / W);
-  for (const it of matches) {
-    let lane = laneEnds.findIndex(end => end + gapT <= it.a);
-    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-    laneEnds[lane] = Math.max(it.b, it.a + span * (280 / W));
-    it.lane = lane;
-  }
-  const laneH = 44;
-  const chartH = TICK_H + laneEnds.length * laneH + 8;
-  const pxDay = (W - 2 * PAD) / (span / 86400000);
+  const laneCount = TimelineChart.packLanes(matches, it => it.a, it => it.b);
   const marks = matches.map(it => {
     const s = catalog.get(it.key) || it;
-    const x0 = xFor(it.a), x1 = Math.max(x0 + (coarse ? 14 : 8), xFor(it.b));
-    const cy = TICK_H + it.lane * laneH + laneH / 2;
     const profile = s.densityChat || [];
     const bins = it.b > it.a && profile.length ? profile : [Math.max(1, ...(profile.length ? profile : [1]))];
     const live = isActive(s);
     const work = typeof isWorking === 'function' && isWorking(s);
     const title = String(s.title || it.title || s.timelineTitle || it.key);
     const label = title.length > 36 ? title.slice(0, 35) + '…' : title;
-    return `<g class="tmark${live ? ' active' : ''}" data-mg="${esc(it.key)}" tabindex="0">
-      <title>${esc(mgTip(it, s))}</title>
-      <line class="duration" style="stroke:${color.stroke}" x1="${x0}" y1="${cy}" x2="${x1}" y2="${cy}"/>
-      <path class="violin" style="fill:${color.fill};stroke:${color.stroke}" d="${violinPath(x0, x1, cy, bins, false, 1)}"/>
-      ${live || work ? `<circle class="livedot${work ? '' : ' idle'}" cx="${x1}" cy="${cy}" r="3.5"/>` : ''}
-      <text x="${x0}" y="${cy - 10}">${esc(label)}</text>
-    </g>`;
-  }).join('');
-  host.setAttribute('data-mg-open', '1');
-  host.removeAttribute('title');
-  host.innerHTML = `<div class="mg-bar">
-      <input class="mg-search" type="search" aria-label="Search conversation titles" placeholder="Search conversation titles" value="${esc(mgUI.query || '')}">
-      <span class="mg-hint">${matches.length} conversations · ${coarse ? 'tap for details' : 'scroll · Shift: pan · Ctrl: zoom'}</span>
+    return { id: it.key, attributes: { 'data-mg': it.key }, className: `tmark${live ? ' active' : ''}`,
+      start: it.a, end: it.b, y: LABEL_H + (it.lane + 0.5) * MG_LANE_H, laneHeight: MG_LANE_H, bins, color,
+      minWidth: coarse ? 14 : 8, title: mgTip(it, s), label, labelCharWidth: 8,
+      live, working: work };
+  });
+  const firstMount = !mgLive.chart;
+  if (firstMount) host.innerHTML = `<div class="mg-bar">
+      <input class="mg-search" type="search" aria-label="Search conversation titles" placeholder="Search conversation titles" value="${esc(mgUI.query)}">
+      <span class="mg-hint"></span>
       <button type="button" class="ghost" data-mg-z="out" title="Zoom out">−</button>
       <button type="button" class="ghost" data-mg-z="in" title="Zoom in">+</button>
       <button type="button" class="ghost" data-mg-z="fit" title="Fit the whole history">fit</button>
       <button type="button" class="ghost" data-mg-fold title="Collapse the timeline (Esc)">▴ fold</button>
     </div>
-    <div class="mg-scroll" tabindex="0" aria-label="Project conversation timeline"><svg width="${W + 280}" height="${chartH}" viewBox="0 0 ${W + 280} ${chartH}">${mgTicks(t0, xFor, pxDay, chartH)}<line class="mg-now" x1="${xFor(now)}" y1="${TICK_H - 4}" x2="${xFor(now)}" y2="${chartH}"/>${marks}</svg></div>`;
+    <div class="mg-scroll" tabindex="0" aria-label="Project conversation timeline"></div>`;
   const scroller = host.querySelector('.mg-scroll');
-  scroller.scrollTop = oldTop;
+  host.querySelector('.mg-hint').textContent = `${matches.length} conversations · ${coarse ? 'drag to pan · pinch to zoom' : 'scroll · Shift: pan · Ctrl: zoom'}`;
+  if (firstMount) mgLive.chart = new TimelineChart({
+    scroller, scale: mgUI.scale ?? PX_DAY_BASE, fitMinimum: true,
+    onInteract: hideMarkPop,
+    onChange: state => { mgUI.scale = state.scale; mgUI.center = state.center; mgUI.top = state.top; },
+  });
+  const chart = mgLive.chart;
+  chart.setData({
+    start: items[0].a, end: Math.max(Date.now(), ...items.map(it => it.b)),
+    height: LABEL_H + laneCount * MG_LANE_H + 10, marks,
+  }, firstMount ? { fit: mgUI.scale == null ? MG_INITIAL_SPAN_MS : undefined, center: mgUI.center, top: mgUI.top } : {});
   host.onkeydown = e => {
     if (e.target.matches('input')) return;
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); mgCollapseOpen(); return; }
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && ['+', '=', '-', '_', '0'].includes(e.key)) {
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === '0') chart.fit();
+      else chart.zoomBy(['+', '='].includes(e.key) ? 1.4 : 1 / 1.4, { animate: true });
+      return;
+    }
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End'].includes(e.key)) {
       e.preventDefault(); e.stopPropagation();
-      if (e.key === 'Home') scroller.scrollLeft = 0;
-      else if (e.key === 'End') scroller.scrollLeft = scroller.scrollWidth;
+      if (e.key === 'Home') chart.jumpStart();
+      else if (e.key === 'End') chart.jump(Date.now(), 0.8);
       else {
         const horizontal = e.shiftKey || ['ArrowLeft', 'ArrowRight'].includes(e.key);
         const direction = ['ArrowUp', 'ArrowLeft', 'PageUp'].includes(e.key) ? -1 : 1;
@@ -7447,81 +7312,40 @@ function mgPaintOpen(host, items, color) {
   };
   const search = host.querySelector('.mg-search');
   search.oninput = () => {
-    const pos = search.selectionStart;
     mgUI.query = search.value;
     hideMarkPop();
-    mgPaintOpen(host, allItems, color);
-    const next = host.querySelector('.mg-search');
-    next.focus({ preventScroll: true });
-    try { next.setSelectionRange(pos, pos); } catch {}
+    mgPaintOpen(host, items, color); // updates data, retaining input and scroller
   };
   search.onkeydown = e => { e.stopPropagation(); if (e.key === 'Escape') { e.preventDefault(); mgCollapseOpen(); } };
-  // Restore the view center; the first open lands on "now" (right edge).
-  scroller.scrollLeft = mgUI.center == null ? Math.max(0, W - viewW) : Math.max(0, xFor(mgUI.center) - viewW / 2);
-  scroller.onscroll = () => { mgUI.center = tFor(scroller.scrollLeft + viewW / 2); };
-  const rezoom = (z, centerT) => {
-    mgUI.zoom = Math.min(Math.max(1, z), maxZoom);
-    if (centerT !== undefined) mgUI.center = centerT;
-    hideMarkPop();
-    mgPaintOpen(host, allItems, color);
-    host.querySelector('.mg-scroll').focus({ preventScroll: true });
-  };
+
   host.querySelectorAll('[data-mg-z]').forEach(b => b.onclick = e => {
     e.stopPropagation();
-    if (b.dataset.mgZ === 'fit') return rezoom(1, null);
-    rezoom(b.dataset.mgZ === 'in' ? mgUI.zoom * 2 : mgUI.zoom / 2);
+    if (b.dataset.mgZ === 'fit') return chart.fit();
+    chart.zoomBy(b.dataset.mgZ === 'in' ? 1.4 : 1 / 1.4, { animate: true });
   });
   host.querySelector('[data-mg-fold]').onclick = e => {
     e.stopPropagation();
     hideMarkPop();
     mgCollapseOpen();
   };
-  // Ctrl+wheel (and trackpad pinch) zooms toward the cursor's time.
-  scroller.addEventListener('wheel', e => {
-    if (!e.ctrlKey) {
-      if (e.shiftKey) { e.preventDefault(); scroller.scrollLeft += e.deltaY || e.deltaX; }
-      return;
-    }
-    e.preventDefault();
-    const pointerX = e.clientX - scroller.getBoundingClientRect().left;
-    const t = tFor(scroller.scrollLeft + pointerX);
-    const z = Math.min(maxZoom, Math.max(1, mgUI.zoom * Math.exp(-e.deltaY * 0.005)));
-    const newScale = (viewW * z - 2 * PAD) / span;
-    rezoom(z, t + (viewW / 2 - pointerX) / newScale);
-  }, { passive: false });
-  host.querySelectorAll('[data-mg]').forEach(g => {
-    g.onclick = e => {
-      e.stopPropagation();
-      const pop = $('markPop');
-      if (!pop.hidden && pop.dataset.rel === g.dataset.mg) return; // second click = the double click path
-      mgShowPop(g, g.dataset.mg, items);
-    };
-    g.ondblclick = e => { e.stopPropagation(); hideMarkPop(); open(g.dataset.mg); };
-    g.onkeydown = e => { if (e.key === 'Enter') { hideMarkPop(); open(g.dataset.mg); } };
-  });
+  // Delegation keeps newly windowed marks interactive without per-frame wiring.
+  scroller.onclick = e => {
+    const mark = e.target.closest('[data-mg]');
+    if (!mark) { hideMarkPop(); return; }
+    e.stopPropagation();
+    const pop = $('markPop');
+    if (!pop.hidden && pop.dataset.rel === mark.dataset.mg) return;
+    mgShowPop(mark, mark.dataset.mg, items);
+  };
+  scroller.ondblclick = e => {
+    const mark = e.target.closest('[data-mg]');
+    if (mark) { e.stopPropagation(); hideMarkPop(); open(mark.dataset.mg); }
+  };
+  scroller.onkeydown = e => {
+    const mark = e.target.closest('[data-mg]');
+    if (mark && e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); hideMarkPop(); open(mark.dataset.mg); }
+  };
   host.onclick = e => { if (!e.target.closest('.tmark')) hideMarkPop(); };
-}
-
-// Ticks for the open hero. Density follows px/day, like the home chart:
-// days when wide, Mondays when mid, month firsts when tight.
-function mgTicks(t0, xFor, pxDay, H) {
-  const out = [];
-  const d = new Date(); d.setHours(0, 0, 0, 0);
-  if (pxDay >= 40) {
-    for (let t = +d; t >= t0; t -= 86400000) {
-      const dt = new Date(t);
-      out.push({ t, label: dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), major: dt.getDate() === 1 });
-    }
-  } else if (pxDay >= 6) {
-    while (d.getDay() !== 1) d.setDate(d.getDate() - 1);
-    for (; +d >= t0; d.setDate(d.getDate() - 7))
-      out.push({ t: +d, label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), major: d.getDate() <= 7 });
-  } else {
-    d.setDate(1);
-    for (; +d >= t0; d.setMonth(d.getMonth() - 1))
-      out.push({ t: +d, label: d.toLocaleDateString(undefined, d.getMonth() === 0 ? { month: 'short', year: 'numeric' } : { month: 'short' }), major: d.getMonth() === 0 });
-  }
-  return out.map(k => `<g class="mg-tick${k.major ? ' major' : ''}"><line x1="${xFor(k.t)}" y1="14" x2="${xFor(k.t)}" y2="${H}"/><text x="${xFor(k.t) + 3}" y="11">${esc(k.label)}</text></g>`).join('');
 }
 
 // The open hero reuses the home chart's floating detail card (#markPop):
@@ -8731,6 +8555,21 @@ function openFileActionMenu(ctx, x, y) {
   });
   menu.querySelector('button').focus();
 }
+
+// The "more…" message menu opens upward by default. Near the top of the
+// scroller (#view clips its overflow) there is no room above, so it flips
+// below. Measured on open; `toggle` does not bubble, hence capture.
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (!(d instanceof HTMLElement) || !d.classList.contains('msg-more-actions')) return;
+  if (!d.open) { d.classList.remove('opens-down'); return; }
+  const menu = d.querySelector(':scope > div');
+  const scroller = d.closest('#view') || document.documentElement;
+  if (!menu) return;
+  const top = scroller.getBoundingClientRect().top;
+  const room = d.getBoundingClientRect().top - top - 6;
+  d.classList.toggle('opens-down', menu.offsetHeight > room);
+}, true);
 
 // Paths occur in transcripts, notes, and project pages. This delegate covers
 // surfaces without local wiring. Conversation controls stop propagation after
@@ -13997,8 +13836,8 @@ async function showEpicEvidence(id, focusKey = activeRel) {
 }
 
 function setTab(t) {
+  disposeHomeTimeline(); // each tab opens its chart at "now"
   tab = t;
-  delete $('list').dataset.initScroll; // each tab scrolls to "now" on first paint
   document.querySelectorAll('#tabs button[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   $('selShown').hidden = t !== 'conv';
   if (t === 'conv') {
@@ -14033,8 +13872,6 @@ function noteLabel(name) {
 
 function renderNotesTab() {
   const list = $('list');
-  const st = list.scrollTop, sl = list.scrollLeft;
-  const atNow = ganttMode === 'v' ? list.scrollTop <= 40 : list.scrollLeft + list.clientWidth >= list.scrollWidth - 40;
   const dir = $('dir').value, src = $('src').value, project = $('ganttProject').value;
   // Source, directory, and project filters apply through the note's source conversation.
   // Notes without a match have no metadata and hide when a filter is active.
@@ -14049,6 +13886,7 @@ function renderNotesTab() {
   });
   $('count').textContent = notes.length + ' notes';
   if (phoneLayout()) {
+    disposeHomeTimeline();
     list.innerHTML = notes.map(n => {
       const conv = sessions.find(s => s.notePath && s.notePath.endsWith('/' + n.file));
       return `<div class="item mobile-work" data-note="${esc(n.file)}"><div class="mobile-work-mark note-sig">✓</div>
@@ -14058,7 +13896,6 @@ function renderNotesTab() {
     }).join('') || (notesList.length
       ? '<div class="empty">no notes match.</div>'
       : '<div class="empty">no notes yet.</div>');
-    timelineGeom = null;
     return;
   }
   // Notes are green violin marks on the same Gantt as conversations.
@@ -14074,27 +13911,23 @@ function renderNotesTab() {
       : null;
   }).filter(Boolean);
   if (!rows.length) {
+    disposeHomeTimeline();
     list.innerHTML = notesList.length
       ? '<div class="empty">no notes match.<div class="hint">clear the filters.</div></div>'
       : '<div class="empty">no notes yet.<div class="hint">open a conversation and press distill.</div></div>';
     return;
   }
-  const { chartH, chartW, pos, daysSvg, nowLine } = timelineGrid(list, rows);
-  const paintedRows = visibleTimelineRows(rows, pos, chartW, list);
-  const marks = paintedRows.map(({ note, name, conv, start, end, lane }) => {
-    const profile = conv ? (conv.densityChat || []) : [];
-    const bins = end > start && profile.length ? profile : [1];
-    const g = markGeom(pos, start, end, lane, bins);
-    const tip = `${name}\nnote · saved ${fmtDate(note.mtimeMs)}${conv ? `\nfrom: ${conv.title || '(untitled)'}` : ''}`;
-    return `<g class="tmark note" data-note="${esc(note.file)}" tabindex="0">
-      <title>${esc(tip)}</title><line class="duration" ${g.line}/>
-      <path class="violin" d="${g.d}"/>
-      ${pxDay() < 40 ? '' : `<text ${g.text}>${esc(noteLabel(name))}</text>`}
-    </g>`;
-  }).join('');
-  timelineGeom = { rows: paintedRows, pos }; // rubber-band selects visible conversations through notes
-  list.innerHTML = `<div class="timeline" style="width:${chartW}px;height:${chartH}px">${projectLabelsHtml(pos)}${svgTagFor(list, chartW, chartH)}${daysSvg}${nowLine}${marks}</svg></div>`;
-  scrollTimeline(list, st, sl);
+  const layout = homeTimelineLayout(rows);
+  const marks = rows.map(row => {
+    const { note, name, conv, start, end, lane } = row;
+    return { id: 'note:' + note.file, attributes: { 'data-note': note.file },
+      className: 'tmark note', row, start, end, y: LABEL_H + (lane + 0.5) * layout.laneHeight,
+      laneHeight: layout.laneHeight, bins: conv?.densityChat || [1],
+      title: `${name}\nnote · saved ${fmtDate(note.mtimeMs)}${conv ? `\nfrom: ${conv.title || '(untitled)'}` : ''}`,
+      label: noteLabel(name),
+    };
+  });
+  paintHomeTimeline(rows, layout, marks);
 }
 
 async function loadEpicsTab() {
@@ -14144,57 +13977,25 @@ document.querySelectorAll('#scaleSeg button').forEach(b => {
   b.onclick = () => zoomTo(ZOOM_PRESETS[b.dataset.s]);
 });
 
-// Set an absolute zoom, anchored on the viewport center.
-function zoomTo(z) { zoomBy(z / ganttZoom); }
-
-// Zoom by a factor. The moment under (cx, cy) stays fixed in the viewport.
-// Without coordinates the anchor is the viewport center.
-function zoomBy(factor, cx, cy) {
-  if (ganttMode === 'off') return;
-  const list = $('list');
-  const g = timelineGeom;
-  const rect = list.getBoundingClientRect();
-  let anchorT = null, offX = 0, offY = 0;
-  if (g && g.pos && g.pos.pd) {
-    if (g.pos.type !== 'v') {
-      offX = cx != null ? cx - rect.left : list.clientWidth / 2;
-      anchorT = g.pos.nowT - (g.pos.xFor(g.pos.nowT) - (list.scrollLeft + offX)) / g.pos.pd * DAY_MS;
-    } else {
-      offY = cy != null ? cy - rect.top : list.clientHeight / 2;
-      anchorT = g.pos.nowT - (list.scrollTop + offY - LABEL_V) / g.pos.pd * DAY_MS;
-    }
-  }
-  ganttZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, ganttZoom * factor));
-  localStorage.setItem('aiconvo.ganttZoom', ganttZoom);
-  renderTabList();
-  updateScaleSeg();
-  if (anchorT != null && timelineGeom && timelineGeom.pos.pd) {
-    const p = timelineGeom.pos;
-    if (p.type !== 'v') list.scrollLeft = p.xFor(anchorT) - offX;
-    else list.scrollTop = p.yFor(anchorT) - offY;
-  }
+// Buttons and keys drive the home chart's camera, the same one the wheel and
+// a pinch move. They anchor on the viewport center and transition briefly.
+function zoomTo(z) {
+  if (viewKind === 'home') homeTimeline?.zoomTo(z * PX_DAY_BASE, { animate: true });
+}
+function zoomBy(factor) {
+  if (viewKind === 'home') homeTimeline?.zoomBy(factor, { animate: true });
 }
 
 function jumpToNow() {
-  const list = $('list'), g = timelineGeom;
-  if (!g || !g.pos.pd) return;
-  if (g.pos.type !== 'v') list.scrollLeft = g.pos.xFor(g.pos.nowT) - list.clientWidth * 0.8;
-  else list.scrollTop = 0;
+  if (viewKind === 'home') homeTimeline?.jump(Date.now(), 0.8);
 }
 
 function jumpToStart() {
-  const list = $('list'), g = timelineGeom;
-  if (!g || !g.pos.pd) return;
-  if (g.pos.type !== 'v') list.scrollLeft = 0;
-  else list.scrollTop = list.scrollHeight;
+  if (viewKind === 'home') homeTimeline?.jumpStart();
 }
 
 function jumpToDate(value) {
-  const t = new Date(value + 'T12:00:00').getTime();
-  const list = $('list'), g = timelineGeom;
-  if (!Number.isFinite(t) || !g || !g.pos.pd) return;
-  if (g.pos.type !== 'v') list.scrollLeft = g.pos.xFor(t) - list.clientWidth / 2;
-  else list.scrollTop = g.pos.yFor(t) - list.clientHeight / 2;
+  if (viewKind === 'home') homeTimeline?.jump(new Date(value + 'T12:00:00').getTime());
 }
 
 $('jumpNow').onclick = jumpToNow;
@@ -14212,7 +14013,7 @@ $('ganttGroup').onclick = () => {
   ganttGroup = ganttGroup === 'project' ? 'compact' : 'project';
   localStorage.setItem('aiconvo.ganttGroup', ganttGroup);
   paintGanttGroupButton();
-  delete $('list').dataset.initScroll;
+  disposeHomeTimeline(); // rows are laid out anew: open the new layout at "now"
   renderTabList();
 };
 
@@ -14414,62 +14215,6 @@ $('ganttResize').addEventListener('dblclick', () => {
   localStorage.removeItem('aiconvo.ganttTrayRatio');
   document.documentElement.style.setProperty('--list-h', '220px');
 });
-
-// Repaint only when scrolling enters another virtual time window. This keeps
-// old archives cheap while still making marks appear as the user pans.
-let timelineScrollRaf = 0;
-$('list').addEventListener('scroll', () => {
-  if (timelineScrollRaf || ganttMode === 'v' || tab === 'epics') return;
-  timelineScrollRaf = requestAnimationFrame(() => {
-    timelineScrollRaf = 0;
-    const list = $('list');
-    const bucket = String(Math.floor(list.scrollLeft / Math.max(1, list.clientWidth / 2)));
-    if (bucket === list.dataset.renderWindow) return;
-    const sl = list.scrollLeft, st = list.scrollTop;
-    hideMarkPop();
-    tab === 'notes' ? renderNotesTab() : render();
-    list.scrollLeft = sl; list.scrollTop = st;
-  });
-}, { passive: true });
-
-// Wheel: ctrl = zoom at pointer, plain = scroll along the time axis.
-$('list').addEventListener('wheel', e => {
-  if (ganttMode === 'off' || !$('list').querySelector('.timeline')) return;
-  if (e.ctrlKey || e.metaKey) {
-    e.preventDefault();
-    zoomBy(e.deltaY < 0 ? 1.25 : 0.8, e.clientX, e.clientY);
-  } else if ((ganttMode === 'h' || ganttMode === 'full') && e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-    e.preventDefault();
-    $('list').scrollLeft += e.deltaY;
-  }
-}, { passive: false });
-
-// Two-finger pinch zooms the chart around the pinch midpoint (phone/tablet).
-(() => {
-  const list = $('list');
-  const pts = new Map();
-  let lastD = 0;
-  list.addEventListener('pointerdown', e => {
-    if (e.pointerType === 'touch') { pts.set(e.pointerId, e); lastD = 0; }
-  });
-  list.addEventListener('pointermove', e => {
-    if (e.pointerType !== 'touch' || !pts.has(e.pointerId)) return;
-    pts.set(e.pointerId, e);
-    if (pts.size !== 2 || !list.querySelector('.timeline')) return;
-    e.preventDefault();
-    const [a, b] = [...pts.values()];
-    const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-    if (!lastD) { lastD = d; return; }
-    const f = d / lastD;
-    if (Math.abs(f - 1) > 0.05) {   // re-render is heavy; step in 5% moves
-      zoomBy(f, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
-      lastD = d;
-    }
-  }, { passive: false });
-  const drop = e => { pts.delete(e.pointerId); lastD = 0; };
-  list.addEventListener('pointerup', drop);
-  list.addEventListener('pointercancel', drop);
-})();
 
 // ---- selection actions ----
 $('selShown').onclick = () => {
@@ -15938,7 +15683,7 @@ function cornerStack() {
 //   (copy, edit, regenerate) — the tap itself pages, so the press takes
 //   over the toggle role that a plain tap has on other devices.
 // Buttons, links, marks, rows, and form fields keep their normal taps.
-// The terminal pane and the open mini-gantt keep their own touch handlers.
+// Timeline surfaces keep their own pan/pinch handlers on every device.
 const einkTapSkip = 'button, a, input, select, textarea, summary, label, .more, .tmark, .item, .ag-row, .sr-hit, [data-close], .job, .fg-mark, .mgantt';
 
 function einkFlash(text) {
@@ -16000,7 +15745,7 @@ function einkScroller(fromEl) {
 let einkTouch = null;
 document.addEventListener('touchstart', e => {
   if (!isEink()) return;
-  if (e.target.closest && e.target.closest('.mgantt[data-mg-open], canvas')) { einkTouch = null; return; }
+  if (e.target.closest && e.target.closest('.timeline-scroller, .mgantt[data-mg-open], canvas')) { einkTouch = null; return; }
   if (e.touches.length === 1) {
     const t = e.touches[0];
     einkTouch = { mode: 'one', x: t.clientX, y: t.clientY, t: Date.now(), moved: 0, scroller: einkScroller(e.target) };
@@ -16581,7 +16326,7 @@ document.addEventListener('keydown', e => {
   // rows, shift+PageUp/PageDown pans along the time axis.
   if (viewKind === 'home' && ['Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
     const list = $('list');
-    if (list.querySelector('.timeline')) {
+    if (homeTimeline) {
       e.preventDefault();
       if (e.key === 'Home') jumpToStart();
       else if (e.key === 'End') jumpToNow();
