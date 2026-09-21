@@ -431,11 +431,22 @@ function fileWsBanner(ws, text, actions = []) {
 
 // Common tail of a mount: cursor memory, the requested line, shortcuts.
 
+// Where a mount puts the cursor. The route's line is where a link, a shared
+// URL or a reload sends the reader. A return (back, forward: opts.restore)
+// lands on the cursor left behind instead, the way a browser returns to a
+// page's scroll rather than to the anchor it was first opened at; the
+// route's line still applies when nothing was left behind.
+function fileWsMountLine(ws, opts) {
+  const asked = opts.line || ws.line || null;
+  let remembered = null;
+  try { const saved = Number(localStorage.getItem('aiconvo.cursor:' + ws.path)); if (saved > 1) remembered = saved; } catch {}
+  return opts.restore ? remembered || asked : asked || remembered;
+}
+
 function fileWsAfterMount(ws, opts) {
   if (fileWs !== ws || !ws.editor) return;
   if (typeof renderPresenceMarks === 'function') renderPresenceMarks();
-  let line = opts.line || ws.line || null;
-  if (!line) { const saved = Number(localStorage.getItem('aiconvo.cursor:' + ws.path)); if (saved > 1) line = saved; }
+  const line = fileWsMountLine(ws, opts);
   if (line && ws.editor.gotoLine) { try { ws.editor.gotoLine(line); } catch {} }
   ws.line = null;
   liveFileAfterMount(ws);

@@ -2394,13 +2394,16 @@ window.addEventListener('popstate', e => {
   let hash = location.hash.slice(1);
   try { hash = decodeURIComponent(hash); } catch {}
   const arrival = nav.arrive(e.state, hash);
-  navLand(arrival.entry, hash);
+  // A screen we have been on is restored (its scroll, a file's cursor). A
+  // foreign entry (a pasted URL, a link) is a first visit: the address says
+  // where to land.
+  navLand(arrival.entry, hash, { restore: !arrival.foreign });
 });
 
-async function navLand(entry, hash) {
+async function navLand(entry, hash, { restore = true } = {}) {
   const seq = ++navTraversalSeq;
   if (typeof entry.projectScope === 'string') { restoringScopeEntry = entry.id; setWorkspaceScope(entry.projectScope, { stamp: false }); }
-  try { await dispatchHash(hash, { restore: true }); }
+  try { await dispatchHash(hash, { restore }); }
   catch (err) { console.error('navigation failed:', err); }
   finally { if (restoringScopeEntry === entry.id) restoringScopeEntry = null; }
   // The person moved on while this screen was loading: nothing to land.
@@ -2509,7 +2512,7 @@ function dispatchHash(h, { restore = false } = {}) {
     let browserContext = null, reviewRef = null;
     try { if (f.browser) browserContext = JSON.parse(f.browser.startsWith('{') ? f.browser : decodeURIComponent(f.browser)); } catch {}
     try { if (f.review) reviewRef = JSON.parse(f.review.startsWith('{') ? f.review : decodeURIComponent(f.review)); } catch {}
-    return openLiveFile(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, back: f.back || null, preview: f.preview || null, browserContext, reviewRef });
+    return openLiveFile(f.path, { project: f.project || null, line: f.line || null, from: f.from || null, to: f.to || null, back: f.back || null, preview: f.preview || null, browserContext, reviewRef, restore });
   }
   if (h.startsWith('doc=')) {
     // doc=PATH[&PROJECT][&conv=KEY]. conv= names the conversation the
