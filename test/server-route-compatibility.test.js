@@ -22,7 +22,8 @@ test('path/read keeps transcript scope, path, and local-request checks after ali
     const data = { content: 'fixture' };
     const handler = pathReadHandler({ req, res,
       u: new URL('http://localhost/api/path/read?id=pi%3Afixture&path=src%2Fa%20b.js'),
-      isLocalRequest: value => { assert.equal(value, req); return local; },
+      // The console is this machine with the install token (design/53).
+      isConsoleRequest: value => { assert.equal(value, req); return local; },
       transcriptFileReadResponse: async (...args) => { calls.push(args); return data; },
       json: (response, status, body) => { assert.equal(response, res); assert.equal(status, 200); assert.equal(body, data); },
     });
@@ -34,7 +35,7 @@ test('path/read keeps transcript scope, path, and local-request checks after ali
 test('path/read keeps the existing error response', async () => {
   let status, error;
   const handler = pathReadHandler({ req: {}, res: {}, u: new URL('http://localhost/api/path/read'),
-    isLocalRequest: () => false,
+    isConsoleRequest: () => false,
     transcriptFileReadResponse: async () => { throw new Error('not in transcript'); },
     json: (_res, code, body) => { status = code; error = body.error; },
   });

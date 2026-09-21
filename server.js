@@ -102,6 +102,11 @@ function isLocalRequest(req) {
   if (ip !== '127.0.0.1' && ip !== '::1') return false;
   return !req.headers['x-forwarded-for'] && !req.headers['tailscale-user-login'];
 }
+// The powers of the machine itself (read any file under the home, act on
+// the desktop) belong to the console: this machine AND the install token.
+// A guest's sandboxed agent is also on this machine; locality alone proves
+// nothing (design/53).
+const isConsoleRequest = req => isLocalRequest(req) && !!req.identity && req.identity.tier === 'console';
 // A stable https name for this install (Tailscale Serve, a real
 // certificate). Connect links and cross-registration prefer it, so other
 // machines land on a secure page where copy, microphone and offline mode
@@ -121,6 +126,7 @@ function lanLoginPage(error = '') {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo</title>
 <style>html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:28rem;margin:12vh auto;padding:1rem}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}</style></head>
 <body><main><p>Enter your token for this aiconvo (your invite link, or the install token from settings → machines). After this, the device stays signed in as you.</p>
+<p><small>On this machine itself: the install token is in <code>~/.cache/aiconvo/lan-token</code>, and <code>open.sh</code> signs the browser in with it.</small></p>
 ${error ? `<p class="err">${error.replace(/</g, '&lt;')}</p>` : ''}
 <form method="post" action="/login"><label for="token">token</label><input id="token" name="token" autocomplete="off" autofocus><button type="submit">open aiconvo</button></form></main></body></html>`;
 }
@@ -2395,11 +2401,20 @@ function runEventForwarder(job) {
 // that entry — an in-file pi branch anchor moves the leaf there first.
 async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf, expectedVersion, recoveryAttempts = 0, principal = null, input = 'keyboard', coauthors = null }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
-  principal = principal || principalFor(null);
+  principal = await principalInProject(principal || principalFor(null), projectNameOf(entry.cwd, key));
+  assertPrincipalCanRun(principal, 'an agent');
   // Who typed this. The SDK engine writes it into the session tree; the
   // rpc engine cannot, so the sidecar remembers it for the indexer.
   const author = customMessage ? null : { id: principal.user.id, name: principal.user.name, input, coauthors: coauthors || undefined };
   if (conversationKind(entry) === 'claude') throw new Error('Headless runs need pi. Claude conversations use the terminal.');
+  let modelNote = '';
+  if (principal.guest) {
+    // The guest's Pi holds only the providers the key proxy can serve.
+    const choice = guestModelChoice(provider, modelId, await guestProviderList());
+    if (!choice.provider) throw new Error('No model is available to guests on this machine right now.');
+    if (choice.changed) modelNote = `answered by ${choice.provider}/${choice.modelId} (the conversation's model is not available to guests)`;
+    provider = choice.provider; modelId = choice.modelId;
+  }
   if (!customMessage && !String(message || '').trim()) throw new Error('empty prompt');
   const delegatedOwner = await assertDelegationLaunch(sessionPath, customMessage);
   // A person now drives a stopped worker's conversation. Record it: the parent
@@ -2524,7 +2539,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       const bundleHash = ctxBundle ? contextBundleHash(ctxBundle.text) : '';
       const sameBundle = !!prevApplied && prevApplied.sig === nextCtxSig && prevApplied.hash === bundleHash;
       if (ctxChanged || (ctxBundle && !sameBundle)) stopAnyWarmSession(sessionPath);
-      const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
+      const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', promptArgFor(principal, ctxBundle.file, ctxBundle.text)] : [])];
       if (customMessage) pirpc.stopWarmSession(sessionPath);
       const owner = await assertDelegationLaunch(sessionPath, customMessage);
       if (findRunningConversation(key)) throw new Error('A terminal now owns this conversation.');
@@ -2535,9 +2550,12 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       if (owner) pisdk.stopWarmSession(sessionPath);
       record.launchStarted = true;
       job.recoveryEligible = !fanout && !customMessage && !owner;
-      const engine = customMessage ? pisdk : piEng();
+      // A guest's run always uses the SDK engine: it is the one that starts
+      // inside the walls (the rpc engine spawns pi on the host).
+      const engine = customMessage || principal.sandbox ? pisdk : piEng();
       if (author && engine !== pisdk) recordAuthorship(key, author, { via: 'rpc', chars: String(message || '').length, input, coauthors });
-      const handle = engine.piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(principal), ...sessionEnv }, sessionEnv, extraArgs }, { provider, modelId, message, images, customMessage, author, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
+      if (modelNote) { job.statusText = modelNote; jobChanged(job); }
+      const handle = engine.piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(principal), ...sessionEnv }, sessionEnv, extraArgs, sandbox: principal.sandbox || undefined }, { provider, modelId, message, images, customMessage, author, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
       appliedContextBySession.set(path.resolve(sessionPath), { sig: nextCtxSig, hash: bundleHash });
       record.handle = handle;
       await handle.done;
@@ -2603,6 +2621,7 @@ async function resumeDelegationFromHost(id, spec) {
   if (headlessRuns.has(file) || headlessOwner(file)) throw new Error('This conversation is working right now. Wait for it to stop.');
   const key = delegationSessionKey(file);
   if (key && findRunningConversation(key)) throw new Error('A terminal owns this conversation. Close it before the worker continues.');
+  assertNotGuest(currentIdentity(), 'Resuming a delegated worker');
   const task = await delegationLib.resumeDelegation(id, spec, { root: DELEGATION_ROOT, env: agentEnv() });
   await delegationCoordinator.forget(id);
   await delegationCoordinator.refresh();
@@ -3010,8 +3029,11 @@ async function setConversationThinking(key, level, force) {
   // like one created by a send, or a later send could reuse it without it.
   const contextItems = conversationContextOf(key);
   const ctxBundle = contextItems.length ? await writeAttachedContextFile(contextItems) : null;
-  const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
-  const out = await withSessionOp(sessionPath, () => piEng().piSetThinking({ sessionPath, cwd, env: agentEnv(), extraArgs }, level));
+  const principal = await currentPrincipal(projectNameOf(entry.cwd, key));
+  assertPrincipalCanRun(principal, 'the thinking level');
+  const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', promptArgFor(principal, ctxBundle.file, ctxBundle.text)] : [])];
+  const engine = principal.sandbox ? pisdk : piEng();
+  const out = await withSessionOp(sessionPath, () => engine.piSetThinking({ sessionPath, cwd, env: agentEnv(principal), extraArgs, sandbox: principal.sandbox || undefined }, level));
   await reindexIfChanged(key);
   if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
   return { ok: true, level: out.level, levels: out.levels, reopened: reopen };
@@ -3344,7 +3366,17 @@ function normalizeContextItems(raw) {
       out.push({ project, kind });
     }
   }
-  return out.slice(0, 24);
+  // What the asker may not see does not ride into a system prompt either:
+  // a guest attaching a hidden conversation, a foreign file or another
+  // project's memory gets it dropped here, the one place context is shaped.
+  const who = currentIdentity();
+  const gated = who && !accessLib.seesAll(who) ? out.filter(item => {
+    if (item.type === 'chat') return !!index[item.key] && keyVisible(who, item.key);
+    if (item.type === 'file') { try { assertPathAccess(who, item.path, 'see'); return true; } catch { return false; } }
+    if (item.type === 'note') return true;
+    return projectVisible(who, item.project);
+  }) : out;
+  return gated.slice(0, 24);
 }
 function conversationContextOf(key) {
   return normalizeContextItems(modelPrefs.context && modelPrefs.context[key]);
@@ -3935,6 +3967,11 @@ const collab = createCollab({ ...yjsLib, persistDir: path.join(CACHE_DIR, 'colla
 const ownerIdentity = () => ({ user: usersLib.ownerOf(roster), tier: 'console', via: 'console' });
 // What a request proves. With no install token the server answers only
 // this computer, so every request is the account itself (as before).
+// Who is asking, from anywhere below a request: the desktop and shell
+// spawns check it, so a guest cannot reach them through any route.
+const requestContext = new AsyncLocalStorage();
+const currentIdentity = () => (requestContext.getStore() || {}).identity || null;
+const currentPrincipal = async project => { const id = currentIdentity(); return id ? principalInProject(principalFor(id), project) : principalFor(null); };
 function identifyRequest(req) {
   if (!LAN_TOKEN) return ownerIdentity();
   return usersLib.identify({ roster, installToken: LAN_TOKEN, isLocal: isLocalRequest(req), cookie: cookieValue(req, 'aiconvo'), authorization: req.headers.authorization });
@@ -3946,9 +3983,131 @@ const userById = id => usersLib.publicUser(usersLib.findUser(roster, id));
 // person still rides along in the environment, so agents, extensions and
 // the ledger know who is driving. A team deployment resolves a Unix user
 // here instead, and nothing else changes. See design/46, "Team scale".
-function principalFor(identity) {
+function principalFor(identity, { project = null } = {}) {
   const user = usersLib.publicUser((identity && identity.user) || usersLib.ownerOf(roster));
-  return { user, spawnAs: null, env: { AICONVO_USER: user.id, AICONVO_USER_NAME: user.name } };
+  const base = { user, spawnAs: null, env: { AICONVO_USER: user.id, AICONVO_USER_NAME: user.name }, guest: false, sandbox: null, project };
+  if (!identity || !usersLib.isGuest(identity.user)) return base;
+  // A guest runs behind walls (sandbox.js): only the project exists for
+  // their processes. Which project is decided by the caller from the
+  // conversation or the folder; without one, nothing may run.
+  return { ...base, guest: true, sandbox: project ? guestSandboxFor(identity.user, project) : null };
+}
+// The same principal, with the walls of one project (a guest's sandbox is
+// built once the project is known; an owner's principal is unchanged).
+async function principalInProject(principal, project) {
+  if (!principal || !principal.guest || principal.sandbox || !project || project === LOOSE_PROJECT) return principal;
+  const user = usersLib.findUser(roster, principal.user.id);
+  return { ...principal, project, sandbox: await guestSandboxFor(user || principal.user, project) };
+}
+// Guest agents cannot read files outside the walls: a system-prompt file
+// is passed as its text instead (pi accepts either).
+function promptArgFor(principal, file, text) {
+  return principal && principal.sandbox ? text : file;
+}
+// What a guest with no project on hand is told when they try to run something.
+function assertPrincipalCanRun(principal, what = 'this') {
+  if (!principal.guest) return;
+  if (!principal.sandbox) { const e = new Error(`As a guest you can only run ${what} inside a project shared with you.`); e.status = 403; throw e; }
+}
+function assertNotGuest(identity, what = 'this') {
+  if (identity && usersLib.isGuest(identity.user)) { const e = new Error(`${what} touches this machine outside the shared project and is not available to guests.`); e.status = 403; throw e; }
+}
+// ---- guests behind walls (design/53) ----
+// Every process a guest causes runs in a bubblewrap sandbox with the
+// project folder, the system, and a private Pi directory whose keys are
+// placeholders the key proxy swaps for real ones. The sandbox is rebuilt
+// per launch (cheap: a list of arguments) so a revoked guest or a changed
+// roster never leaves a stale one; the guest's Pi directory is refreshed
+// when the proxy or the provider list changed.
+const sandboxLib = require('./sandbox.js');
+const { createKeyProxy } = require('./keyproxy.js');
+const GUESTS_DIR = path.join(os.homedir(), '.local', 'share', 'aiconvo', 'guests');
+const OWNER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
+const BWRAP = sandboxLib.findBwrap();
+const keyProxy = createKeyProxy({ log: msg => console.error(msg), onUsage: u => { try { recordGuestUsage(u); } catch {} } });
+const guestProxyTokens = new Map(); // guest id -> placeholder secret held by their sandboxes
+let guestProvidersCache = { at: 0, list: [] };
+async function guestProviderList() {
+  if (Date.now() - guestProvidersCache.at < 60000) return guestProvidersCache.list;
+  try { guestProvidersCache = { at: Date.now(), list: await keyProxy.providers() }; } catch (e) { console.error('[key proxy] providers:', e.message); }
+  return guestProvidersCache.list;
+}
+// The model a guest's run uses: theirs if the proxy can serve it, else the
+// best the proxy can, so a conversation whose model is not guest-servable
+// still answers (the run card says which model replied).
+function guestModelChoice(provider, modelId, providers) {
+  const ids = new Set(providers.map(p => p.id));
+  if (provider && ids.has(provider)) return { provider, modelId, changed: false };
+  const prefer = ['claude-code', 'anthropic', 'openai', 'gemini', 'openrouter'];
+  const pick = prefer.find(id => ids.has(id)) || providers[0]?.id || null;
+  if (!pick) return { provider: null, modelId: null, changed: true };
+  const models = (providers.find(p => p.id === pick) || {}).models || [];
+  const m = pick === 'claude-code' ? 'claude-fable-5-1' : pick === 'anthropic' ? (models.find(x => /opus/.test(x.id)) || models[0] || {}).id : (models[0] || {}).id;
+  return { provider: pick, modelId: m || null, changed: true };
+}
+const guestCredentialLabel = 'sandbox';
+const guestApiSecrets = new Map(); // guest id -> secret (memory only; the roster keeps the hash)
+// A credential for the guest's own processes: the aiconvo CLI and the Pi
+// records tools inside the walls act as the guest, never as the console.
+// One per server lifetime; the previous boot's is dropped from the roster.
+function guestApiTokenFor(user) {
+  const have = guestApiSecrets.get(user.id);
+  if (have) return have;
+  const u = usersLib.findUser(roster, user.id);
+  if (!u) throw new Error('no such guest');
+  u.credentials = u.credentials.filter(x => !(x.kind === 'invite' && x.label === guestCredentialLabel));
+  const { secret } = usersLib.issueCredential(roster, u.id, { label: guestCredentialLabel });
+  saveRoster();
+  guestApiSecrets.set(user.id, secret);
+  return secret;
+}
+async function guestSandboxFor(user, project) {
+  const meta = projectMetaFor(project);
+  if (!meta || !meta.cwd || !fs.existsSync(meta.cwd)) throw Object.assign(new Error('that project has no folder on this machine'), { status: 404 });
+  if (!BWRAP) throw Object.assign(new Error('bubblewrap is not installed on this machine, so guests cannot run anything here (settings → people says so)'), { status: 503 });
+  const projectRoot = meta.cwd;
+  const guestDir = sandboxLib.guestAgentDirFor(GUESTS_DIR, user.id);
+  const insideAgentDir = path.join(os.homedir(), '.pi', 'agent');
+  let token = guestProxyTokens.get(user.id);
+  if (!token) { token = crypto.randomBytes(18).toString('base64url'); guestProxyTokens.set(user.id, token); }
+  if (!guestProxyPort) { const u = await keyProxy.url(); guestProxyPort = Number(new URL(u).port); }
+  const providers = await guestProviderList();
+  const proxyUrl = 'http://127.0.0.1:' + guestProxyPort;
+  const choice = guestModelChoice(null, null, providers);
+  const prepared = sandboxLib.prepareGuestAgentDir({ dir: guestDir, insideDir: insideAgentDir, ownerAgentDir: OWNER_AGENT_DIR,
+    proxy: { url: proxyUrl, token }, allowedProviders: providers, defaults: { provider: choice.provider, model: choice.modelId } });
+  keyProxy.grant(token, { guest: { id: user.id, name: user.name } }).catch(e => console.error('[key proxy] grant:', e.message));
+  // The project's own session folders, read-write, so what the guest's
+  // agent writes is what this server indexes; nothing else of ~/.pi.
+  const sessionBinds = sandboxLib.projectSessionDirs(SOURCES.pi, projectRoot).map(dir => ({ src: dir, dst: dir, rw: true }));
+  const mainSessionDir = path.join(SOURCES.pi, sandboxLib.piSessionDirName(projectRoot));
+  fs.mkdirSync(mainSessionDir, { recursive: true });
+  if (!sessionBinds.some(b => b.src === mainSessionDir)) sessionBinds.push({ src: mainSessionDir, dst: mainSessionDir, rw: true });
+  const piPkg = (() => { try { return require('./pisdk-runtime.js').piPackageDir(); } catch { return null; } })();
+  const env = sandboxLib.sandboxEnv({ principalEnv: { AICONVO_USER: user.id, AICONVO_USER_NAME: user.name, AICONVO_PORT: String(PORT) }, guest: user, agentDir: insideAgentDir, piPackageDir: piPkg, token: guestApiTokenFor(user),
+    extra: { PATH: agentPath(process.env.PATH), PI_CLAUDE_CODE_TRANSPORT: 'api', AICONVO_GUEST_PROJECT: project } });
+  const sb = sandboxLib.createSandbox({ id: 'guest:' + user.id + ':' + projectRoot, bwrap: BWRAP, home: os.homedir(), projectRoot, guest: { id: user.id, name: user.name },
+    binds: [...prepared.binds, ...sessionBinds], env, piPackageDir: piPkg, aiconvoDir: __dirname });
+  sb.sessionDir = mainSessionDir;
+  return sb;
+}
+let guestProxyPort = 0;
+keyProxy.url().then(u => { guestProxyPort = Number(new URL(u).port); return guestProviderList(); }).catch(e => console.error('[key proxy]', e.message));
+const guestUsage = []; // recent proxy usage rows, for the people pane
+function recordGuestUsage(u) {
+  guestUsage.push({ at: Date.now(), guest: u.guest, provider: u.provider, status: u.status, ms: u.ms, bytesIn: u.bytesIn, bytesOut: u.bytesOut });
+  if (guestUsage.length > 2000) guestUsage.splice(0, guestUsage.length - 1500);
+}
+// The kill switch: stop every process a guest has running here, and take
+// their proxy grant away so a run already in flight loses its keys.
+const guestChildren = new Set(); // non-Pi children (exec, cells) per guest
+function stopGuestProcesses(userId) {
+  let stopped = 0;
+  for (const p of allProjectNames()) { const meta = projectMetaFor(p); if (meta && meta.cwd) stopped += pisdk.stopWalls('guest:' + userId + ':' + meta.cwd); }
+  const token = guestProxyTokens.get(userId);
+  if (token) { keyProxy.revoke(token); guestProxyTokens.delete(userId); }
+  for (const child of [...guestChildren]) if (child.guestId === userId) { try { child.kill('SIGKILL'); } catch {} stopped++; }
+  return stopped;
 }
 // Attribution for sends that cannot write into the session file (the
 // terminal bridge owns it; the rpc engine has no session manager): one
@@ -6744,6 +6903,7 @@ function claudeBin() {
 // is also where the spawn changes user; today every principal runs as the
 // account, and only the AICONVO_USER* variables differ.
 function agentEnv(principal = null) {
+  if (principal && principal.sandbox) return principal.sandbox.env();
   const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
   const xauthority = process.env.XAUTHORITY
     || firstExisting([
@@ -6761,6 +6921,12 @@ function agentEnv(principal = null) {
   };
 }
 
+// The one place a command is wrapped for whoever is driving: the owner's
+// processes start as they always did; a guest's start inside their walls.
+function agentLaunch(principal, file, args = [], { cwd } = {}) {
+  if (principal && principal.sandbox) return principal.sandbox.launch(file, args, { cwd });
+  return { file, args, env: agentEnv(principal) };
+}
 function conversationKind(entry) {
   if (entry.source === 'claude') return 'claude';
   if (entry.source === 'pi' || entry.source === 'pi-remote') return 'pi';
@@ -6988,6 +7154,7 @@ function sendKeys(wid, combo) {
 }
 
 function spawnAlacritty(cwd, title, argv) {
+  assertNotGuest(currentIdentity(), 'A terminal window');
   const term = alacrittyBin();
   const sock = socketPathForTitle(title);
   fs.mkdirSync(path.dirname(sock), { recursive: true });
@@ -9909,6 +10076,7 @@ async function pathInfoResponse(key, pathValue, local = false) {
 }
 
 function spawnDesktop(command, args) {
+  assertNotGuest(currentIdentity(), 'Opening on the desktop');
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { detached: true, stdio: 'ignore', env: agentEnv() });
     child.unref();
@@ -11693,12 +11861,16 @@ async function startProjectConversation(options) {
   // in the UI. It rides in the system prompt via --append-system-prompt, so
   // the agent spends zero fetch turns. Claude has no equivalent through our
   // spawn path and keeps the briefing-map behavior below.
-  let contextFile = null;
+  let contextFile = null, contextText = null;
   if (kind === 'pi' && typeof options.context === 'string' && options.context.trim()) {
+    contextText = options.context.trim() + '\n';
     contextFile = path.join(BRIEFINGS_DIR,
       new Date().toISOString().replace(/[:.]/g, '-') + '-' + String(project).replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 60) + '-context.md');
-    await fsp.writeFile(contextFile, options.context.trim() + '\n');
+    await fsp.writeFile(contextFile, contextText);
   }
+  // Guests: the walls of the project this conversation starts in.
+  const guestPrincipal = options.principal && options.principal.guest ? await principalInProject(options.principal, impliedProject) : null;
+  if (guestPrincipal) { assertPrincipalCanRun(guestPrincipal, 'a new conversation'); if (kind !== 'pi' || options.surface === 'alacritty') throw Object.assign(new Error('Guests start Pi conversations from the browser only.'), { status: 403 }); }
   const wantMap = include.map !== false;
   const wantNotes = includeFlag(include, 'notes');
   const wantEpics = Array.isArray(include.epics) && include.epics.length;
@@ -11736,7 +11908,7 @@ async function startProjectConversation(options) {
   // --prompt-mode with --append-system-prompt.
   const piCtxArgs = [
     ...(mode ? ['--prompt-mode', mode] : []),
-    ...(contextFile ? ['--append-system-prompt', contextFile] : []),
+    ...(contextFile ? ['--append-system-prompt', guestPrincipal ? contextText : contextFile] : []),
   ];
   const argv = kind === 'claude'
     ? (text ? [claudeBin(), text] : [claudeBin()])
@@ -11746,8 +11918,10 @@ async function startProjectConversation(options) {
   const useRpc = kind === 'pi' && options.surface !== 'alacritty';
   let key = null;
   if (useRpc) {
-    const principal = options.principal || principalFor(null);
-    const begun = await piEng().piBeginWarm({ cwd, env: agentEnv(principal), extraArgs: ['--name', label, ...piProviderExtraArgs(), ...piCtxArgs] });
+    const principal = guestPrincipal || options.principal || principalFor(null);
+    const engine = principal.sandbox ? pisdk : piEng();
+    const walls = principal.sandbox ? { sandbox: principal.sandbox, sessionDir: principal.sandbox.sessionDir } : {};
+    const begun = await engine.piBeginWarm({ cwd, env: agentEnv(principal), extraArgs: ['--name', label, ...piProviderExtraArgs(), ...piCtxArgs], ...walls });
     // Pi reports sessionFile before it writes. The first prompt creates the file.
     const job = {
       id: 'run:' + crypto.randomUUID().slice(0, 8),
@@ -11760,11 +11934,13 @@ async function startProjectConversation(options) {
     let handle = null;
     if (text) {
       const author = { id: principal.user.id, name: principal.user.name, input: options.input || 'keyboard', coauthors: options.coauthors || undefined };
-      handle = piEng().piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(principal), extraArgs: [...piProviderExtraArgs(), ...piCtxArgs] }, {
-        provider: leadModel && leadModel.provider, modelId: leadModel && leadModel.modelId,
+      let lead = leadModel;
+      if (principal.guest) { const c = guestModelChoice(leadModel && leadModel.provider, leadModel && leadModel.modelId, await guestProviderList()); lead = c.provider ? { provider: c.provider, modelId: c.modelId } : null; }
+      handle = engine.piHeadlessRun({ sessionPath: begun.file, cwd, env: agentEnv(principal), extraArgs: [...piProviderExtraArgs(), ...piCtxArgs], ...walls }, {
+        provider: lead && lead.provider, modelId: lead && lead.modelId,
         message: text, author, simplifyAnswers: appSettings.simplifyAnswers, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job),
       });
-      pendingNewSessionAuthor = piEng() === pisdk ? null : { author, chars: text.length };
+      pendingNewSessionAuthor = engine === pisdk ? null : { author, chars: text.length };
     }
     const t0 = Date.now();
     while (Date.now() - t0 < 20000) {
@@ -11858,11 +12034,15 @@ const RAT_MISSING = 'rat is not installed on this server (or not on its PATH). I
 
 // Run one rat command; resolves { out, code } and never rejects. `onChild`
 // receives the process so a caller can register it for cancellation.
-function ratExec(args, { cwd, timeoutMs, capBytes = 200000, onChild } = {}) {
+async function ratExec(args, { cwd, timeoutMs, capBytes = 200000, onChild } = {}) {
   const rat = ratBinary();
-  if (!rat.path) return Promise.resolve({ out: RAT_MISSING, code: -1, missing: true });
+  if (!rat.path) return { out: RAT_MISSING, code: -1, missing: true };
+  const principal = await currentPrincipal(cwd ? projectOfPath(cwd) : null);
+  assertPrincipalCanRun(principal, 'a notebook cell');
+  const launched = principal.sandbox ? principal.sandbox.launch(rat.path, args, { cwd }) : { file: rat.path, args, env: process.env };
   return new Promise(resolve => {
-    const child = spawn(rat.path, args, { cwd: cwd || os.homedir(), env: process.env });
+    const child = spawn(launched.file, launched.args, { cwd: principal.sandbox ? undefined : (cwd || os.homedir()), env: launched.env });
+    if (principal.guest) { child.guestId = principal.user.id; guestChildren.add(child); child.on('close', () => guestChildren.delete(child)); }
     if (onChild) onChild(child);
     let buf = '';
     let timer = null;
@@ -11940,6 +12120,7 @@ async function deriveNotebookFromAnswer(key, entryId) {
     let result;
     try {
       const forked = await pisdk.piForkAt({ sessionPath, cwd }, entryId, { dir: stage });
+      assertNotGuest(currentIdentity(), 'Deriving a notebook');
       result = await pisdk.piDeriveAt({ sessionPath: forked.file, cwd, env: agentEnv(), extraArgs }, { prompt });
     } finally {
       await fsp.rm(stage, { recursive: true, force: true }).catch(() => {});
@@ -12713,7 +12894,8 @@ function sendValidated(req, res, type, cacheControl, text) {
   sendBody(req, res, 200, { 'Content-Type': type, 'Cache-Control': cacheControl, ETag: etag }, text);
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => requestContext.run({ req }, () => handleRequest(req, res)));
+async function handleRequest(req, res) {
   const u = new URL(req.url, 'http://x');
   try {
     // "Is the server up?" for launchers, update scripts and machine
@@ -12785,7 +12967,7 @@ const server = http.createServer(async (req, res) => {
       } catch (e) { json(res, e.status || 400, { error: e.message }); }
       return;
     }
-    if (LAN_TOKEN && !isLocalRequest(req)) {
+    if (LAN_TOKEN) {
       const landing = u.pathname === '/' ? '/' : u.pathname;
       // A project invite: a page first (name, what is shared, the join
       // command), then the claim makes the person and signs them in.
@@ -12851,6 +13033,7 @@ const server = http.createServer(async (req, res) => {
       return res.end(lanLoginPage());
     }
     req.identity = identity;
+    requestContext.getStore().identity = identity;
     if (u.pathname === '/logout' && req.method === 'POST') {
       res.writeHead(302, { Location: '/', 'Set-Cookie': 'aiconvo=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' });
       return res.end();
@@ -13009,13 +13192,13 @@ const server = http.createServer(async (req, res) => {
       } catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/path/info' && req.method === 'GET') {
       try {
-        const info = await pathInfoResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req));
+        const info = await pathInfoResponse(u.searchParams.get('id'), u.searchParams.get('path'), isConsoleRequest(req));
         assertPathAccess(identity, info.path, 'see');
         json(res, 200, info);
       }
       catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/path/read' && req.method === 'GET') {
-      try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'), isLocalRequest(req))); }
+      try { json(res, 200, await transcriptFileReadResponse(u.searchParams.get('id'), u.searchParams.get('path'), isConsoleRequest(req))); }
       catch (e) { json(res, 404, { error: e.message }); }
     } else if (u.pathname === '/api/path/exists' && req.method === 'POST') {
       // Batch probe for file names quoted in chat prose. The client only
@@ -13026,7 +13209,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const input = JSON.parse(body || '{}');
         const paths = [...new Set((Array.isArray(input.paths) ? input.paths : []).map(String))].slice(0, 300);
-        const local = isLocalRequest(req);
+        const local = isConsoleRequest(req);
         const found = {};
         await Promise.all(paths.map(async p => {
           try {
@@ -13037,7 +13220,7 @@ const server = http.createServer(async (req, res) => {
         json(res, 200, { found });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/path/action' && req.method === 'POST') {
-      if (!isLocalRequest(req)) return json(res, 403, { error: 'system file actions are available only on the laptop' });
+      if (!isConsoleRequest(req)) return json(res, 403, { error: 'system file actions are available only on the laptop' });
       let body = '';
       for await (const chunk of req) body += chunk;
       try {
@@ -13049,7 +13232,7 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         for await (const chunk of req) { body += chunk; if (body.length > 16384) throw Error('Preview request too large'); }
         const input = JSON.parse(body);
-        const found = await transcriptFilePath(input.id, input.path, FILE_EDIT_MAX, isLocalRequest(req));
+        const found = await transcriptFilePath(input.id, input.path, FILE_EDIT_MAX, isConsoleRequest(req));
         assertPathAccess(identity, found.abs, 'see');
         // Retain only the proof, not the HTTP request/socket. Re-resolve it so
         // sign-in revocation, disabled accounts and sharing changes take effect.
@@ -13061,7 +13244,7 @@ const server = http.createServer(async (req, res) => {
       previewAssets.revoke(u.searchParams.get('token')); json(res, 200, { ok: true });
     } else if (u.pathname === '/api/file/media' && (req.method === 'GET' || req.method === 'HEAD')) {
       try {
-        const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'), Infinity, isLocalRequest(req));
+        const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'), Infinity, isConsoleRequest(req));
         assertPathAccess(identity, found.abs, 'see');
         const mime = fileMedia.mediaType(found.abs);
         if (!mime) throw Error('This file is not a supported image, video or PDF');
@@ -13070,7 +13253,7 @@ const server = http.createServer(async (req, res) => {
       } catch (e) { if (!res.headersSent) json(res, 404, { error: e.message }); }
     } else if ((u.pathname === '/api/path/content' || u.pathname === '/api/conversation/file-content') && (req.method === 'GET' || req.method === 'HEAD')) {
       try {
-        const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'), 32 * 1024 * 1024, isLocalRequest(req));
+        const found = await transcriptFilePath(u.searchParams.get('id'), u.searchParams.get('path'), 32 * 1024 * 1024, isConsoleRequest(req));
         assertPathAccess(identity, found.abs, 'see');
         const mime = imageMimeForPath(found.abs);
         if (!mime) throw new Error('this file is not a supported image');
@@ -13332,7 +13515,7 @@ const server = http.createServer(async (req, res) => {
       try { json(res, 200, filesTimelineResponse(u.searchParams)); }
       catch (e) { json(res, 503, { error: e.message }); }
     } else if (u.pathname === '/api/files/stats') {
-      if (u.searchParams.get('heap') === '1' && isLocalRequest(req)) require('v8').writeHeapSnapshot('/tmp/aiconvo-heap.heapsnapshot');
+      if (u.searchParams.get('heap') === '1' && isConsoleRequest(req)) require('v8').writeHeapSnapshot('/tmp/aiconvo-heap.heapsnapshot');
       const mem = process.memoryUsage();
       json(res, 200, { rows: fileLedger ? fileLedger.count() : null, version: fileLedger ? fileLedger.version : null, backfilling: ledgerBackfillRunning, watchers: projectFileWatchers.size, watchedDirs: [...projectFileWatchers.values()].reduce((n, w) => n + (w.count ? w.count() : 1), 0), snapshots: projectFileSnapshots.size, snapshotBytes: projectFileSnapshotBytes, diffCacheRows: Object.keys(diffCache).length, gitHistories: gitHistoryCache.size, memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external, arrayBuffers: mem.arrayBuffers } });
     } else if (u.pathname === '/api/files/touched') {
@@ -14013,7 +14196,9 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { ...headers, 'Content-Length': bytes.length });
       return res.end(req.method === 'HEAD' ? undefined : bytes);
     } else if (u.pathname === '/api/users' && req.method === 'GET') {
-      json(res, 200, { users: publicUsers(), groups: roster.groups, me: usersLib.publicUser(identity.user), tier: identity.tier, canManage: usersLib.canManageUsers(identity), aliases: roster.aliases || {} });
+      json(res, 200, { users: publicUsers(), groups: roster.groups, me: usersLib.publicUser(identity.user), tier: identity.tier, canManage: usersLib.canManageUsers(identity), aliases: roster.aliases || {},
+        walls: { available: !!BWRAP, keyProxy: !!guestProxyPort, providers: guestProvidersCache.list.map(p => p.id) },
+        ...(usersLib.canManageUsers(identity) ? { guestActivity: guestUsage.slice(-200) } : {}) });
     } else if (u.pathname.startsWith('/api/users/') && req.method === 'POST') {
       // Members can edit their own profile and make their own device links;
       // roster membership and roles remain owner/admin actions.
@@ -14038,6 +14223,7 @@ const server = http.createServer(async (req, res) => {
           out = { user: usersLib.publicUser(user), inviteLink: inviteLinkFor(secret) };
         } else if (op === 'update') {
           if (!(manages && (!isOwnerTarget || ownerTier)) && !self) throw Object.assign(new Error('you cannot change that person'), { status: 403 });
+          if (p.disabled === true && manages) stopGuestProcesses(p.id);
           const patch = self && !manages ? { name: p.name, glyph: p.glyph, color: p.color, avatar: p.avatar } : p;
           if (patch.role !== undefined && !ownerTier) delete patch.role;
           out = { user: usersLib.publicUser(usersLib.updateUser(roster, p.id, patch)) };
@@ -14049,8 +14235,15 @@ const server = http.createServer(async (req, res) => {
         } else if (op === 'revoke') {
           if (!manages && !self) throw Object.assign(new Error('not yours to revoke'), { status: 403 });
           out = { revoked: usersLib.revokeCredential(roster, p.id, p.credentialId).id };
+        } else if (op === 'stop') {
+          // The kill switch: everything this person has running here stops,
+          // and their sandboxes lose their keys mid-flight.
+          if (!manages) throw Object.assign(new Error('only the owner or an admin can stop someone\'s work'), { status: 403 });
+          out = { stopped: stopGuestProcesses(p.id) };
         } else if (op === 'remove') {
           if (!manages || (isOwnerTarget)) throw Object.assign(new Error('only the owner or an admin can remove people'), { status: 403 });
+          stopGuestProcesses(p.id);
+          guestApiSecrets.delete(p.id);
           out = { removed: usersLib.removeUser(roster, p.id).id };
           // Their grants go with them; a peer install that acted as them
           // loses its credential here and its pulls stop. Copies already
@@ -14303,6 +14496,9 @@ const server = http.createServer(async (req, res) => {
         searchIdx.semanticResetSync();
       }
       if (semanticEnabled()) scheduleSemanticSync(500); // backfill starts now
+      // The browser that just opened the machine to the network stays signed
+      // in: from now on this machine's own requests need the install token.
+      if (lanWanted() && !prevLan && LAN_TOKEN && isLocalRequest(req)) res.setHeader('Set-Cookie', `aiconvo=${encodeURIComponent(LAN_TOKEN)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
       json(res, 200, settingsResponse(identity));
     } else if (u.pathname === '/api/models') {
       const listed = await listPiModels(u.searchParams.get('refresh') === '1');
@@ -14420,6 +14616,7 @@ const server = http.createServer(async (req, res) => {
       const cached = slashCommandsCache.get(cwd);
       if (cached && Date.now() - cached.at < 5 * 60 * 1000) return json(res, 200, { commands: cached.list, cwd, cached: true });
       try {
+        if (usersLib.isGuest(identity.user)) return json(res, 200, { commands: [] });
         const list = await piListCommands({ cwd, env: agentEnv(), extraArgs: piProviderExtraArgs() });
         slashCommandsCache.set(cwd, { at: Date.now(), list });
         json(res, 200, { commands: list, cwd });
@@ -14559,9 +14756,14 @@ const server = http.createServer(async (req, res) => {
       if (cwd && typeof cwd === 'string') { try { assertPathAccess(identity, cwd, 'act'); } catch (e) { return json(res, e.status || 400, { error: e.message }); } }
       if (!cmd || typeof cmd !== 'string') return json(res, 400, { error: 'cmd required' });
       const t0 = Date.now();
+      let principal;
+      try { principal = await principalInProject(principalFor(identity), cwd ? projectOfPath(cwd) : null); assertPrincipalCanRun(principal, 'a command'); }
+      catch (e) { return json(res, e.status || 403, { error: e.message }); }
       const result = await new Promise(resolve => {
         const dir = cwd && typeof cwd === 'string' && fs.existsSync(cwd) ? cwd : os.homedir();
-        const child = spawn('bash', ['-lc', cmd], { cwd: dir, env: process.env });
+        const launched = agentLaunch(principal, 'bash', ['-lc', cmd], { cwd: dir });
+        const child = spawn(launched.file, launched.args, { cwd: principal.sandbox ? undefined : dir, env: launched.env });
+        if (principal.guest) { child.guestId = principal.user.id; guestChildren.add(child); child.on('close', () => guestChildren.delete(child)); }
         let buf = '';
         const cap = s => { buf += s; if (buf.length > 200000) { buf = buf.slice(0, 200000) + '\n… (truncated — output capped at 200 KB)'; child.kill('SIGKILL'); } };
         child.stdout.on('data', d => cap(String(d)));
@@ -14846,7 +15048,7 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     json(res, 500, { error: e.message });
   }
-});
+}
 
 server.requestTimeout = 0; // distillation can take minutes
 server.headersTimeout = 60000;

@@ -9,7 +9,12 @@ const http = require('http');
 const path = require('path');
 
 const PORT = Number(process.env.AICONVO_PORT || process.env.PORT || 7433);
-const TOKEN = process.env.AICONVO_TOKEN || '';
+// Being on this machine is not a credential (a guest's sandboxed agent is
+// on it too): the token comes from the environment, else from the install
+// token file, which only the account can read.
+const TOKEN = process.env.AICONVO_TOKEN || (() => {
+  try { return require('fs').readFileSync(require('path').join(require('os').homedir(), '.cache', 'aiconvo', 'lan-token'), 'utf8').trim(); } catch { return ''; }
+})();
 
 // Long options that take a value. Anything else that starts with -- is a flag.
 const VALUED = new Set(['project', 'since', 'role', 'type', 'limit', 'offset', 'exclude', 'at', 'context',

@@ -43,13 +43,17 @@ async function boot(t, extraEnv) {
 }
 
 async function reachable(host, port) {
-  try { return (await fetch(`http://${host}:${port}/api/settings`, { signal: AbortSignal.timeout(1500) })).status; }
+  try { return (await globalThis.fetch(`http://${host}:${port}/api/settings`, { signal: AbortSignal.timeout(1500) })).status; }
   catch { return 0; }
 }
 
-async function putLan(base, on) {
-  const cur = await (await fetch(base + '/api/settings')).json();
-  const r = await fetch(base + '/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...cur.settings, lan: on }) });
+// Once a server is on the network, its own machine signs in with the
+// install token like anyone else (design/53); the token file says which.
+const installTokenOf = home => { try { return fs.readFileSync(path.join(home, 'cache', 'lan-token'), 'utf8').trim(); } catch { return ''; } };
+const withToken = (home, opts = {}) => { const t = installTokenOf(home); return t ? { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + t } } : opts; };
+async function putLan(base, on, home) {
+  const cur = await (await fetch(base + '/api/settings', withToken(home))).json();
+  const r = await fetch(base + '/api/settings', withToken(home, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...cur.settings, lan: on }) }));
   return r.json();
 }
 
@@ -61,11 +65,22 @@ test('the reach switch rebinds the listener both ways without a restart', async 
   assert.deepEqual(s.connectLinks, []);
   if (ip) assert.equal(await reachable(ip, port), 0, 'must not answer on the LAN address while off');
 
-  s = await putLan(base, true);
+  s = await putLan(base, true, home);
   assert.equal(s.lan.on, true); assert.equal(s.settings.lan, true);
   assert.ok(s.connectLinks.length >= (ip ? 1 : 0));
   for (const l of s.connectLinks) assert.match(l, /^http:\/\/[\d.]+:\d+\/\?token=[\w-]+$/);
-  assert.equal(await reachable('127.0.0.1', port), 200, 'still answers locally');
+  // This machine's own requests now need the install token too (a guest's
+  // sandboxed agent is local as well): 401 bare, 200 with the token.
+  assert.equal(await reachable('127.0.0.1', port), 401, 'locality alone no longer signs in');
+  const installToken = new URL(s.connectLinks[0] || 'http://x/?token=').searchParams.get('token');
+  if (installToken) assert.equal((await fetch(base + '/api/settings', { headers: { Authorization: 'Bearer ' + installToken } })).status, 200, 'answers locally with the token');
+  // Flipping the switch on from this machine also signs that browser in,
+  // so the person who opened the door is not locked out by it.
+  s = await putLan(base, false, home);
+  const on = await fetch(base + '/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...s.settings, lan: true }) });
+  assert.match(on.headers.get('set-cookie') || '', /^aiconvo=/);
+  s = await on.json();
+  assert.equal(s.lan.on, true);
   if (ip) {
     for (let i = 0; i < 20 && await reachable(ip, port) !== 401; i++) await new Promise(r => setTimeout(r, 50));
     assert.equal(await reachable(ip, port), 401, 'answers on the LAN address, asking for the token');
@@ -86,7 +101,7 @@ test('the reach switch rebinds the listener both ways without a restart', async 
   // The choice is written down, so it survives a restart.
   assert.equal(JSON.parse(fs.readFileSync(path.join(home, '.config', 'aiconvo', 'settings.json'), 'utf8')).lan, true);
 
-  s = await putLan(base, false);
+  s = await putLan(base, false, home);
   assert.equal(s.lan.on, false); assert.deepEqual(s.connectLinks, []);
   assert.equal(await reachable('127.0.0.1', port), 200);
   if (ip) {
@@ -97,15 +112,15 @@ test('the reach switch rebinds the listener both ways without a restart', async 
 
 test('AICONVO_LAN=1 is the default until the switch is used; AICONVO_HOST pins it', async t => {
   const a = await boot(t, { AICONVO_LAN: '1' });
-  let s = await (await fetch(a.base + '/api/settings')).json();
+  let s = await (await fetch(a.base + '/api/settings', withToken(a.home))).json();
   assert.equal(s.lan.on, true); assert.equal(s.lan.fixed, false); assert.equal(s.settings.lan, null);
-  s = await putLan(a.base, false);
+  s = await putLan(a.base, false, a.home);
   assert.equal(s.lan.on, false, 'an explicit off wins over the environment default');
 
   const b = await boot(t, { AICONVO_HOST: '127.0.0.1' });
   s = await (await fetch(b.base + '/api/settings')).json();
   assert.equal(s.lan.fixed, true); assert.equal(s.lan.on, false);
-  s = await putLan(b.base, true);
+  s = await putLan(b.base, true, b.home);
   assert.equal(s.lan.on, false, 'a pinned address ignores the switch');
   assert.deepEqual(s.connectLinks, []);
 });

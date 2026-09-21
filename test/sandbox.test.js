@@ -1,0 +1,101 @@
+'use strict';
+// The walls around a guest (sandbox.js): what goes in, what stays out —
+// as argument lists, and for real when bubblewrap is on this machine.
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const sandbox = require('../sandbox.js');
+const bwrap = sandbox.findBwrap();
+
+test('session folders of a project: the exact folder, subfolders by header cwd, never a sibling', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sess-'));
+  const mk = (name, cwd) => { const d = path.join(root, name); fs.mkdirSync(d); if (cwd) fs.writeFileSync(path.join(d, 'a.jsonl'), JSON.stringify({ type: 'session', cwd }) + '\n'); };
+  mk('--home-x-Projects-app--', '/home/x/Projects/app');
+  mk('--home-x-Projects-app-test--', '/home/x/Projects/app/test');
+  mk('--home-x-Projects-app-sibling--', '/home/x/Projects/app-sibling');
+  mk('--home-x-Projects-other--', '/home/x/Projects/other');
+  mk('--home-x-Projects-app-empty--', null);
+  const dirs = sandbox.projectSessionDirs(root, '/home/x/Projects/app').map(d => path.basename(d)).sort();
+  assert.deepEqual(dirs, ['--home-x-Projects-app--', '--home-x-Projects-app-test--']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the guest agent directory: placeholder keys, proxied providers, no secrets, owner extensions read-only', () => {
+  const owner = fs.mkdtempSync(path.join(os.tmpdir(), 'owner-agent-'));
+  fs.writeFileSync(path.join(owner, 'settings.json'), JSON.stringify({ defaultProvider: 'claude-code', defaultModel: 'x', defaultThinkingLevel: 'high', packages: ['npm:secret-thing'], theme: 't' }));
+  fs.writeFileSync(path.join(owner, 'auth.json'), JSON.stringify({ anthropic: { type: 'oauth', refresh: 'R', access: 'A' } }));
+  fs.mkdirSync(path.join(owner, 'extensions'));
+  fs.writeFileSync(path.join(owner, 'AGENTS.md'), '# guidance');
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'guest-')), 'agent');
+  const out = sandbox.prepareGuestAgentDir({ dir, insideDir: '/home/x/.pi/agent', ownerAgentDir: owner,
+    proxy: { url: 'http://127.0.0.1:5000', token: 'T0K' }, allowedProviders: [{ id: 'anthropic', api: 'anthropic-messages', models: [] }, { id: 'homelab', api: 'openai-completions', models: [{ id: 'm' }] }], defaults: { provider: 'anthropic', model: 'claude-opus-4-7' } });
+  const auth = JSON.parse(fs.readFileSync(path.join(dir, 'auth.json'), 'utf8'));
+  assert.equal(auth.anthropic.key, 'sk-ant-oat-guest-T0K', 'an OAuth-shaped placeholder makes pi speak OAuth to the proxy');
+  assert.equal(auth.homelab.key, 'guest-T0K');
+  const models = JSON.parse(fs.readFileSync(path.join(dir, 'models.json'), 'utf8'));
+  assert.equal(models.providers.anthropic.baseUrl, 'http://127.0.0.1:5000/anthropic');
+  assert.deepEqual(models.providers.homelab.models, [{ id: 'm' }]);
+  const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+  assert.equal(settings.defaultProvider, 'anthropic');
+  assert.equal(settings.packages, undefined, 'the owner\'s package list does not carry over');
+  assert.equal(settings.defaultThinkingLevel, 'high');
+  assert.ok(!fs.existsSync(path.join(dir, 'sessions', 'x')) && fs.existsSync(path.join(dir, 'sessions')));
+  assert.deepEqual(out.binds.map(b => [path.basename(b.dst), b.rw]), [['agent', true], ['extensions', false], ['AGENTS.md', false]]);
+  assert.ok(out.binds.every(b => b.dst.startsWith('/home/x/.pi/agent')));
+  for (const s of [owner, path.dirname(dir)]) fs.rmSync(s, { recursive: true, force: true });
+});
+
+test('the argument list: system read-only, home hidden, project read-write, environment denied by default', () => {
+  const sb = sandbox.createSandbox({ bwrap: '/bin/bwrap', home: '/home/x', projectRoot: '/home/x/Projects/app', guest: { id: 'u_g', name: 'Sam' },
+    binds: [{ src: '/data/guest/agent', dst: '/home/x/.pi/agent', rw: true }, { src: '/home/x/.pi/agent/extensions', dst: '/home/x/.pi/agent/extensions', rw: false }],
+    env: sandbox.sandboxEnv({ hostEnv: { PATH: '/bin', HOME: '/home/x', DISPLAY: ':0', SSH_AUTH_SOCK: '/run/x', ANTHROPIC_API_KEY: 'sk-real', PI_FOO: '1', LANG: 'C.UTF-8', WAYLAND_DISPLAY: 'w' }, principalEnv: { AICONVO_USER: 'u_g' }, guest: { id: 'u_g', name: 'Sam' }, agentDir: '/home/x/.pi/agent', piPackageDir: '/pkg/pi', token: 'guest-secret' }),
+    piPackageDir: '/pkg/pi', aiconvoDir: '/home/x/Projects/aiconvo' });
+  const l = sb.launch('bash', ['-lc', 'ls'], { cwd: '/home/x/Projects/app/src' });
+  assert.equal(l.file, '/bin/bwrap');
+  const a = l.args;
+  const has = (...xs) => { for (let i = 0; i + xs.length <= a.length; i++) if (xs.every((x, j) => a[i + j] === x)) return true; return false; };
+  assert.ok(has('--tmpfs', '/home/x'));
+  assert.ok(has('--bind', '/home/x/Projects/app', '/home/x/Projects/app'));
+  assert.ok(has('--ro-bind', '/home/x/Projects/aiconvo', '/home/x/Projects/aiconvo'));
+  assert.ok(has('--ro-bind', '/pkg/pi', '/pkg/pi'));
+  assert.ok(has('--bind', '/data/guest/agent', '/home/x/.pi/agent'));
+  assert.ok(a.indexOf('/home/x/.pi/agent/extensions') > a.indexOf('/data/guest/agent'), 'nested binds come after their parent');
+  assert.ok(has('--unshare-pid') && has('--die-with-parent') && has('--clearenv') && has('--tmpfs', '/tmp'));
+  assert.ok(has('--chdir', '/home/x/Projects/app/src'));
+  assert.ok(has('--', 'bash', '-lc', 'ls'));
+  assert.equal(sb.launch('bash', [], { cwd: '/home/x/other' }).args.at(-3), '/home/x/Projects/app', 'a cwd outside the project falls back to the project root');
+  const env = Object.fromEntries(a.map((x, i) => x === '--setenv' ? [a[i + 1], a[i + 2]] : null).filter(Boolean));
+  assert.equal(env.DISPLAY, undefined); assert.equal(env.SSH_AUTH_SOCK, undefined); assert.equal(env.ANTHROPIC_API_KEY, undefined); assert.equal(env.WAYLAND_DISPLAY, undefined);
+  assert.equal(env.PI_FOO, '1'); assert.equal(env.LANG, 'C.UTF-8'); assert.equal(env.AICONVO_TOKEN, 'guest-secret'); assert.equal(env.AICONVO_USER, 'u_g');
+  assert.equal(env.PI_CODING_AGENT_DIR, '/home/x/.pi/agent'); assert.equal(env.AICONVO_PI_PACKAGE_DIR, '/pkg/pi');
+  assert.equal(env.GIT_AUTHOR_EMAIL, 'u_g@aiconvo'); assert.equal(env.GIT_COMMITTER_NAME, 'Sam');
+  assert.equal(env.HOME, '/home/x'); assert.equal(env.AICONVO_SANDBOXED, '1');
+});
+
+test('for real: inside the walls, the home is empty but the project, git, node and the network exist', { skip: !bwrap && 'bubblewrap is not installed here' }, () => {
+  const home = os.homedir();
+  const project = fs.mkdtempSync(path.join(home, '.cache', 'aiconvo-sandbox-test-'));
+  fs.writeFileSync(path.join(project, 'hello.txt'), 'hi\n');
+  const sb = sandbox.createSandbox({ bwrap, home, projectRoot: project, guest: { id: 'u_g', name: 'Sam' },
+    env: sandbox.sandboxEnv({ hostEnv: process.env, guest: { id: 'u_g', name: 'Sam' }, agentDir: path.join(home, '.pi', 'agent'), token: 't' }), aiconvoDir: path.join(__dirname, '..') });
+  const run = cmd => { const l = sb.launch('bash', ['-c', cmd], { cwd: project }); const r = spawnSync(l.file, l.args, { env: l.env, encoding: 'utf8' }); return (r.stdout + r.stderr).trim(); };
+  assert.equal(run('cat hello.txt'), 'hi');
+  assert.equal(run('echo more >> hello.txt; cat hello.txt'), 'hi\nmore', 'the project is writable');
+  assert.equal(fs.readFileSync(path.join(project, 'hello.txt'), 'utf8').trim(), 'hi\nmore', 'writes land on the real disk, owned by the account');
+  assert.equal(run('ls -a ~ | tr "\\n" " "').trim(), '. .. .cache Projects', 'the home shows only the paths to the project and to the aiconvo code');
+  assert.equal(run('ls ~/Projects | tr "\\n" " "').trim(), 'aiconvo', 'sibling projects do not exist');
+  assert.match(run('echo x > ~/Projects/aiconvo/should-fail 2>&1'), /Read-only file system/);
+  assert.match(run('cat ~/.ssh/config; cat ~/.pi/agent/auth.json'), /No such file/);
+  assert.doesNotMatch(run('cat ~/.ssh/config 2>&1'), /Host /);
+  assert.match(run('node -e "console.log(1+1)"'), /^2$/);
+  assert.match(run('git --version'), /git version/);
+  assert.equal(run('echo $$'), '2', 'its own PID namespace');
+  assert.match(run('cat /proc/sys/kernel/hostname'), /aiconvo-guest/);
+  assert.equal(run('ls /tmp | wc -l'), '0', 'a private /tmp');
+  assert.equal(run('env | grep -c -E "^(DISPLAY|SSH_AUTH_SOCK|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS)=" || true'), '0');
+  fs.rmSync(project, { recursive: true, force: true });
+});

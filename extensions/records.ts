@@ -1,6 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // Records tools: let the agent mine every aiconvo conversation, note, project
 // memory, epic and evidence card. Each tool is a thin call to the local
@@ -12,7 +15,12 @@ import { Type } from "typebox";
 
 // Read at call time: the env decides which server answers, and tests move it.
 const port = () => Number(process.env.AICONVO_PORT || process.env.PORT || 7433);
-const token = () => process.env.AICONVO_TOKEN || "";
+// The token comes from the environment (a sandboxed guest agent carries
+// its own), else from the install token file only the account can read.
+const token = () => {
+  if (process.env.AICONVO_TOKEN) return process.env.AICONVO_TOKEN;
+  try { return readFileSync(join(homedir(), ".cache", "aiconvo", "lan-token"), "utf8").trim(); } catch { return ""; }
+};
 const TRUTH = "Records are AI transcripts and AI-written notes: a map of what was said, not verified truth. [unverified] marks notes no person reviewed.";
 
 async function call(op: string, params: Record<string, unknown>, signal?: AbortSignal) {

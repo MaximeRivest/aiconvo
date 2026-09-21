@@ -11,6 +11,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
+const { registerConsole, consoleFetch: fetch } = require('./helpers/console-fetch.js');
 async function freePort() {
   const s = net.createServer(); await new Promise(r => s.listen(0, '0.0.0.0', r));
   const port = s.address().port; await new Promise(r => s.close(r));
@@ -39,6 +40,7 @@ async function boot(t) {
   sessionFile(path.join(sessions, '--home-x-Projects-open--'), '01a0open00000000000000000000000000', '/home/x/Projects/open', 'the open plan',
     line({ type: 'custom', customType: 'aiconvo-author', id: 'a1', parentId: null, timestamp: '2026-09-19T10:00:00.500Z', data: { v: 1, user: { id: 'u_lilly', name: 'Lilly' }, input: 'keyboard' } }));
   const port = await freePort(), tlsPort = await freePort();
+  registerConsole(port, 'install-tok');
   let log = '';
   const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: String(tlsPort), AICONVO_NO_WATCH: '0', AICONVO_NO_LEDGER: '1', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent, AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_PUBLIC_URL: '', AICONVO_TOKEN: 'install-tok' }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', b => log += b); child.stderr.on('data', b => log += b);
@@ -58,7 +60,9 @@ const post = (url, body, cookie) => fetch(url, { method: 'POST', headers: { 'Con
 test('people, sharing, presence and handoff on one install', { skip: !lanIp() && 'no LAN address' }, async t => {
   const { local, remote, home } = await boot(t);
 
-  // The console is the account: the owner, whatever cookie it carries.
+  // The console is this machine with the install token. This machine
+  // without it proves nothing: a guest's sandboxed agent is local too.
+  assert.equal((await globalThis.fetch(local + '/api/users')).status, 401);
   const console_ = await (await fetch(local + '/api/users')).json();
   assert.equal(console_.tier, 'console');
   assert.equal(console_.me.role, 'owner');

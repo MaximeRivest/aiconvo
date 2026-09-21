@@ -25,6 +25,7 @@ function contextHarness() {
   const context = {
     crypto, path, Date, Map, Set, JSON, Number, String, Array, Object, Math,
     MEMORY_DOC_KINDS: ['overview', 'intent', 'environment', 'status'],
+    currentIdentity: () => null, // no request: nothing to gate
     loadAttachedChat: async x => ({ text: 'exchange ' + (x.i ?? 'history') }),
     fsp: { writeFile: async () => {} }, BRIEFINGS_DIR: '/tmp',
     estimateInputTokens: x => x.length,

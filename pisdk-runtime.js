@@ -35,6 +35,8 @@ function packageRootFrom(start) {
 function piPackageDir() {
   const home = require('os').homedir();
   const candidates = [];
+  // Inside a sandbox the home is empty; the server says where the package is.
+  if (process.env.AICONVO_PI_PACKAGE_DIR) candidates.push(path.join(process.env.AICONVO_PI_PACKAGE_DIR, 'dist', 'index.js'));
   try { candidates.push(execFileSync('which', ['pi'], { encoding: 'utf8' }).trim()); } catch {}
   // Every nvm node, newest first: the service node and the interactive node
   // may differ, and a node upgrade moves the global install directory.
@@ -396,9 +398,11 @@ async function createS(target) {
   if (disposed) throw new Error('Pi runtime is stopped');
   const { SDK } = loaded;
   const agentDir = SDK.getAgentDir();
+  // `sessionDir` pins where a new session's file lands (a sandboxed guest
+  // writes into the project's own session folder, the only one bound in).
   const sm = target.sessionPath
-    ? SDK.SessionManager.open(path.resolve(target.sessionPath))
-    : SDK.SessionManager.create(target.cwd);
+    ? SDK.SessionManager.open(path.resolve(target.sessionPath), target.sessionDir || undefined)
+    : SDK.SessionManager.create(target.cwd, target.sessionDir || undefined);
   const cwd = sm.getCwd() || target.cwd;
   const trustStore = new SDK.ProjectTrustStore(agentDir);
   const parsed = parseExtraArgs(target.extraArgs);

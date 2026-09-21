@@ -349,10 +349,12 @@ function userForSecret(roster, secret, installToken) {
 }
 
 // What a request proves. tier: console (this machine's own console: the
-// account itself), owner, admin, member; null when nothing is proven.
-// A disabled user proves nothing.
+// account itself, proven by the install token from this machine), owner,
+// admin, member; null when nothing is proven. A disabled user proves
+// nothing. Coming from this machine is not a credential: a guest's
+// sandboxed agent is on this machine too (design/53).
 function identify({ roster, installToken, isLocal, cookie, authorization }) {
-  if (isLocal) return { user: ownerOf(roster), tier: 'console', via: 'console' };
+  if (isLocal && !installToken) return { user: ownerOf(roster), tier: 'console', via: 'console' };
   let secret = cookie || '';
   let via = 'cookie';
   const hdr = String(authorization || '');
@@ -364,6 +366,7 @@ function identify({ roster, installToken, isLocal, cookie, authorization }) {
   }
   const user = userForSecret(roster, secret, installToken);
   if (!user || user.disabled) return null;
+  if (isLocal && installToken && safeEqual(secret, installToken)) return { user, tier: 'console', via };
   return { user, tier: user.role, via };
 }
 

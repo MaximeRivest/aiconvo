@@ -8,6 +8,13 @@ const { fork } = require('child_process');
 const { randomUUID } = require('crypto');
 
 const SCOPED_ENV = /^(?:PI_ORCHESTRATOR_|PI_EFFECTIVE_|PI_SESSION_|PI_PROMPT_MODE|PI_DELEGATION_ID$|PI_PROVIDER$|PI_MODEL$|PI_REASONING_LEVEL$)/;
+// The per-session scoped variables, for a sandboxed spawn whose base
+// environment is the sandbox's own (never the host's).
+function pickScoped(env) {
+  const out = {};
+  for (const [k, v] of Object.entries(env || {})) if (SCOPED_ENV.test(k) && v != null) out[k] = String(v);
+  return out;
+}
 function workerEnv(target = {}, inherited = process.env) {
   const env = {};
   for (const [key, value] of Object.entries(inherited)) {
@@ -189,20 +196,34 @@ function createPiSdkProxy(options = {}) {
   }
   function start(target) {
     const key = target.sessionPath ? path.resolve(target.sessionPath) : null;
-    if (key && sessions.has(key)) return sessions.get(key);
+    // A worker carries the walls of whoever started it. The same session
+    // driven by a guest and by the owner needs two different workers: a
+    // warm one behind other walls is retired first, never reused.
+    const wallsId = target.sandbox ? target.sandbox.id : null;
+    const existing = key ? sessions.get(key) : null;
+    if (existing && existing.wallsId === wallsId) return existing;
+    if (existing) stop(existing);
     // stopWarmSession is synchronous for legacy callers. A replacement must
     // still wait for the old process to exit before it opens the session file.
     const retiring = [...children].filter(W => key && W.key === key && !W.exited);
     const barrier = retiring.length ? Promise.all(retiring.map(W => W.exitDone.promise)) : null;
-    const child = spawnWorker(path.join(__dirname, 'pisdk-worker.js'), {
+    const workerFile = path.join(__dirname, 'pisdk-worker.js');
+    const baseOpts = {
       cwd: target.cwd || process.cwd(), env: workerEnv(target, options.inheritedEnv || process.env),
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'], serialization: 'advanced',
       // Do not inherit the server's inspector or test-runner arguments.
       execArgv: [],
-    });
-    const W = { child, key, barrier, exitDone: deferred(), pending: new Map(), runs: new Map(), dead: false,
+    };
+    let child;
+    if (target.sandbox) {
+      // Inside the walls: bwrap, then node, then the worker. The IPC channel
+      // is an inherited descriptor, which bubblewrap passes through.
+      const launched = target.sandbox.launch(process.execPath, [workerFile], { cwd: target.cwd });
+      child = (options.spawnSandboxed || require('child_process').spawn)(launched.file, launched.args, { ...baseOpts, cwd: undefined, env: { ...launched.env, ...pickScoped(baseOpts.env) } });
+    } else child = spawnWorker(workerFile, baseOpts);
+    const W = { child, key, wallsId, barrier, exitDone: deferred(), pending: new Map(), runs: new Map(), dead: false,
       stopping: false, exited: false, error: null, stopTimer: null,
-      state: { sessionPath: key, cwd: target.cwd, pid: child.pid, busy: false, model: null, alive: true, engine: 'sdk' } };
+      state: { sessionPath: key, cwd: target.cwd, pid: child.pid, busy: false, model: null, alive: true, engine: 'sdk', sandboxed: !!target.sandbox } };
     children.add(W);
     if (key) sessions.set(key, W);
     child.on('message', message => receive(W, message));
@@ -223,7 +244,7 @@ function createPiSdkProxy(options = {}) {
     return W;
   }
   function wireTarget(target) {
-    return { sessionPath: target.sessionPath && path.resolve(target.sessionPath), cwd: target.cwd, extraArgs: target.extraArgs };
+    return { sessionPath: target.sessionPath && path.resolve(target.sessionPath), cwd: target.cwd, extraArgs: target.extraArgs, sessionDir: target.sessionDir };
   }
   function piHeadlessRun(target, opts = {}) {
     let W;
@@ -278,6 +299,8 @@ function createPiSdkProxy(options = {}) {
     stopAllWarmSessions: () => { let count = 0; for (const W of children) if (stop(W)) count++; return count; },
     listWarmSessions: () => [...sessions.values()].filter(W => !W.dead && !W.stopping).map(W => ({ ...W.state,
       busy: W.state.busy || W.runs.size > 0 })),
+    // The kill switch: every worker behind one set of walls.
+    stopWalls: wallsId => { let n = 0; for (const W of children) if (W.wallsId === wallsId && stop(W)) n++; return n; },
     setEditorTextFor: (sessionPath, text) => {
       const W = sessions.get(path.resolve(sessionPath));
       if (W && !W.dead) {

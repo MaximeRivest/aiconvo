@@ -30,6 +30,7 @@ function setup(t) {
     releaseHeadless: async () => {}, spawnAlacritty: async () => { box.spawns++; }, spawns: 0,
     // People (users.js): the account itself drives these runs; nothing recorded.
     principalFor: () => ({ user: { id: 'owner', name: 'Owner' }, spawnAs: null, env: {} }), recordAuthorship() {},
+    principalInProject: async p => p, assertPrincipalCanRun() {}, promptArgFor: (p, file) => file, guestModelChoice: () => ({}), guestProviderList: async () => [], projectNameOf: () => 'p',
   });
   load(box, 'async function assertDelegationOwnership(', 'function delegationSessionKey(');
   load(box, 'function withSessionOp(', '// Index a session file');

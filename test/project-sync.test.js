@@ -13,6 +13,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
+const { registerConsole, consoleFetch: fetch } = require('./helpers/console-fetch.js');
 async function freePort() {
   const s = net.createServer(); await new Promise(r => s.listen(0, '0.0.0.0', r));
   const port = s.address().port; await new Promise(r => s.close(r));
@@ -52,6 +53,7 @@ async function boot(t, { label, sessions, publicUrlFor }) {
   const agent = path.join(home, '.pi', 'agent');
   sessions(path.join(agent, 'sessions'), home);
   const port = await freePort(), tlsPort = await freePort();
+  registerConsole(port, 'tok-' + label);
   const publicUrl = publicUrlFor(port);
   let log = '';
   const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: String(tlsPort), AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1', AICONVO_NO_SYNC: '1',

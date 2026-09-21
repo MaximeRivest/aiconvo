@@ -4,6 +4,7 @@
 // box with carets, the shared file editor, and a project hidden from one
 // of them. Skipped without chromium or a LAN address.
 const test = require('node:test');
+const { registerConsole, consoleFetch: fetch } = require('./helpers/console-fetch.js');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -56,6 +57,7 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   const socket = net.createServer(); await new Promise(r => socket.listen(0, '0.0.0.0', r));
   const port = socket.address().port; await new Promise(r => socket.close(r));
   let serverLog = '';
+  registerConsole(port, 'install-tok');
   server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: '0', AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_TOKEN: 'install-tok', AICONVO_PUBLIC_URL: '', AICONVO_NO_WATCH: '0', AICONVO_NO_LEDGER: '0', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', b => serverLog += b); server.stderr.on('data', b => serverLog += b);
   const base = 'http://' + lanIp() + ':' + port, key = 'pi:shared/chat.jsonl';

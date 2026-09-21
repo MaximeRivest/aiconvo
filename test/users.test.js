@@ -15,7 +15,11 @@ test('a fresh roster has one owner who signs in with the install token', () => {
   assert.equal(users.userForSecret(r, 'tok', 'tok').id, owner.id);
   assert.equal(users.userForSecret(r, 'other', 'tok'), null);
   assert.equal(users.identify({ roster: r, installToken: 'tok', isLocal: false, cookie: 'tok' }).tier, 'owner');
-  assert.equal(users.identify({ roster: r, installToken: 'tok', isLocal: true }).tier, 'console');
+  // Being on this machine is not a credential once a token exists (a
+  // guest's sandboxed agent is local too); the token from this machine is the console.
+  assert.equal(users.identify({ roster: r, installToken: 'tok', isLocal: true }), null);
+  assert.equal(users.identify({ roster: r, installToken: 'tok', isLocal: true, cookie: 'tok' }).tier, 'console');
+  assert.equal(users.identify({ roster: r, installToken: '', isLocal: true }).tier, 'console', 'no token at all: only this machine can ask');
   assert.equal(users.identify({ roster: r, installToken: 'tok', isLocal: false, authorization: 'Bearer tok' }).via, 'bearer');
   assert.equal(users.identify({ roster: r, installToken: 'tok', isLocal: false, authorization: 'Basic ' + Buffer.from('x:tok').toString('base64') }).via, 'basic');
   assert.equal(users.identify({ roster: r, installToken: 'tok', isLocal: false, cookie: 'nope' }), null);
