@@ -150,7 +150,7 @@ test('a link followed after the user moved on does nothing', async () => {
   assert.deepEqual(calls.errors, []);
 });
 
-test('the editor host hears the bundle event and reads the modifier from the capture-phase click', () => {
+test('the editor host hears the bundle event and reads the modifier keys it reports', () => {
   const listeners = {};
   const host = { addEventListener: (type, fn, capture) => { listeners[type + (capture ? ':capture' : '')] = fn; } };
   const followed = [];
@@ -158,12 +158,12 @@ test('the editor host hears the bundle event and reads the modifier from the cap
   vm.runInContext('fileWsFollowLink = (ws, target, opts) => followed.push([target, opts.system])', Object.assign(c, { followed }));
   const ws = {};
   c.fileWsWireDocLinks(ws);
-  const linkTarget = { closest: sel => (sel === '.cm-file-link' ? {} : null) };
-  listeners['click:capture']({ ctrlKey: false, target: linkTarget });
-  listeners['file-link-navigate']({ detail: { path: 'a.md' } });
-  listeners['click:capture']({ ctrlKey: true, target: linkTarget });
-  listeners['file-link-navigate']({ detail: { path: 'b.md' } });
-  listeners['click:capture']({ metaKey: true, target: { closest: () => null } }); // modifier held, but not on a link
-  listeners['file-link-navigate']({ detail: { path: 'c.md' } });
-  assert.deepEqual(plain(followed), [['a.md', false], ['b.md', true], ['c.md', false]]);
+  assert.deepEqual(Object.keys(listeners), ['file-link-navigate'], 'no click listener: the widget stops the click, the event carries the keys');
+  const navigate = detail => listeners['file-link-navigate']({ detail });
+  navigate({ path: 'a.md', modifiers: { ctrl: false, meta: false, shift: false, alt: false } });
+  navigate({ path: 'b.md', modifiers: { ctrl: true, meta: false, shift: false, alt: false } });
+  navigate({ path: 'c.md', modifiers: { ctrl: false, meta: true, shift: false, alt: false } });
+  navigate({ path: 'd.md', modifiers: { ctrl: false, meta: false, shift: true, alt: true } }); // not an "open elsewhere" gesture
+  navigate({ path: 'e.md' }); // the 0.12.0 fallback bundle reports no modifiers
+  assert.deepEqual(plain(followed), [['a.md', false], ['b.md', true], ['c.md', true], ['d.md', false], ['e.md', false]]);
 });

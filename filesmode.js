@@ -166,16 +166,13 @@ async function fileWsFollowLink(ws, target, { system = false } = {}) {
 function fileWsWireDocLinks(ws) {
   const host = $('docEditor');
   if (!host) return;
-  let system = false;
-  // The widget stops propagation of its click, so the modifier is read in
-  // the capture phase, before the widget turns the click into its own event.
-  host.addEventListener('click', e => {
-    system = !!(e.ctrlKey || e.metaKey) && !!(e.target && e.target.closest && e.target.closest('.cm-file-link'));
-  }, true);
+  // The bundle (0.13.0) reports the click's modifier keys with the event;
+  // Ctrl/Cmd means the system application, as on every file control. The
+  // 0.12.0 fallback bundle reports none, so a modified click opens in-app.
   host.addEventListener('file-link-navigate', e => {
-    const opts = { system };
-    system = false;
-    fileWsFollowLink(ws, e.detail && e.detail.path, opts);
+    const detail = e.detail || {};
+    const modifiers = detail.modifiers || {};
+    fileWsFollowLink(ws, detail.path, { system: !!(modifiers.ctrl || modifiers.meta) });
   });
 }
 
