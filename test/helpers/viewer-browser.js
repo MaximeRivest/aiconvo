@@ -21,7 +21,15 @@ async function viewerBrowser(t) {
     const timer = setTimeout(() => child.kill('SIGKILL'), 3000);
     await exited; clearTimeout(timer);
   };
-  t.after(async () => { ws?.close(); await stop(browser); await stop(server); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
+  // A child of the server (a preview worker, a sandbox) can still be writing
+  // when the server exits; a slow temp folder must not fail a passed test.
+  t.after(async () => {
+    ws?.close(); await stop(browser); await stop(server);
+    for (let i = 0; i < 20; i++) {
+      try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); return; }
+      catch (e) { if (e.code !== 'ENOTEMPTY' && e.code !== 'EBUSY') throw e; await new Promise(r => setTimeout(r, 250)); }
+    }
+  });
   const socket = net.createServer(); await new Promise(r => socket.listen(0, '127.0.0.1', r)); const port = socket.address().port; await new Promise(r => socket.close(r));
   const base = 'http://127.0.0.1:' + port; let log = '';
   // Since the console needs the token (design/53), the harness signs in

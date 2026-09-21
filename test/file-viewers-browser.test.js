@@ -8,7 +8,7 @@ const { viewerBrowser, samplePDF } = require('./helpers/viewer-browser');
 
 test('media and HTML viewers: real server, desktop, phone, tablet and security boundaries', { timeout: 120000 }, async t => {
   const b = await viewerBrowser(t);
-  const { work, base, evaluate: run, until, open, command, size } = b;
+  const { work, base, auth, evaluate: run, until, open, command, size } = b;
   fs.writeFileSync(path.join(work, 'reader & notes.pdf'), samplePDF(512 * 1024));
   fs.writeFileSync(path.join(work, 'broken.pdf'), 'not a PDF');
   fs.copyFileSync(path.join(__dirname, 'fixtures/media/password.pdf'), path.join(work, 'password.pdf'));
@@ -145,15 +145,15 @@ test('media and HTML viewers: real server, desktop, phone, tablet and security b
   assert.equal(await run(`fileWs.editor.getContent()`), '<h1>Shared edit</h1>');
 
   // New media routes and cookie-free asset capabilities respect live sharing.
-  const added = await (await fetch(base + '/api/users/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Viewer test member' }) })).json();
+  const added = await (await fetch(base + '/api/users/add', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Viewer test member' }) })).json();
   const secret = new URL(added.inviteLink).searchParams.get('token');
   const member = { ...remote, Cookie: 'aiconvo=' + secret, 'Content-Type': 'application/json' };
   const issued = await (await fetch(base + '/api/file/preview', { method: 'POST', headers: member, body: JSON.stringify({ path: path.join(work, 'site/index.html') }) })).json();
   assert.ok(issued.token, issued.error);
   const memberAsset = base + issued.base + 'styles/site.css';
   assert.equal((await fetch(memberAsset, { headers: remote })).status, 200);
-  const project = (await (await fetch(base + '/api/sessions')).json()).find(s => s.key === 'pi:fixture/media.jsonl').project;
-  const sharing = await fetch(base + '/api/access', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project, mode: 'listed' }) });
+  const project = (await (await fetch(base + '/api/sessions', { headers: auth })).json()).find(s => s.key === 'pi:fixture/media.jsonl').project;
+  const sharing = await fetch(base + '/api/access', { method: 'PUT', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ project, mode: 'listed' }) });
   assert.equal(sharing.status, 200);
   assert.equal((await fetch(mediaURL('clip.webm'), { headers: member })).status, 404, 'hidden project cannot be read through media');
   assert.equal((await fetch(memberAsset, { headers: remote })).status, 404, 'sharing changes invalidate an already-issued capability');

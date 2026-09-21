@@ -166,7 +166,7 @@ test('real app surfaces follow the theme together, including nested painted edge
   const shot = async name => { const p = await send('Page.captureScreenshot', { format: 'png' }, sid); fs.writeFileSync(path.join(os.tmpdir(), name + '.png'), Buffer.from(p.result.data, 'base64')); };
   await send('Runtime.enable', {}, sid); await size(1200, 900);
   await send('Page.navigate', { url: base }, sid);
-  await until(`typeof timelineGeom !== 'undefined' && timelineGeom?.rows?.length && document.querySelector('.tmark')`);
+  await until(`typeof timelineGeom !== 'undefined' && timelineGeom?.marks?.length && document.querySelector('.tmark')`);
   // The actual conversation preview: the original missed surface.
   await evaluate(`selectTheme('light');showMarkPop(document.querySelector('.tmark'), ${JSON.stringify(key)})`);
   await until(`!$('markPop').hidden`);
