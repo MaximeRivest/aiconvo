@@ -737,7 +737,7 @@ function openShareDialog() {
 function inviteSectionHtml(project) {
   return `<div class="share-invite" id="shareInvite">
     <h3>Invite someone to ${esc(project)}</h3>
-    <p class="hint">For a collaborator or a hire who is not part of this household: they get this project only. They can work in the browser here right away, and connect their own aiconvo later so the project's conversations and memory copy both ways.</p>
+    <p class="hint">For a collaborator or a hire who is not part of this household: they get this project only. They can work in the browser here right away, and connect their own aiconvo later so the project's conversations and memory copy both ways. <a href="/guests" target="_blank" rel="noopener">What a guest can and cannot do</a> — the page they see too.</p>
     <div class="row"><input type="text" id="invName" placeholder="their name" maxlength="60"><select id="invRight"><option value="see">can read</option><option value="act">can read and act</option></select><button type="button" id="invMake">make invite link</button></div>
     <div class="row inv-door" id="invDoorRow" hidden><span class="hint">through</span><select id="invDoor"></select><span class="hint" id="invDoorHint"></span></div>
     <div class="warn" id="invWarn" hidden></div>

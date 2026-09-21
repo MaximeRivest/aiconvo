@@ -151,10 +151,39 @@ function invitePage({ secret, invite, inviter, error = '', joinLink = '' }) {
 <p>You will see that project's conversations, notes and memory${invite.projects.some(p => p.right === 'act') ? ', and you can send messages to its agents here' : ''}. Nothing else on this machine is visible to you.</p>
 ${error ? `<p class="err">${escapeHtml(error)}</p>` : ''}
 <form method="post" action="/invite/claim"><input type="hidden" name="invite" value="${escapeHtml(secret)}"><label for="name">your name</label><input id="name" name="name" autocomplete="name" value="${escapeHtml(invite.name)}" autofocus><button type="submit">join in the browser</button></form>
-<small>This link works once. After joining, this device stays signed in as you.</small>
+<small>This link works once. After joining, this device stays signed in as you. <a href="/guests">What a guest can and cannot do here.</a></small>
 <p>Want the project on your own computer too? Install aiconvo there, then run:</p>
 <code>aiconvo join ${escapeHtml(joinLink)} --name "${escapeHtml(invite.name || 'Your Name')}" [--folder /path/to/your/checkout]</code>
 <small>That pairs your aiconvo with this one: the project's conversations and memory copy both ways (each side only ever writes its own), and your agents run on your machine.</small>
+</main></body></html>`;
+}
+// The plain-words page (design/56): what being a guest means, stated so a
+// smart sixteen-year-old could hold the owner to it.
+function guestRulesPage({ walls }) {
+  const style = 'html,body{margin:0;background:#fff;color:#000;font:18px/1.5 monospace}main{max-width:38rem;margin:6vh auto;padding:1rem}h1{font-size:1.3em}h2{font-size:1em;margin-top:1.6em}ul{padding-left:1.2em}li{margin:.3em 0}p{margin:0 0 1em}.no{opacity:.75}';
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo — guests</title><style>${style}</style></head><body><main>
+<h1>What a guest can and cannot do here</h1>
+<p>Someone invited you to <b>one project</b> on their aiconvo. This page says exactly what that means. It is the same for every guest.</p>
+<h2>You can</h2><ul>
+<li>Read that project's conversations, notes and generated memory.</li>
+<li>If your invite says <b>act</b>: send messages to agents in that project, run commands and notebook cells, edit files in the project folder, and commit. Your commits carry your name.</li>
+<li>See who else is in the project right now, and go where they are.</li>
+<li>Connect your own aiconvo later, so the project's conversations and memory copy to your machine as well.</li>
+</ul>
+<h2>You cannot</h2><ul class="no">
+<li>See any other project, conversation or file on this machine. They are not hidden from you — for you they do not exist.</li>
+<li>Reach the owner's keys, SSH, passwords or home folder. ${walls ? 'Everything you run starts inside a sandbox that holds only the project folder; the kernel enforces it, not a rule an agent could argue with.' : 'On this particular machine the sandbox is not available, so an agent you drive runs with the owner\'s file access outside the app — the owner knows this and chose to invite you anyway.'}</li>
+<li>Open a terminal, drive the desktop, or push to git remotes (no SSH keys inside). The owner pushes.</li>
+<li>Use more than your share of the machine: your processes have one budget for memory, cores and process count.</li>
+<li>Invite others, change settings, or see this machine's other people.</li>
+</ul>
+<h2>The owner can</h2><ul>
+<li>See everything you do here: every message and file save is recorded under your name, and every sign-in is logged.</li>
+<li>Stop all your running work with one button, and remove you at any time. What you wrote stays, attributed to you.</li>
+<li>Close the door you came in by. Your invite link works once; after that, this device stays signed in as you.</li>
+</ul>
+<h2>What this is not</h2>
+<p>These are strong walls between people who share a computer, built for a household and a collaborator, not a hosting service. The owner's own account runs the agents. If you need guarantees a company would need, ask before you rely on them.</p>
 </main></body></html>`;
 }
 // Under WSL2 the Linux addresses are a private network inside the virtual
@@ -13019,6 +13048,13 @@ async function handleRequest(req, res) {
     // switching. Answered before sign-in on purpose: a readiness probe has
     // no cookie, and under WSL even the local browser arrives through the
     // Windows port forward, so "/" answers it 401. Says nothing but yes.
+    // What a guest can and cannot do here, in plain words. Public on
+    // purpose: it is linked from the invite landing, which a person reads
+    // before they have any credential. It names no one and nothing.
+    if (u.pathname === '/guests' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(guestRulesPage({ walls: !!BWRAP }));
+    }
     if (u.pathname === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       return res.end(req.method === 'HEAD' ? undefined : '{"ok":true}');

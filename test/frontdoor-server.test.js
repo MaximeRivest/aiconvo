@@ -34,6 +34,12 @@ test('sign-in guard: lockout after ten distinct wrong tokens, a stale cookie cou
   const raw = globalThis.fetch;
   const login = tok => raw(remote + '/login', { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: tok }) });
 
+  // The guest rules are public and name nothing.
+  const rules = await raw(remote + '/guests');
+  assert.equal(rules.status, 200);
+  const rulesText = await rules.text();
+  assert.match(rulesText, /What a guest can and cannot do/);
+  assert.doesNotMatch(rulesText, /install-tok|Lilly/);
   // The page is free; the headers ride on it.
   const page = await raw(remote + '/');
   assert.equal(page.status, 401);

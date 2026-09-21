@@ -91,6 +91,23 @@ sentence, and so that the owner can *see* what is happening.
   (Serve and Funnel say so with `X-Forwarded-Proto`), never over plain
   http on the LAN, or it would not come back.
 
+## The plain-words page
+
+`/guests` — public, before any sign-in, linked from the invite landing and
+from the invite dialog — says what a guest can, cannot, and what the
+owner can, in words a person reads once and can hold the owner to. It
+names nothing on the machine. It also says what this is *not*: walls
+between people who share a computer, not a hosting service.
+
+## The machine side (NixOS)
+
+`os/machines/modules/aiconvo.nix` (`services.aiconvo.frontDoor.*`): the
+LAN ports, bubblewrap, the Tailscale Serve unit for the tailnet name, and
+the operator right. Both hosts use it. The serve unit re-declares the
+tailnet-only handler at every boot, so **a reboot closes the public
+door** on purpose; its stop is a no-op so a rebuild never takes the
+everyday door down for the seconds in between.
+
 ## Trade-offs, stated
 
 - **Tailscale, not a self-hosted relay.** Both doors depend on Tailscale's
