@@ -15,6 +15,15 @@
 // disk is their truth; the host writes the text to disk through its own
 // save path (history, ledger) and pushes disk changes back as minimal
 // edits so remote cursors survive an agent's write.
+//
+// The disk side of a file has two directions and they must not echo:
+//   markSaved(name, text)  the host wrote `text` to disk for this document
+//   fromDisk(name, text)   the watcher read `text` from disk
+// A read that returns one of the host's own recent writes is the save
+// coming back through the watcher, not news; it is dropped. A genuinely
+// outside write (an agent's edit, git) is applied as the delta from the
+// last text known to be on disk, shifted past whatever people typed in
+// the meantime, so a save-then-type window never loses keystrokes.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -76,11 +85,11 @@ function createCollab({ Y, syncProtocol, awarenessProtocol, encoding, decoding, 
     const ydoc = new Y.Doc({ gc: true });
     const awareness = new awarenessProtocol.Awareness(ydoc);
     awareness.setLocalState(null);
-    d = { name, ydoc, awareness, conns: new Map(), contributors: new Map(), saveTimer: null, quietTimer: null, version: 0, applyingHost: false };
+    d = { name, ydoc, awareness, conns: new Map(), contributors: new Map(), saveTimer: null, quietTimer: null, version: 0, applyingHost: false, diskText: null, savedShas: [] };
     docs.set(name, d);
     const stored = load(name);
     if (stored) { try { Y.applyUpdate(ydoc, new Uint8Array(stored)); } catch (e) { log('[collab] stored update for ' + name + ' unreadable: ' + e.message); } }
-    else if (initialText) ydoc.getText(TEXT_KEY).insert(0, initialText);
+    else if (initialText) { ydoc.getText(TEXT_KEY).insert(0, initialText); d.diskText = initialText; }
     ydoc.on('update', (update, origin) => {
       d.version++;
       const enc = encoding.createEncoder();
@@ -197,6 +206,46 @@ function createCollab({ Y, syncProtocol, awarenessProtocol, encoding, decoding, 
     d.ydoc.transact(() => { if (diff.remove) yt.delete(diff.index, diff.remove); if (diff.insert) yt.insert(diff.index, diff.insert); }, 'host');
     return true;
   }
+  const shaOf = text => crypto.createHash('sha256').update(text).digest('hex');
+  const SAVED_SHAS_KEPT = 64;
+  // The host wrote `text` to disk on this document's behalf (the quiet
+  // save, or a person's Ctrl+S). Remembered so the watcher's echo of it is
+  // recognized; several may be in flight, hence a list, not one value.
+  function markSaved(name, text) {
+    const d = docs.get(name);
+    if (!d) return;
+    text = String(text ?? '');
+    d.diskText = text;
+    d.savedShas.push(shaOf(text));
+    if (d.savedShas.length > SAVED_SHAS_KEPT) d.savedShas.splice(0, d.savedShas.length - SAVED_SHAS_KEPT);
+  }
+  function applyEdit(d, yt, edit) {
+    d.ydoc.transact(() => { if (edit.remove) yt.delete(edit.index, edit.remove); if (edit.insert) yt.insert(edit.index, edit.insert); }, 'host');
+  }
+  // The disk now holds `next`. Returns true when the shared text changed.
+  function fromDisk(name, next) {
+    const d = docs.get(name);
+    if (!d) return false;
+    next = String(next ?? '');
+    if (d.savedShas.includes(shaOf(next))) return false; // our own write, back through the watcher
+    const yt = d.ydoc.getText(TEXT_KEY);
+    const live = yt.toString();
+    if (next === live) { d.diskText = next; return false; }
+    const base = d.diskText == null ? live : d.diskText;
+    const outside = textDiff(base, next);   // what changed on disk since we last knew it
+    const typed = base === live ? null : textDiff(base, live); // what people typed since then
+    let edit = outside;
+    if (!outside) edit = textDiff(live, next);
+    else if (typed) {
+      const outsideEnd = outside.index + outside.remove, typedEnd = typed.index + typed.remove;
+      if (outsideEnd <= typed.index) edit = outside; // before the typing: same place
+      else if (outside.index >= typedEnd) edit = { ...outside, index: outside.index + typed.insert.length - typed.remove }; // after it: shifted
+      else edit = textDiff(live, next); // the same region: the disk's rule, its text wins there
+    }
+    if (edit) applyEdit(d, yt, edit);
+    d.diskText = next;
+    return !!edit;
+  }
   function clear(name) {
     const d = docs.get(name);
     if (!d) return { text: '', contributors: [] };
@@ -220,7 +269,7 @@ function createCollab({ Y, syncProtocol, awarenessProtocol, encoding, decoding, 
   function has(name) { return docs.has(name); }
   function closeAll() { for (const name of [...docs.keys()]) close(name); }
 
-  return { open, join, text, setText, clear, close, closeAll, people, contributors, stats, has, on: events.on.bind(events), off: events.off.bind(events), textDiff, TEXT_KEY };
+  return { open, join, text, setText, markSaved, fromDisk, clear, close, closeAll, people, contributors, stats, has, on: events.on.bind(events), off: events.off.bind(events), textDiff, TEXT_KEY };
 }
 
 module.exports = { createCollab, textDiff };

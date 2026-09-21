@@ -144,6 +144,80 @@ test('the host edits a file document with one minimal change while a person keep
   await until(() => !collab.has('file:/tmp/x.md'));
 });
 
+// The bug this guards: the shared text lands on disk 400 ms after typing
+// stops; the write wakes the file watcher, which reads the file ~250 ms
+// later and hands the text back. By then the person has typed on. A
+// blind "disk wins" replace at that point erased the new letters (and put
+// back ones just deleted): letters vanished or doubled while typing.
+test('a file document ignores its own save coming back from the disk watcher', async t => {
+  const { collab, url } = await boot(t, { initialText: 'This guide is by hum' });
+  const a = client(url + '/file:/tmp/echo.md?u=u_a');
+  await a.ready; await until(() => a.synced());
+  const changes = [];
+  collab.on('change', ev => changes.push(ev));
+  a.ydoc.getText('content').insert(20, 'a');
+  await until(() => changes.length >= 1);
+  const saved = changes[0].text;
+  assert.equal(saved, 'This guide is by huma');
+  collab.markSaved('file:/tmp/echo.md', saved); // the save route wrote this to disk
+  // The person keeps typing while the watcher is still on its way.
+  a.ydoc.getText('content').insert(21, 'ns');
+  await until(() => collab.text('file:/tmp/echo.md') === 'This guide is by humans');
+  // The watcher reads the file: it holds what the host wrote a moment ago.
+  assert.equal(collab.fromDisk('file:/tmp/echo.md', saved), false, 'own write echoed: nothing to apply');
+  await sleep(60);
+  assert.equal(collab.text('file:/tmp/echo.md'), 'This guide is by humans');
+  assert.equal(a.text(), 'This guide is by humans');
+  // Same for a deletion: backspace after the save must not come back.
+  a.ydoc.getText('content').delete(22, 1);
+  await until(() => collab.text('file:/tmp/echo.md') === 'This guide is by human');
+  collab.fromDisk('file:/tmp/echo.md', saved);
+  await sleep(60);
+  assert.equal(a.text(), 'This guide is by human');
+  a.close();
+});
+
+test('an outside write lands as its own delta, not as a replace over what people typed since', async t => {
+  const { collab, url } = await boot(t, { initialText: 'title\n\nbody\n' });
+  const a = client(url + '/file:/tmp/ext.md?u=u_a');
+  await a.ready; await until(() => a.synced());
+  const changes = [];
+  collab.on('change', ev => changes.push(ev));
+  a.ydoc.getText('content').insert(11, 'more');
+  await until(() => changes.length >= 1);
+  collab.markSaved('file:/tmp/ext.md', changes[0].text); // disk: 'title\n\nbodymore\n'
+  // The person types on at the end; an agent, working from the saved
+  // text, rewrites the title. The disk it wrote lacks the newest letters.
+  a.ydoc.getText('content').insert(15, ' and more');
+  await until(() => collab.text('file:/tmp/ext.md') === 'title\n\nbodymore and more\n');
+  assert.equal(collab.fromDisk('file:/tmp/ext.md', 'TITLE\n\nbodymore\n'), true);
+  await until(() => a.text().startsWith('TITLE'));
+  assert.equal(a.text(), 'TITLE\n\nbodymore and more\n', 'the title change arrived, the typing stayed');
+  // Change after the typing region: the index shifts by what was typed.
+  collab.markSaved('file:/tmp/ext.md', collab.text('file:/tmp/ext.md'));
+  a.ydoc.getText('content').insert(0, '# ');
+  await until(() => collab.text('file:/tmp/ext.md').startsWith('# '));
+  assert.equal(collab.fromDisk('file:/tmp/ext.md', 'TITLE\n\nbodymore and more\nEND\n'), true);
+  await until(() => a.text().endsWith('END\n'));
+  assert.equal(a.text(), '# TITLE\n\nbodymore and more\nEND\n');
+  // Typing right next to the outside change is still not an overlap.
+  collab.markSaved('file:/tmp/ext.md', collab.text('file:/tmp/ext.md'));
+  a.ydoc.getText('content').insert(2, 'my ');
+  await until(() => collab.text('file:/tmp/ext.md').startsWith('# my '));
+  assert.equal(collab.fromDisk('file:/tmp/ext.md', '# Title\n\nbodymore and more\nEND\n'), true);
+  await until(() => a.text() === '# my Title\n\nbodymore and more\nEND\n');
+  // Truly overlapping edits (typing inside the word the disk rewrote):
+  // the disk's version of that region wins, and the text stays sane.
+  collab.markSaved('file:/tmp/ext.md', collab.text('file:/tmp/ext.md'));
+  a.ydoc.getText('content').insert(7, 'x'); // '# my Tixtle'
+  await until(() => collab.text('file:/tmp/ext.md').startsWith('# my Tixtle'));
+  assert.equal(collab.fromDisk('file:/tmp/ext.md', '# my TITLE\n\nbodymore and more\nEND\n'), true);
+  await until(() => a.text() === '# my TITLE\n\nbodymore and more\nEND\n');
+  // A read that only confirms the current text changes nothing.
+  assert.equal(collab.fromDisk('file:/tmp/ext.md', a.text()), false);
+  a.close();
+});
+
 test('compose boxes survive a restart through the persisted update', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'collab-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

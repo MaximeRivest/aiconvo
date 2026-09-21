@@ -119,7 +119,7 @@ if (process.argv[1] === ${JSON.stringify(path.join(root, 'server.js'))}) {
     assert.equal((await post('/api/agents/recovery', { id: record.id, action: 'resume' })).status, 200);
   }
   await waitFor(() => fs.readFileSync(source, 'utf8').includes('Recovered successfully'));
-  assert.equal(fs.readFileSync(source, 'utf8').split('Continue the interrupted task').length - 1, 1);
+  assert.equal(fs.readFileSync(source, 'utf8').split('Sorry, you were interrupted, continue').length - 1, 1, 'resume must send the default message exactly once');
   assert.equal((await post('/api/agents/recovery', { id: record.id, action: 'resume' })).status, 409);
   await pause(100);
   await post('/api/node/send', { id: key, prompt: 'Fail again' });

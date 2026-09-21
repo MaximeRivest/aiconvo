@@ -157,7 +157,7 @@ test('normalizeSettings keeps a valid doneSound and falls back to voice', () => 
 
 test('the resume message is editable, trimmed, bounded, and defaults when blank', () => {
   const { DEFAULT_RESUME_PROMPT } = require('../settings.js');
-  assert.ok(DEFAULT_RESUME_PROMPT.startsWith('Continue the interrupted task'));
+  assert.equal(DEFAULT_RESUME_PROMPT, 'Sorry, you were interrupted, continue');
   for (const usePiDefault of [true, false]) {
     const custom = normalizeSettings({ usePiDefault, resumePrompt: '  Reprends où tu étais.\nVérifie d’abord les résultats.  ' });
     assert.equal(custom.resumePrompt, 'Reprends où tu étais.\nVérifie d’abord les résultats.');

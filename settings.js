@@ -7,7 +7,7 @@ const DEFAULT_CONTEXT_TOKENS = 272000;
 
 // Sent as the user turn when an interrupted conversation is resumed, by the
 // Resume button or by automatic connection recovery. Editable in Settings.
-const DEFAULT_RESUME_PROMPT = 'Continue the interrupted task from the saved conversation. First check the latest tool results and current state; do not repeat actions that already succeeded. If an action may have completed but its result is missing, verify its effects before retrying. If the task is already complete, report that instead.';
+const DEFAULT_RESUME_PROMPT = 'Sorry, you were interrupted, continue';
 
 // One semantic namespace per user: the GPU index never mixes two installs.
 function defaultSemanticNs() {
