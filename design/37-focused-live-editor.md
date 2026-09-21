@@ -6,6 +6,14 @@ Since 2026-09-11 this is the only file screen: every file link (a markdown link 
 
 `openLiveFile(path, options)` in `live-file.js` owns this frame, while the existing `fileWs` and `docState` own save/draft/run lifecycles. Routes retain a `focus` flag, the return route and optional review reference; a refresh does not revert to the large workspace. Opening does not fetch `/api/project/file-history`, touched-file sessions or reconstructed snapshots. File and editor-bundle loading are parallel.
 
+### Links and lines (2026-09-21, with tryingET, PRs #6, #9, #10)
+
+A document is one node of a linked set of files, and the screen reads that set: a markdown link inside the open document (`[ADR](../adr/0011-x.md)`, `notes.md#L12`, `notes.md#some-heading`) resolves against the open file the way an image does, is checked on the server, and opens in this same screen with Back returning to the source; a dead target or a folder says so in a toast. `#L12` names a line; any other fragment is a heading, found the way GitHub slugs it. Ctrl/Cmd-click hands the file to the system application, as on every file control; the editor bundle reports the modifier keys with its `file-link-navigate` event (0.13.0). The line a link asked for is part of the route (`line=`), so a reload or a shared URL lands there. A **return** (back, forward) lands on the cursor left behind instead, the way a browser returns to a page's scroll rather than to its anchor; the navigation stack tells the two apart (`restore`). Links in the wild also come as `#/file&path=…` (SPA-style, agent-composed) and may contain a literal `%`: `hashRoute()` normalizes the address before the stack records it, so neither form dies silently.
+
+### Diagrams (2026-09-21)
+
+A ```` ```mermaid ```` fence in the open document draws as a figure while the cursor is outside it and shows its source inside, the rule display math follows. The bundle ships no diagram library; aiconvo lends it the mermaid it already carries for transcripts and notes (`mermaidDiagramNode`), so the diagram in a document is the same drawing, in the same theme, as in the conversation that produced it, and a theme switch redraws it. A drawing that fails shows mermaid's message over the source; a library that fails to load says so too, in the editor and in every transcript box, rather than leaving unexplained code.
+
 ## Editing engine
 
 - Runnable Markdown uses the actual MRMD document editor, not a preview or a replacement textarea. Cell execution/output still uses the existing rat-backed API and MRMD output-fence mechanics. Runtime information is loaded on Run, not merely because the document opened.
@@ -55,5 +63,7 @@ A future adapter owns LSP processes, document synchronization, URI/offset conver
 ## Verification
 
 - `test/live-file.test.js`: marker/origin independence, deletion/undo, size limits, real Git attribution and uncommitted/unknown handling.
+- `test/editor-file-links.test.js`: link targets as markdown wrote them, document-relative resolution that never climbs above the root, heading slugs, the server check, and the modifier keys the bundle reports. `test/file-workspace-navigation.test.js`: the route line, and the cursor-versus-line rule on a return. `test/hash-routing.test.js`: `hashRoute()` and the two places that feed the stack from it.
+- In mrmd-editor, `npm run test:document` covers diagram fences: drawn outside, source inside, one draw per distinct source, failures retried, `refreshDiagrams()`, reading and source modes, and misconfiguration failing at creation.
 - `test/conversation-app.test.js`: actual Edit live navigation, no tree/history requests, background gutter markers, Ctrl-F isolation, native Ctrl-Space completion, cancellation of stale completion responses, diagnostic version checks, saving, focused-route restoration, return to review, runnable MRMD output (with a fixture runtime), and Save without a commit.
 - In mrmd-editor, `npm run test:document` now also exercises both editors' gutter updates/hover, invalidation after typing, diagnostics, search, completion, definition hooks and destruction in Chromium.
