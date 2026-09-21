@@ -11,7 +11,17 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.12.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.13.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.13.0: diagram fences drawn through a host renderer. `createDocumentEditor`
+  accepts `diagrams: {languages, render}`; a closed fence in a named language
+  is drawn while the cursor is outside it and shown as source inside, like
+  display math. The bundle ships no diagram library: aiconvo lends its
+  vendored mermaid (`mermaidDiagramNode` in app.html), so documents draw the
+  same diagrams as transcripts and notes, with the same theme. Drawings are
+  cached by source; `refreshDiagrams()` redraws after a theme change. The
+  `file-link-navigate` event now reports the click's modifier keys
+  (`detail.modifiers`), which the file workspace uses for Ctrl/Cmd-click.
+  The bundle grows from 1.7 MB to 1.71 MB.
 - 0.12.0: collaboration primitives under `mrmdDocument.collab` (`Y`,
   `Awareness`, `WebsocketProvider`, `yCollab`, `yUndoManagerKeymap`), and
   both `createDocumentEditor` and `createCodeEditor` accept `extensions`
@@ -66,14 +76,16 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source base: `1c03f74`, plus the existing performance changes and 0.11.0
-  host-service changes in `mrmd-editor` (source, regression tests, and rebuilt
-  document dist are in that tree).
-- SHA-256: `435bbc86587ba4a7addc9749779b01eb839cf51af6b0fe965d784d259d65255d`
-- License: MIT (see `0.11.0/LICENSE`)
+- Source commit: `10bdbf8` ("document entry 0.13.0"), which follows `abae10d`,
+  the commit that finally recorded the 0.10.1/0.11.0 sources earlier bundles
+  were built from.
+- SHA-256: `af4867cfd23d6cbc5e6f2edd11a2959f599fa7c49be54c612a6ad5e2f1792c67`
+- License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.10.1. Keep that artifact and route while the fallback exists.
+  0.12.0 (documents open; diagram fences stay code and Ctrl-click on a file
+  link opens in the app). Keep that artifact and route while the fallback
+  exists.
 
 ## Features enabled in aiconvo
 
@@ -90,6 +102,10 @@ owns the editing surface.
 - `setSourceMode` — raw markdown toggle
 - `setReadonly`
 - `assetResolver` — relative image paths resolve through aiconvo's API
+- `diagrams` — mermaid fences drawn with aiconvo's vendored mermaid;
+  `refreshDiagrams()` after a theme change
+- `file-link-navigate` — links inside the document open in the file
+  workspace (filesmode.js `fileWsWireDocLinks`)
 
 ## Update procedure
 

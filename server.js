@@ -13286,6 +13286,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];

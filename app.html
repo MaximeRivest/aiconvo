@@ -784,6 +784,12 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .doc-editor-host .cm-md-codeblock-first, .doc-editor-host .cm-md-codeblock-last { color: var(--text-faint); font-size: 10px; line-height: 1.7; min-height: 21px; }
 /* Inline code: the conversation's quieter italic voice (no chip). */
 .doc-editor-host .cm-md-inline-code { font-style: italic; }
+/* A drawn ```mermaid fence: the figure is the same .mmd-fig the transcript
+   draws; the bundle only frames it. Its source (while drawing, or under an
+   error) reads as the code block it is. */
+.doc-editor-host .cm-diagram { padding: 8px 0; }
+.doc-editor-host .cm-diagram-source { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); background: color-mix(in srgb, var(--surface-2) 85%, transparent); border: 1px solid var(--border); border-radius: 0; }
+.doc-editor-host .cm-diagram-error-message { color: var(--danger); font-size: var(--fs-micro); }
 /* Run status strip: kernel chip · state · cancel. Output lives IN the
    document (```output under the cell, MRMD style), never here. */
 .doc-run-strip { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-3); padding: 4px 10px; font-size: var(--fs-micro); color: var(--text-dim); border-top: 1px solid var(--border-strong); background: var(--bg); }
@@ -2906,43 +2912,73 @@ function mermaidConfig() {
 function loadMermaid() {
   if (window.mermaid) return Promise.resolve();
   if (!mermaidLoad) {
-    mermaidLoad = new Promise((ok, bad) => {
+    const load = new Promise((ok, bad) => {
       const s = document.createElement('script');
       s.src = '/vendor/mermaid.min.js';
       s.onload = ok;
-      s.onerror = () => { mermaidLoad = null; bad(new Error('mermaid.min.js failed to load')); };
+      s.onerror = () => bad(new Error('mermaid.min.js failed to load'));
       document.head.appendChild(s);
     }).then(() => window.mermaid.initialize(mermaidConfig()));
+    // A failed load (or a failed initialize) is forgotten, so the next
+    // diagram tries again instead of inheriting a rejection for the session.
+    load.catch(() => { if (mermaidLoad === load) mermaidLoad = null; });
+    mermaidLoad = load;
   }
   return mermaidLoad;
 }
 let mermaidSeq = 0;
+// One diagram, drawn: the figure element every mermaid surface shares —
+// transcript and note boxes (renderMermaids) and the document editor
+// (mermaidDiagrams). Throws with mermaid's own message; the element mermaid
+// leaves in the page on a parse error is removed first.
+async function mermaidDiagramNode(source) {
+  await loadMermaid();
+  const id = 'mmd' + (++mermaidSeq);
+  try {
+    const { svg } = await window.mermaid.render(id, source);
+    const fig = document.createElement('div');
+    fig.className = 'mmd-fig';
+    fig.innerHTML = svg;
+    return fig;
+  } catch (e) {
+    const stray = document.getElementById(id) || document.getElementById('d' + id);
+    if (stray) stray.remove();
+    throw e;
+  }
+}
+// The document editor draws ```mermaid fences through the same function, so
+// a diagram looks the same in a document as in the transcript that produced
+// it (vendor/mrmd-document/README.md, 0.13.0). One object: the bundle caches
+// drawings per render function, and refreshDiagrams() clears that cache.
+const mermaidDiagrams = { languages: ['mermaid'], render: (lang, source) => mermaidDiagramNode(source) };
+function mermaidBoxFailed(box, e) {
+  box.classList.add('err');
+  const err = document.createElement('div');
+  err.className = 'mmd-err';
+  err.textContent = '⚠ mermaid: ' + String(e?.message || 'render failed').split('\n')[0];
+  box.prepend(err); // the source stays visible under the error
+}
 async function renderMermaids(root) {
   const boxes = [...(root || document).querySelectorAll('.mmd:not([data-done])')];
   if (!boxes.length) return;
-  try { await loadMermaid(); } catch { return; } // sources stay readable as code
+  // The library loads once for the whole batch. When it cannot, every box
+  // says so over its source rather than staying a silent code block; a
+  // later batch (or a theme refresh) retries the load.
+  let loadError = null;
+  try { await loadMermaid(); } catch (e) { loadError = e; }
   for (const box of boxes) {
     if (box.dataset.done || !box.isConnected) continue;
     box.dataset.done = '1';
+    if (loadError) { mermaidBoxFailed(box, loadError); continue; }
     const code = (box.querySelector('.mmd-src') || {}).textContent || '';
-    const id = 'mmd' + (++mermaidSeq);
     try {
-      const { svg } = await window.mermaid.render(id, code);
-      const fig = document.createElement('div');
-      fig.className = 'mmd-fig';
-      fig.innerHTML = svg;
+      const fig = await mermaidDiagramNode(code);
       fig.title = 'Double-click to see the mermaid source';
       fig.ondblclick = () => box.classList.toggle('show-src');
       box.prepend(fig);
       box.classList.add('ok');
     } catch (e) {
-      const stray = document.getElementById(id) || document.getElementById('d' + id);
-      if (stray) stray.remove();
-      box.classList.add('err');
-      const err = document.createElement('div');
-      err.className = 'mmd-err';
-      err.textContent = '⚠ mermaid: ' + String(e.message || 'render failed').split('\n')[0];
-      box.prepend(err); // the source stays visible under the error
+      mermaidBoxFailed(box, e);
     }
   }
 }
@@ -2955,6 +2991,8 @@ function refreshMermaidTheme() {
     b.querySelectorAll('.mmd-fig, .mmd-err').forEach(x => x.remove());
   });
   renderMermaids(document);
+  // The open document's diagrams were drawn with the old theme too.
+  docState?.editor?.refreshDiagrams?.();
 }
 // One observer, whole app: any view that lands markdown gets its diagrams.
 let mermaidT = null;
@@ -6136,10 +6174,10 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal aiconvo startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
-const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js';
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -6905,6 +6943,7 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
     theme: mrmdHostTheme(),
     placeholder: 'Start writing…',
     assetResolver: url => '/api/doc/asset?doc=' + encodeURIComponent(d.path) + '&src=' + encodeURIComponent(url),
+    diagrams: mermaidDiagrams,
     onChange: shared ? () => fileWsSharedStatus(fileWs) : scheduleDocAutosave,
     onSave: shared ? () => fileWsSharedSave(fileWs) : focused ? autosaveDocument : commitDocument,
     onRunCell: (cell, o) => runDocCell(cell, o),
