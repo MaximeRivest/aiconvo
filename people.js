@@ -120,8 +120,57 @@ function peopleTyping() {
   clearTimeout(peopleTyping.t);
   peopleTyping.t = setTimeout(() => peopleReportRoute({ kind: 'viewing' }), 6500);
 }
-window.addEventListener('aiconvo:route', () => { peopleKind = 'viewing'; peopleReportRoute(); });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { peopleState.lastReport = ''; peopleReportRoute(); } });
+window.addEventListener('aiconvo:route', () => { peopleKind = 'viewing'; peoplePosition = null; peopleReportRoute(); peopleFollowRouteChanged(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { peopleState.lastReport = ''; peopleReportRoute({ position: peoplePosition }); } });
+
+/* ---- where exactly: the position that "take me there" lands on ---- */
+// A conversation reports the entry at the top of the viewport; a file the
+// cursor line. Throttled: presence is a whole-book broadcast to everyone,
+// so a scroll must not turn into a stream.
+let peoplePosition = null, peoplePositionTimer = 0, peopleEditingUntil = 0;
+function peopleSetPosition(position, kind) {
+  const sig = JSON.stringify(position);
+  if (sig === JSON.stringify(peoplePosition) && (!kind || kind === peopleKind)) return;
+  peoplePosition = position;
+  clearTimeout(peoplePositionTimer);
+  peoplePositionTimer = setTimeout(() => peopleReportRoute({ kind, position: peoplePosition }), 600);
+}
+function peopleReadingEntry() {
+  const view = $('view');
+  if (!view || typeof viewKind === 'undefined' || viewKind !== 'conversation') return null;
+  const top = view.getBoundingClientRect().top;
+  const el = [...view.querySelectorAll('#conversationTranscript .msg[data-eid]')].find(e => e.getBoundingClientRect().bottom > top + 8 && e.getClientRects().length);
+  return el ? el.dataset.eid : null;
+}
+function peopleEditorLine() {
+  if (typeof fileWs === 'undefined' || !fileWs || !fileWs.editor || !fileWs.editor.selection) return null;
+  try { return Number(fileWs.editor.selection().line) || null; } catch { return null; }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const view = $('view');
+  if (view) view.addEventListener('scroll', () => {
+    if (typeof viewKind === 'undefined') return;
+    if (viewKind === 'conversation') { const entry = peopleReadingEntry(); if (entry) peopleSetPosition({ entry }); }
+  }, { passive: true });
+  // The composer: "typing" for a few seconds after each keystroke.
+  document.addEventListener('input', e => {
+    const t = e.target;
+    if (!(t instanceof HTMLTextAreaElement)) return;
+    if (t.id === 'agentText' || t.closest('.draft-view, .conversation-draft, .agent-compose')) peopleTyping();
+  }, true);
+  // The file editor: the cursor line, and "editing" while keys land.
+  const editorEvent = e => { if (e.target && e.target.closest && e.target.closest('#codeEditor, #docEditor')) { if (e.type === 'keydown') peopleEditingUntil = Date.now() + 6000; peopleEditorTick(); } };
+  document.addEventListener('keydown', editorEvent, true);
+  document.addEventListener('mouseup', editorEvent, true);
+  document.addEventListener('selectionchange', () => { if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#codeEditor, #docEditor')) peopleEditorTick(); });
+});
+function peopleEditorTick() {
+  const line = peopleEditorLine();
+  if (!line) return;
+  const kind = Date.now() < peopleEditingUntil ? 'editing' : 'viewing';
+  peopleSetPosition({ line }, kind);
+  if (kind === 'editing') { clearTimeout(peopleEditorTick.t); peopleEditorTick.t = setTimeout(() => peopleSetPosition({ line: peopleEditorLine() || line }, 'viewing'), 6500); }
+}
 
 /* ---- the shared compose box ---- */
 // One shared text per conversation (compose:<key>) or draft (draft:<id>).
@@ -224,10 +273,206 @@ function renderPeopleHeader() {
   const me = peopleState.me;
   const others = peopleOthersHere();
   btn.innerHTML = userBubble(me || { name: 'Your profile', glyph: '?', color: '#888' }, 'me');
-  btn.title = (me ? me.name + ' · ' : '') + 'Settings (,)' +
-    (others.length ? ' · also here: ' + others.map(p => p.user.name + ' (' + peopleRouteLabel(p.route) + ')').join(', ') : '');
+  btn.title = (me ? me.name + ' · ' : '') + 'Settings (,)';
   btn.setAttribute('aria-label', (me ? me.name + ' — ' : '') + 'Open settings and profile');
+  // Other people only (design/46, quiet self-presence): their bubbles, in
+  // the order they arrived, at most three and a count.
+  let pb = $('peopleBtn');
+  if (!pb) {
+    pb = document.createElement('button');
+    pb.id = 'peopleBtn';
+    pb.type = 'button';
+    pb.hidden = true;
+    pb.onclick = () => togglePeoplePanel();
+    btn.before(pb);
+  }
+  const shown = others.slice(0, 3);
+  pb.innerHTML = shown.map(p => userBubble(p.user, p.kind === 'typing' ? 'typing' : '')).join('') + (others.length > 3 ? `<span class="people-more">+${others.length - 3}</span>` : '');
+  pb.classList.toggle('has-others', others.length > 0);
+  pb.hidden = !others.length && !peopleFollow;
+  pb.title = others.length ? 'Here now: ' + others.map(p => p.user.name + ' (' + peopleRouteLabel(p.route) + ')').join(', ') + ' · open the people panel' : 'Nobody else is here right now';
+  pb.setAttribute('aria-label', others.length ? others.length + ' other ' + (others.length === 1 ? 'person' : 'people') + ' here — open the people panel' : 'People panel');
+  renderFollowChip();
   renderConversationPresence();
+  renderProjectPresence();
+  if (peoplePanelOpen) renderPeoplePanel();
+  peopleFollowTick();
+}
+
+/* ---- the people panel: who is here, where, and "take me there" ---- */
+let peoplePanelOpen = false;
+function peopleWhereLabel(p) {
+  const base = peopleRouteLabel(p.route).replace(/^in /, '');
+  const pos = p.position || {};
+  const where = p.route.startsWith('file:') && pos.line ? base + ' · line ' + pos.line : base;
+  const doing = p.kind === 'typing' ? 'typing' : p.kind === 'editing' ? 'editing' : 'reading';
+  return { where, doing };
+}
+function peopleCanGo(p) { return !!p && !/^(settings|home)$/.test(p.route) && !p.route.startsWith('draft:'); }
+function togglePeoplePanel(force) {
+  peoplePanelOpen = force === undefined ? !peoplePanelOpen : !!force;
+  let panel = $('peoplePanel');
+  if (!peoplePanelOpen) { if (panel) panel.remove(); return; }
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'peoplePanel';
+    panel.className = 'people-panel surface-popover';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'People here');
+    document.body.appendChild(panel);
+    const close = e => { if (!panel.contains(e.target) && !e.target.closest('#peopleBtn')) togglePeoplePanel(false); };
+    setTimeout(() => document.addEventListener('mousedown', close, { once: true }), 0);
+    panel.addEventListener('keydown', e => { if (e.key === 'Escape') togglePeoplePanel(false); });
+  }
+  renderPeoplePanel();
+  const first = panel.querySelector('button');
+  if (first) first.focus({ preventScroll: true });
+}
+function renderPeoplePanel() {
+  const panel = $('peoplePanel');
+  if (!panel) return;
+  const here = peopleOthersHere();
+  const hereIds = new Set(here.map(p => peopleCanonicalId(p.user.id)));
+  const away = peopleState.users.filter(u => !peopleIsMe(u) && !hereIds.has(peopleCanonicalId(u.id)) && !u.disabled);
+  const ago = at => { const s = Math.max(0, Math.round((Date.now() - at) / 1000)); return s < 45 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min' : Math.round(s / 3600) + ' h'; };
+  const row = p => {
+    const { where, doing } = peopleWhereLabel(p);
+    const id = peopleCanonicalId(p.user.id);
+    const following = peopleFollow && peopleFollow.id === id;
+    const canGo = peopleCanGo(p);
+    return `<div class="pp-row" data-person="${esc(id)}">${userBubble(p.user, p.kind === 'typing' ? 'typing' : '')}
+      <div class="pp-main"><b>${esc(p.user.name)}</b>${(peopleUserById(id) || {}).scope === 'guest' ? '<span class="badge-guest">guest</span>' : ''}<div class="hint">${esc(doing)} · ${esc(where)} · ${ago(p.at)}</div></div>
+      <div class="pp-actions"><button type="button" class="ghost" data-pp="go"${canGo ? '' : ' disabled title="Nothing to open where they are"'}>go</button><button type="button" class="${following ? 'primary' : 'ghost'}" data-pp="follow"${canGo || following ? '' : ' disabled'} title="${following ? 'Stop following' : 'Go where they go, until you navigate yourself'}">${following ? 'following ✓' : 'follow'}</button></div></div>`;
+  };
+  panel.innerHTML = `<div class="pp-head"><b>People</b><span class="hint">${here.length ? here.length + ' here now' : 'nobody else here right now'}</span><button type="button" class="ghost" id="ppClose" aria-label="Close">✕</button></div>
+    <div class="pp-list">${here.map(row).join('')}</div>
+    ${away.length ? `<div class="pp-away"><span class="hint">not here now</span>${away.map(u => `<span class="pp-away-one">${userBubble(u)} ${esc(u.name)}</span>`).join('')}</div>` : ''}
+    <div class="pp-foot hint">Go opens what they are looking at, at their line or message. Follow keeps you with them until you navigate yourself.</div>`;
+  $('ppClose').onclick = () => togglePeoplePanel(false);
+  panel.querySelectorAll('[data-pp]').forEach(b => b.onclick = () => {
+    const id = b.closest('.pp-row').dataset.person;
+    const p = here.find(x => peopleCanonicalId(x.user.id) === id);
+    if (!p) return;
+    if (b.dataset.pp === 'go') { peopleGoTo(p); togglePeoplePanel(false); }
+    else if (peopleFollow && peopleFollow.id === id) peopleStopFollowing('stopped');
+    else peopleStartFollowing(p);
+  });
+}
+
+/* ---- take me there ---- */
+// Route → navigation. Same place already open: only the position moves.
+let peopleNavigatingByFollow = false;
+async function peopleGoTo(p, { byFollow = false } = {}) {
+  if (!p || !peopleCanGo(p)) return false;
+  const route = p.route, pos = p.position || {};
+  peopleNavigatingByFollow = byFollow;
+  try {
+    if (route.startsWith('conversation:')) {
+      const key = route.slice(13);
+      const here = typeof viewKind !== 'undefined' && viewKind === 'conversation' && typeof activeRel !== 'undefined' && activeRel === key;
+      if (here) { if (pos.entry) peopleScrollToEntry(pos.entry); return true; }
+      if (typeof open !== 'function') return false;
+      await open(key, pos.entry ? 'entry:' + pos.entry : undefined);
+      return true;
+    }
+    if (route.startsWith('file:')) {
+      const file = route.slice(5);
+      const here = typeof fileWs !== 'undefined' && fileWs && fileWs.path === file && fileWs.editor;
+      if (here) { if (pos.line && fileWs.editor.gotoLine) { try { fileWs.editor.gotoLine(pos.line); } catch {} } return true; }
+      if (typeof openLiveFile !== 'function') return false;
+      const project = typeof ProjectScope !== 'undefined' && typeof projects !== 'undefined' ? ProjectScope.fileProject({ path: file }, projects || []) : null;
+      await openLiveFile(file, { project: project && project !== ProjectScope.NONE ? project : null, line: pos.line || null });
+      return true;
+    }
+    if (route.startsWith('project:')) {
+      const name = route.slice(8);
+      if (typeof viewKind !== 'undefined' && viewKind === 'project' && typeof projectOverviewName !== 'undefined' && projectOverviewName === name) return true;
+      if (typeof showProjectOverview === 'function') { await showProjectOverview(name); return true; }
+    }
+  } catch (e) { if (typeof errToast === 'function') errToast(e.message || 'could not go there'); }
+  finally { setTimeout(() => { peopleNavigatingByFollow = false; }, 0); }
+  return false;
+}
+function peopleScrollToEntry(eid) {
+  const view = $('view');
+  const el = view && [...view.querySelectorAll(`#conversationTranscript .msg[data-eid="${CSS.escape(eid)}"]`)].find(e => e.getClientRects().length);
+  if (!el) return false;
+  view.scrollTo({ top: view.scrollTop + el.getBoundingClientRect().top - view.getBoundingClientRect().top - 12, behavior: 'smooth' });
+  el.classList.add('presence-landing');
+  setTimeout(() => el.classList.remove('presence-landing'), 1600);
+  return true;
+}
+
+/* ---- follow: go where they go, until I navigate myself ---- */
+let peopleFollow = null; // { id, name, sig, away }
+function peoplePresenceOf(id) { return peopleOthersHere().find(p => peopleCanonicalId(p.user.id) === id) || null; }
+function peopleStartFollowing(p) {
+  const id = peopleCanonicalId(p.user.id);
+  peopleFollow = { id, name: p.user.name, sig: '', away: false };
+  renderPeopleHeader();
+  peopleFollowTick(true);
+}
+function peopleStopFollowing(why) {
+  if (!peopleFollow) return;
+  const name = peopleFollow.name;
+  peopleFollow = null;
+  renderPeopleHeader();
+  if (why === 'stopped' && typeof toast === 'function') toast('no longer following ' + name);
+}
+// Presence moved: if the person I follow is somewhere new, go there.
+function peopleFollowTick(force = false) {
+  if (!peopleFollow) return;
+  const p = peoplePresenceOf(peopleFollow.id);
+  if (!p) { if (!peopleFollow.away) { peopleFollow.away = true; renderFollowChip(); } return; }
+  if (peopleFollow.away) { peopleFollow.away = false; renderFollowChip(); }
+  const sig = p.route + '\0' + JSON.stringify(p.position || null);
+  if (!force && sig === peopleFollow.sig) return;
+  peopleFollow.sig = sig;
+  if (peopleCanGo(p)) peopleGoTo(p, { byFollow: true });
+}
+// My own navigation ends the following — unless the follow caused it.
+function peopleFollowRouteChanged() {
+  if (!peopleFollow || peopleNavigatingByFollow) return;
+  const p = peoplePresenceOf(peopleFollow.id);
+  // Landing where they are (open() fired the route event) is not leaving.
+  if (p && p.route === peopleCurrentRoute()) return;
+  peopleStopFollowing('navigated');
+}
+function renderFollowChip() {
+  let chip = $('followChip');
+  if (!peopleFollow) { if (chip) chip.remove(); return; }
+  if (!chip) {
+    chip = document.createElement('button');
+    chip.id = 'followChip';
+    chip.type = 'button';
+    chip.className = 'follow-chip';
+    chip.onclick = () => peopleStopFollowing('stopped');
+    const pb = $('peopleBtn');
+    if (pb) pb.after(chip); else document.querySelector('header')?.appendChild(chip);
+  }
+  const u = peopleUserById(peopleFollow.id) || { name: peopleFollow.name, glyph: '?', color: '#888' };
+  chip.innerHTML = `${userBubble(u)}<span>${peopleFollow.away ? 'waiting for ' + esc(u.name) : 'following ' + esc(u.name)}</span><span class="follow-x" aria-hidden="true">✕</span>`;
+  chip.title = (peopleFollow.away ? u.name + ' is not here right now; you will follow when they return.' : 'You go where ' + u.name + ' goes.') + ' Click to stop.';
+}
+
+/* ---- the project page: who is in this project right now ---- */
+function peopleInProject(name) {
+  const cwd = typeof projectOverview !== 'undefined' && projectOverview && projectOverview.project === name ? String(projectOverview.cwd || '').replace(/\/$/, '') : '';
+  const list = typeof sessions !== 'undefined' ? sessions : [];
+  return peopleOthersHere().filter(p => {
+    if (p.route === 'project:' + name) return true;
+    if (p.route.startsWith('conversation:')) { const s = list.find(x => x.key === p.route.slice(13)); return !!s && (typeof projectOf === 'function' ? projectOf(s) : s.project) === name; }
+    if (p.route.startsWith('file:')) { const f = p.route.slice(5); return !!cwd && (f === cwd || f.startsWith(cwd + '/')); }
+    return false;
+  });
+}
+function renderProjectPresence() {
+  const host = $('pHereNow');
+  if (!host || typeof projectOverviewName === 'undefined' || !projectOverviewName) return;
+  const here = peopleInProject(projectOverviewName);
+  host.hidden = !here.length;
+  host.innerHTML = here.map(p => { const { where, doing } = peopleWhereLabel(p); return `<button type="button" class="here-now" data-person="${esc(peopleCanonicalId(p.user.id))}" title="${esc(p.user.name + ' is ' + doing + ' ' + where + ' — go there')}">${userBubble(p.user, p.kind === 'typing' ? 'typing' : '')}<span>${esc(p.user.name)}</span><span class="hint">${esc(doing)} · ${esc(where)}</span></button>`; }).join('');
+  host.querySelectorAll('.here-now').forEach(b => b.onclick = () => { const p = here.find(x => peopleCanonicalId(x.user.id) === b.dataset.person); if (p) peopleGoTo(p); });
 }
 // "Lilly is typing…" under the conversation title; bubbles on list rows.
 function renderConversationPresence() {
@@ -242,21 +487,26 @@ function renderConversationPresence() {
   host.innerHTML = here.map(p => userBubble(p.user, p.kind === 'typing' ? 'typing' : '')).join('') + `<span class="presence-label">${esc(label)}</span>`;
 }
 function renderPresenceMarks() {
-  const byKey = new Map();
+  const byKey = new Map(), byFile = new Map();
   for (const p of peopleState.people) {
-    if (!peopleState.me || peopleIsMe(p.user) || !p.route.startsWith('conversation:')) continue;
-    const key = p.route.slice(13);
-    if (!byKey.has(key)) byKey.set(key, []);
-    if (!byKey.get(key).some(x => peopleCanonicalId(x.id) === peopleCanonicalId(p.user.id))) byKey.get(key).push(p.user);
+    if (!peopleState.me || peopleIsMe(p.user)) continue;
+    const bucket = p.route.startsWith('conversation:') ? byKey : p.route.startsWith('file:') ? byFile : null;
+    if (!bucket) continue;
+    const id = p.route.slice(p.route.indexOf(':') + 1);
+    if (!bucket.has(id)) bucket.set(id, []);
+    if (!bucket.get(id).some(x => peopleCanonicalId(x.user.id) === peopleCanonicalId(p.user.id))) bucket.get(id).push(p);
   }
-  for (const el of document.querySelectorAll('[data-presence-key]')) {
-    const list = byKey.get(el.dataset.presenceKey) || [];
-    el.innerHTML = list.map(u => userBubble(u)).join('');
+  const fill = (el, list) => {
+    el.innerHTML = list.map(p => userBubble(p.user, p.kind === 'typing' || p.kind === 'editing' ? 'typing' : '')).join('');
+    el.title = list.length ? list.map(p => p.user.name + (p.position && p.position.line ? ' · line ' + p.position.line : '')).join(', ') : '';
     el.hidden = !list.length;
-  }
+  };
+  for (const el of document.querySelectorAll('[data-presence-key]')) fill(el, byKey.get(el.dataset.presenceKey) || []);
+  for (const el of document.querySelectorAll('[data-presence-file]')) fill(el, byFile.get(el.dataset.presenceFile) || []);
 }
-// Rows in lists call this: a slot the presence marks fill in.
+// Rows in lists call these: a slot the presence marks fill in.
 function presenceSlotHtml(key) { return `<span class="presence-slot" data-presence-key="${esc(key)}" hidden></span>`; }
+function presenceFileSlotHtml(file) { return `<span class="presence-slot" data-presence-file="${esc(file)}" hidden></span>`; }
 
 /* ---- "who" filter on the home list ---- */
 // Mine: I wrote into it, or nobody is recorded and I am this machine's owner.

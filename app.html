@@ -3608,7 +3608,7 @@ function fileActivityHtml(project) {
     const actor = f.actor === 'agent' ? 'agent' : 'human';
     const age = `<span class="ag-age">${esc((fileActor === 'both' ? actor + ' · ' : '') + verb + ' ' + tinyAge(now - f.at))}</span>`;
     return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(attributed === LOOSE_PROJECT ? '' : attributed)}" data-file-conv="${esc(f.key || '')}" title="${esc(f.path + '\n' + actor + ' · ' + verb + ' · ' + new Date(f.at).toLocaleString())}">` +
-      `<button type="button" class="ag-main ag-file-open"><span class="ag-title"><span>${esc(name)}</span>${dir ? '' : age}</span>` +
+      `<button type="button" class="ag-main ag-file-open"><span class="ag-title"><span>${esc(name)}</span>${presenceFileSlotHtml(f.path)}${dir ? '' : age}</span>` +
       (dir ? `<span class="ag-sub"><span class="ag-dir">${esc(dir)}</span>${age}</span>` : '') + '</button>' +
       `<span class="ag-acts"><button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
   }).join('');
@@ -7577,6 +7577,7 @@ function renderProjectPanel(d) {
   $('view').innerHTML = `<div class="project-overview">
     ${miniGanttHtml(heroRows)}
     <div class="ptitle"><h1 id="pTitleBig" title="${esc(pTitleHint(displayTitle))}">${esc(displayTitle)}</h1><button id="pNew" class="primary pnewbtn" title="Start a new conversation in ${esc(d.project)} — you review the context before it goes">+ new in ${esc(d.project)}</button></div>
+    <div id="pHereNow" class="here-now-strip" hidden aria-label="People in this project right now"></div>
     <section class="psection pdesc">
       <div class="pmeta ps-path">${esc(d.cwd || '')}</div>
       ${!d.conversations ? '<p>No conversations yet. Start a conversation when you are ready.</p>' : ''}
@@ -7613,6 +7614,7 @@ function renderProjectPanel(d) {
   </div>`;
   wireMiniGantt($('view'), heroRows, color, 'p:' + d.project);
   wireProjectSwitch(d.project);
+  if (typeof renderProjectPresence === 'function') renderProjectPresence();
   $('pPurpose').onclick = () => editProjectPurpose(d.project);
   if (!d.conversations) $('pNew').textContent = 'Start conversation';
   $('pTitleBig').ondblclick = e => { e.preventDefault(); startProjectTitleEdit(d.project); };

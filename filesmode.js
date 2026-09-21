@@ -317,6 +317,7 @@ function fileWsBanner(ws, text, actions = []) {
 
 function fileWsAfterMount(ws, opts) {
   if (fileWs !== ws || !ws.editor) return;
+  if (typeof renderPresenceMarks === 'function') renderPresenceMarks();
   let line = opts.line || ws.line || null;
   if (!line) { const saved = Number(localStorage.getItem('aiconvo.cursor:' + ws.path)); if (saved > 1) line = saved; }
   if (line && ws.editor.gotoLine) { try { ws.editor.gotoLine(line); } catch {} }

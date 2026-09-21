@@ -111,9 +111,12 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   // The header chip names each person, and shows the other one arriving.
   await owner.until('window.aiconvoMe && window.aiconvoMe.role === "owner"');
   await lilly.until('window.aiconvoMe && window.aiconvoMe.name === "Lilly"');
+  // Quiet self-presence: my own bubble is the settings button; the people
+  // button shows only the others.
   await owner.until('document.querySelector("#peopleBtn.has-others .user-bubble:not(.me)")');
-  assert.equal(await owner.evaluate('document.querySelector("#peopleBtn .user-bubble.me").textContent'), await owner.evaluate('window.aiconvoMe.glyph'));
-  assert.equal(await lilly.evaluate('document.querySelector("#peopleBtn .user-bubble.me").textContent'), 'L');
+  assert.equal(await owner.evaluate('document.querySelector("#settingsBtn .user-bubble.me").textContent'), await owner.evaluate('window.aiconvoMe.glyph'));
+  assert.equal(await lilly.evaluate('document.querySelector("#settingsBtn .user-bubble.me").textContent'), 'L');
+  assert.equal(await owner.evaluate('document.querySelectorAll("#peopleBtn .user-bubble.me").length'), 0);
 
   // Both open the same conversation; Lilly types; the owner's box follows,
   // with Lilly's name over her caret and "typing" in the header.
@@ -182,5 +185,41 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   await owner.until(`!!document.querySelector('.share-dialog select[data-subject="user:' + window.aiconvoMe.id.replace(window.aiconvoMe.id, '') + '"]') || document.querySelectorAll('.share-dialog select[data-subject]').length === 1`);
   assert.equal(await owner.evaluate(`document.querySelector('.share-dialog h3').textContent`), 'Who can see this conversation');
   await owner.evaluate(`document.querySelector('#shareClose').click(); true`);
+
+  // ---- the people panel: where Lilly is, "go", and following her ----
+  // Lilly opens the shared conversation; the owner, on the home page, sees
+  // her in the people button, opens the panel, and goes where she is.
+  await owner.go(base + '/');
+  await lilly.go(base + '/#' + encodeURIComponent(key));
+  await lilly.until('viewKind === "conversation" && activeRel === ' + JSON.stringify(key));
+  await owner.until(`peopleOthersHere().some(p => p.route === 'conversation:' + ${JSON.stringify(key)})`);
+  await owner.evaluate('togglePeoplePanel(true); true');
+  await owner.until(`document.querySelector('#peoplePanel .pp-row b')?.textContent === 'Lilly'`);
+  assert.match(await owner.evaluate(`document.querySelector('#peoplePanel .pp-row .hint').textContent`), /reading · “/);
+  await owner.evaluate(`document.querySelector('#peoplePanel [data-pp=go]').click(); true`);
+  await owner.until('viewKind === "conversation" && activeRel === ' + JSON.stringify(key));
+  assert.equal(await owner.evaluate('!!document.querySelector("#peoplePanel")'), false, 'go closes the panel');
+
+  // Follow: Lilly moves to the file; the owner arrives there by himself.
+  await owner.evaluate(`peopleStartFollowing(peopleOthersHere().find(p => p.user.name === 'Lilly')); true`);
+  await owner.until(`document.querySelector('#followChip')?.textContent.includes('following Lilly')`);
+  await lilly.go(base + '/' + fileHash);
+  await lilly.until('!!(fileWs && fileWs.editor)');
+  await owner.until('viewKind === "file" && fileWs && fileWs.path === ' + JSON.stringify(file), 12000);
+  assert.ok(await owner.evaluate('!!peopleFollow'), 'arriving by follow keeps following');
+  // The file head and the file rows mark her presence.
+  await owner.until(`[...document.querySelectorAll('.live-file-head [data-presence-file]')].some(el => !el.hidden && el.textContent.includes('L'))`);
+  // Lilly moves her cursor: the owner's editor follows her line.
+  await lilly.evaluate(`fileWs.editor.gotoLine(3); peopleEditorTick(); true`);
+  await owner.until('peopleOthersHere().find(p => p.user.name === "Lilly")?.position?.line === 3', 8000);
+  await owner.until('fileWs && fileWs.editor && fileWs.editor.selection().line === 3', 8000);
+  // The owner navigates on his own: following ends.
+  await owner.go(base + '/');
+  await owner.until('viewKind !== "file"');
+  await owner.until('!peopleFollow && !document.querySelector("#followChip")');
+  // The project page says who is in the project right now.
+  await owner.go(base + '/#project=shared');
+  await owner.until(`document.querySelector('#pHereNow') && !document.querySelector('#pHereNow').hidden && document.querySelector('#pHereNow').textContent.includes('Lilly')`, 8000);
+
   assert.deepEqual(exceptions.filter(e => !/ResizeObserver/.test(e)), [], 'no uncaught errors in either browser');
 });

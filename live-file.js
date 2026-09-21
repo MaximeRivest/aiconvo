@@ -42,6 +42,7 @@ function liveFileHead(ws) {
   return `<header class="live-file-head">
     <button id="liveBack" title="${fgAttr(liveBackLabel(ws).slice(2))}: return to the previous view"><span class="lf-back-arrow">←</span><span class="lf-wide">${esc(liveBackLabel(ws).slice(2))}</span></button>
     <b id="ffTitle" title="${fgAttr(ws.path)}">${esc(liveFileLabel(ws))}</b>
+    ${typeof presenceFileSlotHtml === 'function' ? presenceFileSlotHtml(ws.path) : ''}
     <span id="docStatus" role="status">Opening…</span>
     <span id="liveServiceStatus" title="Built-in language support; no language server connected">${esc(liveLanguage(ws.path))}</span>
     ${/\.html?$/i.test(ws.path) ? '<div class="lf-html-switch" role="group" aria-label="HTML view"><button id="htmlSource" aria-pressed="true">Source</button><button id="htmlPreview" aria-pressed="false">Preview</button></div>' : ''}
