@@ -35,6 +35,7 @@ async function peopleRefreshIdentity() {
     const data = await response.json();
     if (seq !== peopleIdentityRequest || !data.me) return;
     peopleState.aliases = data.aliases || {};
+    peopleState.walls = data.walls || null;
     peopleState.users = data.users || peopleState.users;
     peopleState.groups = data.groups || peopleState.groups;
     peopleState.me = data.me; window.aiconvoMe = data.me;
@@ -361,7 +362,7 @@ function inviteSectionHtml(project) {
     <h3>Invite someone to ${esc(project)}</h3>
     <p class="hint">For a collaborator or a hire who is not part of this household: they get this project only. They can work in the browser here right away, and connect their own aiconvo later so the project's conversations and memory copy both ways.</p>
     <div class="row"><input type="text" id="invName" placeholder="their name" maxlength="60"><select id="invRight"><option value="see">can read</option><option value="act">can read and act</option></select><button type="button" id="invMake">make invite link</button></div>
-    <div class="warn" id="invWarn" hidden>With <b>act</b>, their agents run as <b>your account</b> on this machine: hidden things stay hidden in the app, but an agent they drive could still read files outside this project. Give <b>read</b> to someone you do not fully trust, and let them act on their own machine.</div>
+    <div class="warn" id="invWarn" hidden></div>
     <div id="invOut"></div>
     <details class="set-more" id="invPolicy"><summary>what leaves this machine when the project syncs</summary><p class="hint">Conversations hold tool output. Before one is copied to a collaborator's machine, tool steps that touched files outside the project folder — or that look like they could hold a secret — are blanked.</p>
       <label class="set-check"><input type="radio" name="invPolicy" value="redact"> blank those steps (default)</label>
@@ -372,6 +373,11 @@ function inviteSectionHtml(project) {
 }
 function bindInviteSection(dlg, project) {
   const right = dlg.querySelector('#invRight'), warn = dlg.querySelector('#invWarn'), out = dlg.querySelector('#invOut');
+  // What "act" means here depends on whether this machine can build walls.
+  const walls = peopleState.walls || {};
+  warn.innerHTML = walls.available
+    ? `With <b>act</b>, everything they run — agents, commands, notebook cells — starts inside a sandbox: this project's folder read-write, the rest of this machine invisible (no <code>~/.ssh</code>, no other projects, no keys). Their agents use your model subscriptions through a key proxy that never lets the key into the sandbox${walls.providers && walls.providers.length ? ' (' + walls.providers.slice(0, 4).join(', ') + (walls.providers.length > 4 ? '…' : '') + ')' : ''}. Files they write are owned by your account; their commits carry their name.`
+    : `With <b>act</b>, their agents run as <b>your account</b> on this machine with no sandbox (bubblewrap is not installed here): hidden things stay hidden in the app, but an agent they drive could read files outside this project. Give <b>read</b> to someone you do not fully trust, or install bubblewrap first.`;
   right.onchange = () => { warn.hidden = right.value !== 'act'; };
   dlg.querySelector('#invMake').onclick = async () => {
     const name = dlg.querySelector('#invName').value.trim();
@@ -562,6 +568,7 @@ function panePeople() {
       ${userBubble(u)}
       <div class="person-main"><b>${esc(u.name)}</b>${u.scope === 'guest' ? '<span class="badge-guest">guest</span>' : ''}${me && u.id === me.id ? ' <span class="hint">(you)</span>' : ''}<div class="hint">${esc(roleWord(u))}${u.groups.length ? ' · ' + esc(u.groups.join(', ')) : ''}${u.disabled ? ' · disabled' : ''}</div></div>
       <div class="person-actions">
+        ${manages && u.scope === 'guest' ? `<button type="button" class="ghost" data-act="stop" title="Stop every agent and command this person is running here, right now">stop their work</button>` : ''}
         ${manages && u.role !== 'owner' ? `<button type="button" class="ghost" data-act="scope">${u.scope === 'guest' ? 'make household member' : 'make guest'}</button>` : ''}
         ${(manages || (me && u.id === me.id)) && !(u.role === 'owner' && !owner) ? `<button type="button" class="ghost" data-act="invite">new device link</button>` : ''}
         ${manages && !(u.role === 'owner' && !owner) ? `<button type="button" class="ghost" data-act="rename">rename</button>` : ''}
@@ -584,7 +591,7 @@ function panePeople() {
       <div class="set-group-head"><h3>groups</h3><button type="button" class="ghost" id="setGroupAdd">new group</button></div>
       <div id="setGroupList">${peopleState.groups.length ? peopleState.groups.map(g => `<div class="person-row" data-gid="${esc(g.id)}"><span class="user-bubble group">#</span><div class="person-main"><b>${esc(g.name)}</b><div class="hint">${esc(g.id)} · ${peopleState.users.filter(u => u.groups.includes(g.id)).map(u => u.name).join(', ') || 'nobody yet'}</div></div><div class="person-actions"><button type="button" class="ghost" data-gact="remove">✕</button></div></div>`).join('') : '<span class="hint">none — a group lets you share a project with several people at once (say, a department).</span>'}</div>
     </div>` : ''}
-    <details class="set-more"><summary>how sharing works</summary><p>Everything on a machine is shared with everyone admitted to it, unless its owner hides it (the ⊘ button on a conversation or a project). Hidden things leave the lists, search and memory of the people they are hidden from. The owner of the machine — the account the agents run as — always sees everything on it; these are polite walls between people who share a computer, not vaults. Who typed each message, saved each file and vouched each note is recorded by name.</p><p>A <b>guest</b> is the other way round: someone invited to one project (from the project's sharing dialog) sees nothing on this machine except what is listed for them. Guests may connect their own aiconvo; the project's conversations and memory then copy both ways, and each machine only ever writes its own.</p></details>`;
+    <details class="set-more"><summary>how sharing works</summary><p>Everything on a machine is shared with everyone admitted to it, unless its owner hides it (the ⊘ button on a conversation or a project). Hidden things leave the lists, search and memory of the people they are hidden from. The owner of the machine — the account the agents run as — always sees everything on it; these are polite walls between people who share a computer, not vaults. Who typed each message, saved each file and vouched each note is recorded by name.</p><p>A <b>guest</b> is the other way round: someone invited to one project (from the project's sharing dialog) sees nothing on this machine except what is listed for them, and everything they run here starts inside a sandbox that holds only that project's folder${peopleState.walls && peopleState.walls.available ? '' : ' (<b>not on this machine</b>: bubblewrap is not installed, so guest agents would run unwalled)'}. Guests may connect their own aiconvo; the project's conversations and memory then copy both ways, and each machine only ever writes its own.</p></details>`;
 }
 function bindPanePeople(root) {
   const status = t => { const el = $('setPeopleStatus'); if (el) el.innerHTML = t; };
@@ -611,6 +618,7 @@ function bindPanePeople(root) {
     if (act === 'rename') { const name = prompt('New name:', u.name); if (!name || !name.trim()) return; out = await call('update', { id, name: name.trim() }); }
     if (act === 'groups') { const g = prompt('Groups, comma separated (short names, e.g. kids, eng):', u.groups.join(', ')); if (g === null) return; out = await call('update', { id, groups: g.split(',').map(x => x.trim()).filter(Boolean) }); }
     if (act === 'role') out = await call('update', { id, role: u.role === 'admin' ? 'member' : 'admin' });
+    if (act === 'stop') { out = await call('stop', { id }); if (out) toast((out.stopped || 0) + ' process' + (out.stopped === 1 ? '' : 'es') + ' stopped'); return; }
     if (act === 'scope') { const guest = u.scope !== 'guest'; if (!confirm(guest ? u.name + ' will see only the projects listed for them.' : u.name + ' will see everything on this machine that is not hidden, like the household.')) return; out = await call('update', { id, scope: guest ? 'guest' : 'household' }); }
     if (act === 'disable') out = await call('update', { id, disabled: !u.disabled });
     if (act === 'transfer') { if (!confirm('Make ' + u.name + ' the owner of this machine? You become an admin. The install token follows them.')) return; out = await call('transfer', { id }); }
