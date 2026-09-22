@@ -24,6 +24,7 @@ function fixture() {
     extract('async function open(rel, scroll,', '// ---- distillation ----'),
     extract('async function renderConv(scroll) {', '// ---- trace machinery ----'),
     extract('function computeTrace(d) {', '\nconst compareCache'),
+    extract('// ---- reply speed ----', '// Put text on the clipboard'),
     extract('function msgBlock(m, hl, keepOpen', '// Every bash fence'),
     extract("$('view').addEventListener('click', async e => {", '// ---- transcript editing ----'),
     extract('async function headlessSendFromComposer(', '// One server-side model set'),

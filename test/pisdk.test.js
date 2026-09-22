@@ -25,7 +25,21 @@ function fakeSdk(config = {}) {
   const sessions = [], runtimes = [], services = [], signatures = new Map();
   let serial = 0;
   function manager(file, cwd = '/virtual/project') {
-    return { getCwd: () => cwd, getSessionFile: () => file, flushed: true };
+    // A minimal entry tree: pi appends messages after its listeners ran and
+    // custom entries whenever an integrator asks (author, reply speed).
+    const entries = [];
+    let leafId = null;
+    const append = entry => {
+      const stored = { ...entry, id: 'e' + ++serial, parentId: leafId, timestamp: new Date().toISOString() };
+      entries.push(stored);
+      leafId = stored.id;
+      return stored.id;
+    };
+    return { getCwd: () => cwd, getSessionFile: () => file, flushed: true, entries,
+      appendCustomEntry: (customType, data) => append({ type: 'custom', customType, data }),
+      appendMessage: message => append({ type: 'message', message }),
+      getLeafId: () => leafId,
+      getBranch: () => entries.slice() };
   }
   class Session {
     constructor(sm) {
@@ -583,6 +597,51 @@ test('timed dialogs close on the proxy and preserve the automatic cancellation c
   next.resolve();
   await run.done;
   assert.equal(run.uiAutoCancelled, 1);
+});
+
+test('reply speed is measured at the source and stored once per run with the reply entry ids', async t => {
+  const chunk = n => 'x'.repeat(n);
+  const reply = (ts, text) => ({ role: 'assistant', provider: 'fake', model: 'one', timestamp: ts, stopReason: 'stop',
+    usage: { output: 50, reasoning: 0 }, content: [{ type: 'text', text }] });
+  const { proxy, workers } = harness(t, { prompt: async (s, message) => {
+    const sm = s.sessionManager;
+    s.start();
+    s.emit({ type: 'turn_start' });
+    s.emit({ type: 'message_start', message: { role: 'user', content: message } });
+    s.emit({ type: 'message_end', message: { role: 'user', content: message } });
+    sm.appendMessage({ role: 'user', content: message });
+    for (const ts of [1000, 1000]) { // Timestamp collisions must not attach both samples to one reply.
+      const message = reply(ts, chunk(120));
+      s.emit({ type: 'message_start', message });
+      s.emit({ type: 'message_update', message, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: chunk(20) } });
+      await delay(15);
+      s.emit({ type: 'message_update', message, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: chunk(100) } });
+      s.emit({ type: 'message_end', message });
+      sm.appendMessage(message);
+    }
+    s.finish();
+  } });
+  await proxy.piHeadlessRun(target('speed'), { message: 'go', author: { id: 'u_max', name: 'Max' } }).done;
+  const entries = workers[0].sdk.sessions[0].sessionManager.entries;
+  const speed = entries.filter(e => e.type === 'custom' && e.customType === 'aiconvo-speed');
+  assert.equal(speed.length, 1, 'one entry per run, appended after the replies');
+  assert.equal(entries.indexOf(speed[0]), entries.length - 1);
+  const { samples } = speed[0].data;
+  assert.equal(speed[0].data.v, 1);
+  assert.equal(samples.length, 2);
+  const replyEntries = entries.filter(e => e.type === 'message' && e.message.role === 'assistant');
+  assert.deepEqual(samples.map(s => s.entryId), replyEntries.map(e => e.id));
+  for (const sample of samples) {
+    assert.equal(sample.provider, 'fake');
+    assert.equal(sample.model, 'one');
+    assert.equal(sample.thinkingLevel, 'off');
+    assert.deepEqual({ chars: sample.text.chars, timedChars: sample.text.timedChars, chunks: sample.text.chunks }, { chars: 120, timedChars: 100, chunks: 2 });
+    assert.ok(sample.text.ms >= 10 && sample.text.ms < 1000, 'timed between the two chunks: ' + sample.text.ms);
+    assert.ok(sample.waitMs >= 0);
+    assert.deepEqual(sample.usage, { output: 50, reasoning: 0 });
+  }
+  // The author entry still sits right before the prompt.
+  assert.equal(entries[0].customType, 'aiconvo-author');
 });
 
 test('warm startup keeps extension flags, name, system prompt, and per-child environment', async t => {

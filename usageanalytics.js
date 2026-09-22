@@ -8,11 +8,15 @@ const path = require('path');
 const os = require('os');
 const readline = require('readline');
 const { execFileSync } = require('child_process');
+const responseSpeed = require('./responsespeed.js');
 
 let DatabaseSync = null;
 try { ({ DatabaseSync } = require('node:sqlite')); } catch {}
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2; // v2: reply speed samples
+// A per-model characters-per-token ratio is trusted from this many clean
+// replies; until then the default ratio applies and readouts say so.
+const MIN_CALIBRATION_SAMPLES = 10;
 const BILLING_MODES = new Set(['api', 'subscription', 'free', 'local', 'unknown']);
 const SUBSCRIPTION_PROVIDERS = new Set([
   'openai-codex', 'github-copilot', 'claude-code', 'kimi-coding',
@@ -223,8 +227,42 @@ function loadPricingCatalog(options = {}) {
   return catalog;
 }
 
+function speedPart(raw) {
+  if (!raw || !['chars', 'timedChars', 'chunks'].every(k => Number.isSafeInteger(raw[k]) && raw[k] >= 0)
+    || !Number.isFinite(raw.ms) || raw.ms < 0 || raw.timedChars > raw.chars
+    || (raw.timedChars > 0 && raw.chunks < 2)) return null;
+  return { chars: raw.chars, timedChars: raw.timedChars, ms: raw.ms, chunks: raw.chunks };
+}
+
+// One stored reply-speed sample (pisdk-runtime.js writes them) as a flat
+// row. Provider and model fall back to the file's current model, like
+// usage facts do.
+function normalizeSpeedSample(raw, fallback = {}) {
+  const s = raw && typeof raw === 'object' ? raw : {};
+  const usage = s.usage && typeof s.usage === 'object' ? s.usage : {};
+  const text = speedPart(s.text), thinking = speedPart(s.thinking), tool = speedPart(s.tool);
+  if (!text || !thinking || !tool || !Number.isFinite(s.at) || s.at <= 0
+    || [s.waitMs, s.startMs].some(v => v != null && (!Number.isFinite(v) || v < 0))) return null;
+  return {
+    entryId: typeof s.entryId === 'string' ? s.entryId : null,
+    at: number(s.at),
+    provider: String(s.provider || fallback.provider || 'unknown'),
+    model: String(s.model || fallback.model || 'unknown'),
+    stopReason: String(s.stopReason || ''),
+    thinkingLevel: s.thinkingLevel == null ? null : String(s.thinkingLevel),
+    waitMs: s.waitMs == null ? null : number(s.waitMs),
+    startMs: s.startMs == null ? null : number(s.startMs),
+    text, thinking, tool,
+    usage: { output: number(usage.output), reasoning: Number.isFinite(usage.reasoning) && usage.reasoning >= 0 ? usage.reasoning : null },
+  };
+}
+
+// Facts (token usage per model call) and reply-speed samples from one
+// transcript. Speed entries name the reply they measured, so a copied fork
+// yields the same sample key and counts once.
 async function parseUsageFile(file, context = {}, catalog = new PricingCatalog()) {
   const facts = [];
+  const speed = [];
   const source = context.source === 'claude' ? 'claude' : 'pi';
   let currentProvider = null;
   let currentModel = null;
@@ -268,6 +306,17 @@ async function parseUsageFile(file, context = {}, catalog = new PricingCatalog()
       } else if ((d.type === 'compaction' || d.type === 'branch_summary') && d.usage) {
         rawUsage = d.usage;
         category = d.type === 'compaction' ? 'compaction' : 'branch-summary';
+      } else if (d.type === 'custom' && d.customType === 'aiconvo-speed' && d.data?.v === 1 && Array.isArray(d.data.samples)) {
+        d.data.samples.forEach((raw, i) => {
+          const sample = normalizeSpeedSample(raw, { provider: currentProvider, model: currentModel });
+          if (!responseSpeed.sampleHasContent(sample)) return;
+          // Pi entry ids are only 32 bits; a measurement UUID prevents
+          // unrelated sessions from colliding, while copies still deduplicate.
+          const measurement = d.data.measurementId || String(id) + ':' + String(ts);
+          speed.push({ ...sample, sampleKey: 'speed:' + measurement + '#' + i,
+            ts: sample.at || timestampMs(ts, context.mtimeMs) });
+        });
+        continue;
       }
     } else if (d.type === 'assistant' && d.message && d.message.usage) {
       rawUsage = d.message.usage;
@@ -303,7 +352,7 @@ async function parseUsageFile(file, context = {}, catalog = new PricingCatalog()
       priceSource, priceConfidence,
     });
   }
-  return facts;
+  return { facts, speed };
 }
 
 function normalizeBillingConfig(raw) {
@@ -432,6 +481,90 @@ function aggregateFacts(facts, options = {}) {
   };
 }
 
+// ---- reply speed --------------------------------------------------------
+
+function quantile(sorted, q) {
+  if (!sorted.length) return null;
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos), hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+function distribution(values) {
+  const sorted = values.filter(v => Number.isFinite(v)).sort((a, b) => a - b);
+  if (!sorted.length) return { samples: 0, min: null, p10: null, median: null, p90: null, max: null };
+  return { samples: sorted.length, min: sorted[0], p10: quantile(sorted, 0.1), median: quantile(sorted, 0.5),
+    p90: quantile(sorted, 0.9), max: sorted[sorted.length - 1] };
+}
+function scaled(dist, factor) {
+  const out = { samples: dist.samples };
+  for (const k of ['min', 'p10', 'median', 'p90', 'max']) out[k] = dist[k] == null ? null : dist[k] * factor;
+  return out;
+}
+
+// Per model: how many characters one token is worth (from replies whose
+// hidden share is known), the answer-text rate in characters and estimated
+// tokens per second, and the wait before the first visible text. Rates come
+// from answer text only: streamed tool arguments and visible thinking are
+// counted but often arrive in lumps, which would look like infinite speed.
+function speedStatistics(samples, options = {}) {
+  const defaultRatio = Number.isFinite(options.defaultCharsPerToken) && options.defaultCharsPerToken > 0
+    ? options.defaultCharsPerToken : responseSpeed.DEFAULT_CHARS_PER_TOKEN;
+  const groups = new Map();
+  for (const s of samples) {
+    const key = s.provider + '/' + s.model;
+    if (!groups.has(key)) groups.set(key, { provider: s.provider, model: s.model, ratios: [], rates: [], waits: [], count: 0, lastAt: 0 });
+    const g = groups.get(key);
+    g.count++;
+    g.lastAt = Math.max(g.lastAt, number(s.ts));
+    const ratio = responseSpeed.calibrationOf(s);
+    if (ratio != null) g.ratios.push(ratio);
+    const complete = ['stop', 'length', 'toolUse'].includes(s.stopReason);
+    const rate = complete ? responseSpeed.charsPerSecond(s.text) : null;
+    if (rate != null) g.rates.push(rate);
+    if (complete && s.waitMs != null && s.text.chars) g.waits.push(s.waitMs);
+  }
+  const models = [...groups.values()].map(g => {
+    const ratioDist = distribution(g.ratios);
+    const calibrated = ratioDist.samples >= MIN_CALIBRATION_SAMPLES;
+    const charsPerToken = calibrated ? ratioDist.median : defaultRatio;
+    const chars = distribution(g.rates);
+    return {
+      id: g.provider + '/' + g.model, provider: g.provider, model: g.model,
+      samples: g.count, lastAt: g.lastAt,
+      calibration: { charsPerToken, samples: ratioDist.samples, calibrated },
+      charsPerSecond: chars,
+      tokensPerSecond: scaled(chars, 1 / charsPerToken),
+      waitMs: distribution(g.waits),
+    };
+  }).sort((a, b) => b.tokensPerSecond.samples - a.tokensPerSecond.samples || b.samples - a.samples || a.id.localeCompare(b.id));
+  const calibrations = new Map(models.map(m => [m.id, m.calibration.charsPerToken]));
+  return { models, providers: groupedSpeedStatistics(samples, s => s.provider, calibrations),
+    daily: groupedSpeedStatistics(samples, s => localDay(s.ts || s.at), calibrations).sort((a, b) => a.id.localeCompare(b.id)),
+    defaultCharsPerToken: defaultRatio, minCalibrationSamples: MIN_CALIBRATION_SAMPLES };
+}
+
+// Pool reply observations, not averages/medians of model aggregates. Token
+// rates are converted with each reply's own model ratio before grouping.
+function groupedSpeedStatistics(samples, keyOf, calibrations) {
+  const groups = new Map();
+  for (const s of samples) {
+    const id = keyOf(s);
+    if (!groups.has(id)) groups.set(id, { id, samples: 0, chars: [], tokens: [], waits: [] });
+    const g = groups.get(id);
+    g.samples++;
+    if (!['stop', 'length', 'toolUse'].includes(s.stopReason)) continue;
+    const rate = responseSpeed.charsPerSecond(s.text);
+    if (rate != null) {
+      g.chars.push(rate);
+      g.tokens.push(rate / calibrations.get(s.provider + '/' + s.model));
+    }
+    if (s.waitMs != null && s.text.chars) g.waits.push(s.waitMs);
+  }
+  return [...groups.values()].map(g => ({ id: g.id, samples: g.samples,
+    charsPerSecond: distribution(g.chars), tokensPerSecond: distribution(g.tokens), waitMs: distribution(g.waits) }))
+    .sort((a, b) => b.samples - a.samples || a.id.localeCompare(b.id));
+}
+
 class UsageIndex {
   constructor(dbPath) {
     if (!DatabaseSync) throw new Error('node:sqlite is unavailable');
@@ -439,7 +572,7 @@ class UsageIndex {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;');
     const version = this.db.prepare('PRAGMA user_version').get().user_version;
     if (version !== SCHEMA_VERSION) {
-      this.db.exec('DROP TABLE IF EXISTS usage_owners; DROP TABLE IF EXISTS usage_events; DROP TABLE IF EXISTS usage_files;');
+      this.db.exec('DROP TABLE IF EXISTS usage_owners; DROP TABLE IF EXISTS usage_events; DROP TABLE IF EXISTS usage_speed; DROP TABLE IF EXISTS usage_files;');
       this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
     }
     this.db.exec(`
@@ -454,15 +587,27 @@ class UsageIndex {
         reasoning INTEGER, total_tokens INTEGER, estimated_cost REAL, cost_input REAL, cost_output REAL,
         cost_cache_read REAL, cost_cache_write REAL, price_source TEXT, price_confidence TEXT
       );
+      CREATE TABLE IF NOT EXISTS usage_speed (
+        sample_key TEXT PRIMARY KEY, ts INTEGER NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+        stop_reason TEXT, thinking_level TEXT, wait_ms REAL, start_ms REAL, usage_event_key TEXT,
+        text_chars INTEGER, text_timed INTEGER, text_ms REAL, text_chunks INTEGER,
+        think_chars INTEGER, think_timed INTEGER, think_ms REAL, think_chunks INTEGER,
+        tool_chars INTEGER, tool_timed INTEGER, tool_ms REAL, tool_chunks INTEGER,
+        output_tokens INTEGER, reasoning_tokens INTEGER
+      );
+      -- Owners cover usage events and speed samples alike: the key says which.
       CREATE TABLE IF NOT EXISTS usage_owners (
         event_key TEXT NOT NULL, session_key TEXT NOT NULL,
         PRIMARY KEY (event_key, session_key)
       );
       CREATE INDEX IF NOT EXISTS usage_events_ts ON usage_events(ts);
+      CREATE INDEX IF NOT EXISTS usage_speed_ts ON usage_speed(ts);
       CREATE INDEX IF NOT EXISTS usage_owners_session ON usage_owners(session_key);
     `);
     this.progress = { running: false, total: 0, done: 0, errors: 0, current: null, startedAt: null, finishedAt: null };
     this.syncPromise = null;
+    this.fileUpdates = new Map();
+    this.revision = 0;
   }
 
   status() {
@@ -477,9 +622,20 @@ class UsageIndex {
     return !row || row.mtime_ms !== entry.mtimeMs || row.size !== entry.size || row.project !== project;
   }
 
-  async updateFile(key, entry, absPath, catalog) {
-    let facts = [], error = null;
-    try { facts = await parseUsageFile(absPath, { source: entry.source, mtimeMs: entry.mtimeMs }, catalog); }
+  updateFile(key, entry, absPath, catalog) {
+    // A completion refresh can overlap the background sweep. Serialize
+    // each file so an earlier parse cannot overwrite a newer snapshot.
+    const previous = this.fileUpdates.get(key) || Promise.resolve();
+    const work = previous.catch(() => {}).then(() => this._updateFile(key, entry, absPath, catalog));
+    this.fileUpdates.set(key, work);
+    const clear = () => { if (this.fileUpdates.get(key) === work) this.fileUpdates.delete(key); };
+    work.then(clear, clear);
+    return work;
+  }
+
+  async _updateFile(key, entry, absPath, catalog) {
+    let facts = [], speed = [], error = null;
+    try { ({ facts, speed } = await parseUsageFile(absPath, { source: entry.source, mtimeMs: entry.mtimeMs }, catalog)); }
     catch (e) { error = String(e.message || e).slice(0, 500); }
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -501,11 +657,25 @@ class UsageIndex {
           f.estimatedCost, f.costInput, f.costOutput, f.costCacheRead, f.costCacheWrite, f.priceSource, f.priceConfidence);
         putOwner.run(f.eventKey, key);
       }
+      const putSpeed = this.db.prepare(`INSERT OR REPLACE INTO usage_speed
+        (sample_key,ts,provider,model,stop_reason,thinking_level,wait_ms,start_ms,
+         text_chars,text_timed,text_ms,text_chunks,think_chars,think_timed,think_ms,think_chunks,
+         tool_chars,tool_timed,tool_ms,tool_chunks,output_tokens,reasoning_tokens,usage_event_key)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const s of speed) {
+        putSpeed.run(s.sampleKey, s.ts, s.provider, s.model, s.stopReason, s.thinkingLevel, s.waitMs, s.startMs,
+          s.text.chars, s.text.timedChars, s.text.ms, s.text.chunks,
+          s.thinking.chars, s.thinking.timedChars, s.thinking.ms, s.thinking.chunks,
+          s.tool.chars, s.tool.timedChars, s.tool.ms, s.tool.chunks,
+          s.usage.output, s.usage.reasoning, s.entryId ? 'pi:' + s.entryId + ':assistant' : null);
+        putOwner.run(s.sampleKey, key);
+      }
       this.db.prepare(`INSERT INTO usage_files(session_key,source,mtime_ms,size,project,first_ts,scanned_at,error)
         VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(session_key) DO UPDATE SET source=excluded.source,mtime_ms=excluded.mtime_ms,
         size=excluded.size,project=excluded.project,first_ts=excluded.first_ts,scanned_at=excluded.scanned_at,error=excluded.error`)
         .run(key, entry.source, entry.mtimeMs, entry.size, entry.project || 'Unknown project', entry.firstTs || null, Date.now(), error);
       this.db.exec('COMMIT');
+      this.revision++;
     } catch (e) { this.db.exec('ROLLBACK'); throw e; }
     if (error) throw new Error(error);
   }
@@ -517,8 +687,10 @@ class UsageIndex {
       if (live.has(row.session_key)) continue;
       this.db.prepare('DELETE FROM usage_owners WHERE session_key=?').run(row.session_key);
       this.db.prepare('DELETE FROM usage_files WHERE session_key=?').run(row.session_key);
+      this.revision++;
     }
     this.db.exec('DELETE FROM usage_events WHERE event_key NOT IN (SELECT event_key FROM usage_owners)');
+    this.db.exec('DELETE FROM usage_speed WHERE sample_key NOT IN (SELECT event_key FROM usage_owners)');
     const pending = entries.filter(([key, entry]) => this.needs(entry, key))
       .sort((a, b) => String(b[1].lastTs || '').localeCompare(String(a[1].lastTs || '')));
     if (!pending.length) {
@@ -559,6 +731,31 @@ class UsageIndex {
       JOIN usage_files f ON f.session_key=c.session_key
       WHERE e.ts>=? AND e.ts<=? ORDER BY e.ts`).all(fromMs, toMs);
   }
+
+  // Reply-speed samples in the range, as speedStatistics() reads them.
+  speedSamples(fromMs, toMs) {
+    return this.db.prepare(`
+      WITH chosen AS (
+        SELECT event_key, MIN(session_key) AS session_key FROM usage_owners GROUP BY event_key
+      )
+      SELECT s.ts,s.provider,s.model,s.stop_reason AS stopReason,s.thinking_level AS thinkingLevel,
+        s.wait_ms AS waitMs,s.start_ms AS startMs,
+        s.text_chars,s.text_timed,s.text_ms,s.text_chunks,
+        s.think_chars,s.think_timed,s.think_ms,s.think_chunks,
+        s.tool_chars,s.tool_timed,s.tool_ms,s.tool_chunks,
+        s.output_tokens,s.reasoning_tokens,f.project,e.estimated_cost AS estimatedCost
+      FROM usage_speed s JOIN chosen c ON c.event_key=s.sample_key
+      JOIN usage_files f ON f.session_key=c.session_key
+      LEFT JOIN usage_events e ON e.event_key=s.usage_event_key
+      WHERE s.ts>=? AND s.ts<=? ORDER BY s.ts`).all(fromMs, toMs).map(r => ({
+      ts: r.ts, source: 'pi', estimatedCost: r.estimatedCost, provider: r.provider, model: r.model, stopReason: r.stopReason, thinkingLevel: r.thinkingLevel,
+      waitMs: r.waitMs, startMs: r.startMs, project: r.project,
+      text: { chars: r.text_chars, timedChars: r.text_timed, ms: r.text_ms, chunks: r.text_chunks },
+      thinking: { chars: r.think_chars, timedChars: r.think_timed, ms: r.think_ms, chunks: r.think_chunks },
+      tool: { chars: r.tool_chars, timedChars: r.tool_timed, ms: r.tool_ms, chunks: r.tool_chunks },
+      usage: { output: r.output_tokens, reasoning: r.reasoning_tokens },
+    }));
+  }
 }
 
 function openUsageIndex(dbPath) {
@@ -567,6 +764,7 @@ function openUsageIndex(dbPath) {
 }
 
 module.exports = {
+  MIN_CALIBRATION_SAMPLES,
   PricingCatalog, UsageIndex, aggregateFacts, calculateCost, classifyBilling, loadPricingCatalog,
-  normalizeBillingConfig, normalizeUsage, openUsageIndex, parseUsageFile,
+  normalizeBillingConfig, normalizeSpeedSample, normalizeUsage, openUsageIndex, parseUsageFile, speedStatistics,
 };

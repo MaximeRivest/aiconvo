@@ -145,6 +145,7 @@ async function browseConversationPath(key, id, anchor, { exact = false, history:
       data = await response.json();
       if (!response.ok || data.error) throw Error(data.error || 'Conversation unavailable.');
       readerSessions.set(key, data);
+      learnSpeedCalibration(data.speedCalibration);
     } catch (error) { return errToast(error.message); }
   }
   const trace = data && ConversationFlow.trace(data);
@@ -424,7 +425,7 @@ async function prepareConversationReading(d, scroll) {
     try {
       const res = await fetch('/api/session?id=' + encodeURIComponent(key));
       const source = await res.json();
-      if (res.ok && !source.error) readerSessions.set(key, source);
+      if (res.ok && !source.error) { readerSessions.set(key, source); learnSpeedCalibration(source.speedCalibration); }
       else readerSessions.delete(key);
     } catch { readerSessions.delete(key); } // Never substitute a stale source snapshot.
   }));

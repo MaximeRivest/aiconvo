@@ -46,7 +46,18 @@ export default function (pi: any) {
           Object.assign(result, { content: [], stopReason: 'error', errorMessage: 'Callback lost its prompt mode.' });
           stream.push({ type: 'error', reason: 'error', error: result }); stream.end(); return;
         }
-        stream.push({ type: 'start', partial: result });
+        if (process.env.FIXTURE_SPEED_STREAM && !call) {
+          const text = result.content[0].text;
+          const partial = { ...result, content: [{ type: 'text', text: '' }] };
+          stream.push({ type: 'start', partial });
+          stream.push({ type: 'text_start', contentIndex: 0, partial });
+          partial.content[0].text = text.slice(0, 4);
+          stream.push({ type: 'text_delta', contentIndex: 0, delta: text.slice(0, 4), partial });
+          await new Promise(resolve => setTimeout(resolve, 20));
+          partial.content[0].text = text;
+          stream.push({ type: 'text_delta', contentIndex: 0, delta: text.slice(4), partial });
+          stream.push({ type: 'text_end', contentIndex: 0, content: text, partial });
+        } else stream.push({ type: 'start', partial: result });
         stream.push({ type: 'done', reason: result.stopReason, message: result });
         stream.end();
       });

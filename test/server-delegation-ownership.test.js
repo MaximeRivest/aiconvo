@@ -44,7 +44,7 @@ function runSetup(t) {
     appliedContextBySession: new Map(), agentRunJobs: new Map(), jobChanged() {},
     reindexIfChanged: async () => {}, endLiveRunTail() {}, broadcastRunFinal() {}, maybeSettleFanout() {}, speakRunDone() {},
     piProviderExtraArgs: () => [], pirpc: { stopWarmSession() {} }, agentEnv: () => ({}),
-    runEventForwarder: () => () => {}, inspectDeliverySession: async () => ({ deliveries: new Set(), branch: new Set(['launch']) }),
+    refreshUsageForKey() {}, runEventForwarder: () => () => {}, inspectDeliverySession: async () => ({ deliveries: new Set(), branch: new Set(['launch']) }),
     pisdk: { stopWarmSession() {}, piHeadlessRun(target) { b.targets.push(target); return { done: Promise.resolve() }; } }, targets: [],
     stopRunningAgent: async () => { b.stops++; }, waitFileQuiet: async () => {}, stops: 0,
     appSettings: { simplifyAnswers: false, simplifyPrompt: '' },
@@ -57,7 +57,7 @@ const message = ids => ({ customType: 'delegation-complete', details: { taskIds:
 
 test('a failed delegation guard is a run error, not an ordinary informational extension notice', () => {
   const dirname = path.resolve(__dirname, '..');
-  const box = vm.createContext({ path, __dirname: dirname, liveRunTails: new Map(), broadcast() {},
+  const box = vm.createContext({ path, performance, responseSpeed: require('../responsespeed.js'), __dirname: dirname, liveRunTails: new Map(), broadcast() {},
     setTimeout, clearTimeout, addRunNotice(job, text) { job.notices = [...(job.notices || []), text]; } });
   load(box, 'function runEventForwarder(', '// Start one headless run');
   const ordinary = { id: 'one' }, guarded = { id: 'two' };

@@ -1138,6 +1138,11 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .msg:hover > .msg-actions, .msg:focus-within > .msg-actions, .msg.actions-open > .msg-actions { opacity: 1; visibility: visible; }
 .msg-actions button { height: 18px; min-height: 18px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--text-faint); font-size: 10px; }
 .msg-actions button:hover, .msg-actions button:focus-visible { background: transparent; color: var(--text); text-decoration: underline; }
+/* How fast the reply streamed: a fact beside the actions, shown with them. */
+.msg-actions .msg-speed { position: relative; margin-right: auto; color: var(--text-faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+.msg-speed > summary { cursor: pointer; list-style: none; padding: 6px 0; }
+.msg-speed > summary::-webkit-details-marker { display: none; }
+.msg-speed-detail { position: absolute; bottom: 100%; left: 0; z-index: 3; width: min(280px, 70vw); padding: 8px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-dim); font-size: var(--fs-micro); line-height: 1.5; }
 /* Touch has no stable hover. Keep the actions visible after a message tap. */
 @media (hover: none) { .msg-actions { transition: none; } }
 :root[data-theme-mode="binary"] .msg-actions { transition: none; }
@@ -1308,6 +1313,7 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .mpick .mp-row span { color: var(--text-faint); font-size: var(--fs-micro); }
 .mpick .mp-check { flex: 0 0 14px; color: var(--accent); font-weight: 700; text-align: center; }
 .mpick .mp-row .mp-ctx { margin-left: auto; flex: 0 0 auto; }
+.mpick .mp-row .mp-speed { flex: 0 0 auto; min-width: 62px; text-align: right; font-variant-numeric: tabular-nums; }
 .mpick .mp-tag { border: 1px solid var(--border); padding: 0 5px; font-size: 10px; line-height: 15px; color: var(--text-dim); flex: 0 0 auto; }
 .mpick .mp-tag.free { border-color: var(--accent); color: var(--accent); font-weight: 700; }
 .mpick .mp-row.on { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
@@ -2100,7 +2106,7 @@ body.side-layout.conv.chrome-min #floatHead > * { pointer-events: none; }
 /* Preserve the spacing, not the visual noise. Focus and tap-reveal keep
    actions reachable without a mouse. An open menu must not vanish. */
 .msg:hover > .msg-actions, .msg:focus-within > .msg-actions,
-.msg.actions-open > .msg-actions, .msg:has(.msg-more-actions[open]) > .msg-actions { opacity: 1; visibility: visible; }
+.msg.actions-open > .msg-actions, .msg:has(.msg-more-actions[open], .msg-speed[open]) > .msg-actions { opacity: 1; visibility: visible; }
 .msg.user > .msg-actions { position: absolute; top: 100%; right: 8px; margin: 6px 0 0; }
 /* Bridge the visual gap so moving from a bubble to its buttons keeps hover. */
 .msg.user > .msg-actions::before { content: ''; position: absolute; left: 0; right: 0; top: -6px; height: 6px; }
@@ -2730,6 +2736,38 @@ function fmtTokens(n) {
   return String(v);
 }
 function errToast(msg) { toast('✗ ' + msg, null, 'err'); }
+
+// ---- reply speed ----
+// Measured from the characters that actually streamed (responsespeed.js on
+// the server). Tokens are an estimate from a per-model characters-per-token
+// ratio; ≈ stays even after calibration because content changes that ratio.
+const speedCalibration = new Map(); // 'provider/model' → { charsPerToken, calibrated }
+function learnSpeedCalibration(map) {
+  for (const [id, c] of Object.entries(map || {})) if (c && c.charsPerToken > 0) speedCalibration.set(id, c);
+}
+function fmtSpeedRate(value) {
+  return '≈' + (value < 10 ? value.toFixed(1) : Math.round(value));
+}
+function fmtTokRate(charsPerSecond, calibration) {
+  const c = calibration && calibration.charsPerToken > 0 ? calibration : { charsPerToken: 4, calibrated: false };
+  return fmtSpeedRate(charsPerSecond / c.charsPerToken) + ' tok/s';
+}
+function fmtSeconds(ms) {
+  const s = ms / 1000;
+  return (s >= 10 ? Math.round(s) : s.toFixed(1)) + ' s';
+}
+// The label under one reply: its streaming time and rate, or nothing when
+// the reply was too short to say anything about speed.
+function speedLabelHtml(m) {
+  const s = m.speed;
+  if (!s || !(s.ms >= 1000 && s.timedChars >= 200)) return '';
+  const cps = s.timedChars * 1000 / s.ms;
+  const calibration = m.provider && m.model ? speedCalibration.get(m.provider + '/' + m.model) : null;
+  const wait = s.waitMs != null ? `${fmtSeconds(s.waitMs)} until the first text · ` : '';
+  const title = `${wait}${s.chars.toLocaleString()} visible characters; ${s.timedChars.toLocaleString()} timed over ${fmtSeconds(s.ms)} (${Math.round(cps)} chars/s)`
+    + (calibration && calibration.calibrated ? ` · estimated using ${calibration.charsPerToken.toFixed(1)} chars per token from this model` : ' · tokens estimated at 4 characters each');
+  return `<details class="msg-speed" title="${esc(title)}"><summary aria-label="Reply speed details">${esc(fmtSeconds(s.ms))} · ${esc(fmtTokRate(cps, calibration))}</summary><span class="msg-speed-detail">${esc(title)}</span></details>`;
+}
 
 // Put text on the clipboard from any origin. navigator.clipboard only exists
 // on secure contexts (https or localhost); over plain http to another machine
@@ -8780,6 +8818,7 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1, messageKey = 
     const full = (m.origin === 'delegation' ? '<div class="role" title="The parent conversation wrote this brief. No person typed it."><span>↰ brief from the parent conversation</span></div>' : '') +
       `<div class="md">${mdRender(m.text, q)}</div>${messageMediaHtml(m.images, messageKey)}`;
     const actions = `<div class="msg-actions" aria-label="Message actions">` +
+      (m.role === 'assistant' ? speedLabelHtml(m) : '') +
       `<button type="button" class="msg-copy" data-msg-index="${copyIndex}" title="Copy the message Markdown">copy</button>` +
       `<button type="button" class="msg-read" data-msg-index="${copyIndex}" title="Read this message aloud">read</button>` +
       (versionSwitch ? `<button type="button" data-answer-version="${versionSwitch}" title="${versionSwitch === 'original' ? 'Show the original answer' : 'Show the simpler version'}">${versionSwitch === 'original' ? 'original' : 'simpler'}</button>` : '') +
@@ -9354,6 +9393,7 @@ async function modelCatalog(refresh = false) {
         _modelCatalog = d;
         _modelCatalogAt = Date.now();
       }
+      if (d.speed) learnSpeedCalibration(Object.fromEntries(Object.entries(d.speed.models || {}).map(([id, m]) => [id, m.calibration])));
       return d;
     }).finally(() => { _modelCatalogPending = null; });
   return _modelCatalogPending;
@@ -9482,6 +9522,19 @@ async function openModelPicker(anchor, opts, onPick) {
   // the special editions are visible without reading long ids.
   const baseNameOf = m => { const cut = m.model.indexOf(':'); return cut < 0 ? m.model : m.model.slice(0, cut); };
   const variantOf = m => { const cut = m.model.indexOf(':'); return cut < 0 ? '' : m.model.slice(cut + 1); };
+  // Measured speed of recent replies, so the choice is informed by what
+  // this machine saw. Require three rated replies before recommending a rate.
+  const MIN_SPEED_SAMPLES = 3;
+  const speedOf = m => {
+    const s = cat.speed && cat.speed.models && cat.speed.models[m.id];
+    if (!s || !s.tokensPerSecond || s.tokensPerSecond.samples < MIN_SPEED_SAMPLES) return null;
+    const r = s.tokensPerSecond;
+    const tok = fmtSpeedRate;
+    return { label: tok(r.median) + ' tok/s',
+      title: `${r.samples} replies in the last ${cat.speed.days} days · ${tok(r.min)}–${tok(r.max)} tok/s, median ${tok(r.median)}`
+        + (s.waitMs && s.waitMs.median != null ? ` · first text after ${fmtSeconds(s.waitMs.median)} (median)` : '')
+        + (s.calibration?.calibrated ? ' · estimated using this model’s measured character/token ratio' : ' · tokens estimated at 4 characters each') };
+  };
   const ageLabel = () => {
     const s = Math.max(0, Math.round((Date.now() - (cat.fetchedAt || Date.now())) / 1000));
     return s < 90 ? s + 's ago' : Math.round(s / 60) + ' min ago';
@@ -9531,10 +9584,12 @@ async function openModelPicker(anchor, opts, onPick) {
       const head = !provFilter && m.provider !== provider ? `<div class="mp-provider">${esc(m.provider)}</div>` : '';
       provider = m.provider;
       const variant = variantOf(m);
-      return head + `<button class="mp-row${sel.has(m.id) ? ' on' : ''}${ready.has(m.provider) ? '' : ' notready'}" data-mp="${esc(m.id)}" title="${ready.has(m.provider) ? '' : 'provider not authenticated · '}${esc(m.id)} · ${esc(m.contextLabel || '')} context${esc(fitLabel(m))}">` +
+      const speed = speedOf(m);
+      return head + `<button class="mp-row${sel.has(m.id) ? ' on' : ''}${ready.has(m.provider) ? '' : ' notready'}" data-mp="${esc(m.id)}" title="${ready.has(m.provider) ? '' : 'provider not authenticated · '}${esc(m.id)} · ${esc(m.contextLabel || '')} context${esc(fitLabel(m))}${speed ? ' · ' + esc(speed.title) : ''}">` +
         `<span class="mp-check">${sel.has(m.id) ? '✓' : ''}</span><b>${esc(baseNameOf(m))}</b>` +
         `${variant ? `<span class="mp-tag${variant === 'free' ? ' free' : ''}">${esc(variant)}</span>` : ''}` +
         `<span class="mp-ctx">${esc(m.contextLabel || '')}</span>` +
+        `${speed ? `<span class="mp-speed">${esc(speed.label)}</span>` : ''}` +
         `${replaces ? `<span class="mp-addbtn" role="button" title="${sel.has(m.id) ? 'remove from the parallel set' : 'add to the parallel set (fan-out)'}">${sel.has(m.id) ? '−' : '+'}</span>` : ''}</button>`;
     }).join('') || '<div class="mp-empty">no matching models</div>';
     list.querySelectorAll('.mp-row').forEach(b => b.onclick = ev => {
@@ -12877,6 +12932,7 @@ async function open(rel, scroll, routeHash = null) {
     return;
   }
   current = next;
+  learnSpeedCalibration(next.speedCalibration);
   if (navigating && !sessions.some(s => s.key === rel) && restoringScopeEntry !== nav.current()?.id) {
     adoptWorkspaceProject(projectOf(next), { select: sideLayoutOn() && sidePanel() === 'inbox', stamp: true });
   }
@@ -14396,6 +14452,37 @@ function usageBreakdownTable(rows, key, label) {
   return `<div class="usage-table-wrap"><table class="usage-table"><thead><tr><th>${esc(label)}</th><th>calls</th><th>input</th><th>cache read</th><th>cache write</th><th>output</th><th>API est.</th><th>subscription value</th><th>total value</th></tr></thead><tbody>${body || '<tr><td colspan="9">no matching calls</td></tr>'}</tbody></table></div>`;
 }
 
+// Reply speed per model: measured from the characters that streamed, rated
+// on answer text only. Token figures remain estimates even with a learned
+// character/token ratio; raw characters per second remain available.
+function usageSpeedGroups(rows, label) {
+  const rate = v => v == null ? '–' : fmtSpeedRate(v);
+  return `<div class="usage-table-wrap"><table class="usage-table"><thead><tr><th>${esc(label)}</th><th>rated replies</th><th>tok/s min · median · max</th><th>10th–90th percentile</th><th>first text median</th></tr></thead><tbody>${rows.map(m => {
+    const r = m.tokensPerSecond;
+    return `<tr><td>${esc(m.id)}</td><td>${usageNum(r.samples)}</td><td>${rate(r.min)} · <b>${rate(r.median)}</b> · ${rate(r.max)}</td><td>${rate(r.p10)}–${rate(r.p90)}</td><td>${m.waitMs.median == null ? '–' : fmtSeconds(m.waitMs.median)}</td></tr>`;
+  }).join('') || '<tr><td colspan="5">no measured replies</td></tr>'}</tbody></table></div>`;
+}
+
+function usageSpeedTable(speed) {
+  const models = speed && speed.models || [];
+  const tok = (m, v) => v == null ? '–' : fmtSpeedRate(v);
+  const body = models.slice(0, 30).map(m => {
+    const r = m.tokensPerSecond, c = m.charsPerSecond, w = m.waitMs;
+    const rated = r.samples ? `${tok(m, r.min)} · <b>${tok(m, r.median)}</b> · ${tok(m, r.max)}` : '–';
+    const calibration = m.calibration.calibrated
+      ? `${m.calibration.charsPerToken.toFixed(1)} chars/token (${usageNum(m.calibration.samples)} replies)`
+      : `default ${speed.defaultCharsPerToken} chars/token · ${usageNum(m.calibration.samples)}/${usageNum(speed.minCalibrationSamples)} clean replies`;
+    return `<tr title="${esc(m.id)}"><td>${esc(m.id)}</td><td>${usageNum(m.samples)}</td><td>${usageNum(r.samples)}</td>
+      <td>${rated}</td><td>${tok(m, r.p10)}–${tok(m, r.p90)}</td><td>${c.median == null ? '–' : usageNum(Math.round(c.median))}</td>
+      <td>${w.median == null ? '–' : fmtSeconds(w.median)}</td><td>${esc(calibration)}</td></tr>`;
+  }).join('');
+  return `<div class="usage-table-wrap"><table class="usage-table"><thead><tr><th>provider / model</th><th>replies</th><th>rated</th><th>tok/s min · median · max</th><th>10th–90th percentile</th><th>chars/s median</th><th>first text median</th><th>calibration</th></tr></thead><tbody>${body || '<tr><td colspan="8">no hosted replies measured in this period</td></tr>'}</tbody></table></div>
+    ${models.length > 30 ? `<p class="usage-note">Showing 30 of ${usageNum(models.length)} models; use the filters to narrow the list.</p>` : ''}
+    <details><summary>By provider</summary>${usageSpeedGroups(speed?.providers || [], 'provider')}</details>
+    <details><summary>By day${speed?.daily?.length > 62 ? ' · latest 62 days with measurements' : ''}</summary>${usageSpeedGroups((speed?.daily || []).slice(-62), 'day')}</details>
+    <p class="usage-note">Observed answer-text delivery speed, not a model benchmark. Each text part is timed from its first to last chunk; the first chunk’s characters are excluded from the rate. Thinking and tool output are separate. “First text” includes preparation and waiting before the answer. Rates need at least one second and 200 timed characters. Token rates are always approximate; hidden reasoning tokens are never counted. New hosted Pi SDK replies only; older replies, RPC history, terminal sessions and delegated workers have no stored timing.</p>`;
+}
+
 function usageDailyChart(rows) {
   const max = Math.max(0.000001, ...(rows || []).map(row => row.equivalentCost || 0));
   const visible = (rows || []).slice(-62);
@@ -14484,6 +14571,7 @@ function renderUsageDashboard(data) {
     <div class="usage-grid"><div>
       <section class="usage-panel"><h2>daily API-equivalent value</h2>${usageDailyChart(data.daily)}</section>
       <section class="usage-panel"><h2>by model</h2>${usageBreakdownTable(data.models, 'model', 'provider / model')}</section>
+      <section class="usage-panel"><h2>reply speed</h2>${usageSpeedTable(data.speed)}</section>
       <section class="usage-panel"><h2>by project</h2>${usageBreakdownTable(data.projects, 'project', 'project')}</section>
     </div><aside>
       <section class="usage-panel"><h2>billing split</h2>${usageBreakdownTable(data.billing, 'billing', 'type')}</section>

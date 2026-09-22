@@ -6,11 +6,13 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { performance } = require('node:perf_hooks');
 const { pathToFileURL } = require('url');
 const { execFileSync } = require('child_process');
 const { installCustomPromptPreparation, waitForCustomTurns } = require('./pisdk-custom.js');
 const { forkPiSnapshot } = require('./session-snapshot.js');
 const { captureRewriteRequest } = require('./pisdk-rewrite.js');
+const { createSpeedMeter } = require('./responsespeed.js');
 
 const PI_TESTED_VERSION = '0.84.1';
 const WARM_IDLE_MS = 5 * 60 * 1000;
@@ -332,6 +334,53 @@ function makeUiContext(S, loaded) {
   };
 }
 
+// Reply speed, measured where the events are born and stored in the session
+// as one `aiconvo-speed` custom entry per agent run, so it travels with the
+// file (forks, copies) and the usage index reads it back. The samples name
+// their assistant message's entry id: forks copy entries verbatim, so the
+// same reply counts once however many files hold it.
+function observeSpeed(S, ev, at) {
+  const speed = S.speed;
+  if (ev.type === 'agent_start') speed.turnLeafId = leafIdOf(S.session.sessionManager);
+  const sample = speed.meter.observe(ev, at);
+  if (sample) speed.samples.push({ sample, message: ev.message });
+  if (ev.type === 'agent_end' && speed.samples.length) persistSpeedSamples(S);
+}
+function leafIdOf(sm) {
+  try { return typeof sm.getLeafId === 'function' ? sm.getLeafId() || null : null; } catch { return null; }
+}
+// The listener runs before pi persists a message_end, so entry ids are only
+// known at agent_end. Pi persists the same message object it emits; match
+// by identity, not timestamps (two replies can share a millisecond).
+function assistantEntryIds(sm, stopAtId) {
+  const ids = new Map();
+  if (typeof sm.getBranch !== 'function') return ids;
+  const branch = sm.getBranch();
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const entry = branch[i];
+    if (entry.id === stopAtId) break;
+    const message = entry.type === 'message' ? entry.message : null;
+    if (message && message.role === 'assistant') ids.set(message, entry.id);
+  }
+  return ids;
+}
+function persistSpeedSamples(S) {
+  const speed = S.speed;
+  const samples = speed.samples.splice(0);
+  try {
+    const sm = S.session.sessionManager;
+    if (typeof sm.appendCustomEntry !== 'function') throw new Error('session manager cannot append entries');
+    const ids = assistantEntryIds(sm, speed.turnLeafId);
+    sm.appendCustomEntry('aiconvo-speed', {
+      v: 1, at: new Date().toISOString(),
+      samples: samples.map(({ sample, message }) => ({ entryId: ids.get(message) || null, ...sample })),
+      measurementId: crypto.randomUUID(),
+    });
+  } catch (error) {
+    S.emit({ type: 'run_note', text: 'could not record the reply speed: ' + String(error.message || error) });
+  }
+}
+
 async function bindS(S, loaded) {
   const session = S.runtime.session;
   S.session = session;
@@ -340,12 +389,17 @@ async function bindS(S, loaded) {
   if (previousFile !== S.file && sdkSessions.get(previousFile) === S) sdkSessions.delete(previousFile);
   sdkSessions.set(S.file, S);
   if (S.unsub) S.unsub();
+  S.speed = { meter: createSpeedMeter({ thinkingLevel: () => session.thinkingLevel ?? null }), samples: [], turnLeafId: null };
   // Subscribe before bindExtensions: session_start hooks can start turns or dialogs.
   S.unsub = session.subscribe(ev => {
+    const at = performance.now();
     S.lastEventAt = Date.now();
+    observeSpeed(S, ev, at);
     // An autonomous extension turn wins over the optional editing pass.
     if (ev.type === 'agent_start') S.rewriteController?.abort();
-    S.emit(ev);
+    // Source clock travels with the event: IPC and browser batching must
+    // not change the observed rate. Never mutate the SDK's event object.
+    S.emit({ ...ev, aiconvoSpeedAt: at });
     if (ev.type === 'agent_settled') {
       // An extension can start a fresh turn inside agent_settled.
       queueMicrotask(() => {

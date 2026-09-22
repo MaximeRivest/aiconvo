@@ -10,6 +10,7 @@ const http = require('http');
 const https = require('https');
 const os = require('os');
 const crypto = require('crypto');
+const { performance } = require('node:perf_hooks');
 const readline = require('readline');
 const net = require('net');
 const { pathToFileURL } = require('url');
@@ -36,6 +37,7 @@ const fanoutLib = require('./fanout.js');
 const conversationFlow = require('./conversation-flow.js');
 const fanoutMerge = require('./fanoutmerge.js');
 const usageLib = require('./usageanalytics.js');
+const responseSpeed = require('./responsespeed.js');
 const agentReadLib = require('./agentread.js');
 const { createModelHealth } = require('./modelhealth.js');
 const delegationLib = require('./delegation.js');
@@ -308,6 +310,73 @@ function pricingCatalog() {
   if (!usagePricingCatalog) usagePricingCatalog = usageLib.loadPricingCatalog();
   return usagePricingCatalog;
 }
+
+// ---- reply speed ------------------------------------------------------
+// The runtime measures every hosted reply (responsespeed.js) and stores the
+// samples in the session file; the usage index reads them back. Statistics
+// over the recent window serve the model picker, the live readout on run
+// cards and the transcript. Cached briefly: several surfaces ask at once.
+const SPEED_STATS_DAYS = 30;
+const SPEED_STATS_TTL_MS = 60 * 1000;
+let speedStatsCache = { at: 0, value: null };
+function speedStats() {
+  if (!usageIdx) return null;
+  const now = Date.now();
+  if (speedStatsCache.value && speedStatsCache.revision === usageIdx.revision && now - speedStatsCache.at < SPEED_STATS_TTL_MS) return speedStatsCache.value;
+  let value = null;
+  try { value = usageLib.speedStatistics(usageIdx.speedSamples(now - SPEED_STATS_DAYS * 86400000, now)); }
+  catch (e) { console.error('reply speed statistics', e.message); }
+  speedStatsCache = { at: now, value, revision: usageIdx.revision };
+  return value;
+}
+function speedForModel(provider, model) {
+  const stats = speedStats();
+  return stats ? stats.models.find(m => m.provider === provider && m.model === model) || null : null;
+}
+function speedCalibrationFor(provider, model) {
+  const hit = speedForModel(provider, model);
+  return hit ? hit.calibration : { charsPerToken: responseSpeed.DEFAULT_CHARS_PER_TOKEN, samples: 0, calibrated: false };
+}
+// What the model picker and the transcript need per model: the estimate
+// mark stays even when calibrated: content changes the character/token ratio.
+function speedCatalog() {
+  const stats = speedStats();
+  if (!stats) return null;
+  const models = {};
+  for (const m of stats.models) {
+    models[m.id] = { samples: m.samples, calibration: m.calibration, tokensPerSecond: m.tokensPerSecond,
+      charsPerSecond: m.charsPerSecond, waitMs: m.waitMs };
+  }
+  return { days: SPEED_STATS_DAYS, defaultCharsPerToken: stats.defaultCharsPerToken, models };
+}
+// The ratios a transcript needs to show its replies' speed in tokens.
+function speedCalibrationOfMessages(messages) {
+  const out = {};
+  for (const m of Array.isArray(messages) ? messages : []) {
+    if (m.role !== 'assistant' || !m.speed || !m.provider || !m.model) continue;
+    const id = m.provider + '/' + m.model;
+    if (!out[id]) out[id] = speedCalibrationFor(m.provider, m.model);
+  }
+  return out;
+}
+// The live readout beside the character count while a reply streams.
+function liveSpeedText(live, provider, model) {
+  const cps = responseSpeed.charsPerSecond(live && live.text);
+  if (cps == null) return '';
+  const calibration = speedCalibrationFor(provider, model);
+  const rate = cps / calibration.charsPerToken;
+  return ' · ≈' + (rate < 10 ? rate.toFixed(1) : Math.round(rate)) + ' tok/s';
+}
+// One transcript changed under a hosted run: read its usage and speed now,
+// instead of waiting for the next dashboard visit. A targeted update: the
+// full sweep stays with the dashboard.
+function refreshUsageForKey(key) {
+  const entry = index[key];
+  if (!usageIdx || !entry) return;
+  usageIdx.updateFile(key, { ...entry, project: projectNameOf(entry.cwd, key) || 'Unknown project' }, absPathForKey(key), pricingCatalog())
+    .then(() => { speedStatsCache.at = 0; })
+    .catch(e => console.error('usage index', key, e.message));
+}
 function usageAuthTypes() {
   const out = {};
   try {
@@ -408,6 +477,7 @@ function cachePathFor(key) {
 
 // Bump when the cached message format changes; forces a re-index.
 const CACHE_VERSION = 18; // v18: the last message summary for the side list (design/59)
+// New speed entries change file size; historical caches need no rebuild.
 
 // One line of plain text for a list row: markdown syntax, code, links and
 // line breaks go; the first `max` characters stay. Nothing here is a parser;
@@ -610,6 +680,9 @@ async function parseFile(absPath) {
   // Who sent each user message: an aiconvo-author entry sits right before
   // it in the tree (pisdk-runtime.js writes it for web sends).
   const authorEntries = new Map(); // entry id → { id, name, input, coauthors }
+  // How fast each reply streamed: an aiconvo-speed entry after the run
+  // names the reply entries it measured (pisdk-runtime.js writes it).
+  const speedByEntry = new Map(); // reply entry id → compact sample
   const stream = fs.createReadStream(absPath, { encoding: 'utf8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   for await (const line of rl) {
@@ -646,6 +719,12 @@ async function parseFile(absPath) {
       continue;
     } else if (d.type === 'custom' && d.customType === 'aiconvo-author' && d.data && d.data.user && typeof d.data.user.id === 'string') {
       if (eid) authorEntries.set(eid, { id: d.data.user.id, name: String(d.data.user.name || ''), input: d.data.input || undefined, coauthors: Array.isArray(d.data.coauthors) ? d.data.coauthors : undefined, via: 'entry' });
+      continue;
+    } else if (d.type === 'custom' && d.customType === 'aiconvo-speed' && d.data?.v === 1 && Array.isArray(d.data.samples)) {
+      for (const raw of d.data.samples) {
+        const s = usageLib.normalizeSpeedSample(raw);
+        if (s?.entryId && s.text.chars) speedByEntry.set(s.entryId, { waitMs: s.waitMs, chars: s.text.chars, timedChars: s.text.timedChars, ms: s.text.ms });
+      }
       continue;
     } else if (d.type === 'custom_message' && d.display !== false &&
       ['delegation-complete', 'delegation-review-pending', 'orchestrator-event'].includes(d.customType)) {
@@ -723,6 +802,7 @@ async function parseFile(absPath) {
     if (m._eid && !active.has(m._eid)) m.off = true;
     m.eid = m._eid || null;
     delete m._eid;
+    if (m.role === 'assistant' && m.eid && speedByEntry.has(m.eid)) m.speed = speedByEntry.get(m.eid);
   }
   // entryParents: the FULL entry tree (labels, model changes, … included),
   // so a client can retrace any path from any leaf without the raw file.
@@ -2295,16 +2375,25 @@ function runEventForwarder(job) {
   state.push = push;
   const liveText = () => { for (let i = blocks.length - 1; i >= 0; i--) if (blocks[i].kind === 'text' && !blocks[i].done) return blocks[i]; return null; };
   const toolBlock = callId => blocks.find(b => b.kind === 'tool' && b.callId === callId);
+  // The readout's own clock: the same meter the runtime persists with, read
+  // here at arrival. The stored sample is the source of truth afterwards.
+  const speed = responseSpeed.createSpeedMeter();
   return event => {
     try {
-      if (event.type === 'answer_rewrite') {
+      const speedAt = Number.isFinite(event.aiconvoSpeedAt) ? event.aiconvoSpeedAt : performance.now();
+      speed.observe(event, speedAt);
+      if (event.type === 'run_note') {
+        addRunNotice(job, event.text || 'Run notice');
+        push(true);
+      } else if (event.type === 'answer_rewrite') {
         if (event.state === 'ready' && event.text) job.lastAssistantText = event.text;
         job.statusText = event.state === 'running' ? 'preparing simpler version'
           : event.state === 'ready' ? 'simpler version ready' : 'original answer kept · simpler version unavailable';
         if (event.state === 'failed') addRunNotice(job, 'The simpler version was not completed. Your original answer is safe.');
         push(true);
       } else if (event.type === 'message_start' && event.message && event.message.role === 'assistant') {
-        blocks.push({ id: ++blockSeq, kind: 'text', text: '', think: '', parts: new Map(), tools: new Map() });
+        blocks.push({ id: ++blockSeq, kind: 'text', text: '', think: '', parts: new Map(), tools: new Map(),
+          provider: event.message.provider || null, model: event.message.model || null });
         job.statusText = 'streaming';
         push(true);
       } else if (event.type === 'message_update' && event.assistantMessageEvent) {
@@ -2348,7 +2437,7 @@ function runEventForwarder(job) {
         }
         cur.text = [...cur.parts.values()].filter(p => p.type === 'text').map(p => p.text).join('\n');
         cur.think = [...cur.parts.values()].filter(p => p.type === 'thinking').map(p => p.text).join('\n');
-        job.statusText = cur.text.length ? 'streaming · ' + cur.text.length + ' chars'
+        job.statusText = cur.text.length ? 'streaming · ' + cur.text.length + ' chars' + liveSpeedText(speed.live(speedAt), cur.provider, cur.model)
           : cur.think.length ? 'thinking · ' + cur.think.length + ' chars' : 'streaming';
         push(/_start$|_end$/.test(ev.type));
       } else if (event.type === 'tool_execution_start') {
@@ -2556,6 +2645,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     if (error) job.error = error;
     job.finishedAt = Date.now();
     await reindexIfChanged(key).catch(e => console.error('[run index]', e.message));
+    refreshUsageForKey(key);
     if (status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
     endLiveRunTail(job.id);
     jobChanged(job);
@@ -2673,6 +2763,7 @@ if (typeof pisdk.setAutonomousRunHandler === 'function') pisdk.setAutonomousRunH
       job.uiRequests = []; job.finishedAt = Date.now();
       if (job.errorMessage) job.error = job.errorMessage;
       await reindexIfChanged(key).catch(() => {});
+      refreshUsageForKey(key);
       if (job.status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
       endLiveRunTail(job.id); jobChanged(job); broadcastRunFinal(job, key); speakRunDone(job);
     }
@@ -4791,11 +4882,19 @@ function usageDashboardResponse(searchParams) {
     if (value) filters[key] = value;
   }
   const facts = usageIdx.facts(range.fromMs, range.toMs);
+  const authTypes = usageAuthTypes();
   const data = usageLib.aggregateFacts(facts, {
-    ...range, filters, billing: appSettings.usageBilling, authTypes: usageAuthTypes(),
+    ...range, filters, billing: appSettings.usageBilling, authTypes,
   });
+  // Speed follows all dashboard filters, including the billing route.
+  const speedRows = usageIdx.speedSamples(range.fromMs, range.toMs).filter(s =>
+    (!filters.project || s.project === filters.project)
+    && (!filters.provider || s.provider === filters.provider)
+    && (!filters.model || s.model === filters.model)
+    && (!filters.billing || usageLib.classifyBilling(s, appSettings.usageBilling, authTypes).mode === filters.billing));
   return {
     ...data,
+    speed: usageLib.speedStatistics(speedRows),
     range,
     filters,
     billingConfig: appSettings.usageBilling,
@@ -12189,6 +12288,7 @@ async function startProjectConversation(options) {
         else { job.status = 'done'; job.statusText = 'settled'; }
         job.finishedAt = Date.now();
         await reindexIfChanged(key);
+        refreshUsageForKey(key);
         if (job.status === 'done' && !record.yielded) job.doneSpeechSource = job.lastAssistantText || '';
         endLiveRunTail(job.id);
         jobChanged(job);
@@ -13445,6 +13545,7 @@ async function handleRequest(req, res) {
       data.project = projectNameOf(index[key].cwd, key);
       data.selectedModels = await inferredConversationModels(key, data);
       data.attachedContext = conversationContextOf(key);
+      data.speedCalibration = usersLib.canManageUsers(identity) ? speedCalibrationOfMessages(data.messages) : {};
       json(res, 200, data);
     } else if (u.pathname === '/api/conversation/media' && req.method === 'GET') {
       try {
@@ -14810,12 +14911,16 @@ async function handleRequest(req, res) {
       json(res, 200, settingsResponse(identity));
     } else if (u.pathname === '/api/models') {
       const listed = await listPiModels(u.searchParams.get('refresh') === '1');
+      // Reply-speed figures come from the usage index; bring it up to date
+      // in the background so the next opening of the picker has them.
+      if (usageIdx && usersLib.canManageUsers(identity)) usageIdx.startSync(usageIndexEntries(), absPathForKey, pricingCatalog()).then(() => { speedStatsCache.at = 0; }).catch(error => console.error('usage index', error.message));
       json(res, 200, {
         models: listed.models,
         readyProviders: readyProviders(),
         fetchedAt: listed.at,
         error: listed.error,
         piDefault: readPiDefault(),
+        speed: usersLib.canManageUsers(identity) ? speedCatalog() : null,
       });
     } else if (u.pathname === '/api/delegations' && req.method === 'GET') {
       json(res, 200, await delegationCoordinator.refresh());

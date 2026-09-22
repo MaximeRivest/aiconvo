@@ -71,5 +71,18 @@ async function until(fn) { for (let i = 0; i < 200; i++) { if (fn()) return; awa
   assert.ok(!customEvents.some(e => e.type === 'message_end' && e.message?.stopReason === 'error'), 'cold callback preserves the mode');
   const raw = await fs.readFile(begun[1].file, 'utf8');
   assert.ok(raw.split('\n').some(line => { try { const e = JSON.parse(line); return e.type === 'custom_message' && e.customType === 'fixture-direct' && e.details.deliveryId === 'fixture'; } catch { return false; } }));
+  const entries = raw.trim().split('\n').map(JSON.parse);
+  const measurements = entries.filter(e => e.type === 'custom' && e.customType === 'aiconvo-speed');
+  assert.ok(measurements.length >= 2, 'the real SDK persists timing for both hosted runs');
+  for (const entry of measurements) {
+    assert.equal(entry.data.v, 1);
+    assert.match(entry.data.measurementId, /^[\da-f-]{36}$/);
+    for (const sample of entry.data.samples) {
+      const reply = entries.find(e => e.id === sample.entryId);
+      assert.equal(reply?.message?.role, 'assistant', 'timing is attached to an actual saved reply');
+      assert.ok(entries.indexOf(reply) < entries.indexOf(entry), 'measurement follows message persistence');
+    }
+  }
+  assert.ok(customEvents.some(e => e.type === 'message_update' && Number.isFinite(e.aiconvoSpeedAt)), 'source timing crosses the worker boundary');
   console.log(JSON.stringify({ observed, isolatedPids: begun.map(b => b.pid), dialog: notices, callbacks: callbacks.length, customMessagePersisted: true, toolCheckpointsVerified }));
 })().catch(e => { console.error(e.stack); process.exitCode = 1; }).finally(() => { sdk.stopAllWarmSessions(); });

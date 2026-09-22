@@ -27,6 +27,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
     extract('async function open(rel, scroll,', '// ---- distillation ----'),
     extract('async function renderConv(scroll) {', '// ---- trace machinery ----'),
     extract('function computeTrace(d) {', '\nconst compareCache'),
+    extract('// ---- reply speed ----', '// Put text on the clipboard'),
     extract('function msgBlock(m, hl, keepOpen', '// Every bash fence'),
   ].join('\n');
   const fixture = `<!doctype html><meta charset="utf-8"><div id="view"></div><pre id="result">PENDING</pre><script>

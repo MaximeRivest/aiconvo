@@ -33,7 +33,7 @@ test('saved history hides the request, links both answers, and counts successful
   assert.deepEqual(Array.from(parsed.messages, m => m.text), ['Explain it.', 'Technical original.', 'Everyday explanation.']);
   assert.equal(parsed.messages[2].rewriteOf, 'a');
   assert.ok(parsed.entryParents.some(([id]) => id === 'request'), 'hidden request stays in the ancestry');
-  const facts = await parseUsageFile(file, { source: 'pi' }, new PricingCatalog());
+  const { facts } = await parseUsageFile(file, { source: 'pi' }, new PricingCatalog());
   assert.equal(facts.length, 3);
   assert.equal(facts.at(-1).category, 'internal');
   assert.equal(facts.at(-1).stopReason, 'length');
