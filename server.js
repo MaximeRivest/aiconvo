@@ -13465,6 +13465,7 @@ async function handleRequest(req, res) {
       '/icon.svg': { file: 'icon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
       '/icon-maskable-512.png': { file: 'icons/icon-maskable-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/favicon.svg': { file: 'icons/favicon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
+      '/mark.svg': { file: 'icons/mark.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
       '/favicon-32.png': { file: 'icons/favicon-32.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/vendor/mermaid.min.js': { file: 'vendor/mermaid.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },

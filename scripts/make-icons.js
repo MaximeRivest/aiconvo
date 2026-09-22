@@ -74,12 +74,18 @@ ${place(folded, { x: 0, y: 0, size: 64 })}`, 64);
 const faviconPng = svg(`<rect width="64" height="64" rx="14" fill="${PAPER}"/>
 ${place(folded, { x: 7, y: 7, size: 50 }, { fill: INK })}`, 64);
 
+// The bare frog on its book, black on transparent, cropped to the shape:
+// the app paints it in the current theme's colour through a CSS mask
+// (the empty-conversation mark).
+const mark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${book.w} ${book.h}"><title>Rockfrog</title>\n${book.inner}\n</svg>\n`;
+
 // Android notification icon: white on transparent, the system tints it.
 const notify = svg(place(folded, { x: 8, y: 8, size: 80 }, { fill: '#ffffff' }), 96);
 
 const write = (rel, text) => { fs.writeFileSync(path.join(ROOT, rel), text); console.log('wrote', rel); };
 write('icon.svg', appIcon);
 write('icons/favicon.svg', favicon);
+write('icons/mark.svg', mark);
 
 const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'chattering-icons-'));
 function png(svgText, rel, size) {

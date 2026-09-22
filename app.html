@@ -1120,6 +1120,13 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 
 .empty { color: var(--text-dim); text-align: center; margin-top: 60px; }
 .empty .hint { color: var(--text-faint); font-size: var(--fs-meta); }
+/* An empty conversation: the Rockfrog mark, quiet, in the theme's own ink. */
+.conv-empty { display: flex; justify-content: center; padding: 16vh 0 8vh; }
+.conv-empty .rf-mark { width: 148px; aspect-ratio: 1828 / 1428; background: var(--text-faint); opacity: .55;
+  -webkit-mask: url(/mark.svg?v=frog) center / contain no-repeat; mask: url(/mark.svg?v=frog) center / contain no-repeat; }
+:root[data-theme="eink"] .conv-empty .rf-mark { opacity: 1; }
+:root[data-form="phone"] .conv-empty { padding-top: 10vh; }
+:root[data-form="phone"] .conv-empty .rf-mark { width: 112px; }
 
 /* view headers (note, distill, editor — the conversation has none) */
 .convhead { position: sticky; top: calc(-1 * var(--sp-3)); z-index: 8; background: var(--bg); padding: var(--sp-2) 0 var(--sp-2); margin-bottom: var(--sp-3); border-bottom: 1px solid var(--border); max-width: var(--read-max); margin-left: auto; margin-right: auto; }
@@ -12178,7 +12185,7 @@ async function renderConv(scroll) {
   const liveHandoff = captureLiveReplyHandoff(d);
   $('view').innerHTML = head + '<div id="conversationDelegations"></div>' +
     (msgs.length ? `<div class="transcript" id="conversationTranscript">` + blocks.join('') + `</div>`
-                 : '<div class="empty" id="conversationTranscript">nothing to show in this view.</div>') +
+                 : '<div class="conv-empty" id="conversationTranscript"><div class="rf-mark" role="img" aria-label="Empty conversation"></div></div>') +
     `<div id="liveReplies" class="transcript" data-conversation-key="${esc(d.key)}"></div><div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
     readerDestinationHtml(d) + agentComposerHtml(d);
   restoreLiveReplyHandoff(liveHandoff);
