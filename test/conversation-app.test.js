@@ -400,6 +400,35 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
   assert.equal(spawnSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).stdout, headBefore, 'Focused Markdown Save unexpectedly created a commit');
   await evaluate(`runDocCell(docState.editor.listCells()[0])`);
   assert.equal(await evaluate(`docState.editor.getContent().includes('42') && docState.editor.getContent().includes('\\x60\\x60\\x60output')`), true, 'MRMD run output did not land in the document');
+  // A streamed run: output and a prompt appear under the cell while it
+  // runs, the answer goes back to the server, the result is written once.
+  await evaluate(`(() => {
+    window.inputsSent = []; window.runStream = null;
+    window.fetch = (url, opts) => {
+      const u = String(url);
+      if (u.includes('/api/doc/run-input')) { inputsSent.push(JSON.parse(opts.body)); return Promise.resolve(new Response(JSON.stringify({ ok: true }))); }
+      if (u.includes('/api/doc/run-cell')) return Promise.resolve(new Response(new ReadableStream({ start(c) { window.runStream = c; } }), { headers: { 'Content-Type': 'application/x-ndjson' } }));
+      return liveOriginalFetch(url, opts);
+    };
+    window.emit = ev => runStream.enqueue(new TextEncoder().encode(JSON.stringify(ev) + '\\n'));
+    window.streamed = runDocCell(docState.editor.listCells()[0]);
+  })()`);
+  const until = async (expr, what) => { for (let i = 0; i < 100; i++) { if (await evaluate(expr)) return; await new Promise(r => setTimeout(r, 50)); } assert.fail(what); };
+  await until(`!!window.runStream`, 'the run request was not made');
+  await evaluate(`emit({ type: 'output', text: 'Open https://accounts.example/device\\n' })`);
+  await until(`document.querySelector('.mrmd-cell-run a')?.href === 'https://accounts.example/device'`, 'live output did not appear under the cell');
+  await evaluate(`emit({ type: 'input_request', prompt: 'Code: ', secret: true })`);
+  await until(`document.querySelector('.mrmd-cell-run-field')?.type === 'password' && !document.querySelector('.mrmd-cell-run-input').hidden`, 'the prompt did not appear');
+  assert.match(await evaluate(`document.querySelector('.doc-run-state').textContent`), /waiting for input/);
+  await evaluate(`(() => { const f = document.querySelector('.mrmd-cell-run-field'); f.value = 's3cret'; f.form.requestSubmit(); })()`);
+  await until(`inputsSent.length === 1`, 'the answer was not sent');
+  assert.equal(await evaluate(`inputsSent[0].text`), 's3cret');
+  await evaluate(`(() => { emit({ type: 'input_done' }); emit({ type: 'done', code: 0, out: 'Open https://accounts.example/device\\nsigned in\\n\\n\u2713 1.0s | 3 vars', runtime: 'fixture', ms: 1000 }); runStream.close(); })()`);
+  await evaluate(`streamed`);
+  assert.equal(await evaluate(`document.querySelectorAll('.mrmd-cell-run').length`), 0, 'the live panel stayed after the run');
+  const afterStream = await evaluate(`docState.editor.getContent()`);
+  assert.match(afterStream, /\x60\x60\x60output\nOpen https:\/\/accounts.example\/device\nsigned in\n\x60\x60\x60/);
+  assert.doesNotMatch(afterStream, /s3cret/);
   await evaluate(`autosaveDocument()`);
   await evaluate(`window.fetch=liveOriginalFetch`);
   const markdownShot = await send('Page.captureScreenshot', { format: 'png' }, sid);

@@ -815,6 +815,8 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
    document (```output under the cell, MRMD style), never here. */
 .doc-run-strip { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-3); padding: 4px 10px; font-size: var(--fs-micro); color: var(--text-dim); border-top: 1px solid var(--border-strong); background: var(--bg); }
 .doc-run-strip .doc-run-state { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-run-ask { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); padding: 4px 10px; font-size: var(--fs-micro); border-top: 1px solid var(--border-strong); background: var(--bg); }
+.doc-run-ask input { flex: 1; min-width: 8em; font: inherit; }
 .doc-run-strip .doc-run-cancel { height: 22px; padding: 0 8px; font-size: var(--fs-micro); color: var(--danger); border-color: var(--border-strong); }
 /* Output blocks read as results, not as code: the conversation's run-out
    voice — no side borders, a single quiet accent bar, dim text. */
@@ -6303,10 +6305,10 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal chattering startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
-const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js';
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -6794,10 +6796,16 @@ async function runDocCell(cell, opts = {}) {
   const runId = 'run-' + (++docRunSeq) + '-' + Date.now();
   st.running = runId;
   const t0 = Date.now();
+  // While the program waits for an answer the strip says so; without the
+  // live panel (an older editor bundle) it also carries the latest output
+  // line, so a sign-in code is visible while it matters.
+  let waiting = false, lastLine = '', panel = null;
+  const runLabel = () => (waiting ? '✋ ' + (cell.lang || '?') + ' cell is waiting for input · ' : '● ' + (cell.lang || '?') + ' cell · ')
+    + Math.round((Date.now() - t0) / 1000) + 's' + (!panel && lastLine ? ' · ' + lastLine : '');
   const tick = setInterval(() => {
-    if (st.running === runId) state.textContent = '● ' + (cell.lang || '?') + ' cell · ' + Math.round((Date.now() - t0) / 1000) + 's';
+    if (st.running === runId) state.textContent = runLabel();
   }, 1000);
-  state.textContent = '● ' + (cell.lang || '?') + ' cell · 0s';
+  state.textContent = runLabel();
   cancelBtn.hidden = false;
   cancelBtn.disabled = false;
   cancelBtn.onclick = async () => {
@@ -6827,15 +6835,45 @@ async function runDocCell(cell, opts = {}) {
     }
     st.doctor.after = st.doctor.after.map(a => ({ ...a, played: true }));
   }
-  let r;
-  try {
-    r = await postJson('/api/doc/run-cell', { lang: cell.lang, code: cell.code, doc: st.path, runId });
-  } catch { r = { error: 'network failure' }; }
+  // The live panel under the cell (mrmd-document 0.14+): output as it
+  // streams, and a field when the program asks. Not document text: the
+  // result is still written once, below, when the run ends.
+  panel = typeof st.editor.showCellRun === 'function' ? st.editor.showCellRun(cell) : null;
+  const onLive = ev => {
+    if (docState !== st || st.running !== runId) return;
+    if (ev.type === 'output') {
+      if (panel) panel.append(ev.text);
+      else {
+        const line = String(ev.text).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').split(/[\r\n]/).map(x => x.trim()).filter(Boolean).at(-1);
+        if (line) { lastLine = line.slice(0, 160); state.textContent = runLabel(); }
+      }
+    } else if (ev.type === 'input_request') {
+      waiting = true;
+      state.textContent = runLabel();
+      const asked = panel ? panel.ask({ prompt: ev.prompt, secret: ev.secret }) : docStripAsk(strip, ev);
+      asked.then(async reply => {
+        if (st.running !== runId) return;
+        if (typeof reply.text === 'string') {
+          const a = await postJson('/api/doc/run-input', { runId, text: reply.text });
+          if (a.error && st.running === runId) toast(a.error, null, 'err');
+        } else if (reply.dismissed) cancelBtn.onclick();
+      });
+    } else if (ev.type === 'input_done') {
+      waiting = false;
+      if (panel) panel.dismissInput(); else docStripAskClose();
+      state.textContent = runLabel();
+    }
+  };
+  const r = await docRunRequest({ lang: cell.lang, code: cell.code, doc: st.path, runId }, onLive);
   clearInterval(tick);
-  if (docState !== st) return { ok: false };
+  docStripAskClose();
+  // Dispose right before the result is written (no await between): the
+  // live panel and the written result swap in one frame.
+  const disposePanel = () => { try { panel && panel.dispose(); } catch {} };
+  if (docState !== st) { disposePanel(); return { ok: false }; }
   st.running = null;
   cancelBtn.hidden = true;
-  if (r.error) { state.textContent = '✗ ' + r.error; return { ok: false, r }; }
+  if (r.error) { disposePanel(); state.textContent = '✗ ' + r.error; return { ok: false, r }; }
   const secs = Math.round(r.ms / 100) / 10;
   state.textContent = (r.code === 0 ? '✓ ' : '✗ exit ' + r.code + ' · ') + r.runtime + ' · ' + secs + 's';
   if (r.missing) refreshDocDoctor(); // rat vanished: say so in the strip, not per cell
@@ -6847,6 +6885,7 @@ async function runDocCell(cell, opts = {}) {
     .replace(/\n?[✓✗] \d+(?:\.\d+)?m?s( \| \d+ vars?)?\s*$/, '')
     .trim();
   const wrote = st.editor.setCellOutput(cell, outText);
+  disposePanel();
   if (!wrote) {
     // Stale guard fired: the cell changed while running. Honest fallback.
     toast('the cell changed while it ran — output not written');
@@ -6856,6 +6895,63 @@ async function runDocCell(cell, opts = {}) {
   offerDeclareDependency(strip, r, cell);
   if (opts.advance && r.code === 0) st.editor.advanceToNextCell(cell);
   return { ok: r.code === 0, r };
+}
+
+// Run a cell on the server. With a rat that streams (`rat run --events`)
+// the reply is NDJSON: live events go to `onLive` as they arrive, and the
+// final {type:'done'} is returned — the same fields as the one-shot JSON
+// reply an older rat (or server) gives, which is returned as it is.
+async function docRunRequest(body, onLive) {
+  let res;
+  try { res = await fetch('/api/doc/run-cell', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, stream: true }) }); }
+  catch { return { error: 'network failure' }; }
+  if (!/ndjson/.test(res.headers.get('content-type') || '')) {
+    try { return await res.json(); } catch { return { error: 'the server sent an unreadable reply' }; }
+  }
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = '', done = null;
+  try {
+    for (;;) {
+      const { value, done: end } = await reader.read();
+      if (end) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 1);
+        if (!line.trim()) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'done') done = ev;
+        else { try { onLive(ev); } catch {} }
+      }
+    }
+  } catch { return { error: 'the connection to the server was lost while the cell ran (the run continues on the kernel)' }; }
+  return done || { error: 'the run ended without a result (the connection was lost)' };
+}
+
+// A program's input prompt asked in the run strip — only when the editor
+// bundle has no live panel under the cell (older than mrmd-document 0.14).
+// Resolves like the panel: {text} | {dismissed: true} | {withdrawn: true}.
+function docStripAsk(strip, { prompt, secret }) {
+  docStripAskClose();
+  const form = document.createElement('form');
+  form.className = 'doc-run-ask';
+  form.innerHTML = '<label></label><input autocomplete="off" spellcheck="false"><span class="dim">Enter sends · Esc stops the run</span>';
+  form.querySelector('label').textContent = String(prompt || '').trim() || 'The program is waiting for input:';
+  const field = form.querySelector('input');
+  field.type = secret ? 'password' : 'text';
+  strip.insertAdjacentElement('afterend', form);
+  return new Promise(resolve => {
+    const finish = reply => { if (!form.isConnected) return; form.remove(); resolve(reply); };
+    form._withdraw = () => finish({ withdrawn: true });
+    form.onsubmit = e => { e.preventDefault(); finish({ text: field.value }); };
+    field.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); finish({ dismissed: true }); } };
+    setTimeout(() => field.focus(), 0);
+  });
+}
+function docStripAskClose() {
+  const form = document.querySelector('.doc-run-ask');
+  if (form) (form._withdraw || (() => form.remove()))();
 }
 
 // Run every cell, top to bottom, one kernel, one at a time — state builds

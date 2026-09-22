@@ -15,7 +15,7 @@ const readline = require('readline');
 const net = require('net');
 const { pathToFileURL } = require('url');
 const { AsyncLocalStorage } = require('async_hooks');
-const { execFile, execFileSync, spawn } = require('child_process');
+const { execFile, execFileSync, spawn, spawnSync } = require('child_process');
 const zlib = require('zlib');
 // Before anything reads its files: data written under the old product name
 // moves to the new one (legacy-homes.js). Skipped when the environment pins
@@ -12338,6 +12338,8 @@ const TTS_DIR = path.join(CACHE_DIR, 'tts');
 // Document cell runs in flight, keyed by client runId — the cancel
 // endpoint interrupts the kernel and ends the matching subprocess.
 const activeDocRuns = new Map();
+// Who started a run (an input answer must come from the same person).
+const docRunOwner = identity => (identity && identity.user && identity.user.id) || 'owner';
 
 // ---------- rat: notebook cells run on rat kernels ----------
 // Design boundary (deliberately thin — no MCP client, no kernel state
@@ -12361,15 +12363,23 @@ const RAT_MISSING = 'rat is not installed on this server (or not on its PATH). I
 
 // Run one rat command; resolves { out, code } and never rejects. `onChild`
 // receives the process so a caller can register it for cancellation.
-async function ratExec(args, { cwd, timeoutMs, capBytes = 200000, onChild } = {}) {
+// Start one rat command as the current principal (a guest's runs go
+// through their sandbox). Returns the child, or null when rat is missing.
+async function ratSpawn(args, { cwd } = {}) {
   const rat = ratBinary();
-  if (!rat.path) return { out: RAT_MISSING, code: -1, missing: true };
+  if (!rat.path) return null;
   const principal = await currentPrincipal(cwd ? projectOfPath(cwd) : null);
   assertPrincipalCanRun(principal, 'a notebook cell');
   const launched = principal.sandbox ? principal.sandbox.launch(rat.path, args, { cwd }) : { file: rat.path, args, env: process.env };
+  const child = spawn(launched.file, launched.args, { cwd: principal.sandbox ? undefined : (cwd || os.homedir()), env: launched.env });
+  if (principal.guest) { child.guestId = principal.user.id; guestChildren.add(child); child.on('close', () => guestChildren.delete(child)); }
+  return child;
+}
+
+async function ratExec(args, { cwd, timeoutMs, capBytes = 200000, onChild } = {}) {
+  const child = await ratSpawn(args, { cwd });
+  if (!child) return { out: RAT_MISSING, code: -1, missing: true };
   return new Promise(resolve => {
-    const child = spawn(launched.file, launched.args, { cwd: principal.sandbox ? undefined : (cwd || os.homedir()), env: launched.env });
-    if (principal.guest) { child.guestId = principal.user.id; guestChildren.add(child); child.on('close', () => guestChildren.delete(child)); }
     if (onChild) onChild(child);
     let buf = '';
     let timer = null;
@@ -12380,6 +12390,79 @@ async function ratExec(args, { cwd, timeoutMs, capBytes = 200000, onChild } = {}
     child.on('close', code => { if (timer) clearTimeout(timer); resolve({ out: buf, code }); });
     child.on('error', e => { if (timer) clearTimeout(timer); resolve({ out: e.code === 'ENOENT' ? RAT_MISSING : String(e.message), code: -1, missing: e.code === 'ENOENT' }); });
   });
+}
+
+// Does this rat stream a run (`rat run --events`: output as it arrives,
+// input prompts answered through stdin)? Asked once per installed binary;
+// an older rat keeps the one-reply-at-the-end path.
+let ratEventsProbe = { key: null, ok: false };
+function ratSpeaksEvents() {
+  const rat = ratBinary();
+  if (!rat.path) return false;
+  let key;
+  try { key = fs.realpathSync(rat.path); } catch { return false; }
+  if (ratEventsProbe.key !== key) {
+    const help = spawnSync(key, ['run', '--help'], { encoding: 'utf8', timeout: 10000 });
+    ratEventsProbe = { key, ok: /--events\b/.test(String(help.stdout || '') + String(help.stderr || '')) };
+  }
+  return ratEventsProbe.ok;
+}
+
+// A streamed notebook run: `rat run --events`, relayed to the page as
+// NDJSON — {type:'output'|'input_request'|'input_done'} while it runs,
+// then one {type:'done'} with the same fields the one-shot reply has.
+// No time limit: a run may wait on a person (a sign-in) or train for
+// hours; cancel interrupts the kernel. The page answers prompts through
+// /api/doc/run-input, which writes to rat's stdin; if the page goes away,
+// rat's stdin is closed, so a later prompt is cancelled rather than left
+// waiting on nobody — the run itself continues to its end.
+const DOC_RUN_LIVE_CAP = 2000000; // live output relayed per run
+async function streamDocRun(res, { doc, runtime, code, runId, owner }) {
+  const t0 = Date.now();
+  const child = await ratSpawn(['run', '--events', '--timeout', '0', '--doc', doc, runtime, code], { cwd: path.dirname(doc) });
+  if (!child) return json(res, 200, { out: RAT_MISSING, code: -1, missing: true, runtime, ms: 0 });
+  const entry = { child, runtime, doc, cancelled: false, owner, streamed: true, waiting: false };
+  activeDocRuns.set(runId, entry);
+  res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
+  const send = ev => { if (!res.writableEnded && !res.destroyed) res.write(JSON.stringify(ev) + '\n'); };
+  let finished = false, stderr = '', live = '', liveCapped = false, result = null, failure = '';
+  res.on('close', () => { if (!finished) { try { child.stdin.end(); } catch {} } });
+  child.stdin.on('error', () => {});
+  const onEvent = ev => {
+    if (ev.event === 'output' && typeof ev.text === 'string') {
+      if (live.length < DOC_RUN_LIVE_CAP) { live += ev.text; send({ type: 'output', text: ev.text }); }
+      else if (!liveCapped) { liveCapped = true; send({ type: 'output', text: '\n… (live output stops here; the run continues)\n' }); }
+    } else if (ev.event === 'input_request') {
+      entry.waiting = true;
+      send({ type: 'input_request', prompt: String(ev.prompt || ''), secret: !!ev.secret });
+    } else if (ev.event === 'input_done') {
+      entry.waiting = false;
+      send({ type: 'input_done' });
+    } else if (ev.event === 'result') result = ev;
+    else if (ev.event === 'error') failure = String(ev.message || 'rat could not complete the run');
+  };
+  let buf = '';
+  child.stdout.on('data', d => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      try { onEvent(JSON.parse(line)); } catch {}
+    }
+  });
+  child.stderr.on('data', d => { if (stderr.length < 20000) stderr += d; });
+  await new Promise(resolve => { child.on('close', resolve); child.on('error', e => { failure = failure || String(e.message); resolve(); }); });
+  finished = true;
+  activeDocRuns.delete(runId);
+  // The same `out` the one-shot path returns: rat's stderr (kernel-start
+  // banner, errors) then the run's text with its status tail.
+  let out = stderr + (result ? String(result.text || '') : live + (failure ? (live ? '\n' : '') + failure : ''));
+  if (out.length > 200000) out = out.slice(0, 200000) + '\n… (truncated — output capped at 200 KB)';
+  if (entry.cancelled) out += (out ? '\n' : '') + '■ cancelled — the kernel was interrupted; its variables are intact';
+  const exit = child.exitCode == null ? -1 : child.exitCode;
+  send({ type: 'done', out, code: result ? (result.success ? 0 : 1) : (exit || 1), runtime, cancelled: entry.cancelled, ms: Date.now() - t0 });
+  if (!res.writableEnded) res.end();
 }
 
 // rat's JSON reports (doctor/ensure/resolve) go to stdout; progress and
@@ -13473,6 +13556,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.11.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/chattering.apk': { file: 'chattering.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
@@ -15217,12 +15301,17 @@ async function handleRequest(req, res) {
       if (!code || typeof code !== 'string' || !code.trim()) return json(res, 400, { error: 'code required' });
       const doc = notebookPath(parsed.doc);
       if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const runIdIn = String(parsed.runId || '') || ('run-' + Date.now());
+      if (parsed.stream && ratSpeaksEvents()) {
+        try { return await streamDocRun(res, { doc, runtime, code, runId: runIdIn, owner: docRunOwner(identity) }); }
+        catch (e) { if (!res.headersSent) return json(res, e.status || 403, { error: e.message }); return; }
+      }
       const t0run = Date.now();
       // No hard timeout: long runs are legitimate (training, big queries).
       // The client shows elapsed time and offers cancel, which interrupts
       // the KERNEL (rat cancel) — killing this subprocess alone would leave
       // the kernel computing. runId lets /api/doc/cancel-run find it.
-      const runId = String(parsed.runId || '') || ('run-' + Date.now());
+      const runId = runIdIn;
       const result = await ratExec(['run', '--doc', doc, runtime, code], {
         cwd: path.dirname(doc),
         onChild: child => activeDocRuns.set(runId, { child, runtime, doc, cancelled: false }),
@@ -15231,6 +15320,23 @@ async function handleRequest(req, res) {
       activeDocRuns.delete(runId);
       if (entry && entry.cancelled) result.out += (result.out ? '\n' : '') + '■ cancelled — the kernel was interrupted; its variables are intact';
       json(res, 200, { ...result, runtime, cancelled: !!(entry && entry.cancelled), ms: Date.now() - t0run });
+    } else if (u.pathname === '/api/doc/run-input' && req.method === 'POST') {
+      // Answer a streamed run's input prompt: one line to rat's stdin. Only
+      // the person who started the run may answer — the answer can be a
+      // password, and the prompt went to their page alone.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const entry = activeDocRuns.get(String(parsed.runId || ''));
+      if (!entry || !entry.streamed) return json(res, 404, { error: 'no such run (it may have finished already)' });
+      if (entry.owner !== docRunOwner(identity)) return json(res, 403, { error: 'only the person who started this run can answer it' });
+      if (typeof parsed.text !== 'string') return json(res, 400, { error: 'text required' });
+      if (!entry.waiting) return json(res, 409, { error: 'the program is not waiting for input' });
+      entry.waiting = false;
+      try { entry.child.stdin.write(JSON.stringify({ input: parsed.text }) + '\n'); }
+      catch (e) { return json(res, 500, { error: 'could not deliver the answer: ' + e.message }); }
+      json(res, 200, { ok: true });
     } else if (u.pathname === '/api/doc/cancel-run' && req.method === 'POST') {
       // Cancel a running cell: interrupt the kernel first (rat cancel —
       // keeps the namespace), then end the pending run subprocess.

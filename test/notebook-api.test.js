@@ -174,3 +174,87 @@ test('notebooks list reads provenance from disk; prerequisites run through rat p
   const derive = await post('/api/doc/notebook-from-answer', { key: 'nope', entryId: 'x' });
   assert.match(derive.error, /required/);
 });
+
+// A streamed run (`rat run --events`): output arrives while the cell runs,
+// input prompts are answered from the page, and a page that goes away
+// does not leave the kernel waiting on nobody.
+const ratBin = process.env.RAT_BIN || 'rat';
+const ratStreams = haveRat && /--events\b/.test(String(spawnSync(ratBin, ['run', '--help'], { encoding: 'utf8' }).stdout || ''));
+
+async function streamRun(base, body, onEvent) {
+  const res = await fetch(base + '/api/doc/run-cell', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, stream: true }), signal: body.signal });
+  assert.match(res.headers.get('content-type'), /ndjson/);
+  const reader = res.body.getReader(), dec = new TextDecoder(), events = [];
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const ev = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+      events.push(ev);
+      await onEvent?.(ev, events);
+    }
+  }
+  return events;
+}
+
+test('a streamed run relays output as it comes and takes answers from the page', { skip: !ratStreams && 'this rat does not stream runs (rat run --events)' }, async t => {
+  const { post, base } = await bootServer(t, { RAT_NOTEBOOK_REQUIREMENTS: '' });
+  const { repo, nb } = makeProject();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const code = 'import getpass, time\nprint("step 1", flush=True)\ntime.sleep(0.5)\nname = input("Your name: ")\npw = getpass.getpass("Password: ")\nprint("hello", name, len(pw))';
+  const t0 = Date.now();
+  let firstOutputAt = null;
+  const events = await streamRun(base, { lang: 'python', code, doc: nb, runId: 's1' }, async ev => {
+    if (ev.type === 'output' && firstOutputAt == null) firstOutputAt = Date.now() - t0;
+    if (ev.type === 'input_request') {
+      const r = await post('/api/doc/run-input', { runId: 's1', text: ev.secret ? 'hunter2' : 'Alice' });
+      assert.equal(r.ok, true, JSON.stringify(r));
+    }
+  });
+  const kinds = events.map(e => e.type);
+  const asks = events.filter(e => e.type === 'input_request');
+  assert.deepEqual(asks.map(a => [a.prompt, a.secret]), [['Your name: ', false], ['Password: ', true]]);
+  assert.equal(kinds.at(-1), 'done');
+  const done = events.at(-1);
+  assert.equal(done.code, 0, done.out);
+  assert.match(done.out, /hello Alice 7/);
+  assert.doesNotMatch(JSON.stringify(events), /hunter2/, 'the secret never travels back to the page');
+  assert.ok(firstOutputAt < done.ms, 'output arrived before the run ended');
+
+  const none = await post('/api/doc/run-input', { runId: 'nope', text: 'x' });
+  assert.match(none.error, /no such run/);
+});
+
+test('an answer is refused when nothing waits, and a page that leaves cancels its prompt', { skip: !ratStreams && 'this rat does not stream runs (rat run --events)' }, async t => {
+  const { post, base } = await bootServer(t, { RAT_NOTEBOOK_REQUIREMENTS: '' });
+  const { repo, nb } = makeProject();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const warm = await post('/api/doc/run-cell', { lang: 'py', code: 'kept = 7', doc: nb, runId: 'w' });
+  assert.equal(warm.code, 0, warm.out);
+
+  // Not waiting yet: the answer is refused, not queued for a later prompt.
+  await streamRun(base, { lang: 'py', code: 'import time\nprint("busy", flush=True)\ntime.sleep(1)', doc: nb, runId: 'b' }, async ev => {
+    if (ev.type === 'output') {
+      const early = await post('/api/doc/run-input', { runId: 'b', text: 'too soon' });
+      assert.equal(early.error, 'the program is not waiting for input');
+    }
+  });
+
+  // The page goes away while the program waits: rat's stdin closes, the
+  // prompt is cancelled, the kernel lives on with its variables.
+  const ctrl = new AbortController();
+  await streamRun(base, { lang: 'py', code: 'input("anyone? ")', doc: nb, runId: 'gone', signal: ctrl.signal }, ev => {
+    if (ev.type === 'input_request') ctrl.abort();
+  }).catch(e => assert.equal(e.name, 'AbortError'));
+  let after;
+  for (let i = 0; i < 50; i++) {
+    after = await post('/api/doc/run-cell', { lang: 'py', code: 'print(kept)', doc: nb, runId: 'a' + i });
+    if (after.code === 0) break;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  assert.equal(after.code, 0, after.out);
+  assert.match(after.out, /^7$/m, 'the kernel kept its variables');
+});

@@ -11,7 +11,19 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.13.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.14.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.14.0: live cell runs. `showCellRun(cell)` puts a panel under a running
+  cell: `append(text)` shows output as it streams (carriage returns redraw
+  a progress line in place, ANSI styling dropped, links clickable), and
+  `ask({prompt, secret})` shows a field for the program's input prompt — a
+  password field when `secret` — resolving `{text}`, `{dismissed: true}`
+  (Esc: the host stops the run) or `{withdrawn: true}` (`dismissInput()`,
+  a newer question, or `dispose()`). The panel is a view decoration, never
+  document text: no save, undo step or collaboration traffic while a cell
+  runs; the result block the cell already owns is dimmed until the host
+  writes the new one (`setCellOutput`) and calls `dispose()`. Chattering
+  feeds it from `rat run --events` (runDocCell in app.html). The bundle
+  grows by about 5 KB.
 - 0.13.0: diagram fences drawn through a host renderer. `createDocumentEditor`
   accepts `diagrams: {languages, render}`; a closed fence in a named language
   is drawn while the cursor is outside it and shown as source inside, like
@@ -76,16 +88,14 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `10bdbf8` ("document entry 0.13.0"), which follows `abae10d`,
-  the commit that finally recorded the 0.10.1/0.11.0 sources earlier bundles
-  were built from.
-- SHA-256: `af4867cfd23d6cbc5e6f2edd11a2959f599fa7c49be54c612a6ad5e2f1792c67`
+- Source commit: `93da1a6` ("document entry 0.14.0").
+- SHA-256: `b3116e02aa216318872e3ebd4a8add1a6959c894ea36856acce62305367d1533`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.12.0 (documents open; diagram fences stay code and Ctrl-click on a file
-  link opens in the app). Keep that artifact and route while the fallback
-  exists.
+  0.13.0 (documents open; a running cell's prompt is asked in the run strip
+  and its latest output line shown there, instead of the panel under the
+  cell). Keep that artifact and route while the fallback exists.
 
 ## Features enabled in chattering
 
@@ -106,6 +116,9 @@ owns the editing surface.
   `refreshDiagrams()` after a theme change
 - `file-link-navigate` — links inside the document open in the file
   workspace (filesmode.js `fileWsWireDocLinks`)
+- `showCellRun` — a running notebook cell's live output and input prompts
+  (app.html `runDocCell`, fed by `rat run --events` through
+  `/api/doc/run-cell` with `stream: true` and `/api/doc/run-input`)
 
 ## Update procedure
 
