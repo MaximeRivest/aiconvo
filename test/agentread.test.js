@@ -12,10 +12,10 @@ test('fresh state guards with since = now', () => {
 
 test('normalize drops junk and keeps valid numbers', () => {
   const s = R.normalize({ since: '5', read: { a: 10, b: 'x', '': 3 }, finished: { c: -1, d: 7 } }, 99);
-  assert.deepEqual(s, { since: 5, read: { a: 10 }, finished: { d: 7 }, flagged: {}, dismissed: {}, pinned: {} });
-  assert.deepEqual(R.normalize(null, 42), { since: 42, read: {}, finished: {}, flagged: {}, dismissed: {}, pinned: {} });
-  const marks = R.normalize({ flagged: { a: 3, b: 0 }, dismissed: { c: '9' }, pinned: { d: 4, '': 5 } }, 1);
-  assert.deepEqual([marks.flagged, marks.dismissed, marks.pinned], [{ a: 3 }, { c: 9 }, { d: 4 }]);
+  assert.deepEqual(s, { since: 5, read: { a: 10 }, finished: { d: 7 }, opened: {}, flagged: {}, dismissed: {}, pinned: {} });
+  assert.deepEqual(R.normalize(null, 42), { since: 42, read: {}, finished: {}, opened: {}, flagged: {}, dismissed: {}, pinned: {} });
+  const marks = R.normalize({ opened: { o: 2, p: 'no' }, flagged: { a: 3, b: 0 }, dismissed: { c: '9' }, pinned: { d: 4, '': 5 } }, 1);
+  assert.deepEqual([marks.opened, marks.flagged, marks.dismissed, marks.pinned], [{ o: 2 }, { a: 3 }, { c: 9 }, { d: 4 }]);
 });
 
 test('markRead uses the server clock and clears the finish marker', () => {
@@ -77,7 +77,7 @@ test('import from a second device merges by max and ignores covered finishes', (
 test('mark unread beats the since guard and any later read lifts it', () => {
   const s = R.createState(5000);
   assert.equal(R.unreadAt(s, 'old', 1000), 0, 'older than the guard: read');
-  assert.deepEqual(R.markUnread(s, 'old', { now: 6000 }), { flagged: { old: 6000 } });
+  assert.deepEqual(R.markUnread(s, 'old', { now: 6000 }), { flagged: { old: 6000 }, opened: { old: 6000 } });
   assert.equal(R.unreadAt(s, 'old', 1000), 6000, 'flagged: unread, sorted at the flag time');
   const delta = R.markRead(s, 'old', { now: 7000, mtimeMs: 1000 });
   assert.deepEqual(delta, { read: { old: 7000 }, flagged: { old: 0 } });
@@ -109,6 +109,7 @@ test('dismiss reads and hides until newer activity arrives', () => {
 
 test('mark unread cancels a dismissal; dismissing cancels a flag', () => {
   const s = R.createState(1000);
+  R.open(s, 'a', 1500);
   R.dismiss(s, 'a', { now: 2000 });
   assert.deepEqual(R.markUnread(s, 'a', { now: 3000 }), { flagged: { a: 3000 }, dismissed: { a: 0 } });
   assert.equal(R.isDismissed(s, 'a', 0), false);
@@ -117,6 +118,33 @@ test('mark unread cancels a dismissal; dismissing cancels a flag', () => {
   assert.deepEqual(delta, { read: { a: 4000 }, flagged: { a: 0 }, dismissed: { a: 4000 } });
   assert.equal(R.unreadAt(s, 'a', 0), 0);
   assert.equal(R.isDismissed(s, 'a', 0), true);
+});
+
+// design/59: the side list holds what a person opened, until closed.
+test('the list starts empty; opening lists, closing hides, a later reply brings it back', () => {
+  const s = R.createState(1000);
+  assert.equal(R.isListed(s, 'a', 5000), false, 'activity alone never lists a conversation');
+  assert.deepEqual(R.open(s, 'a', 2000), { opened: { a: 2000 } });
+  assert.equal(R.open(s, 'a', 2500), null, 'opening again changes nothing');
+  assert.equal(s.opened.a, 2000, 'the first opening time is kept');
+  assert.equal(R.isListed(s, 'a', 1500), true);
+  const closed = R.dismiss(s, 'a', { now: 3000, mtimeMs: 1500 });
+  assert.deepEqual(closed, { read: { a: 3000 }, dismissed: { a: 3000 } });
+  assert.equal(R.isListed(s, 'a', 1500), false, 'closed: off the list');
+  assert.equal(s.opened.a, 2000, 'closing keeps the opened mark');
+  assert.equal(R.isListed(s, 'a', 3500), true, 'a newer transcript write lists it again');
+  assert.equal(R.unreadAt(s, 'a', 3500), 3500, '...as unread');
+  R.dismiss(s, 'a', { now: 4000, mtimeMs: 3500 });
+  assert.equal(R.isListed(s, 'a', 3500), false);
+  assert.deepEqual(R.open(s, 'a', 4500), { dismissed: { a: 0 } }, 'opening a closed conversation lists it again');
+  assert.equal(R.isListed(s, 'a', 3500), true);
+});
+
+test('mark unread lists a conversation nobody opened', () => {
+  const s = R.createState(1000);
+  assert.deepEqual(R.markUnread(s, 'b', { now: 2000 }), { flagged: { b: 2000 }, opened: { b: 2000 } });
+  assert.equal(R.isListed(s, 'b', 0), true);
+  assert.equal(R.markUnread(s, 'b', { now: 2100 }).opened, undefined, 'already listed: no opened delta');
 });
 
 test('pins keep pin order and report no change when idle', () => {
@@ -134,13 +162,18 @@ test('applyDelta mirrors the server on a browser copy, 0 removes a mark', () => 
   const local = R.createState(1000);
   const server = R.createState(1000);
   R.applyDelta(local, R.setPinned(server, 'a', true, 2000));
+  R.applyDelta(local, R.open(server, 'd', 2050));
   R.applyDelta(local, R.markUnread(server, 'b', { now: 2100 }));
   R.applyDelta(local, R.markFinished(server, 'c', 2200));
   assert.deepEqual(local, server);
   R.applyDelta(local, R.setPinned(server, 'a', false));
   R.applyDelta(local, R.markRead(server, 'b', { now: 2300 }));
   R.applyDelta(local, R.dismiss(server, 'c', { now: 2400 }));
+  R.applyDelta(local, R.dismiss(server, 'd', { now: 2500 }));
+  R.applyDelta(local, R.open(server, 'd', 2600));
   assert.deepEqual(local, server);
+  assert.equal(local.opened.d, 2050);
+  assert.equal('d' in local.dismissed, false);
   assert.deepEqual(local.pinned, {});
   assert.deepEqual(local.flagged, {});
   assert.equal(local.dismissed.c, 2400);

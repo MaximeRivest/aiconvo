@@ -3251,12 +3251,25 @@ function agentReadMark(keys) {
 }
 // Explicit inbox marks (design/42): each is one click, applied at once.
 function agentReadMarkUnread(keys) {
-  const merged = { flagged: {}, dismissed: {} };
+  const merged = { flagged: {}, opened: {}, dismissed: {} };
   let any = false;
   for (const key of keys) {
     if (!key || !index[key]) continue;
     const d = agentReadLib.markUnread(agentRead, key);
-    if (d) { Object.assign(merged.flagged, d.flagged); Object.assign(merged.dismissed, d.dismissed || {}); any = true; }
+    if (d) { Object.assign(merged.flagged, d.flagged); Object.assign(merged.opened, d.opened || {}); Object.assign(merged.dismissed, d.dismissed || {}); any = true; }
+  }
+  if (any) agentReadApply(merged);
+}
+// A person opened a conversation: it joins the side list (design/59). A
+// conversation just started from the web may reach here a beat before the
+// index sees its file, so the index is not required.
+function agentReadOpen(keys) {
+  const merged = { opened: {}, dismissed: {} };
+  let any = false;
+  for (const key of keys) {
+    if (!key) continue;
+    const d = agentReadLib.open(agentRead, key);
+    if (d) { Object.assign(merged.opened, d.opened || {}); Object.assign(merged.dismissed, d.dismissed || {}); any = true; }
   }
   if (any) agentReadApply(merged);
 }
@@ -14954,6 +14967,8 @@ async function handleRequest(req, res) {
         // { unread: [keys] } marks by hand; { dismiss: [keys] } removes from the
         // inbox; { pin: { key: true|false } } pins and unpins.
         if (Array.isArray(p.unread)) agentReadMarkUnread(p.unread.map(String));
+        // { open: [keys] } lists conversations a person opened (design/59).
+        if (Array.isArray(p.open)) agentReadOpen(p.open.map(String));
         if (Array.isArray(p.dismiss)) agentReadDismiss(p.dismiss.map(String));
         if (p.pin && typeof p.pin === 'object') agentReadPin(p.pin);
         json(res, 200, agentRead);

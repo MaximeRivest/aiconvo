@@ -14,19 +14,22 @@
 // so enabling the feature (or wiping the state) never floods the inbox with
 // every old conversation.
 //
-// Three explicit marks ride in the same state (design/42):
+// Four explicit marks ride in the same state (design/42, design/59):
+// · opened[key]    a person opened the conversation; it belongs to the side
+//                  list from then on (the list starts empty, nothing is
+//                  listed that nobody opened);
 // · flagged[key]   marked unread by hand; unread while newer than the read,
 //                  whatever the transcript's age (the guard does not apply);
-// · dismissed[key] removed from the inbox; hidden while its activity is not
-//                  newer than the dismissal, a later reply brings it back;
-// · pinned[key]    kept in a section of its own, in pin order.
+// · dismissed[key] closed from the list; hidden while its activity is not
+//                  newer than the closing, a later reply brings it back;
+// · pinned[key]    kept at the top of the list, in pin order.
 
 function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }
 
-const MARK_MAPS = ['flagged', 'dismissed', 'pinned'];
+const MARK_MAPS = ['opened', 'flagged', 'dismissed', 'pinned'];
 
 function createState(now = Date.now()) {
-  return { since: now, read: {}, finished: {}, flagged: {}, dismissed: {}, pinned: {} };
+  return { since: now, read: {}, finished: {}, opened: {}, flagged: {}, dismissed: {}, pinned: {} };
 }
 
 function normalize(raw, now = Date.now()) {
@@ -64,21 +67,35 @@ function markFinished(state, key, at = Date.now()) {
   return { finished: { [key]: t } };
 }
 
+// A person opened `key`: it joins the list. A closed conversation opened
+// again is listed again. Opening is not reading (markRead does that).
+function open(state, key, now = Date.now()) {
+  if (!key) return null;
+  const delta = {};
+  let changed = false;
+  if (!state.opened[key]) { state.opened[key] = num(now) || Date.now(); delta.opened = { [key]: state.opened[key] }; changed = true; }
+  if (key in state.dismissed) { delete state.dismissed[key]; delta.dismissed = { [key]: 0 }; changed = true; }
+  return changed ? delta : null;
+}
+
 // "Mark as unread": the flag must beat the last read even when that read
 // was stamped with a future mtime, so it is at least one past the read.
-// A dismissed conversation comes back into the inbox.
+// The conversation joins the list (it is being asked for) and a closed one
+// comes back.
 function markUnread(state, key, { now = Date.now() } = {}) {
   if (!key) return null;
   const at = Math.max(num(now), num(state.read[key]) + 1);
   const delta = { flagged: { [key]: at } };
   state.flagged[key] = at;
-  if (key in state.dismissed) { delete state.dismissed[key]; delta.dismissed = { [key]: 0 }; }
+  const opened = open(state, key, now);
+  if (opened) Object.assign(delta, opened);
   return delta;
 }
 
-// "Remove from the inbox": reads the conversation and hides it while no
-// newer activity arrives. The dismissal time is the read time, so the same
-// clock rule covers it.
+// "Close": reads the conversation and hides it from the list while no
+// newer activity arrives. The closing time is the read time, so the same
+// clock rule covers it. The `opened` mark stays, so a later reply lists
+// the conversation again.
 function dismiss(state, key, { now = Date.now(), mtimeMs = 0 } = {}) {
   if (!key) return null;
   const delta = markRead(state, key, { now, mtimeMs }) || { read: { [key]: state.read[key] } };
@@ -145,10 +162,15 @@ function unreadAt(state, key, mtimeMs = 0) {
   return activity > read ? activity : 0;
 }
 
-// Removed from the inbox, and nothing newer has happened since.
+// Closed, and nothing newer has happened since.
 function isDismissed(state, key, mtimeMs = 0) {
   const at = num(state.dismissed[key]);
   return !!at && activityAt(state, key, mtimeMs) <= at && !(num(state.flagged[key]) > num(state.read[key]));
+}
+
+// In the side list: opened by a person and not closed since.
+function isListed(state, key, mtimeMs = 0) {
+  return !!num(state.opened[key]) && !isDismissed(state, key, mtimeMs);
 }
 
 // Pinned keys, most recently pinned first.
@@ -156,4 +178,4 @@ function pinnedKeys(state) {
   return Object.entries(state.pinned).sort((a, b) => b[1] - a[1]).map(([k]) => k);
 }
 
-module.exports = { createState, normalize, markRead, markFinished, markUnread, dismiss, setPinned, importState, applyDelta, unreadAt, isDismissed, pinnedKeys, activityAt };
+module.exports = { createState, normalize, markRead, markFinished, open, markUnread, dismiss, setPinned, importState, applyDelta, unreadAt, isDismissed, isListed, pinnedKeys, activityAt };

@@ -75,6 +75,9 @@ and the existing sound/phone notification preferences are unchanged.
 
 ## Check-in and return
 
+*Superseded 2026-09-22 (design/59): the "Return to work" button is gone;
+Back does this job.*
+
 Opening a conversation through Agents or an agent-run alert remembers
 the current navigation entry. Repeated check-ins and inspecting files along
 the way keep the original return target until that page is reached again.

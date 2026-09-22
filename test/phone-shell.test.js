@@ -42,16 +42,16 @@ test('phone shell: bottom bar, sheets, one-row head, back hook, desktop untouche
   assert.equal(await ev(`$('gRecenter').getBoundingClientRect().bottom <= $('phoneBar').getBoundingClientRect().top`), true, 'the recenter control moved above the bar');
   await screenshot('phone-shell-home.png');
 
-  // Agents: the desktop inbox in a sheet — Unread, Read, Working docked.
-  await ev(`agentReadState.read=Object.fromEntries(sessions.map(s=>[s.key,1]));agentReadState.finished={};agentReadState.flagged={};jobs.set('run-1',{id:'run-1',type:'agent-run',status:'running',key:${JSON.stringify(keys.beta)}});activeRuns.set('run-1',{jobId:'run-1',key:${JSON.stringify(keys.beta)},status:'running',statusText:'tool · bash'});updateActiveBtn()`);
+  // Agents: the side list in a sheet (design/59) — the conversations a
+  // person opened, the working one with its typing dots.
+  await ev(`agentReadState.read=Object.fromEntries(sessions.map(s=>[s.key,1]));agentReadState.finished={};agentReadState.flagged={};agentReadState.opened=Object.fromEntries(sessions.map(s=>[s.key,1]));jobs.set('run-1',{id:'run-1',type:'agent-run',status:'running',key:${JSON.stringify(keys.beta)}});activeRuns.set('run-1',{jobId:'run-1',key:${JSON.stringify(keys.beta)},status:'running',statusText:'tool · bash'});updateActiveBtn()`);
   await ev(`document.querySelector('[data-phone-tab=agents]').click()`);
-  await until(`!$('agentsPop').hidden && $('agentsPop').dataset.panel==='inbox' && document.querySelector('#agentsLegacy [data-sec=traffic]')?.textContent.includes('beta')`, 'Agents opens as the inbox, with the running conversation in Working');
+  await until(`!$('agentsPop').hidden && $('agentsPop').dataset.panel==='inbox' && document.querySelector('#agentsUnread [data-sec=open] .ag-row.working[data-key=${JSON.stringify(keys.beta)}] .ag-typing')`, 'Agents opens as the list, with the running conversation typing');
   assert.equal(await ev(`document.body.classList.contains('phone-sheet') && document.querySelector('[data-phone-tab=agents]').getAttribute('aria-pressed')==='true'`), true);
   assert.equal(await ev(`$('agentsSheetHead').checkVisibility() && $('agentsSheetClose').getBoundingClientRect().height>=44`), true, 'the sheet has a head with a close button');
   assert.equal(await ev(`(()=>{const p=$('agentsPop').getBoundingClientRect(),b=$('phoneBar').getBoundingClientRect();return p.top<=0.5 && Math.abs(p.bottom-b.top)<1 && p.width===innerWidth})()`), true, 'the sheet fills the screen above the bar');
-  assert.equal(await ev(`!!document.querySelector('#agentsUnread [data-sec=unread]') && !!document.querySelector('#agentsUnread [data-sec=read]') && !!document.querySelector('#agentsLegacy [data-sec=traffic]')`), true, 'Unread and Read scroll; Working is docked');
-  assert.equal(await ev(`(()=>{const w=document.querySelector('#agentsLegacy [data-sec=traffic]').getBoundingClientRect(),b=$('phoneBar').getBoundingClientRect();return w.bottom<=b.top+1 && w.top>=0})()`), true, 'Working is on screen without scrolling');
-  assert.match(await ev(`document.querySelector('#agentsLegacy [data-sec=traffic]').textContent`), /beta/, 'the running conversation is in Working');
+  assert.equal(await ev(`!document.querySelector('[data-sec=unread],[data-sec=read],[data-sec=traffic]')`), true, 'no Unread, Read or Working sections');
+  assert.equal(await ev(`document.querySelectorAll('#agentsUnread [data-sec=open] .ag-row[data-key]').length===sessions.length`), true, 'every opened conversation is listed');
   assert.equal(await ev(`$('phoneBar').checkVisibility()`), true, 'the bar stays while a sheet is open');
   await screenshot('phone-shell-agents.png');
   // A row opens its conversation and closes the sheet; the one-row head shows a full title and ⋯.

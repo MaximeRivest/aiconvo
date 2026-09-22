@@ -186,8 +186,6 @@ body.side-layout > header { grid-column: 2; }
 body.side-layout > main { grid-column: 2; grid-row: 2; min-height: 0; }
 body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-direction: row; min-height: 0; background: var(--panel-bg); border-right: 1px solid var(--panel-border); }
 /* One panel: navigation above the work, machine and utilities below it. */
-#returnToWork[hidden] { display: none; }
-#returnToWork { width: 100%; color: var(--accent); }
 #sidePanel { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 #railMachine { flex: 0 1 auto; min-width: 0; max-width: 72px; height: 30px; min-height: 30px; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-1); color: var(--text); font-weight: 600; font-size: var(--fs-micro); display: flex; align-items: center; justify-content: center; }
 #railMachine .rail-initials { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
@@ -198,29 +196,21 @@ body.side-layout > #side { display: flex; grid-column: 1; grid-row: 1 / 3; flex-
 .rail-badge[hidden] { display: none; }
 .rail-badge.dot { min-width: 8px; width: 8px; height: 8px; padding: 0; top: 7px; right: 8px; font-size: 0; }
 :root[data-theme-mode="binary"] .rail-badge { background: var(--text); color: var(--bg); }
-/* The panel shows one section at a time; the flow/dock split only applies
-   inside "chats". Other sections use the full height, top-aligned. */
-body.side-layout #agentsPop[data-panel]:not([data-panel="conversations"]) #agentsLegacy { margin-top: 0; }
+body.side-layout #agentsPop[data-panel] #agentsLegacy { margin-top: 0; }
 body.side-layout #agentsPop:not([data-panel="files"]):not([data-panel="recent-files"]) .ag-files-block { display: none; }
 .panel-title { padding: var(--sp-2) 10px 4px; font-size: var(--fs-label); font-weight: 700; color: var(--text); }
 .panel-scope-caption { padding: 0 10px 8px; font-size: var(--fs-micro); color: var(--text-dim); }
-.inbox-section > h3 { margin: 0; padding: 8px 10px 4px; font-size: var(--fs-micro); font-weight: 600; color: var(--text-dim); }
-.inbox-read-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 4px; }
-.inbox-read-head h3 { flex: 1; min-width: 0; margin: 0; font-size: var(--fs-micro); font-weight: 600; color: var(--text-dim); }
-.read-scope { display: flex; gap: 2px; }
-.read-scope button { min-height: 28px; padding: 2px 8px; font-size: var(--fs-micro); background: transparent; border-color: transparent; }
-.read-scope button[aria-pressed="true"] { background: var(--surface-2); border-color: var(--border); color: var(--text); }
-.inbox-section + .inbox-section { margin-top: 12px; padding-top: 4px; border-top: 1px solid var(--border); }
-/* Replies scroll above a working dock that stays reachable. Keep the stored
-   inbox panel id so existing selections and project-scope rules carry over. */
+/* The open list (design/59) scrolls; other processes and recovery settings
+   dock underneath, folded, and stay reachable. */
+.ag-open { padding-top: var(--sp-2); }
 body.side-layout #agentsPop[data-panel="inbox"] { overflow: hidden; }
 body.side-layout #agentsPop[data-panel="inbox"] #agentsUnread { flex: 1 1 auto; min-height: 0; overflow: auto; }
-body.side-layout #agentsPop[data-panel="inbox"] #agentsLegacy { flex: 0 0 auto; max-height: 42%; overflow: auto; border-top: 1px solid var(--border); }
+body.side-layout #agentsPop[data-panel="inbox"] #agentsLegacy { flex: 0 0 auto; max-height: 42%; overflow: auto; }
+body.side-layout #agentsPop[data-panel="inbox"] #agentsLegacy:not(:empty) { border-top: 1px solid var(--border); }
 #sideUnfold.work .rail-icon { color: var(--live); }
 .ag-project { color: inherit; text-decoration: none; }
 .ag-project:hover, .ag-project:focus-visible { color: var(--text); text-decoration: underline; }
 .ag-project:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.tray-scope { margin: 6px 10px; }
 .mpick.project-scope-picker { width: 320px; max-height: min(480px, calc(100dvh - 16px)); }
 .mpick.project-scope-picker .mp-top { padding: 10px; border-bottom: 1px solid var(--border); }
 .mpick.project-scope-picker .mp-filter { min-width: 0; }
@@ -287,17 +277,7 @@ body.side-layout #agentsPop .ag-row.kbd-selected { outline: 1px solid var(--acce
 body.side-layout #agentsPop:not(.kbd) .ag-row.kbd-selected { outline: 0; }
 /* File activity lives in the right column, or in the phone's Files sheet. */
 body:not(.side-layout):not(.phone-shell) .ag-files-block { display: none; }
-.ag-sec-body[hidden] { display: none; }
-/* Sections are separated by space, not lines. A head is a quiet label; it
-   folds on click (the fold is remembered) and shows a count when folded. */
-.ag-section { padding: var(--sp-2) 0 2px; }
-.ag-sec { display: flex; align-items: center; gap: 6px; padding: 2px 10px 4px; border: 0; cursor: pointer; user-select: none; color: var(--text-faint); font-size: 10px; letter-spacing: .04em; }
-.ag-sec:hover { color: var(--text-dim); }
-.ag-sec .ag-sec-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ag-sec .ag-sec-n { color: var(--text-faint); }
-.ag-sec::after { content: "⌄"; color: var(--text-faint); opacity: 0; }
-.ag-sec[aria-expanded="false"]::after { content: "›"; }
-.ag-sec:hover::after, .ag-sec[aria-expanded="false"]::after { opacity: 1; }
+/* Quiet labels: the interrupted block's head and the files source head. */
 .ag-sub-sec { padding: 8px 10px 2px; color: var(--text-faint); font-size: 10px; letter-spacing: .04em; }
 .ag-files-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 10px 2px; }
 .ag-files-head > .ag-sub-sec { padding: 0; }
@@ -474,11 +454,11 @@ body:not(.home) .count { display: none !important; }
 .ag-recovery-setting { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; font-size: 12px; cursor: pointer; }
 .ag-recovery-help { padding: 4px 12px 12px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 @media (max-width: 520px) { .ag-recovery-actions { flex-direction: column; max-width: 90px; } .ag-recovery-actions button { min-height: 44px; } }
-.ag-unread-tray { min-height: 58px; }
-.ag-traffic { margin-top: 6px; }
 /* A row is two lines: the title across the whole width, then the folder and
-   a short time at the end. No icon columns: unread is a dot after the title,
-   working is a hollow pulsing one. Actions (⋯, stop) overlay on hover. */
+   a short time at the end. No icon columns: unread is a filled dot after the
+   title (and a bold title); working is three pulsing dots, the assistant's
+   "typing" — a person typing is the bouncing avatar bubble beside it.
+   Actions (⋯, ✕, stop) overlay on hover. */
 .ag-row { position: relative; display: flex; gap: 8px; align-items: center; padding: 4px 10px; margin: 0 2px; border-radius: var(--panel-row-r); cursor: pointer; font-size: var(--fs-meta); }
 .ag-row:hover { background: var(--surface-2); }
 /* One-line rows (no folder line) carry the time on the title line. */
@@ -490,8 +470,13 @@ body:not(.home) .count { display: none !important; }
 .ag-row.unread .ag-title { font-weight: 700; }
 .ag-row .ag-title::after { content: ""; flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; display: none; }
 .ag-row.unread .ag-title::after { display: block; background: var(--accent); }
-.ag-row.working .ag-title::after { display: block; border: 1px solid var(--accent); box-sizing: border-box; animation: activepulse 2.4s ease-in-out infinite; }
-.ag-row.unread.working .ag-title::after { background: var(--accent); }
+.ag-typing { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; height: 6px; }
+.ag-typing i { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: .35; animation: ag-typing 1.2s ease-in-out infinite; }
+.ag-typing i:nth-child(2) { animation-delay: .2s; }
+.ag-typing i:nth-child(3) { animation-delay: .4s; }
+@keyframes ag-typing { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-1px); } }
+.ag-row .ag-close { border: 0; background: transparent; color: var(--text-faint); font-size: 11px; }
+.ag-row .ag-close:hover { color: var(--text); background: var(--surface-3); }
 .ag-row .ag-sub { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .ag-row .ag-dir { flex: 1 1 auto; color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-row .ag-age { flex: 0 0 auto; color: var(--text-faint); font-size: 10px; white-space: nowrap; }
@@ -515,7 +500,7 @@ body:not(.home) .count { display: none !important; }
 .ag-notifications .job:last-child { border-bottom: 1px solid var(--border); }
 :root[data-theme-mode="binary"] #activeBtn.unread::after,
 :root[data-theme-mode="binary"] .ag-row.unread .ag-title::after { background: var(--text); }
-:root[data-theme-mode="binary"] .ag-row.working .ag-title::after { border: 2px solid var(--text); }
+:root[data-theme-mode="binary"] .ag-typing i { background: var(--text); opacity: 1; animation: none; }
 
 /* filter popover */
 #filtersPop { position: absolute; top: calc(var(--header-h) - 4px); right: var(--sp-3); z-index: 30; background: var(--surface-1); border: 1px solid var(--border-strong); padding: var(--sp-3); min-width: 280px; display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -1892,7 +1877,6 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
   body.phone-shell #agentsPop .ag-row { min-height: 52px; }
   body.phone-shell #agentsPop .ag-row.current { background: var(--surface-2); }
   body.phone-shell #agentsPop .ag-row.current .ag-title { color: var(--accent); }
-  body.phone-shell .read-scope button { min-height: 34px; }
   body.phone-shell.phone-files > #rightFiles { display: flex; flex-direction: column; position: fixed; top: 0; left: 0; right: 0; bottom: var(--phone-bar-h); z-index: 47; background: var(--bg); }
   body.phone-shell.phone-files #rightFilePanel { flex: 1 1 auto; min-height: 0; }
   body.phone-shell #rightFileList { padding: 0 4px 8px; overscroll-behavior: contain; }
@@ -2198,7 +2182,6 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
         <button id="sideNewMore" hidden title="Other ways to start" aria-haspopup="menu" aria-label="More ways to start">▾</button>
       </div>
     </div>
-    <button id="returnToWork" type="button" hidden title="Return to the page you left to check an agent">↩ <span>Return to work</span></button>
   </div>
   <div id="sideAgents"></div>
   <div class="side-foot">
@@ -2893,7 +2876,7 @@ async function voiceSetMuted(muted, minutes = 30) {
 function openJobNotification(job) {
   if (!job) return;
   toggleAgents(false);
-  if (job.type === 'agent-run' && (job.fanoutRootKey || job.key)) return openAgentCheck(job.fanoutRootKey || job.key, job.status === 'done' ? 'reply' : 'bottom');
+  if (job.type === 'agent-run' && (job.fanoutRootKey || job.key)) return openPanelConversation(job.fanoutRootKey || job.key, job.status === 'done' ? 'reply' : 'bottom');
   if (job.status === 'error') return; // error text is visible in the card
   if (job.type === 'distill' && job.key) {
     if (job.status === 'running') streamDistill(job.key, false);
@@ -3262,10 +3245,11 @@ setInterval(renderTicker, 30000);
 // the server echoes back rather than merged.
 const AGENT_READ_LEGACY_KEY = 'aiconvo.agentRead.v1'; // per-browser state, imported once
 const AGENT_READ_CACHE_KEY = 'aiconvo.agentRead.v2';  // last server state, boot copy
-// Besides reads and finishes, three explicit marks (design/42): flagged
-// (marked unread by hand), dismissed (removed from the inbox), pinned.
-const AGENT_MARK_MAPS = ['flagged', 'dismissed', 'pinned'];
-const emptyAgentReadState = () => ({ since: Date.now(), read: {}, finished: {}, flagged: {}, dismissed: {}, pinned: {} });
+// Besides reads and finishes, four explicit marks (design/42, design/59):
+// opened (a person opened it: it belongs to the side list), flagged (marked
+// unread by hand), dismissed (closed from the list), pinned.
+const AGENT_MARK_MAPS = ['opened', 'flagged', 'dismissed', 'pinned'];
+const emptyAgentReadState = () => ({ since: Date.now(), read: {}, finished: {}, opened: {}, flagged: {}, dismissed: {}, pinned: {} });
 let agentReadState = emptyAgentReadState();
 let agentReadLoaded = false;           // the server state has been fetched once
 const agentReadPending = new Map();    // key → local read time, not yet accepted by the server
@@ -3387,11 +3371,17 @@ function agentIsFlagged(s) {
   const key = s && s.key;
   return (Number(agentReadState.flagged[key]) || 0) > (Number(agentReadState.read[key]) || 0);
 }
-// Removed from the inbox by hand, and nothing newer happened since.
+// Closed by hand, and nothing newer happened since.
 function agentIsDismissed(s) {
   const at = Number(agentReadState.dismissed[s && s.key]) || 0;
   return !!at && agentActivityAt(s) <= at && !agentIsFlagged(s);
 }
+// In the side list: a person opened it, and it was not closed since. The
+// list starts empty; a conversation nobody opened here is not in it.
+function agentIsListed(s) {
+  return !!(s && s.key && Number(agentReadState.opened[s.key])) && !agentIsDismissed(s);
+}
+function listedSessions() { return sessions.filter(agentIsListed); }
 function agentIsPinned(key) { return !!agentReadState.pinned[key]; }
 function pinnedSessions() {
   return Object.entries(agentReadState.pinned).sort((a, b) => b[1] - a[1])
@@ -3416,10 +3406,22 @@ function markAgentUnread(key) {
   if (!key) return;
   agentReadPending.delete(key);
   agentReadState.flagged[key] = Math.max(Date.now(), (Number(agentReadState.read[key]) || 0) + 1);
+  if (!agentReadState.opened[key]) agentReadState.opened[key] = Date.now();
   delete agentReadState.dismissed[key];
   agentMarksChanged();
   return postAgentMarks({ unread: [key] });
 }
+// Opening a conversation puts it in the side list (and brings a closed one
+// back). Nothing is sent when it is already there.
+function openAgentConversation(key) {
+  if (!key) return;
+  if (agentReadState.opened[key] && !(key in agentReadState.dismissed)) return;
+  if (!agentReadState.opened[key]) agentReadState.opened[key] = Date.now();
+  delete agentReadState.dismissed[key];
+  agentMarksChanged();
+  return postAgentMarks({ open: [key] });
+}
+// "Close": reads it and takes it off the list until it replies again.
 function dismissAgentConversation(key) {
   if (!key) return;
   const s = sessions.find(item => item.key === key);
@@ -3477,11 +3479,19 @@ async function loadAgentRecovery() {
     if (response.ok) applyAgentRecovery(await response.json());
   } catch {}
 }
+// Unread replies in the side list (design/59): a finished, unread reply of
+// a conversation a person opened. A conversation nobody opened here does
+// not count, whatever it did.
 function finishedUnreadSessions() {
   const busy = agentBusyKeys(), byKey = delegationTaskByKey();
   const interrupted = new Set(agentsRecovery.interrupted.map(r => r.key));
-  return sessions.filter(s => agentUnreadAt(s) && !interrupted.has(s.key) && !busy.has(s.key) && !agentIsDismissed(s) && delegatedNeedsPerson(s, byKey))
+  return listedSessions().filter(s => agentUnreadAt(s) && !interrupted.has(s.key) && !busy.has(s.key) && delegatedNeedsPerson(s, byKey))
     .sort((a, b) => agentUnreadAt(b) - agentUnreadAt(a));
+}
+// Listed conversations the assistant is working in right now.
+function workingListedKeys() {
+  const busy = agentBusyKeys();
+  return new Set(listedSessions().filter(s => busy.has(s.key)).map(s => s.key));
 }
 function markAgentRead(key, at = Date.now()) {
   if (!key) return;
@@ -3515,11 +3525,12 @@ document.addEventListener('visibilitychange', () => {
 
 function updateActiveBtn() {
   const unread = finishedUnreadSessions();
-  const attention = new Set(sessions.filter(isActive).map(s => s.key));
-  unread.forEach(s => attention.add(s.key));
+  const attention = new Set(unread.map(s => s.key));
   agentsRecovery.interrupted.forEach(r => attention.add(r.key));
-  const working = activeRuns.size > 0 || sessions.some(isWorking);
-  $('activeBtn').hidden = attention.size === 0 && !working && !delegationUI.index().tasks.some(DelegationUI.isLive);
+  // The signals follow the list: work in a conversation nobody opened here
+  // is not shown, so it must not pulse either.
+  const working = workingListedKeys().size > 0;
+  $('activeBtn').hidden = attention.size === 0 && !working && !listedSessions().length && !delegationUI.index().tasks.some(DelegationUI.isLive);
   // The number is an inbox count. Its reserved slot stays empty when clear,
   // so activity changes never move the other header controls.
   $('activeGlyph').textContent = working ? '⚉' : '⚇';
@@ -3537,8 +3548,7 @@ function updateActiveBtn() {
   side.classList.toggle('work', working);
   side.classList.toggle('unread', unread.length > 0);
   side.dataset.unread = unread.length ? String(unread.length) : '';
-  if (sideLayoutOn()) paintRailBadges({ unread: unread.length,
-    working: activeRuns.size > 0 || sessions.some(isWorking) || agentsProcs.some(p => p.busy === true) });
+  if (sideLayoutOn()) paintRailBadges({ unread: unread.length, working });
   if (typeof paintPhoneBar === 'function' && document.body.classList.contains('phone-shell')) paintPhoneBar();
 }
 
@@ -3602,15 +3612,13 @@ function paintTreeDelegations() {
   if (treeNav.sel && treeNav.sel.startsWith('dg:')) paintTreeBar();
 }
 document.addEventListener('visibilitychange', () => delegationUI.visibilityChanged());
-// Every section of the panel folds, and the fold is remembered on this
-// device. Project scope is a separate, explicit workspace choice.
+// Per-device panel choices (file source, project scope, rail counts).
+// Project scope is a separate, explicit workspace choice.
 const AGENT_SEC_KEY = 'aiconvo.agentSections.v1';
 let agentSecState = {};
 try { agentSecState = JSON.parse(localStorage.getItem(AGENT_SEC_KEY) || '{}') || {}; } catch {}
 function saveAgentSecState() { try { localStorage.setItem(AGENT_SEC_KEY, JSON.stringify(agentSecState)); } catch {} }
-const agentSecOpen = id => agentSecState['fold:' + id] !== true;
 const recentFileActor = () => ['agent', 'both'].includes(agentSecState['files:actor']) ? agentSecState['files:actor'] : 'human';
-const agentReadScope = () => agentSecState.readScope === 'project' ? 'project' : 'all';
 // Long sidebar lists grow as they are scrolled; no fixed last row at eight.
 const PANEL_PAGE_SIZE = 100;
 const panelListLimits = new Map();
@@ -3827,7 +3835,6 @@ function paintRailBadges(patch = {}) {
   $('sideUnfold').title = 'Show side panel (`)' + status;
   $('sideUnfold').setAttribute('aria-label', $('sideUnfold').title);
 }
-function toggleAgentSec(id) { agentSecState['fold:' + id] = agentSecOpen(id); saveAgentSecState(); renderAgentsPop(false); }
 // Scope is a browsing choice, not a guess based on the last open chat.
 const workspaceScope = () => ProjectScope.normalize(agentSecState.projectScope, projectFolds.map);
 const panelProjectName = workspaceScope;
@@ -3840,11 +3847,7 @@ function setWorkspaceScope(project, { stamp = true } = {}) {
   agentSecState.projectScope = next;
   saveAgentSecState();
   if (stamp && nav.current()?.id === navShownId) nav.rememberScope(navShownId, next);
-  if (changed) {
-    panelListLimits.delete('files');
-    panelListLimits.delete('recent');
-    if (agentReadScope() === 'project') panelListLimits.delete('read');
-  }
+  if (changed) panelListLimits.delete('files');
   renderSideNew(); renderAgentsPopSoon(); updateActiveBtn();
 }
 function adoptWorkspaceProject(project, { select = false, stamp = false } = {}) {
@@ -3861,17 +3864,16 @@ function tinyAge(ms) {
   if (ms < 60000) return Math.max(1, Math.round(ms / 1000)) + 's';
   return ago(ms);
 }
-function agentSecHtml(id, label, body, { count = null, empty = '', cls = '' } = {}) {
-  const open = agentSecOpen(id);
-  return `<div class="ag-section ${cls}" data-sec="${id}"><div class="ag-sec" data-sec-head="${id}" role="button" aria-expanded="${open}">` +
-    `<span class="ag-sec-label">${esc(label)}${count != null && !open ? ` <span class="ag-sec-n">· ${count}</span>` : ''}</span></div>` +
-    `<div class="ag-sec-body"${open ? '' : ' hidden'}>${body || (empty ? `<div class="ag-empty">${esc(empty)}</div>` : '')}</div></div>`;
-}
 function renderAgentsPopSoon() {
   if ($('agentsPop').hidden) return;
   clearTimeout(agentsPopT);
   agentsPopT = setTimeout(() => renderAgentsPop(false), 300);
 }
+// The side list (design/59): one list of the conversations a person opened,
+// newest conversation on top, the way a messaging app lists chats. No
+// Unread / Read / Working sections: each row carries its own state — three
+// pulsing dots while the assistant works, a filled dot and bold title once
+// it has replied and nobody read it yet — and a ✕ to close it.
 async function renderAgentsPop(refetch) {
   renderRightFiles();
   const pop = $('agentsPop');
@@ -3895,14 +3897,9 @@ async function renderAgentsPop(refetch) {
     return `<a class="ag-project" href="#project=${encodeURIComponent(project)}" data-open-project="${esc(project)}" title="${esc('Open project · ' + project + (s.cwd ? '\n' + s.cwd : ''))}">${esc(ProjectScope.label(project))}</a>`;
   };
   const busyNow = agentBusyKeys();
-  // The phone sheet is the desktop inbox, not the old tray: Unread, then Read
-  // (paged), with Working docked underneath where it stays reachable.
   const panel = sideLayoutOn() ? sidePanel() : phoneShellOn() ? 'inbox' : 'tray';
-  const project = workspaceScope(), scoped = !!project;
-  // One row per orchestration, not one per worker. Workers fold under the
-  // conversation that launched them; that row shows progress and expands on
-  // request. A worker gets its own top-level row only when it is unread and
-  // no parent callback can reach a person (see finishedUnreadSessions).
+  // One row per conversation. Workers fold under the conversation that
+  // launched them; that row shows progress and expands on request.
   // Controls stay in the conversation view.
   const delegatedBy = new Map();
   for (const t of delegationIndex.tasks) if (t.key && !delegatedBy.has(t.key)) delegatedBy.set(t.key, t);
@@ -3924,9 +3921,13 @@ async function renderAgentsPop(refetch) {
     if (t.delivery !== 'web') return 'not reported · terminal root gets a next-turn reminder';
     return 'not reported · parent conversation is not indexed';
   };
-  // A worker's second line names its parent and, in the inbox, why no
-  // parent callback carried its result.
+  // A worker's second line names its parent and why no parent callback
+  // carried its result.
   const origin = key => { const t = delegatedBy.get(key); return t ? '↳ ' + parentTitle(t) + (attentionNote(t) ? ' · ' + attentionNote(t) : '') : ''; };
+  // The assistant's "typing" indicator: three dots after the title. A person
+  // typing is a bouncing avatar bubble in the presence slot next to it, so
+  // the two never look alike.
+  const typingHtml = '<span class="ag-typing" role="img" aria-label="working"><i></i><i></i><i></i></span>';
   const childRows = (ids, depth) => ids.map(id => {
     const t = delegationIndex.byId.get(id); if (!t) return '';
     const s = t.key ? byKey(t.key) : null;
@@ -3934,7 +3935,7 @@ async function renderAgentsPop(refetch) {
     const kids = delegationIndex.children.get(id) || [];
     const note = attentionNote(t) || (t.error ? String(t.error).slice(0, 80) : t.role || '');
     return `<div class="ag-row ag-child${unread ? ' unread' : ''}${live ? ' working' : ''}${t.key ? '' : ' off'}" data-key="${esc(t.key || '')}" style="--depth:${depth}">` +
-      `<span class="ag-main"><span class="ag-title" title="${esc(t.title || 'Untitled task')}"><span>${esc(t.title || 'Untitled task')}</span></span>` +
+      `<span class="ag-main"><span class="ag-title" title="${esc(t.title || 'Untitled task')}"><span>${esc(t.title || 'Untitled task')}</span>${live ? typingHtml : ''}</span>` +
       `<span class="ag-sub"><span class="ag-dir">${[projectLink(s), esc(note)].filter(Boolean).join(' · ')}</span>` +
       `<span class="ag-age">${esc((t.status || 'running') + (t.review && t.review !== 'unreviewed' ? ' · ' + t.review : ''))}</span></span></span></div>` +
       (kids.length ? childRows(kids, depth + 1) : '');
@@ -3949,8 +3950,8 @@ async function renderAgentsPop(refetch) {
       children: open ? `<div class="ag-children">${childRows(ids, 1)}</div>` : '',
     };
   };
-  // One process per conversation row: pid, owner, and a kill button live ON
-  // the row. A separate section lists only processes with no conversation.
+  // The process behind a conversation row: pid and a stop button live ON the
+  // row. Processes no row claims are folded away at the bottom.
   const procByKey = new Map();
   for (const p of agentsProcs) if (p.key && !procByKey.has(p.key)) procByKey.set(p.key, p);
   const shownPids = new Set();
@@ -3959,124 +3960,88 @@ async function renderAgentsPop(refetch) {
     shownPids.add(pid);
     return `<button class="ag-kill" data-pid="${pid}" data-name="${esc(name || 'process')}" title="Stop this process (pid ${pid}). Web runs abort cleanly and keep partial output.">✗</button>`;
   };
+  const pidOf = key => { const p = procByKey.get(key); return (p && p.pid) || agentsPids.get(key) || null; };
   // The full title, not the 10-char Gantt label: the row has room for it.
   const rowTitle = s => (s && (s.title || s.timelineTitle)) || '(untitled)';
-  // A delegated worker belongs to its supervisor, so its row has no kill
-  // button; cancel it from the parent conversation's delegation section.
-  // Every row of an indexed conversation carries the ⋯ actions (pin, mark
-  // unread, remove); the open conversation is marked so the column shows
-  // where the person is.
-  const more = (s, key) => s && key ? `<button class="ag-more" data-more="${esc(key)}" title="Pin, mark unread, remove…" aria-label="Conversation actions" aria-haspopup="menu">⋯</button>` : '';
-  // `status` is the short text at the end of the second line: normally the
-  // age of the last activity; the traffic rows put the pid there.
-  // The second line names the project (a delegated worker: its parent). A
-  // list already scoped to one project has no second line: the time moves
-  // to the end of the title line.
-  const row = (s, key, status, pid, readState = '', working = false, { dir } = {}) => {
-    const acts = (delegatedBy.has(key) ? '' : kill(pid, rowTitle(s))) + more(s, key);
+  // Every row carries the ⋯ actions (pin, mark unread, close) and a ✕; the
+  // open conversation is marked so the column shows where the person is.
+  const more = (s, key) => s && key ? `<button class="ag-more" data-more="${esc(key)}" title="Pin, mark unread, close…" aria-label="Conversation actions" aria-haspopup="menu">⋯</button>` : '';
+  const close = key => `<button class="ag-close" data-close="${esc(key)}" title="Close — it comes back if the assistant replies again" aria-label="Close">✕</button>`;
+  // `status` is the short text at the end of the second line: the age of
+  // the last activity, or what the assistant is doing right now.
+  const row = (s, key, status, state = '', { closable = true } = {}) => {
+    const acts = (busyNow.has(key) && !delegatedBy.has(key) ? kill(pidOf(key), rowTitle(s)) : '') + more(s, key) + (closable ? close(key) : '');
     const o = orchestration(key);
-    const sub = dir === false ? '' : (dir ? esc(dir) : [projectLink(s), esc(origin(key))].filter(Boolean).join(' · '));
+    const sub = [projectLink(s), esc(origin(key))].filter(Boolean).join(' · ');
     const ageHtml = `<span class="ag-age">${esc(status)}</span>`;
-    return `<div class="ag-row${readState === 'unread' ? ' unread' : ''}${working ? ' working' : ''}${key && key === activeRel && ['conversation', 'tree'].includes(viewKind) ? ' current' : ''}" data-key="${esc(key || '')}">` +
-      `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}"><span>${esc(rowTitle(s))}</span>${key ? presenceSlotHtml(key) : ''}${s ? participantsHtml(s) : ''}${s && s.mirror ? `<span class="badge-mirror" title="Mirrored from ${esc(s.mirror.peerName)}: read here, driven there">${esc(s.mirror.peerName)}</span>` : ''}${sub || o.badge ? '' : ageHtml}</span>` +
+    return `<div class="ag-row${state ? ' ' + state : ''}${key === activeRel && ['conversation', 'tree'].includes(viewKind) ? ' current' : ''}${agentIsPinned(key) ? ' pinned' : ''}" data-key="${esc(key)}">` +
+      `<span class="ag-main"><span class="ag-title" title="${esc(rowTitle(s))}"><span>${esc(rowTitle(s))}</span>${state === 'working' ? typingHtml : ''}${presenceSlotHtml(key)}${s ? participantsHtml(s) : ''}${s && s.mirror ? `<span class="badge-mirror" title="Mirrored from ${esc(s.mirror.peerName)}: read here, driven there">${esc(s.mirror.peerName)}</span>` : ''}${sub || o.badge ? '' : ageHtml}</span>` +
       (sub || o.badge ? `<span class="ag-sub"><span class="ag-dir">${sub}</span>${o.badge}${ageHtml}</span>` : '') + `</span>` +
-      (acts ? `<span class="ag-acts">${acts}</span>` : '') + `</div>` + o.children;
+      `<span class="ag-acts">${acts}</span></div>` + o.children;
   };
   const age = s => tinyAge(now - agentActivityAt(s));
-  const webKeys = new Set([...activeRuns.values()].map(r => r.fanoutRootKey || r.key));
+  // What a working row says at the end of its second line: a web run's own
+  // status text, a parallel turn's count, a terminal run's age.
+  const workStatus = new Map();
   const webGroups = new Map();
   for (const r of activeRuns.values()) {
     const id = r.fanoutId || r.jobId;
     if (!webGroups.has(id)) webGroups.set(id, []);
     webGroups.get(id).push(r);
   }
-  const webRuns = [...webGroups.values()].map(rs => {
+  for (const rs of webGroups.values()) {
     const first = rs[0], key = first.fanoutRootKey || first.key;
     // Child RPC processes belong to this one parallel turn. Claim them so
-    // they do not reappear as separate "other agents" rows below.
+    // they do not reappear as separate "other processes" rows below.
     for (const r of rs) { const p = procByKey.get(r.key); if (p) shownPids.add(p.pid); }
-    const status = first.fanoutId
+    workStatus.set(key, first.fanoutId
       ? rs.filter(r => r.status === 'running').length + '/' + rs.length + ' working'
-      : (first.statusText || 'working…').slice(0, 18);
-    return row(byKey(key), key, status, null, '', true);
-  });
-  const termRows = [...runningKeys].map(k => ({ k, s: byKey(k), p: procByKey.get(k) }));
-  const termWork = termRows.filter(t => t.s && isActive(t.s));
-  const termIdle = termRows.filter(t => !t.s || !isActive(t.s));
-  const termStatus = t => {
-    const pid = (t.p && t.p.pid) || agentsPids.get(t.k);
-    const activity = t.s && t.s.mtimeMs ? tinyAge(now - t.s.mtimeMs) : 'waiting';
-    return (pid ? 'pid ' + pid + ' · ' : '') + activity;
-  };
+      : (first.statusText || 'working…').slice(0, 18));
+  }
   const unread = finishedUnreadSessions();
   const unreadKeys = new Set(unread.map(s => s.key));
-  const unreadStatus = s => (agentIsFlagged(s) ? 'marked · ' : '') + age(s);
-  // Pins belong to the scoped chat browser. Pinning never removes a reply
-  // from the machine-wide Inbox.
-  const pinned = pinnedSessions().filter(scopeIncludesSession);
-  const pinnedKeys = new Set(pinned.map(s => s.key));
-  const pinnedSec = pinned.map(s => {
-    const working = busyNow.has(s.key);
-    const isUnread = unreadKeys.has(s.key);
-    const readAt = Number(agentReadState.read[s.key]) || 0;
-    const status = isUnread ? unreadStatus(s) : s.mtimeMs ? age(s) : readAt ? tinyAge(now - readAt) : '';
-    return row(s, s.key, status, null, isUnread ? 'unread' : agentIsRead(s) ? 'read' : '', working, { dir: scoped ? false : undefined });
-  }).join('');
-  const unreadSec = unread.map(s => row(s, s.key, unreadStatus(s), null, 'unread')).join('');
-  // "Writing" claims only sessions with a busy live process behind them. A
-  // warm web process at the prompt is not work and must not hide a result.
-  const writing = sessions.filter(s => isActive(s) && !runningKeys.has(s.key) && !webKeys.has(s.key) && !delegatedBy.has(s.key)
-      && procByKey.has(s.key) && procByKey.get(s.key).busy !== false)
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const writeStatus = s => {
-    const p = procByKey.get(s.key);
-    return (p ? 'pid ' + p.pid + ' · ' : '') + tinyAge(now - s.mtimeMs);
-  };
   const interruptedKeys = new Set(agentsRecovery.interrupted.map(r => r.key));
-  const claimed = new Set([...runningKeys, ...webKeys, ...writing.map(s => s.key), ...interruptedKeys]);
-  // A conversation belongs to Working while a turn runs, not to both lists.
-  const workingKeys = new Set([...webKeys, ...termWork.map(t => t.k), ...writing.map(s => s.key),
-    ...[...orchProgress].filter(([, p]) => p.live).map(([key]) => key),
-    ...agentsProcs.filter(p => p.busy === true && p.key).map(p => p.key)]);
-  // Only Read can be narrowed. Unread, interruptions and Working stay global.
-  const readProjectOnly = panel === 'inbox' && agentReadScope() === 'project';
-  const recent = sessions.filter(s => {
-    if (readProjectOnly && (!project || !scopeIncludesSession(s))) return false;
-    if (!agentIsRead(s) || delegatedBy.has(s.key) || agentIsDismissed(s) || workingKeys.has(s.key) || interruptedKeys.has(s.key)) return false;
-    // Read history means an actual receipt, not just the first-use guard.
-    return (Number(agentReadState.read[s.key]) || 0) > 0;
-  }).sort((a, b) => Math.max(Number(agentReadState.read[b.key]) || 0, b.mtimeMs || 0)
-    - Math.max(Number(agentReadState.read[a.key]) || 0, a.mtimeMs || 0));
-  // Orchestrations with live workers whose launching conversation has no row
-  // above: one row per orchestration, with its progress and expandable tree.
-  const delegatedSec = [...orchestrations.keys()].filter(k => orchProgress.get(k).live && !claimed.has(k)).map(k => {
-    if (!k) {
-      const o = orchestration('');
-      return `<div class="ag-row working off" data-key="">` +
-        `<span class="ag-main"><span class="ag-title"><span>Delegated work from an unindexed conversation</span></span><span class="ag-sub"><span class="ag-dir">records under ~/.local/share/aiconvo/delegations</span>${o.badge}</span></span>` +
-        `</div>` + o.children;
+  const statusOf = s => {
+    if (busyNow.has(s.key)) {
+      if (workStatus.has(s.key)) return workStatus.get(s.key);
+      const p = orchProgress.get(s.key);
+      if (p && p.live) return p.live + ' working';
+      return age(s);
     }
-    const p = orchProgress.get(k);
-    return row(byKey(k), k, p.live + ' working', null, '', true);
-  }).join('');
-  const webSec = webRuns.join('');
-  const workSec = termWork.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k), '', true)).join('');
-  const idleSec = termIdle.map(t => row(t.s, t.k, termStatus(t), (t.p && t.p.pid) || agentsPids.get(t.k))).join('');
-  const writeSec = writing.map(s => row(s, s.key, writeStatus(s), (procByKey.get(s.key) || {}).pid, '', true)).join('');
-  // Leftovers: processes no row above claimed — idle warm RPC sessions on
-  // other conversations, server children, and untracked strays.
+    return (unreadKeys.has(s.key) && agentIsFlagged(s) ? 'marked · ' : '') + age(s);
+  };
+  const stateOf = s => busyNow.has(s.key) ? 'working' : unreadKeys.has(s.key) ? 'unread' : '';
+  // Order: pinned first (newest pin on top), then by the conversation's
+  // first message, newest on top. A reply does not move a row: the list
+  // holds still while it is being read.
+  const born = s => Date.parse(s.firstTs || '') || Number(s.mtimeMs) || 0;
+  const pinAt = s => Number(agentReadState.pinned[s.key]) || 0;
+  const listed = listedSessions().filter(s => !interruptedKeys.has(s.key))
+    .sort((a, b) => (pinAt(b) - pinAt(a)) || (born(b) - born(a)));
+  const listSec = panelListRows('open', listed).map(s => row(s, s.key, statusOf(s), stateOf(s))).join('') + panelListMore('open', listed.length);
+  for (const s of listed) { const p = procByKey.get(s.key); if (p) shownPids.add(p.pid); }
+  // Processes and delegated work no listed row accounts for: terminal
+  // sessions nobody opened here, warm RPC processes, server children,
+  // strays. Folded at the bottom; a row opens (and so lists) its conversation.
   const others = agentsProcs.filter(p => !DelegationUI.trackedProcess(delegationIndex, p) && !shownPids.has(p.pid) && !interruptedKeys.has(p.key));
   const processRows = procs => procs.map(p => `<div class="ag-row${p.busy === true ? ' working' : ''}" data-key="${esc(p.key || '')}">` +
-    `<span class="ag-main"><span class="ag-title"><span>${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span></span>` +
+    `<span class="ag-main"><span class="ag-title"><span>${esc(p.title || (p.kind + (p.rpc ? ' · rpc' : '') + ' · no conversation'))}</span>${p.busy === true ? typingHtml : ''}</span>` +
     `<span class="ag-sub"><span class="ag-dir">${projectLink(byKey(p.key)) ? projectLink(byKey(p.key)) + ' · ' : ''}${esc(p.owner)}${p.busy != null ? (p.busy ? ' · busy' : ' · idle') : ''}${p.model ? ' · ' + esc(String(p.model).split('/').pop()) : ''}${p.ageMs != null ? ' · up ' + esc(tinyAge(p.ageMs)) : ''}</span>` +
     `<span class="ag-age">pid ${p.pid}</span></span></span>` +
     `<span class="ag-acts">${kill(p.pid, p.title || p.kind + ' pid ' + p.pid)}</span></div>`).join('');
+  const listedKeys = new Set(listed.map(s => s.key));
+  const orphanDelegated = [...orchestrations.keys()].filter(k => orchProgress.get(k).live && !listedKeys.has(k)).map(k => {
+    const o = orchestration(k);
+    if (!k) return `<div class="ag-row working off" data-key=""><span class="ag-main"><span class="ag-title"><span>Delegated work from an unindexed conversation</span>${typingHtml}</span><span class="ag-sub"><span class="ag-dir">records under ~/.local/share/aiconvo/delegations</span>${o.badge}</span></span></div>` + o.children;
+    return row(byKey(k), k, orchProgress.get(k).live + ' working', 'working', { closable: false });
+  }).join('');
+  const otherRows = orphanDelegated + processRows(others);
+  const otherCount = (otherRows.match(/class="ag-row/g) || []).length;
   const st = pop.scrollTop;
-  const replyScroll = $('agentsUnread').scrollTop, workingScroll = $('agentsLegacy').scrollTop;
+  const listScroll = $('agentsUnread').scrollTop, dockScroll = $('agentsLegacy').scrollTop;
   const focusedRecovery = document.activeElement?.dataset?.recoveryId;
   const focusedAction = document.activeElement?.dataset?.recoveryAction;
   const recoveryToggleFocused = document.activeElement?.id === 'agentAutoResume';
-  const focusedReadScope = document.activeElement?.dataset?.readScope;
   const focusedProjectKey = document.activeElement?.matches('.ag-project') ? document.activeElement.closest('.ag-row')?.dataset.key : null;
   const interruptedSec = agentsRecovery.interrupted.map(r => `<div class="ag-row ag-interrupted" data-key="${esc(r.key)}">
     <span class="ag-main"><span class="ag-title">${esc(rowTitle(byKey(r.key)) === '(untitled)' ? r.title : rowTitle(byKey(r.key)))}</span>
@@ -4090,52 +4055,12 @@ async function renderAgentsPop(refetch) {
   const recoverySection = interruptedSec || agentsRecovery.enabled ? `<details class="ag-recovery ag-notifications"${agentRecoveryOpen ? ' open' : ''}><summary>Connection recovery settings</summary>` +
     `<label class="ag-recovery-setting"><input id="agentAutoResume" type="checkbox"${agentsRecovery.enabled ? ' checked' : ''}> Resume connection failures automatically</label>` +
     `<div class="ag-recovery-help">${network.checkedAt ? esc(network.host + (network.state === 'reachable' ? ' reachable' : ' not reachable') + ' · checked ' + secs(now - network.checkedAt) + ' ago') + '. ' : ''}Checks run on the host laptop/server, even with this panel closed. Two successful checks before resuming. At most 3 attempts, within 24 hours. Deliberate stops and other errors stay stopped. Continuing can repeat work; check any uncertain results.</div></details>` : '';
-  // Browsing lists share the explicit scope. Inbox state never removes a
-  // conversation from Chats: an unread/read chat still belongs to its project.
-  const listed = pinnedKeys;
-  const wrote = sessions.filter(s => s.lastUserTs && !listed.has(s.key) && !delegatedBy.has(s.key) && scopeIncludesSession(s))
-    .sort((a, b) => Date.parse(b.lastUserTs) - Date.parse(a.lastUserTs));
-  const wroteSec = panelListRows('recent', wrote).map(s => row(s, s.key, tinyAge(now - Date.parse(s.lastUserTs)), null, agentUnreadAt(s) ? 'unread' : '', busyNow.has(s.key), { dir: scoped ? false : undefined })).join('') + panelListMore('recent', wrote.length);
-  const readSec = panelListRows('read', recent).map(s => row(s, s.key, age(s), null, 'read')).join('') + panelListMore('read', recent.length);
-  const traffic = webSec + workSec + writeSec + delegatedSec + processRows(others.filter(p => p.busy === true));
-  const idleTraffic = idleSec + processRows(others.filter(p => p.busy !== true));
-  const trafficCount = (traffic.match(/class="ag-row/g) || []).length;
-  // Sections in order. Open ones flow from the top; folded ones dock at the
-  // bottom with traffic and notifications (column only: the tray has no
-  // free space to speak of, so there they stay in place).
   pop.dataset.panel = panel;
-  const recentConvBody = wroteSec || `<div class="ag-empty">${esc(scoped ? 'nothing written in ' + project + ' yet' : 'nothing written yet')}</div>`;
-  const chatSections = [
-    pinnedSec ? ['pinned', 'pinned', pinnedSec, { count: pinned.length, cls: 'ag-pinned' }] : null,
-    ['recent', 'recent', recentConvBody, { count: wrote.length }],
-  ].filter(Boolean);
-  const trafficSection = ['traffic', 'Working now', traffic, { count: trafficCount, cls: 'ag-traffic', dock: true, empty: 'No agents working right now.' }];
-  let flow, dock, tail = '', heading = '';
-  const scopeCaption = `<div class="panel-scope-caption">${esc(ProjectScope.label(project))}</div>`;
-  if (panel === 'inbox') {
-    heading = '';
-    flow = []; dock = [];
-    heading += (interruptedSec ? `<section class="ag-recovery"><div class="ag-sub-sec">Interrupted · needs attention</div>${interruptedSec}</section>` : '') +
-      `<section data-sec="unread" class="inbox-section ag-unread-tray" aria-labelledby="inboxUnreadHeading"><h3 id="inboxUnreadHeading">Unread${unread.length ? ' · ' + unread.length : ''}</h3><div class="ag-sec-body">${unreadSec || '<div class="ag-empty">No unread replies.</div>'}</div></section>` +
-      `<section data-sec="read" class="inbox-section" aria-labelledby="inboxReadHeading"><div class="inbox-read-head"><h3 id="inboxReadHeading">Read</h3><div class="read-scope" role="group" aria-label="Read replies scope"><button type="button" data-read-scope="all" aria-pressed="${!readProjectOnly}" title="Read replies across all projects">All</button><button type="button" data-read-scope="project" aria-pressed="${readProjectOnly}"${project ? '' : ' disabled'} title="${esc(project ? 'Read replies · ' + ProjectScope.label(project) : 'Choose a project using the project button above')}">Project</button></div></div>${readProjectOnly && project ? `<div class="panel-scope-caption">${esc(ProjectScope.label(project))}</div>` : ''}<div class="ag-sec-body">${readSec || `<div class="ag-empty">${readProjectOnly ? project ? 'No read replies in this project yet.' : 'Choose a project above, or switch to All.' : 'No read replies yet.'}</div>`}</div></section>`;
-    tail = `<section data-sec="traffic" class="inbox-section ag-traffic" aria-labelledby="agentsWorkingHeading"><h3 id="agentsWorkingHeading">Working</h3><div class="ag-sec-body">${traffic || '<div class="ag-empty">No agents working right now.</div>'}</div></section>` +
-      (idleTraffic ? `<details class="ag-notifications"${agentIdleOpen ? ' open' : ''}><summary>Idle and other processes</summary>${idleTraffic}</details>` : '') + recoverySection;
-  } else {
-    heading = panel === 'tray'
-      ? `<button type="button" class="tray-scope" data-project-scope-picker>${esc(ProjectScope.label(project))} ▾</button>`
-      : '<div class="panel-title">Chats</div>' + scopeCaption;
-    const sections = panel === 'tray' ? [
-      ['unread', 'Unread · all projects', unreadSec, { count: unread.length, cls: 'ag-unread-tray', empty: 'Nothing new' }],
-      ...(readSec ? [['read', 'Read replies · all projects', readSec, { count: recent.length }]] : []),
-      ...chatSections, ...(traffic ? [trafficSection] : []),
-    ] : chatSections;
-    const dockFolded = sideLayoutOn();
-    flow = sections.filter(([id, , , o]) => !o.dock && (agentSecOpen(id) || !dockFolded));
-    dock = sections.filter(([id, , , o]) => o.dock || (!agentSecOpen(id) && dockFolded));
-    if (panel === 'tray') tail = interruptedSec + recoverySection;
-  }
-  $('agentsUnread').innerHTML = heading + flow.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('');
-  $('agentsLegacy').innerHTML = dock.map(([id, label, body, o]) => agentSecHtml(id, label, body, o)).join('') + tail;
+  $('agentsUnread').innerHTML =
+    (interruptedSec ? `<section class="ag-recovery"><div class="ag-sub-sec">Interrupted · needs attention</div>${interruptedSec}</section>` : '') +
+    `<section data-sec="open" class="ag-open" aria-label="Open conversations">${listSec || '<div class="ag-empty">Nothing open yet. Conversations you open appear here.</div>'}</section>`;
+  $('agentsLegacy').innerHTML =
+    (otherRows ? `<details class="ag-notifications ag-others"${agentIdleOpen ? ' open' : ''}><summary>Other processes<span class="ag-notify-count">${otherCount}</span></summary>${otherRows}</details>` : '') + recoverySection;
   renderPresenceMarks();
 
   const recovery = pop.querySelector('details.ag-recovery');
@@ -4149,16 +4074,15 @@ async function renderAgentsPop(refetch) {
     await loadAgentRecovery(); renderAgentsPop(false);
   };
   pop.scrollTop = st;
-  $('agentsUnread').scrollTop = replyScroll;
-  $('agentsLegacy').scrollTop = workingScroll;
+  $('agentsUnread').scrollTop = listScroll;
+  $('agentsLegacy').scrollTop = dockScroll;
   selectAgentRow(agentsSelectedKey, false);
-  if (focusedReadScope) [...pop.querySelectorAll('[data-read-scope]')].find(b => b.dataset.readScope === focusedReadScope && !b.disabled)?.focus({ preventScroll: true });
-  else if (focusedProjectKey) [...pop.querySelectorAll('.ag-row[data-key]')].find(r => r.dataset.key === focusedProjectKey)?.querySelector('.ag-project')?.focus({ preventScroll: true });
+  if (focusedProjectKey) [...pop.querySelectorAll('.ag-row[data-key]')].find(r => r.dataset.key === focusedProjectKey)?.querySelector('.ag-project')?.focus({ preventScroll: true });
   else if (recoveryToggleFocused) autoResume?.focus({ preventScroll: true });
   else if (focusedRecovery) [...pop.querySelectorAll('[data-recovery-id]')].find(b => b.dataset.recoveryId === focusedRecovery && b.dataset.recoveryAction === focusedAction)?.focus({ preventScroll: true });
 }
 function agentRows() {
-  return [...$('agentsPop').querySelectorAll('.ag-row[data-key]')].filter(row => row.dataset.key && !row.closest('details:not([open])') && !row.closest('.ag-sec-body[hidden]'));
+  return [...$('agentsPop').querySelectorAll('.ag-row[data-key]')].filter(row => row.dataset.key && !row.closest('details:not([open])'));
 }
 function selectAgentRow(key, scroll = true) {
   const rows = agentRows();
@@ -4212,7 +4136,7 @@ function agentsPopKeydown(e) {
     if (row) { toggleAgents(false); openPanelConversation(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined); }
     return true;
   }
-  // Inbox marks on the row under the cursor (design/42).
+  // Marks on the row under the cursor (design/42, design/59): pin, unread, close.
   if (e.key === 'p' || e.key === 'u' || e.key === 'Delete') {
     const row = selectAgentRow(agentsSelectedKey, false);
     const s = row && sessions.find(item => item.key === row.dataset.key);
@@ -4275,7 +4199,7 @@ function openAgentRowMenu(key, x, y, anchor) {
   const items = [
     [pinned ? 'Unpin' : 'Pin to the top', () => setAgentPinned(key, !pinned)],
     [unread ? 'Mark as read' : 'Mark as unread', () => unread ? markAgentRead(key) : markAgentUnread(key)],
-    ['Remove from replies', () => dismissAgentConversation(key), 'Hidden until it replies again. Nothing is deleted.'],
+    ['Close', () => dismissAgentConversation(key), 'Leaves the list; it comes back if the assistant replies again. Nothing is deleted.'],
     ['Open', () => { toggleAgents(false); open(key, unread ? 'reply' : undefined); }],
   ];
   const menu = document.createElement('div');
@@ -4307,16 +4231,6 @@ $('agentsPop').addEventListener('contextmenu', e => {
   openAgentRowMenu(row.dataset.key, e.clientX, e.clientY);
 });
 $('rightFileList').onclick = $('agentsPop').onclick = async e => {
-  const readScopeButton = e.target.closest('[data-read-scope]');
-  if (readScopeButton) {
-    e.stopPropagation();
-    if (readScopeButton.disabled) return;
-    agentSecState.readScope = readScopeButton.dataset.readScope;
-    panelListLimits.delete('read');
-    saveAgentSecState(); renderAgentsPop(false);
-    $('agentsPop').querySelector('.inbox-read-head')?.scrollIntoView({ block: 'nearest' });
-    return;
-  }
   const scopeButton = e.target.closest('[data-project-scope-picker]');
   if (scopeButton) { e.stopPropagation(); openWorkspaceProjectPicker(scopeButton); return; }
   const projectButton = e.target.closest('[data-open-project]');
@@ -4339,10 +4253,10 @@ $('rightFileList').onclick = $('agentsPop').onclick = async e => {
     saveAgentSecState(); renderAgentsPop(false);
     return;
   }
-  const head = e.target.closest('[data-sec-head]');
-  if (head) {
+  const closeButton = e.target.closest('.ag-close[data-close]');
+  if (closeButton) {
     e.stopPropagation();
-    toggleAgentSec(head.dataset.secHead);
+    dismissAgentConversation(closeButton.dataset.close);
     return;
   }
   const forget = e.target.closest('[data-forget]');
@@ -12762,6 +12676,7 @@ async function open(rel, scroll, routeHash = null) {
     if (progressStream) { progressStream.close(); progressStream = null; }
     activeRel = rel;
     markAgentRead(rel);
+    openAgentConversation(rel);
     const navSession = sessions.find(s => s.key === rel);
     if (navSession) {
       const navProject = projectOf(navSession);
@@ -15189,33 +15104,12 @@ $('railMachine').onclick = e => {
   $('railMachine').setAttribute('aria-expanded', String(!$('machinePop').hidden));
 };
 $('sideHome').onclick = () => $('brand').click();
-// A check-in is a detour, not a replacement for the page being worked on.
-// Keep the original history entry even across several agent check-ins.
-let workReturnId = sessionStorage.getItem('aiconvo.workReturn') || null;
-function paintWorkReturn() {
-  const target = nav.entries().find(e => e.id === workReturnId);
-  if (!target || target.id === nav.current()?.id) { workReturnId = null; sessionStorage.removeItem('aiconvo.workReturn'); }
-  $('returnToWork').hidden = !workReturnId;
-  $('returnToWork').title = target ? 'Return to ' + (describeRoute(target.hash).title || target.title || 'Home') : 'Return to work';
-}
-function openAgentCheck(key, scroll) {
+// A row in the side list, or an agent alert, opens its conversation; Back
+// is the way home (the "return to work" button is gone, design/59).
+function openPanelConversation(key, scroll) {
   if (!key) return;
-  if (key !== activeRel || viewKind !== 'conversation') {
-    if (!workReturnId || nav.current()?.id === workReturnId) {
-      workReturnId = nav.current()?.id || null;
-      if (workReturnId) sessionStorage.setItem('aiconvo.workReturn', workReturnId);
-    }
-  }
   return open(key, scroll);
 }
-function openPanelConversation(key, scroll) {
-  return !sideLayoutOn() || sidePanel() === 'inbox' ? openAgentCheck(key, scroll) : open(key, scroll);
-}
-$('returnToWork').onclick = () => {
-  const index = nav.entries().findIndex(e => e.id === workReturnId);
-  if (index >= 0) nav.go(index - nav.index());
-};
-nav.onChange(paintWorkReturn);
 // ‹ › in the bar and in the column: one stack, every pair in step.
 const navButtons = Navigation.mount(nav, {
   back: [$('navBack'), $('sideBack')], forward: [$('navFwd'), $('sideFwd')],
@@ -16077,7 +15971,7 @@ function helpNow() {
   // Open panels sit on top of the view.
   if (settingsOpen) sections.push({ label: 'settings', keys: [['esc / ,', 'back to where you were']] });
   if (!$('filtersPop').hidden) sections.push({ label: 'filters', keys: [['esc / f', 'close the filters']] });
-  if (agentsTrayOpen()) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['p', 'pin / unpin'], ['u', 'mark unread / read'], ['del', 'remove from replies'], ['j', 'background jobs in Settings'], ['esc / a', sideLayoutOn() ? 'leave the side panel' : 'close the agents panel']] });
+  if (agentsTrayOpen()) sections.push({ label: 'agents', keys: [['↑ ↓', 'select an agent'], ['enter', 'open the selected conversation'], ['p', 'pin / unpin'], ['u', 'mark unread / read'], ['del', 'close the conversation'], ['j', 'background jobs in Settings'], ['esc / a', sideLayoutOn() ? 'leave the side panel' : 'close the agents panel']] });
 
   // The view itself.
   if (document.body.classList.contains('file-full')) {
@@ -16727,7 +16621,7 @@ live.onmessage = ev => {
       if (d.job.type === 'epic') relatedCache.clear();
       else if (d.job.key) relatedCache.delete(d.job.key);
       if (d.job.type === 'agent-run') toast('✓ Reply ready: ' + d.job.title,
-        () => openAgentCheck(d.job.fanoutRootKey || d.job.key, 'reply'), 'ok');
+        () => openPanelConversation(d.job.fanoutRootKey || d.job.key, 'reply'), 'ok');
       if ((d.job.type === 'project-distill' || d.job.type === 'memory-docs' || d.job.type === 'memory-backfill') && d.job.project && viewKind === 'project' && projectOverviewName === d.job.project) {
         showProjectOverview(d.job.project);
       } else if (d.job.type === 'memory-extract' && viewKind === 'project' && projectOverviewName && projectMemoryJobTouches(d.job, projectOverviewName)) {
@@ -16738,7 +16632,7 @@ live.onmessage = ev => {
       }
     }
     if (d.job.type === 'agent-run' && d.job.status === 'error' && (!old || old.status === 'running') && !d.job.parentId) {
-      toast('Agent stopped: ' + (d.job.statusText || d.job.title || 'unknown error'), () => openAgentCheck(d.job.fanoutRootKey || d.job.key, 'bottom'), 'err');
+      toast('Agent stopped: ' + (d.job.statusText || d.job.title || 'unknown error'), () => openPanelConversation(d.job.fanoutRootKey || d.job.key, 'bottom'), 'err');
     }
     return;
   }
