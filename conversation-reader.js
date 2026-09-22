@@ -252,7 +252,7 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
   const endTurn = () => {
     if (turn.groups > 1) {
       const files = turn.files.size;
-      out.push(`<button class="tg-review tg-review-turn" data-step-review="${esc(JSON.stringify({ key: d.key, calls: turn.calls })).replace(/"/g, '&quot;')}">Review whole turn · ${turn.steps} steps${files ? ` · ${files} ${files === 1 ? 'file' : 'files'} touched` : ''}</button>`);
+      out.push(`<button class="tg-review tg-review-turn" data-step-review="${esc(JSON.stringify({ key: d.key, calls: turn.calls }))}">Review whole turn · ${turn.steps} steps${files ? ` · ${files} ${files === 1 ? 'file' : 'files'} touched` : ''}</button>`);
     }
     turn = { calls: [], files: new Set(), groups: 0, steps: 0 };
   };
@@ -276,7 +276,7 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
       for (const id of reviewCalls) if (!turn.calls.includes(id)) turn.calls.push(id);
       for (const path of files.keys()) turn.files.add(path);
     }
-    if (reviewCalls.length) out.push(`<button class="tg-review" data-step-review="${esc(JSON.stringify({ key: d.key, calls: reviewCalls })).replace(/"/g, '&quot;')}">${files.size ? `${files.size} ${files.size === 1 ? 'file' : 'files'} touched · ` : ''}Review changes</button>`);
+    if (reviewCalls.length) out.push(`<button class="tg-review" data-step-review="${esc(JSON.stringify({ key: d.key, calls: reviewCalls }))}">${files.size ? `${files.size} ${files.size === 1 ? 'file' : 'files'} touched · ` : ''}Review changes</button>`);
     const launches = work.filter(m => m.role === 'tool' && m.name === 'delegate');
     if (launches.length) out.push('<div class="dg-cards">' + launches.map((m, ordinal) => {
       const dg = delegateCallOf(m);

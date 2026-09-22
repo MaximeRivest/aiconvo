@@ -15,6 +15,7 @@
 // (test/conversation-reader.test.js), which is why the suite never caught
 // this. These scenarios run the REAL production esc.
 const { describe, it, before } = require('node:test');
+const { spawnSync } = require('node:child_process');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -51,8 +52,15 @@ describe('Scenario: JSON tokens survive the HTML round-trip', () => {
   // (conversation-reader.js) and the continue/fork buttons (app.html).
   const token = JSON.stringify({ key: 'pi:--home-tryinget-Documents-Obsidian--/2026-09-09T14-59-18-854Z_x.jsonl', id: '4d63aacb' });
   let parsed = null;
+  // On lambda the `chromium` on PATH is the shared agent browser, which
+  // refuses a headless profile; CHROMIUM names a plain binary (as in
+  // test/navigation-app.test.js). Without one, the round-trip is skipped and
+  // the source-level scenarios above still guard the fix.
+  const chromium = process.env.CHROMIUM || 'chromium';
+  const haveChromium = !spawnSync(chromium, ['--version']).error;
 
   before(async () => {
+    if (!haveChromium) return;
     assert.ok(token.includes('"'), 'token must contain quotes to exercise the bug');
     const esc = productionEsc();
     const html = `<!doctype html><meta charset="utf-8"><body><div id="host"></div><script>
@@ -67,7 +75,7 @@ describe('Scenario: JSON tokens survive the HTML round-trip', () => {
     const server = http.createServer((req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-attr-'));
-    const browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--no-first-run',
+    const browser = spawn(chromium, ['--headless', '--no-sandbox', '--disable-gpu', '--no-first-run',
       '--user-data-dir=' + dir, '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
     try {
       const endpoint = await new Promise((resolve, reject) => {
@@ -103,15 +111,16 @@ describe('Scenario: JSON tokens survive the HTML round-trip', () => {
     assert.ok(parsed, 'round-trip page produced no result');
   });
 
-  it('given the branchPointHtml button pattern, when the token contains quotes, spaces and colons, then data-reader-path parses back to the exact object', () => {
+  const roundTrip = { skip: haveChromium ? false : 'chromium is not installed' };
+  it('given the branchPointHtml button pattern, when the token contains quotes, spaces and colons, then data-reader-path parses back to the exact object', roundTrip, () => {
     assert.deepEqual(JSON.parse(parsed.button), JSON.parse(token), 'button data-reader-path was truncated');
   });
 
-  it('given the answer picker <option>, then its value round-trips too', () => {
+  it('given the answer picker <option>, then its value round-trips too', roundTrip, () => {
     assert.deepEqual(JSON.parse(parsed.option), JSON.parse(token), 'option value was truncated');
   });
 
-  it('and quote-free attributes (data-at) keep working unchanged', () => {
+  it('and quote-free attributes (data-at) keep working unchanged', roundTrip, () => {
     assert.equal(parsed.at, '50658cba');
   });
 });

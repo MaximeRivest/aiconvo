@@ -5389,7 +5389,9 @@ async function openNoteFile(file) {
 }
 
 // Attribute-safe text for HTML attribute values.
-const fgAttr = value => esc(value).replace(/"/g, '&quot;');
+// Kept as a name: esc() has been attribute-safe since PR #4, so these are
+// the same function. Callers that say fgAttr say "this goes in an attribute".
+const fgAttr = esc;
 
 // ---- line diff ----
 // LineDiff (/linediff.js, shared with the server) is exact and has no size
@@ -12903,20 +12905,21 @@ function mdRender(src, q = '') {
   //    view asks the server whether it exists next to the session's cwd and
   //    links it then (wireTranscriptPathCandidates); the target stays in the
   //    title either way, so a dead link still says where it pointed.
-  // The text is HTML-escaped here, so a match is safe inside an attribute
-  // once quotes are entity-encoded. Bare URLs may sit at the start of a
+  // The text is HTML-escaped here (quotes included), so a match is safe
+  // inside an attribute as it is. Bare URLs may sit at the start of a
   // line, after whitespace, brackets or quotes, after an opening tag, or
   // after an entity ("&quot;" ends in ";"); "&amp;" is one URL char while
   // "&lt;" / "&gt;" end it. Trailing sentence punctuation and unbalanced
   // ")" stay outside. A bare path ends on a word char, dropping glued
-  // punctuation.
-  const attr = v => String(v).replace(/"/g, '&quot;');
-  const pathButton = (p, label) => `<button type="button" class="msg-path" data-transcript-path="${attr(p)}" title="Open ${attr(p)}">${label}</button>`;
+  // punctuation. Matches are taken from text esc() already encoded (quotes
+  // included), so they go straight into attributes: encoding them again
+  // would turn one "&amp;" into "&amp;amp;".
+  const pathButton = (p, label) => `<button type="button" class="msg-path" data-transcript-path="${p}" title="Open ${p}">${label}</button>`;
   const mdLink = (text, target) => {
-    if (/^(?:https?:\/\/|mailto:)/i.test(target)) return `<a href="${attr(target)}" target="_blank" rel="noopener">${text}</a>`;
+    if (/^(?:https?:\/\/|mailto:)/i.test(target)) return `<a href="${target}" target="_blank" rel="noopener">${text}</a>`;
     if (/^(?:~\/|\/)/.test(target)) return pathButton(target, text);
     if (target.startsWith('#') || /[<>&]/.test(target)) return text;
-    return `<a class="md-file" data-path-candidate="${attr(target.replace(/^\.\//, ''))}" title="${attr(target)}">${text}</a>`;
+    return `<a class="md-file" data-path-candidate="${target.replace(/^\.\//, '')}" title="${target}">${text}</a>`;
   };
   const linkify = h => h.replace(
     /\[([^\]\n]+)\]\(([^()\s]+)(?:\s+&quot;[^&]*&quot;)?\)|(^|[\s(*`>;])((?:~\/|\/)(?:[\w.@+-]+\/)+[\w.@+-]*[A-Za-z0-9_])|(^|[\s(\["'>;])(https?:\/\/(?:[^\s<&"]|&amp;)+)/g,
