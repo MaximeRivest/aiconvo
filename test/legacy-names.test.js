@@ -79,11 +79,15 @@ test('home folders: moved once to the new name, never over an existing destinati
   }
   const second = migrateHome(home);
   assert.deepEqual(second, { moved: [], skipped: [] }, 'nothing left to do');
-  // An old folder appearing next to an existing new one is left alone.
+  // An old folder appearing next to an existing new one is left alone,
+  // and the operator is told so (the data would otherwise go unnoticed).
   fs.mkdirSync(path.join(home, '.cache', 'aiconvo'));
-  const third = migrateHome(home);
+  logs.length = 0;
+  const third = migrateHome(home, { log: m => logs.push(m) });
   assert.equal(third.moved.length, 0);
   assert.equal(third.skipped[0].why, 'destination exists');
   assert.ok(fs.existsSync(path.join(home, '.cache', 'aiconvo')));
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /NOT moved: .*\.cache\/aiconvo .*merge/);
   fs.rmSync(home, { recursive: true, force: true });
 });

@@ -6,6 +6,12 @@
 // copied). A place that cannot be moved (another file system, permissions)
 // is reported and left where it was, so the server still starts.
 //
+// The skip that matters is "destination exists": it means something wrote
+// under the new name before this ran (on 2026-09-22 on lambda, a second
+// server started early and ~/.local/share/chattering grew next to the
+// 1.6 GB under the old name, which was then invisible). That case is
+// logged loudly, with the merge instruction, never silently.
+//
 // Pure with respect to its inputs: the caller names the home directory and
 // the file system, so the tests run it against a temporary home.
 const fs = require('fs');
@@ -31,7 +37,11 @@ function migrateHome(home, { fsx = fs, log = () => {} } = {}) {
     let fromStat;
     try { fromStat = fsx.lstatSync(from); } catch { continue; }
     if (fromStat.isSymbolicLink()) { skipped.push({ from, to, why: 'symlink' }); continue; }
-    if (fsx.existsSync(to)) { skipped.push({ from, to, why: 'destination exists' }); continue; }
+    if (fsx.existsSync(to)) {
+      skipped.push({ from, to, why: 'destination exists' });
+      log(`[rename] NOT moved: ${from} still holds data but ${to} already exists. Stop the server, merge ${from} into ${to} by hand, then remove ${from}.`);
+      continue;
+    }
     try {
       fsx.mkdirSync(path.dirname(to), { recursive: true });
       fsx.renameSync(from, to);

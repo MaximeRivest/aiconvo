@@ -25,14 +25,39 @@ HOST="$(hostname)"
 
 say() { printf '\n== %s\n' "$*"; }
 
-say "1. stop the old service"
-systemctl --user stop aiconvo.service 2>/dev/null || true
-systemctl --user stop aiconvo-idle-stop.timer 2>/dev/null || true
+say "1. stop every server, old name or new"
+# Both names: on lambda a chattering.service installed by an earlier
+# Home Manager switch ran next to aiconvo.service for 13 minutes, and
+# the data folders were then "already there" under the new name.
+for u in aiconvo.service aiconvo-idle-stop.timer chattering.service chattering-idle-stop.timer; do
+  systemctl --user stop "$u" 2>/dev/null || true
+done
+# The hand-written units the Nix module replaced (the laptop had them
+# linked from ~/.config/systemd/user). Nix owns the unit from now on.
+for u in aiconvo.service aiconvo-idle-stop.service aiconvo-idle-stop.timer; do
+  systemctl --user disable "$u" 2>/dev/null || true
+  rm -f "$HOME/.config/systemd/user/$u"; rm -rf "$HOME/.config/systemd/user/$u.d"
+done
+rm -f "$HOME/.config/autostart/aiconvo-tray.desktop"
+systemctl --user daemon-reload
+if pgrep -f "Projects/(aiconvo|chattering)/server.js" >/dev/null; then
+  echo "a server is still running:" >&2; pgrep -af "Projects/(aiconvo|chattering)/server.js" >&2
+  echo "stop it, then run this script again" >&2; exit 1
+fi
 
 say "2. move the checkout"
 if [ -d "$OLD" ] && [ ! -e "$NEW" ]; then mv "$OLD" "$NEW"; echo "moved $OLD → $NEW"
 elif [ -d "$NEW" ]; then echo "already at $NEW"
 else echo "no checkout at $OLD or $NEW" >&2; exit 1; fi
+# The GitHub repository was renamed too; the old URL only redirects.
+remote=$(git -C "$NEW" remote get-url origin 2>/dev/null || true)
+case "$remote" in
+  *MaximeRivest/aiconvo*) git -C "$NEW" remote set-url origin "${remote/aiconvo/chattering}"; echo "origin → $(git -C "$NEW" remote get-url origin)" ;;
+esac
+# Worktrees of this checkout (~/Projects/aiconvo-links) point at the old
+# .git path; repair rewrites both sides.
+git -C "$NEW" worktree repair 2>/dev/null || true
+git -C "$NEW" worktree repair "$HOME"/Projects/aiconvo-* 2>/dev/null || true
 
 say "3. move the semantic search folder"
 if [ -d "$HOME/family-ai/aiconvo-semantic" ] && [ ! -e "$HOME/family-ai/chattering-semantic" ]; then
@@ -40,7 +65,12 @@ if [ -d "$HOME/family-ai/aiconvo-semantic" ] && [ ! -e "$HOME/family-ai/chatteri
 else echo "nothing to move"; fi
 
 say "4. move the data folders"
-node -e "require('$NEW/legacy-homes.js').migrateHome(require('os').homedir(), { log: console.log })"
+# A skip here means data under the old name would be left behind: stop
+# and let a person merge, rather than start a server over half the data.
+node -e "
+const r = require('$NEW/legacy-homes.js').migrateHome(require('os').homedir(), { log: console.log });
+if (r.skipped.length) { console.error('data folders not moved: merge them by hand before going on'); process.exit(1); }
+"
 
 say "5. records that name this project by its folder"
 node - "$NEW" <<'EOF'
@@ -90,12 +120,19 @@ home-manager switch --flake "$HOME/Projects/os/machines#maxime@$HOST"
 sudo nixos-rebuild switch --flake "$HOME/Projects/os/machines#$HOST"
 
 say "8. start Chattering"
-systemctl --user enable --now chattering.service
-for i in $(seq 1 60); do
-  if curl -fs -o /dev/null http://localhost:7433/health; then echo "Chattering answers on http://localhost:7433"; break; fi
-  sleep 1
-  if [ "$i" = 60 ]; then echo "no answer after 60 s: journalctl --user -u chattering -n 50" >&2; exit 1; fi
-done
+# A portal machine (the laptop: desktop.chattering.autostart = false) has
+# no [Install] section; there the launcher starts the server on demand
+# and the service is left alone.
+if [ "$(systemctl --user is-enabled chattering.service 2>/dev/null)" = static ]; then
+  echo "portal machine: chattering.service starts on demand, not now"
+else
+  systemctl --user enable --now chattering.service
+  for i in $(seq 1 60); do
+    if curl -fs -o /dev/null http://localhost:7433/health; then echo "Chattering answers on http://localhost:7433"; break; fi
+    sleep 1
+    if [ "$i" = 60 ]; then echo "no answer after 60 s: journalctl --user -u chattering -n 50" >&2; exit 1; fi
+  done
+fi
 
 say "done"
 echo "Remaining by hand: the phone and the e-ink tablet need the rebuilt APK (android/) — until then they keep working through the old app."
