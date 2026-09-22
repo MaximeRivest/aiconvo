@@ -93,21 +93,27 @@ test('mark unread lands after a read stamped in the future', () => {
   assert.equal(R.unreadAt(s, 'a', 9000), 9001);
 });
 
-test('dismiss reads and hides until newer activity arrives', () => {
+test('a close hides until newer activity arrives, touches nothing else, and restores exactly', () => {
   const s = R.createState(1000);
   R.markFinished(s, 'a', 3000);
   assert.equal(R.unreadAt(s, 'a', 2000), 3000);
-  const delta = R.dismiss(s, 'a', { now: 4000, mtimeMs: 2000 });
-  assert.deepEqual(delta, { read: { a: 4000 }, dismissed: { a: 4000 } });
-  assert.equal(R.unreadAt(s, 'a', 2000), 0, 'dismissing also reads');
+  const delta = R.dismiss(s, 'a', { now: 2500, mtimeMs: 2000 });
+  assert.deepEqual(delta, { dismissed: { a: 3000 } }, 'the closing time follows the clock rule: not below the finish');
+  assert.equal(R.unreadAt(s, 'a', 2000), 3000, 'closing does not read');
   assert.equal(R.isDismissed(s, 'a', 2000), true);
+  assert.equal(R.dismiss(s, 'a', { now: 2600, mtimeMs: 2000 }), null, 'closing again changes nothing');
   assert.equal(R.isDismissed(s, 'a', 4500), false, 'a newer transcript write brings it back');
   assert.equal(R.unreadAt(s, 'a', 4500), 4500, '...as unread');
-  R.markFinished(s, 'a', 4200);
+  assert.deepEqual(R.restore(s, 'a'), { dismissed: { a: 0 } }, 'undo removes the mark');
+  assert.equal(R.restore(s, 'a'), null, 'nothing to undo twice');
+  assert.equal(R.isDismissed(s, 'a', 2000), false);
+  assert.equal(R.unreadAt(s, 'a', 2000), 3000, 'back exactly as it was: still unread');
+  R.dismiss(s, 'a', { now: 5000, mtimeMs: 2000 });
+  R.markFinished(s, 'a', 5200);
   assert.equal(R.isDismissed(s, 'a', 2000), false, 'a newer finish brings it back too');
 });
 
-test('mark unread cancels a dismissal; dismissing cancels a flag', () => {
+test('mark unread cancels a close; a close after a flag hides it', () => {
   const s = R.createState(1000);
   R.open(s, 'a', 1500);
   R.dismiss(s, 'a', { now: 2000 });
@@ -115,9 +121,11 @@ test('mark unread cancels a dismissal; dismissing cancels a flag', () => {
   assert.equal(R.isDismissed(s, 'a', 0), false);
   assert.equal(R.unreadAt(s, 'a', 0), 3000);
   const delta = R.dismiss(s, 'a', { now: 4000 });
-  assert.deepEqual(delta, { read: { a: 4000 }, flagged: { a: 0 }, dismissed: { a: 4000 } });
-  assert.equal(R.unreadAt(s, 'a', 0), 0);
-  assert.equal(R.isDismissed(s, 'a', 0), true);
+  assert.deepEqual(delta, { dismissed: { a: 4000 } }, 'the flag is left alone');
+  assert.equal(R.unreadAt(s, 'a', 0), 4000, 'still flagged unread underneath...');
+  assert.equal(R.isDismissed(s, 'a', 0), true, '...but closed, so not listed');
+  R.restore(s, 'a');
+  assert.equal(R.unreadAt(s, 'a', 0), 4000, 'undo: the flag is intact');
 });
 
 // design/59: the side list holds what a person opened, until closed.
@@ -129,7 +137,7 @@ test('the list starts empty; opening lists, closing hides, a later reply brings 
   assert.equal(s.opened.a, 2000, 'the first opening time is kept');
   assert.equal(R.isListed(s, 'a', 1500), true);
   const closed = R.dismiss(s, 'a', { now: 3000, mtimeMs: 1500 });
-  assert.deepEqual(closed, { read: { a: 3000 }, dismissed: { a: 3000 } });
+  assert.deepEqual(closed, { dismissed: { a: 3000 } });
   assert.equal(R.isListed(s, 'a', 1500), false, 'closed: off the list');
   assert.equal(s.opened.a, 2000, 'closing keeps the opened mark');
   assert.equal(R.isListed(s, 'a', 3500), true, 'a newer transcript write lists it again');

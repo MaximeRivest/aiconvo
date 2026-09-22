@@ -22,6 +22,7 @@
 //                  whatever the transcript's age (the guard does not apply);
 // · dismissed[key] closed from the list; hidden while its activity is not
 //                  newer than the closing, a later reply brings it back;
+//                  closing touches nothing else, so restore() undoes it;
 // · pinned[key]    kept at the top of the list, in pin order.
 
 function num(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; }
@@ -92,16 +93,26 @@ function markUnread(state, key, { now = Date.now() } = {}) {
   return delta;
 }
 
-// "Close": reads the conversation and hides it from the list while no
-// newer activity arrives. The closing time is the read time, so the same
-// clock rule covers it. The `opened` mark stays, so a later reply lists
-// the conversation again.
+// "Close": hides the conversation from the list while no newer activity
+// arrives. Closing changes nothing else — not the read time, not a manual
+// flag — so a close can be undone exactly (restore). The `opened` mark
+// stays, so a later reply lists the conversation again. The closing time
+// follows the clock rule: never below the server's now, the transcript's
+// mtime or the recorded finish, so a reply that lands a moment later still
+// counts as newer.
 function dismiss(state, key, { now = Date.now(), mtimeMs = 0 } = {}) {
   if (!key) return null;
-  const delta = markRead(state, key, { now, mtimeMs }) || { read: { [key]: state.read[key] } };
-  state.dismissed[key] = state.read[key];
-  delta.dismissed = { [key]: state.dismissed[key] };
-  return delta;
+  const at = Math.max(num(now), num(mtimeMs), num(state.finished[key]), num(state.dismissed[key]));
+  if (at === state.dismissed[key]) return null;
+  state.dismissed[key] = at;
+  return { dismissed: { [key]: at } };
+}
+
+// Undo a close: the conversation is back exactly as it was.
+function restore(state, key) {
+  if (!key || !(key in state.dismissed)) return null;
+  delete state.dismissed[key];
+  return { dismissed: { [key]: 0 } };
 }
 
 function setPinned(state, key, on, now = Date.now()) {
@@ -162,10 +173,11 @@ function unreadAt(state, key, mtimeMs = 0) {
   return activity > read ? activity : 0;
 }
 
-// Closed, and nothing newer has happened since.
+// Closed, and nothing newer has happened since: no activity, no manual
+// "mark unread" after the close.
 function isDismissed(state, key, mtimeMs = 0) {
   const at = num(state.dismissed[key]);
-  return !!at && activityAt(state, key, mtimeMs) <= at && !(num(state.flagged[key]) > num(state.read[key]));
+  return !!at && activityAt(state, key, mtimeMs) <= at && num(state.flagged[key]) <= at;
 }
 
 // In the side list: opened by a person and not closed since.
@@ -178,4 +190,4 @@ function pinnedKeys(state) {
   return Object.entries(state.pinned).sort((a, b) => b[1] - a[1]).map(([k]) => k);
 }
 
-module.exports = { createState, normalize, markRead, markFinished, open, markUnread, dismiss, setPinned, importState, applyDelta, unreadAt, isDismissed, isListed, pinnedKeys, activityAt };
+module.exports = { createState, normalize, markRead, markFinished, open, markUnread, dismiss, restore, setPinned, importState, applyDelta, unreadAt, isDismissed, isListed, pinnedKeys, activityAt };

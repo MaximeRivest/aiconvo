@@ -407,7 +407,36 @@ function cachePathFor(key) {
 }
 
 // Bump when the cached message format changes; forces a re-index.
-const CACHE_VERSION = 17; // v17: seed recent file activity from confirmed tool results
+const CACHE_VERSION = 18; // v18: the last message summary for the side list (design/59)
+
+// One line of plain text for a list row: markdown syntax, code, links and
+// line breaks go; the first `max` characters stay. Nothing here is a parser;
+// a preview only needs to read like the message did.
+function previewText(text, max = 140) {
+  const plain = String(text || '')
+    .replace(/```[\s\S]*?```/g, ' [code] ')
+    .replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/^\s{0,3}(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?)/gm, '')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/[*_~]{1,3}([^*_~]+)[*_~]{1,3}/g, '$1')
+    .replace(/\s+/g, ' ').trim();
+  return plain.length > max ? plain.slice(0, max - 1).trimEnd() + '…' : plain;
+}
+// The last thing said on the active branch by a person or the assistant,
+// for the row under a conversation's title. `asks` says the assistant ended
+// with a question: the reply wants an answer, not just a read. A trailing
+// question mark is a plain, honest signal; it is not a reading of intent.
+function lastMessageSummary(messages) {
+  const m = [...messages].reverse().find(m => (m.role === 'user' || m.role === 'assistant') && !m.off
+    && String(m.text || '').trim() && !(m.role === 'user' && (m.origin === 'delegation' || isBootstrapMessage(m.text))));
+  if (!m) return null;
+  const text = previewText(m.text);
+  const lastLine = String(m.text || '').trim().split(/\n/).filter(l => l.trim()).pop() || '';
+  return { role: m.role, text, asks: m.role === 'assistant' && /\?\s*$/.test(previewText(lastLine, 400)) };
+}
 
 // A memory-briefing bootstrap prompt is the same for every launched session; it says
 // nothing about the actual work. Titles must come from the first real request instead.
@@ -805,6 +834,8 @@ async function indexFile(source, relPath, stat) {
       realUserCount: messages.filter(m => m.role === 'user' && m.origin !== 'delegation' && String(m.text || '').trim() && !isBootstrapMessage(m.text)).length,
       // When a person last wrote here (the side panel's "recent" list).
       lastUserTs: [...messages].reverse().find(m => m.role === 'user' && !m.off && m.origin !== 'delegation' && String(m.text || '').trim() && !isBootstrapMessage(m.text))?.ts || null,
+      // What was said last, for the side list's second line (design/59).
+      last: lastMessageSummary(messages),
       assistantCount: messages.filter(m => m.role === 'assistant').length,
       densityChat: densityProfile(messages, meta.firstTs, meta.lastTs, false),
       densityAll: densityProfile(messages, meta.firstTs, meta.lastTs, true),
@@ -3274,12 +3305,23 @@ function agentReadOpen(keys) {
   if (any) agentReadApply(merged);
 }
 function agentReadDismiss(keys) {
-  const merged = { read: {}, flagged: {}, dismissed: {} };
+  const merged = { dismissed: {} };
   let any = false;
   for (const key of keys) {
     if (!key || !index[key]) continue;
     const d = agentReadLib.dismiss(agentRead, key, { mtimeMs: index[key].mtimeMs });
-    if (d) { Object.assign(merged.read, d.read); Object.assign(merged.flagged, d.flagged || {}); Object.assign(merged.dismissed, d.dismissed); any = true; }
+    if (d) { Object.assign(merged.dismissed, d.dismissed); any = true; }
+  }
+  if (any) agentReadApply(merged);
+}
+// Undo a close (design/59). A deleted conversation can still be restored:
+// the mark is the person's, not the file's.
+function agentReadRestore(keys) {
+  const merged = { dismissed: {} };
+  let any = false;
+  for (const key of keys) {
+    const d = agentReadLib.restore(agentRead, key);
+    if (d) { Object.assign(merged.dismissed, d.dismissed); any = true; }
   }
   if (any) agentReadApply(merged);
 }
@@ -14970,6 +15012,8 @@ async function handleRequest(req, res) {
         // { open: [keys] } lists conversations a person opened (design/59).
         if (Array.isArray(p.open)) agentReadOpen(p.open.map(String));
         if (Array.isArray(p.dismiss)) agentReadDismiss(p.dismiss.map(String));
+        // { restore: [keys] } undoes a close.
+        if (Array.isArray(p.restore)) agentReadRestore(p.restore.map(String));
         if (p.pin && typeof p.pin === 'object') agentReadPin(p.pin);
         json(res, 200, agentRead);
       } catch (e) { json(res, 400, { error: e.message }); }
