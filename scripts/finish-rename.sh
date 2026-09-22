@@ -116,7 +116,9 @@ chmod +x "$NEW/chattering"
 echo "installed: ~/.local/bin/chattering"
 
 say "7. rebuild this machine (Home Manager, then NixOS — the second asks for sudo)"
-home-manager switch --flake "$HOME/Projects/os/machines#maxime@$HOST"
+# The flake names the laptop's home "maxime" and lambda's "maxime@lambda".
+HM_ATTR=maxime; [ "$HOST" = lambda ] && HM_ATTR=maxime@lambda
+home-manager switch --flake "$HOME/Projects/os/machines#$HM_ATTR"
 sudo nixos-rebuild switch --flake "$HOME/Projects/os/machines#$HOST"
 
 say "8. start Chattering"
