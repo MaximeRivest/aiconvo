@@ -135,8 +135,13 @@ function cookieValue(req, name) {
   }
   return '';
 }
+// The pages shown before sign-in cannot fetch the icon (every other path
+// needs a signed-in visitor), so they carry it inline.
+const FAVICON_LINK = (() => {
+  try { return `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${fs.readFileSync(path.join(__dirname, 'icons', 'favicon.svg')).toString('base64')}">`; } catch { return ''; }
+})();
 function lanLoginPage(error = '') {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering</title>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering</title>${FAVICON_LINK}
 <style>html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:28rem;margin:12vh auto;padding:1rem}h1{font-size:1.4rem;margin:0 0 .2rem}h1 small{font-weight:400;font-size:.8rem;color:#555}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}</style></head>
 <body><main><h1>Chattering <small>by Rockfrog</small></h1><p>Enter your token for this Chattering (your invite link, or the install token from settings → machines). After this, the device stays signed in as you.</p>
 <p><small>On this machine itself: the install token is in <code>~/.cache/chattering/lan-token</code>, and <code>open.sh</code> signs the browser in with it.</small></p>
@@ -150,9 +155,9 @@ ${error ? `<p class="err">${error.replace(/</g, '&lt;')}</p>` : ''}
 const escapeHtml = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function invitePage({ secret, invite, inviter, error = '', joinLink = '' }) {
   const style = 'html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:34rem;margin:8vh auto;padding:1rem}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}code{display:block;white-space:pre-wrap;word-break:break-all;border:1px solid #000;padding:.6rem;margin:.4rem 0}small{display:block;opacity:.75;margin:.2rem 0 1rem}';
-  if (!invite) return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering</title><style>${style}</style></head><body><main><p class="err">${escapeHtml(error || 'This invite link is not valid here.')}</p><p>Ask the person who invited you for a new link.</p></main></body></html>`;
+  if (!invite) return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering</title>${FAVICON_LINK}<style>${style}</style></head><body><main><p class="err">${escapeHtml(error || 'This invite link is not valid here.')}</p><p>Ask the person who invited you for a new link.</p></main></body></html>`;
   const projects = invite.projects.map(p => `<b>${escapeHtml(p.name)}</b>${p.right === 'see' ? ' (read only)' : ''}`).join(', ');
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering — invitation</title><style>${style}</style></head>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering — invitation</title>${FAVICON_LINK}<style>${style}</style></head>
 <body><main><p>${escapeHtml(inviter || 'Someone')} invited you to work on ${projects} in their Chattering.</p>
 <p>You will see that project's conversations, notes and memory${invite.projects.some(p => p.right === 'act') ? ', and you can send messages to its agents here' : ''}. Nothing else on this machine is visible to you.</p>
 ${error ? `<p class="err">${escapeHtml(error)}</p>` : ''}
@@ -167,7 +172,7 @@ ${error ? `<p class="err">${escapeHtml(error)}</p>` : ''}
 // smart sixteen-year-old could hold the owner to it.
 function guestRulesPage({ walls }) {
   const style = 'html,body{margin:0;background:#fff;color:#000;font:18px/1.5 monospace}main{max-width:38rem;margin:6vh auto;padding:1rem}h1{font-size:1.3em}h2{font-size:1em;margin-top:1.6em}ul{padding-left:1.2em}li{margin:.3em 0}p{margin:0 0 1em}.no{opacity:.75}';
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering — guests</title><style>${style}</style></head><body><main>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering — guests</title>${FAVICON_LINK}<style>${style}</style></head><body><main>
 <h1>What a guest can and cannot do here</h1>
 <p>Someone invited you to <b>one project</b> on their Chattering. This page says exactly what that means. It is the same for every guest.</p>
 <h2>You can</h2><ul>
@@ -13458,6 +13463,9 @@ async function handleRequest(req, res) {
       '/icon-512.png': { file: 'icons/icon-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/apple-touch-icon.png': { file: 'icons/apple-touch-icon.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/icon.svg': { file: 'icon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
+      '/icon-maskable-512.png': { file: 'icons/icon-maskable-512.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
+      '/favicon.svg': { file: 'icons/favicon.svg', type: 'image/svg+xml', cache: 'public, max-age=86400' },
+      '/favicon-32.png': { file: 'icons/favicon-32.png', type: 'image/png', cache: 'public, max-age=86400', compress: false },
       '/vendor/mermaid.min.js': { file: 'vendor/mermaid.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.9.4/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },

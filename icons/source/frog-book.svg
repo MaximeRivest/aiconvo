@@ -1,8 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-<title>Chattering, by Rockfrog</title>
-<rect x="16" y="16" width="480" height="480" rx="108" fill="#f2f6f3"/>
-<rect x="16.5" y="16.5" width="479" height="479" rx="107.5" fill="none" stroke="#101412" stroke-opacity=".14"/>
-<g transform="translate(92.00 124.61) scale(0.17943)" fill="#101412"><g transform="translate(0.000000,1428.000000) scale(0.100000,-0.100000)"><path d="M13731 14234 c-203 -37 -387 -138 -532 -292 -75 -80 -169 -229 -169
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1828.000000 1428.000000">
+<title>Rockfrog: frog on an open book</title>
+<!-- Traced with potrace from the 2026-09-22 concept sheet (~/Pictures/rockfrog-concepts). Master shape: scripts/make-icons.js composes every icon from it. -->
+<g transform="translate(0.000000,1428.000000) scale(0.100000,-0.100000)"><path d="M13731 14234 c-203 -37 -387 -138 -532 -292 -75 -80 -169 -229 -169
 -268 0 -27 22 -36 160 -64 58 -12 123 -28 145 -36 23 -8 52 -14 67 -14 14 0
 41 -6 59 -14 19 -7 57 -17 84 -20 62 -9 170 -31 250 -52 33 -9 78 -19 100 -23
 22 -5 78 -18 125 -29 47 -12 117 -29 155 -37 74 -17 161 -39 235 -60 149 -42
@@ -122,5 +121,5 @@
 233 -22 14 -78 53 -125 87 -139 99 -400 271 -650 428 -225 142 -500 295 -800
 446 -269 136 -755 364 -810 381 -14 4 -30 11 -36 16 -6 5 -35 18 -65 28 -30
 11 -79 29 -109 41 -534 208 -1226 404 -1855 526 -393 76 -461 87 -655 109 -74
-8 -182 22 -240 30 -235 34 -763 44 -1090 19z"/></g></g>
+8 -182 22 -240 30 -235 34 -763 44 -1090 19z"/></g>
 </svg>

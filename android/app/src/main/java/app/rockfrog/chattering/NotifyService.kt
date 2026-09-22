@@ -71,7 +71,7 @@ class NotifyService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val running = NotificationCompat.Builder(this, CHANNEL_RUNNING)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_rockfrog)
             .setContentTitle("Chattering is listening for replies")
             .setContentIntent(openAppIntent(null))
             .setOngoing(true)
@@ -162,7 +162,7 @@ class NotifyService : Service() {
         }
         val body = ev.optString("excerpt").ifEmpty { ev.optString("statusText") }
         val n = NotificationCompat.Builder(this, CHANNEL_REPLIES)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_rockfrog)
             .setContentTitle(head)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
