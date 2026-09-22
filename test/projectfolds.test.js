@@ -33,6 +33,23 @@ test('isLooseCwd: general launch and temporary folders stay out of projects', ()
   assert.strictEqual(isLooseCwd('/home/u/work/real'), false);
 });
 
+test('isLooseCwd: the macOS scratch folder is temporary on every host, in both of its spellings', () => {
+  // A conversation recorded on a Mac may be read on a Linux host whose
+  // tmpdir is /tmp; the layout itself must be recognised, like AppData\Temp.
+  const saved = process.env.TMPDIR;
+  process.env.TMPDIR = '/tmp';
+  try {
+    assert.strictEqual(isLooseCwd('/var/folders/ab/xyz_w9/T/pi-run'), true, 'the $TMPDIR spelling');
+    assert.strictEqual(isLooseCwd('/private/var/folders/ab/xyz_w9/T/pi-run'), true, 'the resolved cwd spelling');
+    assert.strictEqual(isLooseCwd('/private/var/folders/ab/xyz_w9/T'), true);
+    assert.strictEqual(isLooseCwd('/var/folders/ab/xyz_w9/C/caches'), false, 'the sibling cache folder is not scratch');
+    assert.strictEqual(isLooseCwd('/var/folders/ab/xyz_w9/Tools/real'), false);
+    assert.strictEqual(isLooseCwd('/Users/u/Projects/real'), false);
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = saved;
+  }
+});
+
 test('isLooseCwd: the platform temporary directory is temporary wherever TMPDIR puts it', () => {
   const os = require('node:os');
   const saved = process.env.TMPDIR;

@@ -12,8 +12,9 @@
 //      linked worktree maps to the raw name of its main worktree.
 //
 // Aliases win over auto folds. Resolution follows chains a few hops and
-// never loops. Everything here is pure and synchronous; the server owns
-// file I/O timing and the git probing that fills the auto map.
+// never loops. Everything here is synchronous and does no file I/O; the
+// server owns I/O timing and the git probing that fills the auto map. The
+// one environmental read is the host's temporary directory (isLooseCwd).
 
 const os = require('os');
 
@@ -29,14 +30,20 @@ function isLooseCwd(cwd) {
   if (/^[A-Z]:\/Users\/[^/]+(?:\/Projects)?$/i.test(c)) return true;
   if (/^\/(?:tmp|var\/tmp)(?:\/|$)/.test(c)) return true;
   if (/^[A-Z]:\/Users\/[^/]+\/AppData\/Local\/Temp(?:\/|$)/i.test(c)) return true;
+  // macOS: $TMPDIR is /var/folders/<2 chars>/<hash>/T, and a process there
+  // records the resolved /private/var/… form as its cwd. Fixed, like the
+  // Windows pattern above, because a conversation recorded on a Mac is
+  // classified wherever its record is read, not only on that Mac.
+  if (/^(?:\/private)?\/var\/folders\/[^/]+\/[^/]+\/T(?:\/|$)/.test(c)) return true;
   const tmp = tempRoot();
   if (tmp && (c === tmp || c.startsWith(tmp + '/'))) return true;
   return false;
 }
-// The temporary directory the platform actually uses: $TMPDIR, or macOS's
-// /var/folders/…/T, which the fixed patterns above never see. It is only a
-// temporary root when it does not contain the home folder; a TMPDIR set to
-// $HOME or / would otherwise make every project loose.
+// The temporary directory this host actually uses: a custom $TMPDIR, which
+// no fixed pattern can know. Host-specific by nature; records from another
+// machine rely on the patterns above. It is only a temporary root when it
+// does not contain the home folder; a TMPDIR set to $HOME or / would
+// otherwise make every project loose.
 function tempRoot() {
   let tmp = '', home = '';
   try { tmp = String(os.tmpdir() || '').replace(/\\/g, '/').replace(/\/+$/, ''); } catch { return ''; }
