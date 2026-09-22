@@ -118,12 +118,11 @@ test('a heading fragment reads the target once and lands on the heading', async 
   assert.deepEqual(unreadable.calls.toasts, ['could not read the target for its heading · opening notes.md']);
 });
 
-test('dead, folder, and unreachable targets say so and stay put', async () => {
-  const { c, ws, calls } = following({ exists: p => (p.endsWith('dir') ? { found: { [p]: { path: p, kind: 'directory' } } } : { found: { [p]: null } }) });
+test('dead and unreachable targets say so and stay put', async () => {
+  const { c, ws, calls } = following({ exists: p => ({ found: { [p]: null } }) });
   await c.fileWsFollowLink(ws, 'gone.md');
-  await c.fileWsFollowLink(ws, 'somedir');
   assert.deepEqual(calls.navigate, []);
-  assert.deepEqual(calls.errors, ['link target not found · gone.md', 'folders have no in-app view · somedir']);
+  assert.deepEqual(calls.errors, ['link target not found · gone.md']);
   const failing = following({ exists: () => { throw new Error('offline'); } });
   await failing.c.fileWsFollowLink(failing.ws, 'x.md');
   assert.deepEqual(failing.calls.errors, ['could not check the link · x.md']);
@@ -166,4 +165,21 @@ test('the editor host hears the bundle event and reads the modifier keys it repo
   navigate({ path: 'd.md', modifiers: { ctrl: false, meta: false, shift: true, alt: true } }); // not an "open elsewhere" gesture
   navigate({ path: 'e.md' }); // the 0.12.0 fallback bundle reports no modifiers
   assert.deepEqual(plain(followed), [['a.md', false], ['b.md', true], ['c.md', true], ['d.md', false], ['e.md', false]]);
+});
+
+test('a linked folder opens the Files browser at that folder, on any device', async () => {
+  const folders = [];
+  const { c, ws, calls } = following({
+    exists: p => ({ found: { [p]: { path: p, kind: 'directory' } } }),
+    read: url => (url.includes('/api/path/info') ? { path: '/home/u/repo/docs/adr', kind: 'directory', browse: { project: 'repo', root: '/home/u/repo', dir: 'docs/adr' } } : { error: 'no read' }),
+  });
+  vm.runInContext('openFolderInApp = info => { folders.push(info.browse); return true; }', Object.assign(c, { folders }));
+  assert.equal(await c.fileWsFollowLink(ws, 'adr'), true);
+  assert.ok(calls.reads[0].includes('path=%2Fhome%2Fu%2Frepo%2Fdocs%2Fadr'), 'the folder is looked up by its resolved path');
+  assert.deepEqual(plain(folders), [{ project: 'repo', root: '/home/u/repo', dir: 'docs/adr' }]);
+  assert.deepEqual(calls.navigate, []);
+  assert.deepEqual(calls.errors, []);
+  const offline = following({ exists: p => ({ found: { [p]: { path: p, kind: 'directory' } } }), read: () => { throw new Error('offline'); } });
+  await offline.c.fileWsFollowLink(offline.ws, 'adr');
+  assert.deepEqual(offline.calls.errors, ['could not check the folder · adr']);
 });

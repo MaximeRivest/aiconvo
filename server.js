@@ -10197,9 +10197,26 @@ function imageMimeForPath(file) {
   return fileMedia.mediaKind(file) === 'image' ? fileMedia.mediaType(file) : null;
 }
 
+// Where a folder can be browsed in the app: the project and repository root
+// that contain it, and its path inside that root, or null when the folder
+// lies outside every browsable root (the Files browser refuses those). Same
+// root set as /api/files/browse, so what this names, that route serves.
+async function folderBrowseLocation(abs) {
+  const project = projectOfPath(abs);
+  const meta = project ? projectMetaFor(project) : null;
+  if (!meta) return null;
+  const candidates = [meta.cwd, ...await projectGitRepositories(meta)].filter(Boolean);
+  const roots = [...new Set(await Promise.all(candidates.map(p => fsp.realpath(p).catch(() => null))))].filter(Boolean);
+  const real = await fsp.realpath(abs).catch(() => abs);
+  // The deepest root wins: a nested repository browses as itself.
+  const root = roots.filter(r => real === r || real.startsWith(r + '/')).sort((a, b) => b.length - a.length)[0];
+  if (!root) return null;
+  return { project, root, dir: path.relative(root, real) };
+}
+
 async function pathInfoResponse(key, pathValue, local = false) {
   const { abs, stat } = await transcriptPathInfo(key, pathValue, { local });
-  if (stat.isDirectory()) return { path: abs, kind: 'directory', preview: 'none', hostActions: local };
+  if (stat.isDirectory()) return { path: abs, kind: 'directory', preview: 'none', hostActions: local, browse: await folderBrowseLocation(abs) };
   const mime = fileMedia.mediaType(abs);
   let preview = fileMedia.mediaKind(abs) || 'text';
   if (!mime) {

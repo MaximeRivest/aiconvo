@@ -156,7 +156,7 @@ async function fileWsFollowLink(ws, target, { system = false } = {}) {
   // Ctrl/Cmd-click means the system application, as it does on every file
   // control in the app.
   if (system) return runNativePathAction({ key: '', path: found.path }, 'open');
-  if (found.kind !== 'file') return errToast('folders have no in-app view · ' + link.path);
+  if (found.kind !== 'file') return fileWsOpenFolder(found.path, link.path);
   let line = null;
   const at = link.fragment.match(/^L?(\d+)(?:-L?\d+)?$/);
   if (at) line = Number(at[1]);
@@ -167,6 +167,15 @@ async function fileWsFollowLink(ws, target, { system = false } = {}) {
     else if (line === undefined) toast('could not read the target for its heading · opening ' + link.path);
   }
   return liveFileNavigate(ws, { path: found.path, line: line || 1 });
+}
+// A linked folder opens as the Files browser at that folder (app.html
+// openFolderInApp), which needs the project and root /api/path/info names.
+async function fileWsOpenFolder(pathValue, label) {
+  let info;
+  try { info = await (await fetch('/api/path/info?' + new URLSearchParams({ id: '', path: pathValue }))).json(); }
+  catch { info = { error: 'could not check the folder · ' + label }; }
+  if (info.error) return errToast(info.error);
+  return openFolderInApp(info);
 }
 function fileWsWireDocLinks(ws) {
   const host = $('docEditor');

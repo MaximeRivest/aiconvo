@@ -8474,10 +8474,7 @@ async function openPathInApp(ctx, quiet = false) {
     if (!quiet) errToast(info.error);
     return false;
   }
-  if (info.kind === 'directory') {
-    if (!quiet) errToast('folders have no in-app preview — use Show in folder');
-    return false;
-  }
+  if (info.kind === 'directory') return openFolderInApp(info, { quiet, key: ctx.key });
   if (info.preview === 'image') {
     openMediaLightbox('/api/path/content?' + query, info.path);
     return true;
@@ -8493,6 +8490,22 @@ async function openPathInApp(ctx, quiet = false) {
   if (fromConversation) rememberConversationFileReturn(ctx.button);
   const line = Number((String(ctx.path).match(/:(\d+)(?::\d+)?$/) || [])[1]) || null;
   openLiveFile(info.path, { project: s ? projectOf(s) : currentProjectName(), back: fromConversation || currentHash, line });
+  return true;
+}
+
+// A folder opens as the Files browser at that folder, on any device: the
+// browser is served by the same server the files live on, so this works
+// from the laptop and the phone, where "Show in folder" (a desktop action
+// on the server's own screen) does not. `info` is a /api/path/info answer;
+// a folder outside every project's repositories has no in-app view.
+function openFolderInApp(info, { quiet = false, key = '' } = {}) {
+  const at = info.browse;
+  if (!at) {
+    if (!quiet) errToast('this folder is outside every project — use Show in folder' + (info.hostActions ? '' : ' on the server'));
+    return false;
+  }
+  const conv = viewKind === 'conversation' && key === activeRel ? key : '';
+  showFilesBrowser(at.project, { root: at.root, dir: at.dir, conv });
   return true;
 }
 
