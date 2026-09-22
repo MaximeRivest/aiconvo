@@ -30,7 +30,7 @@ function git(args, { cwd, input, env, timeout = 15000, max = 32 * 1024 * 1024 } 
   });
 }
 class CheckpointStore {
-  constructor(dir = process.env.AICONVO_CHECKPOINT_DIR || path.join(os.homedir(), '.local/share/aiconvo/checkpoints')) {
+  constructor(dir = process.env.CHATTERING_CHECKPOINT_DIR || path.join(os.homedir(), '.local/share/chattering/checkpoints')) {
     this.dir = path.resolve(dir); fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 }); this.dir = fs.realpathSync(this.dir); fs.chmodSync(this.dir, 0o700);
     this.db = new DatabaseSync(path.join(this.dir, 'metadata.sqlite'));
     fs.chmodSync(path.join(this.dir, 'metadata.sqlite'), 0o600);
@@ -113,7 +113,7 @@ class CheckpointStore {
     const paths = [...new Set(await this.paths(root))].sort();
     if (paths.length > 20000) throw Error('Checkpoint file limit exceeded (20,000)');
     let total = 0;
-    const limit = Number(process.env.AICONVO_CHECKPOINT_MB || 1024) * 1024 * 1024;
+    const limit = Number(process.env.CHATTERING_CHECKPOINT_MB || 1024) * 1024 * 1024;
     let used = this.db.prepare('SELECT COALESCE(SUM(bytes),0) AS n FROM checkpoint_objects').get().n;
     if (!(limit > 0) || used >= limit) throw Error('Checkpoint storage budget reached; existing checkpoints are retained');
     for (const rel of paths) {
@@ -192,7 +192,7 @@ class CheckpointStore {
     const repo = await this.init(root), oid = blobId(bytes), dest = path.join(repo, 'objects', oid.slice(0, 2), oid.slice(2));
     if (this.db.prepare('SELECT 1 FROM checkpoint_objects WHERE root=? AND oid=?').get(root, oid) && fs.existsSync(dest)) return oid;
     const packed = deflateSync(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`), bytes]));
-    const limit = Number(process.env.AICONVO_CHECKPOINT_MB || 1024) * 1024 * 1024;
+    const limit = Number(process.env.CHATTERING_CHECKPOINT_MB || 1024) * 1024 * 1024;
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const known = this.db.prepare('SELECT 1 FROM checkpoint_objects WHERE root=? AND oid=?').get(root, oid);

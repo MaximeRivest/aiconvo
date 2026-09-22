@@ -278,10 +278,10 @@ function liveFileStash(ws) {
   // A shared file has no local draft: the server holds the text and the
   // disk follows it. A stale stash here would come back as a "draft" the
   // next time the file opens alone.
-  if (ws.collab || ws.wasShared) { try { sessionStorage.removeItem('aiconvo.draft:' + ws.path); } catch {} return; }
+  if (ws.collab || ws.wasShared) { try { sessionStorage.removeItem('chattering.draft:' + ws.path); } catch {} return; }
   const text = ws.editor.getContent();
   try {
-    const key = 'aiconvo.draft:' + ws.path;
+    const key = 'chattering.draft:' + ws.path;
     if (text === ws.live.original) sessionStorage.removeItem(key);
     else sessionStorage.setItem(key, JSON.stringify({ sha: ws.live.sha, text, at: Date.now() }));
     ws.live.draftWarning = false;

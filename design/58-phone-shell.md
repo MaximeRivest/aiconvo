@@ -56,7 +56,7 @@ pages keep ‹ alone; the bar carries the rest.
 
 ## The Android back button
 
-`window.aiconvoBack()` is asked first by the app. Anything transient closes:
+`window.chatteringBack()` is asked first by the app. Anything transient closes:
 a menu, a picker, a sheet, an on-the-fly dialog, then the fixed overlays,
 search, settings, the mark preview. It returns `true` when it handled the
 press; `false` means the app should move through the page history, and with

@@ -26,8 +26,8 @@ for (const role of ['assistant', 'user']) test(`${role} correction appends a sib
   assert.equal(f.appended.parentId, 'parent');
   assert.equal(f.appended.id, 'new');
   assert.equal(f.appended.message.content[0].text, 'corrected');
-  assert.equal(f.appended.aiconvo.kind, 'edit');
-  assert.equal(f.appended.aiconvo.sourceEntryId, 'old');
+  assert.equal(f.appended.chattering.kind, 'edit');
+  assert.equal(f.appended.chattering.sourceEntryId, 'old');
   assert.equal(f.original.message.content[0].text, 'old');
 });
 test('stale identity and content cannot create branches', async () => {

@@ -11,7 +11,7 @@ gaining the three controls every inbox has: pin, mark unread, remove.
 
 ## Model
 
-- **One layout choice per device.** `aiconvo.layout` in `localStorage`:
+- **One layout choice per device.** `chattering.layout` in `localStorage`:
   `top` (default, unchanged) or `side`. It is a device preference, like the
   theme, not a server setting: the same person wants the panel on a wide
   screen and the top bar on a phone. It is set from settings → appearance
@@ -33,7 +33,7 @@ gaining the three controls every inbox has: pin, mark unread, remove.
   machine, settings, fold. A section folded by click leaves the flow and
   docks at the bottom as one line with its count, so the top of the column
   only ever holds open lists; the fold is remembered per device
-  (`aiconvo.agentSections.v1`). *Recent* has one `project | all` toggle for
+  (`chattering.agentSections.v1`). *Recent* has one `project | all` toggle for
   its conversations and files together (the open conversation's, page's or
   file's project); in project scope its rows are one line, since the
   project is known.
@@ -52,7 +52,7 @@ gaining the three controls every inbox has: pin, mark unread, remove.
   default). The e-ink theme sets the radii to 0 and the border to black;
   binary mode keeps solid borders on the scope toggle.
 - **Recent files** are the files a person opened or saved in the editor,
-  newest first, shared across devices (`~/notes/aiconvo/recent-files.json`,
+  newest first, shared across devices (`~/notes/chattering/recent-files.json`,
   `/api/recent-files`, SSE `recent-files`). This remains the default human
   view; [design/47](47-recent-file-activity.md) adds an independent source
   filter for agents or both, without displacing the human visit history.

@@ -10,14 +10,14 @@ Created one repository-free diagnostic routine through Claude Code 2.1.278, manu
 
 The CLI creation instructions required a schedule, so the experiment used a **disabled one-off timestamp**, 2026-09-22T18:00:00Z. A manual run worked while `enabled:false`; no temporary enabling was needed. The future `next_run_at` remained populated even when disabled. Do not infer enabled state from that field alone.
 
-We recovered the routine definition, session metadata, run history, and all 25 events returned for the completed run. A small offline conversion let the existing Aiconvo parser read the prompt, three tool calls, three results, and final answer. This proves a narrow reading path, not production import, browser rendering, or Pi continuation.
+We recovered the routine definition, session metadata, run history, and all 25 events returned for the completed run. A small offline conversion let the existing Chattering parser read the prompt, three tool calls, three results, and final answer. This proves a narrow reading path, not production import, browser rendering, or Pi continuation.
 
 ## Private evidence
 
 The experiment's account-specific records and scripts are retained outside Git:
 
 ```
-~/.local/share/aiconvo/research/claude-routines/2026-09-21/
+~/.local/share/chattering/research/claude-routines/2026-09-21/
 ```
 
 Directory permissions: 0700; files: 0600. No authentication tokens were copied there. The read-only retrieval script reads the existing Claude credential at execution time and sends it only to the first-party API, refusing redirects. Do not publish the raw files: records can contain account identifiers, prompt contents, tool output, and signed thinking blocks.
@@ -34,8 +34,8 @@ Important files:
 - `before.json`, `after-files.json`: local filesystem metadata comparison.
 - `file-endpoint-checks.json`: limits encountered when requesting remote files.
 - `fetch-records.py`: read-only exporter for this particular diagnostic.
-- `check-aiconvo-parser.cjs`: offline experiment using the real parser extracted from `server.js` without starting the server.
-- `aiconvo-display-projection.jsonl`: **display-only experiment**, not a resumable native transcript.
+- `check-chattering-parser.cjs`: offline experiment using the real parser extracted from `server.js` without starting the server.
+- `chattering-display-projection.jsonl`: **display-only experiment**, not a resumable native transcript.
 - `parser-check.json`: checked results.
 - `SHA256SUMS.json`: hashes of the retained evidence files.
 
@@ -51,7 +51,7 @@ The management conversations are ordinary Claude transcripts:
 ~/.claude/projects/-tmp-claude-routines-probe/<local-session-uuid>.jsonl
 ```
 
-Those record requests to create/run/inspect a routine and their responses. They are **not the cloud execution's own transcript**. Aiconvo can discover these local management conversations today.
+Those record requests to create/run/inspect a routine and their responses. They are **not the cloud execution's own transcript**. Chattering can discover these local management conversations today.
 
 The observed filesystem comparison found no separate local routine-definition file and no native transcript named for the cloud execution's inner session UUID. The marker file did not appear on Lambda. This is a result for CLI management in this experiment, not a claim about every Desktop client, attachment, cache, or teleport workflow.
 
@@ -63,7 +63,7 @@ The run reported:
 - Hostname: `vm`.
 - Native Claude version: 2.1.278.
 - `$HOME/.claude/projects` exists.
-- Marker artifact: `/tmp/aiconvo-routine-probe-20260921.txt`.
+- Marker artifact: `/tmp/chattering-routine-probe-20260921.txt`.
 
 The exact native transcript filename **was not verified on the remote filesystem**. A predicted native path and the known marker path were both rejected by the read-only file endpoint: that endpoint permits only `/mnt/user-data/outputs` and `/mnt/user-data/working`. Do not mistake our downloaded API event export for a byte-for-byte copy of the native cloud JSONL. No attempt was made to bypass that restriction.
 
@@ -87,7 +87,7 @@ The installed CLI's `RemoteTrigger` tool exposes:
 - `create_webhook_trigger`.
 - `list_runs`, `get_run_log`.
 
-Its management calls use the first-party `/v1/code/triggers` and `/v1/code/sessions` API paths with the installed CLI's routine beta header. We successfully made authenticated read-only GETs to those same endpoints for the account's test objects. **This demonstrates current behavior; it is not a stable public API compatibility guarantee.** Isolate this transport behind a provider adapter rather than embedding it throughout Aiconvo.
+Its management calls use the first-party `/v1/code/triggers` and `/v1/code/sessions` API paths with the installed CLI's routine beta header. We successfully made authenticated read-only GETs to those same endpoints for the account's test objects. **This demonstrates current behavior; it is not a stable public API compatibility guarantee.** Isolate this transport behind a provider adapter rather than embedding it throughout Chattering.
 
 `get_run_log` is insufficient for faithful import: it displayed 19 of 25 events, omitted lifecycle events, shortened long text, flattened tool results, and reduced thinking to a marker.
 
@@ -114,7 +114,7 @@ The event stream includes provisioning logs, init, prompt, tool calls/results, m
 
 The session endpoint returned a `response_shape` wrapper in this account/version. Preserve the raw response and validate versioned shapes instead of assuming the direct session object.
 
-## Aiconvo parser experiment
+## Chattering parser experiment
 
 Relevant existing code:
 
@@ -147,7 +147,7 @@ Usage also needs separate normalization: multiple streamed assistant events shar
 
 ## Proposed integration: two independent capabilities
 
-### A. Read cloud routines and their runs in Aiconvo
+### A. Read cloud routines and their runs in Chattering
 
 Keep the execution on Claude while adding visibility:
 
@@ -161,7 +161,7 @@ Keep the execution on Claude while adding visibility:
 
 Trade-off: cloud execution remains dependent on Anthropic, but this is the lower-risk first step and preserves historical truth.
 
-### B. Adopt a routine as a Pi-run Aiconvo task
+### B. Adopt a routine as a Pi-run Chattering task
 
 Create a **new local task**, retaining an origin link:
 
@@ -170,11 +170,11 @@ Create a **new local task**, retaining an origin link:
 - Keep imported tasks disabled until those choices are reviewed.
 - Start fresh native Pi sessions through the existing execution path; attach prior cloud history as clearly labeled reference only when desired.
 - Preserve cloud runs as historical Claude records. Do not relabel them as Pi runs or replay foreign thinking signatures/tool calls as native Pi history.
-- Supply an Aiconvo notification mechanism consistent with the routine's intended quiet/actionable behavior.
+- Supply a Chattering notification mechanism consistent with the routine's intended quiet/actionable behavior.
 - Build a durable scheduler with timezone semantics, restart recovery, missed-run policy, concurrency limits, cancellation, and deduplication. API and event triggers need authenticated handlers and duplicate-event protection.
 - Make source disabling and destination activation an explicit handover to avoid running the same automation twice.
 
-Trade-off: tasks can use local compute and the user's chosen models, but Aiconvo must own scheduling, safety, integrations, and notification delivery. Copying a prompt does not preserve the original environment or guarantee equivalent behavior.
+Trade-off: tasks can use local compute and the user's chosen models, but Chattering must own scheduling, safety, integrations, and notification delivery. Copying a prompt does not preserve the original environment or guarantee equivalent behavior.
 
 This proposal does not assume a validated native Claude-to-Pi session conversion. The current experiment did not create or run a Pi routine.
 
@@ -186,7 +186,7 @@ Flow: **Scheduled → New task → Create with Claude**. Answered Claude's setup
 
 The resulting record was immediately discoverable through the **same authenticated `/v1/code/triggers` API used in the CLI experiment**:
 
-- Name: `Aiconvo website portability probe 2026-09-21`.
+- Name: `Chattering website portability probe 2026-09-21`.
 - `created_via: meta_mcp`, `created_kind: cowork_task`.
 - Model: `claude-fable-5`.
 - Exact user task text matched both `derived_state.prompt` and the saved kickoff event, character for character.
@@ -199,7 +199,7 @@ The creation flow could not save paused. It created the future one-off enabled; 
 Clicked **Run now** exactly once while paused. The task succeeded and remained disabled. The displayed answer and exported final result both were:
 
 ```
-AICONVO_WEB_ROUTINE_PROBE_20260921
+CHATTERING_WEB_ROUTINE_PROBE_20260921
 17 + 25 = 42
 ```
 
@@ -224,10 +224,10 @@ This route adds another presentation identity: following the run-history link `/
 Private evidence, four screenshots, a read-only re-export script, and checked facts are under:
 
 ```
-~/.local/share/aiconvo/research/claude-routines/2026-09-21-web/
+~/.local/share/chattering/research/claude-routines/2026-09-21-web/
 ```
 
-Start with `verification.json`, `routine-raw.json`, `result-page.json`, and `04-completed-run.png`. The setup chat, task, and result identifiers are retained there, outside Git. The laptop browser was left showing the successful result. No Pi/Aiconvo production import was installed, no service was restarted, and both experimental routines remain disabled.
+Start with `verification.json`, `routine-raw.json`, `result-page.json`, and `04-completed-run.png`. The setup chat, task, and result identifiers are retained there, outside Git. The laptop browser was left showing the successful result. No Pi/Chattering production import was installed, no service was restarted, and both experimental routines remain disabled.
 
 **Confirmed conclusion:** at least this website-created scheduled task is accessible through the same cloud routine API and can be exported without reconstructing its prompt from screenshots. This is stronger than the earlier expectation, but it is still one controlled task, not validation of every task type or account configuration.
 
@@ -277,13 +277,13 @@ These GitHub details are documented capabilities, not behavior verified against 
 
 ### Harmless coding run through this exact form
 
-Created **Aiconvo Code routine web probe 2026-09-21** through the Code UI, not through a mutation script:
+Created **Chattering Code routine web probe 2026-09-21** through the Code UI, not through a mutation script:
 
 - No repositories and **zero connectors**, removed explicitly before saving.
 - One-off timestamp tomorrow, then paused immediately after creation and before firing.
 - Push, email, and Slack notifications all off; auto-fix off.
 - No API trigger/token, GitHub subscription, package installation, or repository action.
-- Prompt: create a standard-library Python `sum_even` function and exactly three unit tests inside `/tmp/aiconvo-code-routine-web-probe`, then run them.
+- Prompt: create a standard-library Python `sum_even` function and exactly three unit tests inside `/tmp/chattering-code-routine-web-probe`, then run them.
 
 Clicked **Run now** exactly once while paused. The raw transcript proves two shell calls (create directory, run Python) and one Write call. The three tests covered an empty list, mixed odd/even numbers, and negative numbers/zero. Python's output named all three tests, reported each as `ok`, and ended in `OK`. The final answer correctly said all three passed. One successful run was recorded; the routine remained disabled.
 
@@ -302,7 +302,7 @@ The model selector initially displayed Opus 5, but this draft did not save an ex
 
 The earlier broad statement about recovering a 67,000-character extra instruction block must therefore stay scoped to the general scheduled task. For these Code routines we recovered the explicit task, configuration, runtime events, and the separately recorded routine wrapper—not a demonstrated complete base system prompt.
 
-### Implication for Aiconvo
+### Implication for Chattering
 
 The likely development use case is **delegating a recurring or event-driven development responsibility**: detect work, prepare a workspace, inspect/edit/test code, produce a reviewable result, and possibly follow the PR through CI and review. The candidate user's particular dependency on these pieces has not been established.
 
@@ -321,7 +321,7 @@ Importing history is still useful, but it is not feature parity with the work ex
 Private records, UI screenshots, task text, official-doc snapshots, exporter, and checked results are under:
 
 ```
-~/.local/share/aiconvo/research/claude-routines/2026-09-21-code-web/
+~/.local/share/chattering/research/claude-routines/2026-09-21-code-web/
 ```
 
 Start with `verification.json`, `routine-raw.json`, and `06-completed-run.png`. No production application code was changed or restarted during this investigation.

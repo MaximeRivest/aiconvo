@@ -15,7 +15,7 @@ test('media and HTML viewers: real server, desktop, phone, tablet and security b
   for (const ext of ['webm', 'mp4']) fs.copyFileSync(path.join(__dirname, 'fixtures/media/clip.' + ext), path.join(work, 'clip.' + ext));
   fs.writeFileSync(path.join(work, 'broken.mp4'), 'not a video');
   const mediaURL = file => base + '/api/file/media?' + new URLSearchParams({ path: path.join(work, file) });
-  const remote = { 'X-Forwarded-For': '100.100.100.100' }, signedIn = { ...remote, Cookie: 'aiconvo=viewer-test-token' };
+  const remote = { 'X-Forwarded-For': '100.100.100.100' }, signedIn = { ...remote, Cookie: 'chattering=viewer-test-token' };
   assert.equal((await fetch(mediaURL('clip.webm'), { headers: remote })).status, 401, 'remote media needs login');
   const partial = await fetch(mediaURL('clip.webm'), { headers: { ...signedIn, Range: 'bytes=10-99' } });
   assert.equal(partial.status, 206); assert.equal((await partial.arrayBuffer()).byteLength, 90);
@@ -130,7 +130,7 @@ test('media and HTML viewers: real server, desktop, phone, tablet and security b
   // without the offline injection before exercising the real shared provider.
   await run(`window.beforeOnlineReload=true`);
   await command('Page.reload');
-  await until(`!window.beforeOnlineReload && !!window.aiconvoMe && viewKind==='conversation' && !!$('agentText')`, 'online conversation fully mounted after reload');
+  await until(`!window.beforeOnlineReload && !!window.chatteringMe && viewKind==='conversation' && !!$('agentText')`, 'online conversation fully mounted after reload');
   fs.writeFileSync(path.join(work, 'site/shared.html'), '<h1>Shared source</h1>');
   await open('site/shared.html');
   await until(`!!fileWs?.editor`, 'shared HTML editor mounts');
@@ -147,7 +147,7 @@ test('media and HTML viewers: real server, desktop, phone, tablet and security b
   // New media routes and cookie-free asset capabilities respect live sharing.
   const added = await (await fetch(base + '/api/users/add', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Viewer test member' }) })).json();
   const secret = new URL(added.inviteLink).searchParams.get('token');
-  const member = { ...remote, Cookie: 'aiconvo=' + secret, 'Content-Type': 'application/json' };
+  const member = { ...remote, Cookie: 'chattering=' + secret, 'Content-Type': 'application/json' };
   const issued = await (await fetch(base + '/api/file/preview', { method: 'POST', headers: member, body: JSON.stringify({ path: path.join(work, 'site/index.html') }) })).json();
   assert.ok(issued.token, issued.error);
   const memberAsset = base + issued.base + 'styles/site.css';

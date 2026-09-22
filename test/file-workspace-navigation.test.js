@@ -50,11 +50,11 @@ test('a link or reload lands on the route line; a return lands on the cursor lef
   assert.equal(context.fileWsMountLine({ ...ws, line: '7' }, {}), '7', 'a line parsed from the hash is a string');
   assert.equal(context.fileWsMountLine(ws, {}), null, 'no line at all: the editor stays at the top');
   // The reader left the file at line 200 (fileWsCloseEditor remembers it).
-  storage.set('aiconvo.cursor:/tmp/doc.md', '200');
+  storage.set('chattering.cursor:/tmp/doc.md', '200');
   assert.equal(context.fileWsMountLine(ws, { line: 12 }), 12, 'a fresh open from a link still honors the link');
   assert.equal(context.fileWsMountLine(ws, { line: 12, restore: true }), 200, 'back/forward returns to where the reader was');
   assert.equal(context.fileWsMountLine(ws, {}), 200, 'no line asked: the memory applies as before');
-  storage.set('aiconvo.cursor:/tmp/doc.md', '1');
+  storage.set('chattering.cursor:/tmp/doc.md', '1');
   assert.equal(context.fileWsMountLine(ws, { line: 12, restore: true }), 12, 'line 1 is not a memory worth returning to');
 });
 
@@ -66,6 +66,6 @@ test('cursor is remembered before destroying the editor', () => {
   const { context, storage } = workspace({ state });
   vm.runInContext('fileWs = state', context);
   context.fileWsCloseEditor();
-  assert.equal(storage.get('aiconvo.cursor:/tmp/test.js'), '19');
+  assert.equal(storage.get('chattering.cursor:/tmp/test.js'), '19');
   assert.equal(destroyed, true);
 });

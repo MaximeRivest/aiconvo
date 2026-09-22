@@ -27,8 +27,8 @@ test('transcript attaches speed to the saved reply, hides metadata, and preserve
     { type: 'session', id: 'session', cwd: dir },
     { type: 'message', id: 'question', parentId: null, message: { role: 'user', content: 'Explain.' } },
     { type: 'message', id: 'reply', parentId: 'question', message: { role: 'assistant', provider: 'test', model: 'fast', content: 'The answer.' } },
-    { type: 'custom', id: 'speed', parentId: 'reply', customType: 'aiconvo-speed', data: { v: 1, samples: [sample, null, { ...sample, entryId: 'question' }] } },
-    { type: 'custom', id: 'future', parentId: 'speed', customType: 'aiconvo-speed', data: { v: 100, samples: [{ ...sample, text: part(100, 90, 4, 3) }] } },
+    { type: 'custom', id: 'speed', parentId: 'reply', customType: 'chattering-speed', data: { v: 1, samples: [sample, null, { ...sample, entryId: 'question' }] } },
+    { type: 'custom', id: 'future', parentId: 'speed', customType: 'chattering-speed', data: { v: 100, samples: [{ ...sample, text: part(100, 90, 4, 3) }] } },
   ];
   fs.writeFileSync(file, lines.map(JSON.stringify).join('\n'));
   const box = vm.createContext({ fs, readline, usageLib, textOf, conversationFlow: require('../conversation-flow'),
@@ -53,7 +53,7 @@ test('live status uses source timing despite IPC bursts and excludes thinking an
   vm.runInContext(extract('function runEventForwarder(', '// Start one headless run'), box);
   t.after(() => { for (const state of tails.values()) clearTimeout(state.timer); });
   const forward = box.runEventForwarder(job);
-  const emit = (at, ev) => forward({ ...ev, aiconvoSpeedAt: at });
+  const emit = (at, ev) => forward({ ...ev, chatteringSpeedAt: at });
   const message = { role: 'assistant', provider: 'test', model: 'fast', content: [] };
   emit(0, { type: 'turn_start' });
   emit(1, { type: 'message_start', message });

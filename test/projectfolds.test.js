@@ -9,8 +9,8 @@ const {
 } = require('../projectfolds.js');
 
 test('rawProjectOf: /Projects/ segment wins, else last part', () => {
-  assert.strictEqual(rawProjectOf('/home/u/Projects/aiconvo'), 'aiconvo');
-  assert.strictEqual(rawProjectOf('/home/u/Projects/aiconvo/sub/dir'), 'aiconvo');
+  assert.strictEqual(rawProjectOf('/home/u/Projects/chattering'), 'chattering');
+  assert.strictEqual(rawProjectOf('/home/u/Projects/chattering/sub/dir'), 'chattering');
   assert.strictEqual(rawProjectOf('/home/u/work/thing/'), 'thing');
   assert.strictEqual(rawProjectOf('C:\\Users\\u\\Projects\\win'), 'win');
   assert.strictEqual(rawProjectOf(''), LOOSE_PROJECT);
@@ -122,12 +122,12 @@ test('normalizeRemote: ssh and https forms become one key', () => {
 });
 
 test('suggestPairs: remote match, name prefix, direction, dismissed', () => {
-  const counts = { aiconvo: 50, 'aiconvo-v2': 3, unrelated: 9 };
-  const remotes = { aiconvo: ['github.com/u/aiconvo'], 'aiconvo-v2': ['github.com/u/aiconvo'] };
+  const counts = { chattering: 50, 'chattering-v2': 3, unrelated: 9 };
+  const remotes = { chattering: ['github.com/u/chattering'], 'chattering-v2': ['github.com/u/chattering'] };
   const out = suggestPairs(counts, remotes, []);
   assert.strictEqual(out.length, 1); // one suggestion per pair, remote wins
-  assert.strictEqual(out[0].from, 'aiconvo-v2'); // smaller folds into bigger
-  assert.strictEqual(out[0].into, 'aiconvo');
+  assert.strictEqual(out[0].from, 'chattering-v2'); // smaller folds into bigger
+  assert.strictEqual(out[0].into, 'chattering');
   assert.strictEqual(out[0].reason, 'same git remote');
   // Prefix-only evidence (no shared remote).
   const p = suggestPairs({ foo: 5, 'foo-wt-x': 1 }, {}, []);

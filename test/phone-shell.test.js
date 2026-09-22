@@ -66,7 +66,7 @@ test('phone shell: bottom bar, sheets, one-row head, back hook, desktop untouche
   // The fixture's folder is not a project: no "new here", no project page, no file browser.
   assert.deepEqual(await ev(`[...document.querySelectorAll('.phone-more-menu button')].map(b=>b.textContent)`), ['Rename', 'Who can see this', 'Move to another project', 'Conversation tree']);
   assert.equal(await ev(`[...document.querySelectorAll('.phone-more-menu button')].every(b=>b.getBoundingClientRect().height>=44)`), true);
-  assert.equal(await ev(`window.aiconvoBack()`), true, 'back closes the menu');
+  assert.equal(await ev(`window.chatteringBack()`), true, 'back closes the menu');
   assert.equal(await ev(`!document.querySelector('.phone-more-menu') && $('phoneMore').getAttribute('aria-expanded')==='false'`), true);
   await screenshot('phone-shell-conversation.png');
 
@@ -97,9 +97,9 @@ test('phone shell: bottom bar, sheets, one-row head, back hook, desktop untouche
   await ev(`document.querySelector('[data-phone-tab=files]').click()`);
   await until(`rightFilesOpen`);
   await screenshot('phone-shell-files.png');
-  assert.equal(await ev(`window.aiconvoBack()`), true, 'back closes the sheet');
+  assert.equal(await ev(`window.chatteringBack()`), true, 'back closes the sheet');
   await until(`!rightFilesOpen && !document.body.classList.contains('phone-sheet')`);
-  assert.equal(await ev(`window.aiconvoBack()`), false, 'with nothing open, back is the page history');
+  assert.equal(await ev(`window.chatteringBack()`), false, 'with nothing open, back is the page history');
   await ev(`document.querySelector('[data-phone-tab=files]').click()`);
   await until(`rightFilesOpen`);
   await ev(`document.querySelector('.ag-file[data-path=${JSON.stringify(doc)}] .ag-file-open').click()`);

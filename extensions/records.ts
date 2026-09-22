@@ -5,21 +5,21 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// Records tools: let the agent mine every aiconvo conversation, note, project
+// Records tools: let the agent mine every Chattering conversation, note, project
 // memory, epic and evidence card. Each tool is a thin call to the local
 // server's GET /api/records/<op>; the text that comes back is the same text
-// the `aiconvo` CLI prints, so a bash user and a tool user read one format.
+// the `chattering` CLI prints, so a bash user and a tool user read one format.
 //
-// Load with -e /absolute/path/extensions/records.ts (aiconvo does this for
+// Load with -e /absolute/path/extensions/records.ts (Chattering does this for
 // web sessions and delegated workers). Terminal: pi -e …/records.ts.
 
 // Read at call time: the env decides which server answers, and tests move it.
-const port = () => Number(process.env.AICONVO_PORT || process.env.PORT || 7433);
+const port = () => Number(process.env.CHATTERING_PORT || process.env.PORT || 7433);
 // The token comes from the environment (a sandboxed guest agent carries
 // its own), else from the install token file only the account can read.
 const token = () => {
-  if (process.env.AICONVO_TOKEN) return process.env.AICONVO_TOKEN;
-  try { return readFileSync(join(homedir(), ".cache", "aiconvo", "lan-token"), "utf8").trim(); } catch { return ""; }
+  if (process.env.CHATTERING_TOKEN) return process.env.CHATTERING_TOKEN;
+  try { return readFileSync(join(homedir(), ".cache", "chattering", "lan-token"), "utf8").trim(); } catch { return ""; }
 };
 const TRUTH = "Records are AI transcripts and AI-written notes: a map of what was said, not verified truth. [unverified] marks notes no person reviewed.";
 
@@ -32,7 +32,7 @@ async function call(op: string, params: Record<string, unknown>, signal?: AbortS
   try {
     res = await fetch(`http://127.0.0.1:${PORT}/api/records/${op}?${qs}`, { headers, signal });
   } catch (e: any) {
-    throw new Error(`aiconvo server is not answering on port ${PORT} (${e?.cause?.code || e?.message}). Start it: systemctl --user start aiconvo`);
+    throw new Error(`chattering server is not answering on port ${PORT} (${e?.cause?.code || e?.message}). Start it: systemctl --user start chattering`);
   }
   const data: any = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
   if (!res.ok) throw new Error(data.error || data.text || `HTTP ${res.status}`);
@@ -49,11 +49,11 @@ function selfPath(ctx: any): string | undefined {
 
 export default function records(pi: ExtensionAPI) {
   pi.registerTool({
-    name: "aiconvo_search", label: "aiconvo search",
+    name: "chattering_search", label: "chattering search",
     description: "Search every past conversation, distilled note, project memory document and epic across all projects (lexical, plus semantic when available). Returns ranked passages with a short conversation id, date, project and the follow-up command. Use it before asking the user what was decided, tried, or why. " + TRUTH,
     promptSnippet: "Search past conversations, notes and project memory across all projects",
     promptGuidelines: [
-      "Before you ask the user what was decided, tried, or why, run aiconvo_search; then zoom with aiconvo_show. Quote the conversation id and date when you use what you found.",
+      "Before you ask the user what was decided, tried, or why, run chattering_search; then zoom with chattering_show. Quote the conversation id and date when you use what you found.",
       "Treat records as what was said, not verified truth. Prefer [vouched] notes over [unverified] ones, and the transcript over both when it matters.",
     ],
     parameters: Type.Object({
@@ -73,8 +73,8 @@ export default function records(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "aiconvo_show", label: "aiconvo show",
-    description: "Read one past conversation by its short id (from aiconvo_search or aiconvo_list), full key, or session file path. With no position: header plus an outline of every user turn. With at: the messages around #N, all roles. With from/to: a range. With last: the tail. Output is bounded and ends with the next command.",
+    name: "chattering_show", label: "chattering show",
+    description: "Read one past conversation by its short id (from chattering_search or chattering_list), full key, or session file path. With no position: header plus an outline of every user turn. With at: the messages around #N, all roles. With from/to: a range. With last: the tail. Output is bounded and ends with the next command.",
     promptSnippet: "Read one past conversation: outline, a slice around a message, or the tail",
     parameters: Type.Object({
       id: Type.String(),
@@ -90,7 +90,7 @@ export default function records(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "aiconvo_memory", label: "aiconvo memory",
+    name: "chattering_memory", label: "chattering memory",
     description: "Read the AI-written memory map of a project (overview, intent, environment, status), of one declared area of a project, or of an epic. Each document carries a trust label. Default project: the one of the current folder.",
     promptSnippet: "Read a project's, area's or epic's memory documents (overview, intent, environment, status)",
     parameters: Type.Object({
@@ -104,7 +104,7 @@ export default function records(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "aiconvo_read", label: "aiconvo read",
+    name: "chattering_read", label: "chattering read",
     description: "Read one record: the distilled note of a conversation (or a note file under the notes tree), an epic narrative, or the evidence card of a conversation. Trust labels are printed. " + TRUTH,
     promptSnippet: "Read a distilled note, an epic, or a conversation's evidence card",
     parameters: Type.Object({
@@ -116,7 +116,7 @@ export default function records(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "aiconvo_list", label: "aiconvo list",
+    name: "chattering_list", label: "chattering list",
     description: "List what is on record: projects (with memory state), conversations of a project (newest first), distilled notes, or epics. Default project: the one of the current folder; set project to 'all' for everything.",
     promptSnippet: "List projects, a project's conversations, notes, or epics",
     parameters: Type.Object({

@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { upgradeLeaf } = require('../memory-fingerprint.js');
-const cache = path.resolve(process.env.AICONVO_CACHE_DIR || path.join(os.homedir(), '.cache/aiconvo'));
+const cache = path.resolve(process.env.CHATTERING_CACHE_DIR || path.join(os.homedir(), '.cache/chattering'));
 const apply = process.argv.includes('--apply');
 const sources = {
   pi: path.join(os.homedir(), '.pi/agent/sessions'),

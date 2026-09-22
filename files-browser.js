@@ -5,8 +5,8 @@ let filesBrowserSeq = 0;
 const filesBrowserPlaces = new Map();
 
 function fbStore(key, value) {
-  try { if (value === undefined) return JSON.parse(localStorage.getItem('aiconvo.browser.' + key) || 'null');
-    localStorage.setItem('aiconvo.browser.' + key, JSON.stringify(value));
+  try { if (value === undefined) return JSON.parse(localStorage.getItem('chattering.browser.' + key) || 'null');
+    localStorage.setItem('chattering.browser.' + key, JSON.stringify(value));
   } catch {} return null;
 }
 function fbHash(s) {

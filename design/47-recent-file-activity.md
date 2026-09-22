@@ -4,7 +4,7 @@
 
 The Files panel follows the shared project dropdown (All projects, a named
 project, or No project; design/50). Its **human / agents / both** choice is
-independent. Default: human. The choice lives in `aiconvo.agentSections.v1`
+independent. Default: human. The choice lives in `chattering.agentSections.v1`
 as `files:actor`, independent of `projectScope`, and survives reloads.
 
 Rows show matching paths once each, newest activity first. The original
@@ -16,7 +16,7 @@ conversation as the return link.
 ## Facts, not guesses
 
 - Human: a successfully mounted editor/file-history view, or a successful save
-  in aiconvo. Automatic editor refreshes are not new human visits.
+  in Chattering. Automatic editor refreshes are not new human visits.
 - Agent: named local read/write/edit/multiedit/notebook-edit calls that have a
   successful tool result. Empty successful results count; pending and failed
   calls do not. File edits made through the editor API with a recorded agent
@@ -32,7 +32,7 @@ conversation as the return link.
 ## Store and filtering
 
 `recent-files.js` is shared by the server and browser. The durable v2 record
-at `~/notes/aiconvo/recent-files.json` stores one last observation **per actor
+at `~/notes/chattering/recent-files.json` stores one last observation **per actor
 and path**, not one per path. This is essential: a newer agent edit cannot
 replace the human visit when selecting human-only. Legacy rows lacking an
 actor migrate as human, with their original times.

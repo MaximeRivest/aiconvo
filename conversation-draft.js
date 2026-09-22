@@ -10,7 +10,7 @@
    app.html, as conversation-reader.js does. */
 'use strict';
 
-const DRAFT_STORE_PREFIX = 'aiconvo.draft.v1:';
+const DRAFT_STORE_PREFIX = 'chattering.draft.v1:';
 const DRAFT_KEY_PREFIX = 'draft:';
 const DRAFT_IMAGE_BUDGET = 1.5 * 1024 * 1024; // localStorage is small; larger images stay in memory
 const DRAFT_STALE_MS = 60 * 86400000;

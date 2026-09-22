@@ -74,7 +74,7 @@ describe('Scenario: JSON tokens survive the HTML round-trip', () => {
 
     const server = http.createServer((req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(html); });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-attr-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chattering-attr-'));
     const browser = spawn(chromium, ['--headless', '--no-sandbox', '--disable-gpu', '--no-first-run',
       '--user-data-dir=' + dir, '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
     try {

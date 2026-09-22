@@ -46,6 +46,9 @@ function parseLines(raw) {
 
 function entryId(d) { return d && d.type !== 'session' && typeof d.id === 'string' ? d.id : null; }
 function parentOf(d) { return (d && d.parentId) || null; }
+// The operation record on an entry. Entries written before the rename
+// (2026-09-22) carry it under the old product name; both are read.
+function operationOf(d) { return (d && (d.chattering || d.aiconvo)) || null; }
 function isUserMessage(d) { return !!(d && d.type === 'message' && d.message && d.message.role === 'user'); }
 // Bridge entries are machinery with a user role: the merge stage writes
 // "N models answered my last message in parallel." and the both entry carries
@@ -55,7 +58,7 @@ function isUserMessage(d) { return !!(d && d.type === 'message' && d.message && 
 // merge deleted the very entry the whole tree hung from).
 function isBridgeText(t) {
   const s = String(t || '');
-  if (/<!--\s*aiconvo:(both|merge)\s*-->/.test(s)) return true;
+  if (/<!--\s*chattering:(both|merge)\s*-->/.test(s)) return true;
   return /^\d+ models answered my last message in parallel\./i.test(s.trim());
 }
 function isPromptMessage(d) { return isUserMessage(d) && !isBridgeText(textOf(d.message.content)); }
@@ -70,7 +73,7 @@ function isAssistantText(d) {
 }
 function isBothEntry(d) {
   return !!(d && d.type === 'message' && d.message && d.message.role === 'assistant'
-    && /<!--\s*aiconvo:both\s*-->/.test(textOf(d.message.content)));
+    && /<!--\s*(?:chattering|aiconvo):both\s*-->/.test(textOf(d.message.content)));
 }
 
 // The copied prefix: the leading run of fork entries that the root holds with
@@ -150,14 +153,14 @@ function answerOfTail(tail) {
 
 function makeBothEntry(parentId, answers, opts) {
   const body = answers.map(a => `=== ${a.model || 'model'} ===\n${String(a.text || '').trim()}`).join('\n\n')
-    + '\n\n<!-- aiconvo:both -->';
+    + '\n\n<!-- chattering:both -->';
   return {
     type: 'message',
     id: (opts && opts.newId) || crypto.randomBytes(4).toString('hex'),
     parentId,
     timestamp: (opts && opts.now) || new Date().toISOString(),
     message: { role: 'assistant', content: [{ type: 'text', text: body }] },
-    aiconvo: { kind: 'both', sources: answers.map(a => ({ id: a.id || null, key: a.key || null, model: a.model || 'model', entryIds: a.entryIds || (a.id ? [a.id] : []) })), unresolved: true },
+    chattering: { kind: 'both', sources: answers.map(a => ({ id: a.id || null, key: a.key || null, model: a.model || 'model', entryIds: a.entryIds || (a.id ? [a.id] : []) })), unresolved: true },
   };
 }
 
@@ -189,7 +192,7 @@ function computeFanoutMerge(rootRaw, forkRaws, opts = {}) {
   // After a successful merge the first fork can be entirely shared history
   // (especially when it needed no model-setting entries). Its durable run
   // identity still fixes the canonical prompt for every retry.
-  const savedPrompt = opts.fanoutId && [...rootById.values()].find(d => d.aiconvo?.kind === 'parallel' && d.aiconvo.runId === opts.fanoutId && isPromptMessage(d));
+  const savedPrompt = opts.fanoutId && [...rootById.values()].find(d => operationOf(d)?.kind === 'parallel' && operationOf(d).runId === opts.fanoutId && isPromptMessage(d));
   let canonical = savedPrompt ? { id: savedPrompt.id, text: textOf(savedPrompt.message.content) } : null;
   const droppedIds = new Set();
   const computed = new Map(); // id -> entry (first fork wins)
@@ -210,7 +213,7 @@ function computeFanoutMerge(rootRaw, forkRaws, opts = {}) {
   }
 
   if (canonical && opts.fanoutId && computed.has(canonical.id)) {
-    computed.get(canonical.id).aiconvo = { kind: 'parallel', runId: opts.fanoutId };
+    computed.get(canonical.id).chattering = { kind: 'parallel', runId: opts.fanoutId };
   }
 
   // Assemble: root order first, computed entries rewrite their root copies in
@@ -230,7 +233,7 @@ function computeFanoutMerge(rootRaw, forkRaws, opts = {}) {
     emitted.add(id);
     if (canonical && isBothEntry(it.d) && parentOf(it.d) === canonical.id) hasBoth = true;
     const c = computed.get(id);
-    if (c && (parentOf(c) !== parentOf(it.d) || (c.aiconvo && JSON.stringify(c.aiconvo) !== JSON.stringify(it.d.aiconvo)))) { out.push(JSON.stringify(c)); changed = true; }
+    if (c && (parentOf(c) !== parentOf(it.d) || (operationOf(c) && JSON.stringify(operationOf(c)) !== JSON.stringify(operationOf(it.d))))) { out.push(JSON.stringify(c)); changed = true; }
     else out.push(it.line);
   }
   for (const [id, d] of computed) {

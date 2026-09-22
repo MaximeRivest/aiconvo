@@ -1,7 +1,7 @@
 'use strict';
 // Stall detection for one headless pi run (shared by pisdk.js and pirpc.js).
 //
-// The TUI never times a run out, and neither does aiconvo on wall-clock:
+// The TUI never times a run out, and neither does Chattering on wall-clock:
 // long runs are legitimate. The only failure sign is SILENCE — pi emitting
 // nothing for a long time. But not every silence is a failure:
 //

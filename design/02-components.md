@@ -10,7 +10,7 @@ Use the tokens from `tokens.css`. Do not hardcode colors.
 Height `--header-h` (44 px). Background `--surface-1`. Bottom border `--border`.
 Zones, left to right:
 
-1. **Brand.** `aiconvo` prefixed with a green `❯`. 700 weight, `--text`.
+1. **Brand.** `chattering` prefixed with a green `❯`. 700 weight, `--text`.
    Acts as home button (clears search and filters).
 2. **Search zone.** One input, flex-grows, min 240 px.
 3. **Action zone.** `filters` button, view-mode select, `jobs [N]` button,

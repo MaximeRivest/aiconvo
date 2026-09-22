@@ -7,7 +7,7 @@ Custom themes are user files. App updates do not overwrite them.
 Put each theme in:
 
 ```text
-~/.config/aiconvo/themes/<theme-id>.css
+~/.config/chattering/themes/<theme-id>.css
 ```
 
 Use a lowercase file name. Use letters, numbers, and hyphens only. The file
@@ -19,12 +19,12 @@ The fastest start: import your terminal or OS colors with
 Or copy `design/theme-template.css` to start by hand:
 
 ```bash
-mkdir -p ~/.config/aiconvo/themes
-cp design/theme-template.css ~/.config/aiconvo/themes/my-theme.css
+mkdir -p ~/.config/chattering/themes
+cp design/theme-template.css ~/.config/chattering/themes/my-theme.css
 ```
 
 Then change `theme-template` to `my-theme` inside the file. Change the theme
-name and colors. Refresh aiconvo. The theme appears under **custom themes**.
+name and colors. Refresh Chattering. The theme appears under **custom themes**.
 Focusing the theme selector also refreshes the catalog.
 
 ## File contract
@@ -32,7 +32,7 @@ Focusing the theme selector also refreshes the catalog.
 A theme contains one metadata comment and one CSS rule:
 
 ```css
-/* aiconvo-theme
+/* chattering-theme
 name: My Theme
 scheme: dark
 mode: color
@@ -96,7 +96,7 @@ Themes can optionally change project color weight:
 Run:
 
 ```bash
-node test/theme-check.js ~/.config/aiconvo/themes/my-theme.css
+node test/theme-check.js ~/.config/chattering/themes/my-theme.css
 ```
 
 The validator checks:

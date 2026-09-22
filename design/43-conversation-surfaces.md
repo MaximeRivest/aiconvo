@@ -58,7 +58,7 @@ line to a floating card. Shape belongs to themes, not hard-coded components.
   actions, menus and composer. Default: 6/4/10/18px. Built-in e-ink sets all
   to zero. The theme template documents the same tokens.
 - Appearance offers Theme default, System sans, Humanist sans, Book serif,
-  Monospace. System sans is the default. Applies immediately; `aiconvo.font` persists per browser and is
+  Monospace. System sans is the default. Applies immediately; `chattering.font` persists per browser and is
   restored before paint. These use installed font stacks, not remote assets;
   the exact face can vary by device. Theme default removes the override.
 - Code and editor/terminal text retain `--font-mono`; a reading-font change
@@ -67,7 +67,7 @@ line to a floating card. Shape belongs to themes, not hard-coded components.
 ## Defaults
 
 Sidebar is the desktop default; narrow screens still use the top bar.
-`aiconvo.layout=top` now stores an explicit opt-out, instead of removing the
+`chattering.layout=top` now stores an explicit opt-out, instead of removing the
 preference. Existing explicit layout/font choices are kept. System sans and
 sidebar apply before paint, including when browser storage is unavailable.
 

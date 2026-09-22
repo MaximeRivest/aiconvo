@@ -55,7 +55,7 @@ async function publishSession(file, text) {
 async function forkPiSnapshot(SessionManager, target, nodeId, { before = false, dir = null } = {}) {
   const source = path.resolve(target.sessionPath);
   const snapshot = await readSessionSnapshot(source);
-  const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'aiconvo-fork-'));
+  const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'chattering-fork-'));
   try {
     const input = path.join(stage, 'source.jsonl');
     await fs.writeFile(input, snapshot, { flag: 'wx', mode: 0o600 });

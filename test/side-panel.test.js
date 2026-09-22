@@ -44,7 +44,7 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   const socket = net.createServer(); await new Promise(r => socket.listen(0, '127.0.0.1', r));
   const port = socket.address().port; await new Promise(r => socket.close(r));
   let serverLog = '';
-  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: '0', AICONVO_HOST: '127.0.0.1', AICONVO_NO_WATCH: '1', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: '0', CHATTERING_HOST: '127.0.0.1', CHATTERING_NO_WATCH: '1', CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', b => serverLog += b); server.stderr.on('data', b => serverLog += b);
   const base = 'http://127.0.0.1:' + port;
   let indexed = false;
@@ -100,7 +100,7 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   await size(1440, 1000);
   await send('Page.navigate', { url: base + '/' }, sid);
   await until(`typeof applyLayout === 'function'`);
-  assert.equal(await evaluate(`localStorage.getItem('aiconvo.layout')`), null, 'fresh browser has no layout override');
+  assert.equal(await evaluate(`localStorage.getItem('chattering.layout')`), null, 'fresh browser has no layout override');
   assert.equal(await evaluate(`document.documentElement.dataset.appFont`), 'sans', 'system sans is the default');
   assert.match(await evaluate(`getComputedStyle(document.body).fontFamily`), /system-ui/);
   await until(`document.body.classList.contains('side-layout') && sessions.length >= 3`, 'side layout on');
@@ -339,16 +339,16 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   assert.equal(await evaluate(`document.querySelector('#sideNew span').textContent + '|' + document.querySelector('#sideNewMore').hidden`), 'new|true', 'outside a conversation + new is the plain one');
   // A folded section docks at the bottom and remembers.
   await evaluate(`setSidePanel('conversations');document.querySelector('[data-sec-head=recent]').click()`);
-  assert.equal(await evaluate(`document.querySelector('[data-sec=recent] .ag-sec-body').hidden && JSON.parse(localStorage.getItem('aiconvo.agentSections.v1'))['fold:recent'] && document.querySelector('[data-sec=recent]').parentElement.id === 'agentsLegacy'`), true, 'folded, remembered, docked at the bottom');
+  assert.equal(await evaluate(`document.querySelector('[data-sec=recent] .ag-sec-body').hidden && JSON.parse(localStorage.getItem('chattering.agentSections.v1'))['fold:recent'] && document.querySelector('[data-sec=recent]').parentElement.id === 'agentsLegacy'`), true, 'folded, remembered, docked at the bottom');
   await evaluate(`document.querySelector('[data-sec-head=recent]').click()`);
   assert.equal(await evaluate(`!document.querySelector('[data-sec=recent] .ag-sec-body').hidden && document.querySelector('[data-sec=recent]').parentElement.id === 'agentsUnread'`), true, 'open again: back in the flow');
   // Files live in their own rail section; the project scope is shared with chats.
   await evaluate(`document.querySelector('#sideRail [data-rail=files]').click()`);
-  assert.equal(await evaluate(`$('agentsPop').dataset.panel + '|' + document.querySelector('#sideRail [data-rail=files]').getAttribute('aria-pressed') + '|' + JSON.parse(localStorage.getItem('aiconvo.agentSections.v1')).panel`), 'files|true|files');
+  assert.equal(await evaluate(`$('agentsPop').dataset.panel + '|' + document.querySelector('#sideRail [data-rail=files]').getAttribute('aria-pressed') + '|' + JSON.parse(localStorage.getItem('chattering.agentSections.v1')).panel`), 'files|true|files');
   await until(`document.querySelector('.ag-files-block .ag-row .ag-title span')?.textContent === 'README.md'`, 'recent file listed');
   assert.equal(await evaluate(`!!document.querySelector('.ag-unread-tray') || !!document.querySelector('[data-sec=recent] .ag-row[data-key]')`), false, 'no conversation lists in the files panel');
   await evaluate(`setWorkspaceScope('work');renderAgentsPop(false)`);
-  assert.equal(await evaluate(`document.querySelectorAll('.ag-files-block .ag-row').length + '|' + JSON.parse(localStorage.getItem('aiconvo.agentSections.v1')).projectScope`), '1|work');
+  assert.equal(await evaluate(`document.querySelectorAll('.ag-files-block .ag-row').length + '|' + JSON.parse(localStorage.getItem('chattering.agentSections.v1')).projectScope`), '1|work');
   await evaluate(`recentFilesList.push({path:'/tmp/elsewhere/notes.md',project:'other',at:Date.now(),kind:'opened'});renderAgentsPop(false)`);
   assert.equal(await evaluate(`document.querySelectorAll('.ag-files-block .ag-row').length`), 1, 'project scope hides other projects');
   await evaluate(`setWorkspaceScope('');renderAgentsPop(false)`);
@@ -468,10 +468,10 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   recorded = (await recentAPI({ path: sharedFile, project: 'work' })).files;
   assert.equal(recorded.filter(f => f.actor === 'human')[0].path, sharedFile);
   for (let i=0;i<100;i++) {
-    try { if (JSON.parse(fs.readFileSync(path.join(home,'notes/aiconvo/recent-files.json'),'utf8')).dismissed['agent\0'+agentFile]) break; } catch {}
+    try { if (JSON.parse(fs.readFileSync(path.join(home,'notes/chattering/recent-files.json'),'utf8')).dismissed['agent\0'+agentFile]) break; } catch {}
     await new Promise(r=>setTimeout(r,30));
   }
-  assert.ok(JSON.parse(fs.readFileSync(path.join(home,'notes/aiconvo/recent-files.json'),'utf8')).dismissed['agent\0'+agentFile], 'dismissal is durably saved');
+  assert.ok(JSON.parse(fs.readFileSync(path.join(home,'notes/chattering/recent-files.json'),'utf8')).dismissed['agent\0'+agentFile], 'dismissal is durably saved');
 
   // Images use the same file route and recent list, without mounting a text editor.
   const picture = path.join(work, 'large & bright.PNG');
@@ -502,7 +502,7 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   await evaluate(`showSettings('appearance')`);
   await until(`!!document.querySelector('input[name=setLayout][value=top]')`);
   await evaluate(`$('setAppFont').value='sans';$('setAppFont').dispatchEvent(new Event('change'))`);
-  assert.equal(await evaluate(`localStorage.getItem('aiconvo.font')`), 'sans');
+  assert.equal(await evaluate(`localStorage.getItem('chattering.font')`), 'sans');
   assert.match(await evaluate(`getComputedStyle(document.body).fontFamily`), /system-ui/);
   await send('Page.reload', {}, sid);
   await until(`typeof settingsOpen !== 'undefined' && settingsOpen && !!document.querySelector('#setAppFont')`);
@@ -513,7 +513,7 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   assert.equal(await evaluate(`document.documentElement.style.getPropertyValue('--font')`), '', 'theme default removes the override');
   await evaluate(`const r=document.querySelector('input[name=setLayout][value=top]'); r.checked=true; r.onchange()`);
   assert.equal(await evaluate(`document.body.classList.contains('side-layout')`), false);
-  assert.equal(await evaluate(`localStorage.getItem('aiconvo.layout')`), 'top', 'top bar is now an explicit saved preference');
+  assert.equal(await evaluate(`localStorage.getItem('chattering.layout')`), 'top', 'top bar is now an explicit saved preference');
   await send('Page.reload', {}, sid);
   await until(`typeof settingsOpen !== 'undefined' && settingsOpen && !!document.querySelector('#setAppFont')`);
   assert.equal(await evaluate(`sideLayoutOn()`), false, 'explicit top preference survives reload');

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// aiconvo — browse, search and export Claude Code conversations.
+// Chattering — browse, search and export Claude Code conversations.
 // No dependencies. Run: node server.js  → http://localhost:7433
 'use strict';
 
@@ -17,6 +17,10 @@ const { pathToFileURL } = require('url');
 const { AsyncLocalStorage } = require('async_hooks');
 const { execFile, execFileSync, spawn } = require('child_process');
 const zlib = require('zlib');
+// Before anything reads its files: data written under the old product name
+// moves to the new one (legacy-homes.js). Skipped when the environment pins
+// the cache elsewhere, as the tests do.
+if (!process.env.CHATTERING_CACHE_DIR) require('./legacy-homes.js').migrateHome(os.homedir(), { log: m => console.error(m) });
 const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const { readSessionSnapshot, publishSession } = require('./session-snapshot.js');
 const settingsLib = require('./settings.js');
@@ -42,7 +46,7 @@ const agentReadLib = require('./agentread.js');
 const { createModelHealth } = require('./modelhealth.js');
 const delegationLib = require('./delegation.js');
 const { createDelegationCoordinator, inspectDeliverySession, TERMINAL: DELEGATION_TERMINAL } = require('./server-delegations.js');
-const DELEGATION_ROOT = process.env.AICONVO_DELEGATION_ROOT || path.join(os.homedir(), '.local', 'share', 'aiconvo', 'delegations');
+const DELEGATION_ROOT = process.env.CHATTERING_DELEGATION_ROOT || path.join(os.homedir(), '.local', 'share', 'chattering', 'delegations');
 const { execFileWithActivityTimeout } = require('./modelprocess.js');
 
 // Conversation sources. Keys in the index look like "claude:<relPath>".
@@ -53,32 +57,32 @@ const SOURCES = {
   claude: path.join(os.homedir(), '.claude', 'projects'),
   pi: path.join(os.homedir(), '.pi', 'agent', 'sessions'),
   'pi-remote': path.join(os.homedir(), '.pi', 'remote', 'sessions'),
-  mirror: process.env.AICONVO_MIRROR_DIR || path.join(os.homedir(), '.local', 'share', 'aiconvo', 'mirrors', 'sessions'),
+  mirror: process.env.CHATTERING_MIRROR_DIR || path.join(os.homedir(), '.local', 'share', 'chattering', 'mirrors', 'sessions'),
 };
 // The name this machine goes by in memory documents and towards peers.
-const HOST_NAME = String(process.env.AICONVO_HOSTNAME || '').trim() || os.hostname();
-const CACHE_DIR = process.env.AICONVO_CACHE_DIR ? path.resolve(process.env.AICONVO_CACHE_DIR) : path.join(os.homedir(), '.cache', 'aiconvo');
-const NOTES_DIR = path.join(os.homedir(), 'notes', 'aiconvo');
+const HOST_NAME = String(process.env.CHATTERING_HOSTNAME || '').trim() || os.hostname();
+const CACHE_DIR = process.env.CHATTERING_CACHE_DIR ? path.resolve(process.env.CHATTERING_CACHE_DIR) : path.join(os.homedir(), '.cache', 'chattering');
+const NOTES_DIR = path.join(os.homedir(), 'notes', 'chattering');
 const SESS_DIR = path.join(CACHE_DIR, 'sessions');
 const INDEX_FILE = path.join(CACHE_DIR, 'index.json');
 const USAGE_DB_FILE = path.join(CACHE_DIR, 'usage.db');
 const INTERNAL_USAGE_FILE = path.join(CACHE_DIR, 'internal-usage.jsonl');
 const MODEL_HEALTH_FILE = path.join(CACHE_DIR, 'memory-model-health.json');
-const MODEL_ACTIVITY_TIMEOUT_MS = Math.max(30000, Number(process.env.AICONVO_MODEL_ACTIVITY_TIMEOUT_MS) || 2 * 60 * 1000);
+const MODEL_ACTIVITY_TIMEOUT_MS = Math.max(30000, Number(process.env.CHATTERING_MODEL_ACTIVITY_TIMEOUT_MS) || 2 * 60 * 1000);
 const PORT = process.env.PORT ? Number(process.env.PORT) : 7433;
-// Where the server listens. AICONVO_HOST pins an exact address (rare, for
+// Where the server listens. CHATTERING_HOST pins an exact address (rare, for
 // operators). Otherwise the switch in settings → machines decides, and
-// until someone has flipped it, AICONVO_LAN=1 in the service unit does.
+// until someone has flipped it, CHATTERING_LAN=1 in the service unit does.
 // HOST and LAN_TOKEN change at runtime when the switch is flipped; see
 // applyLanMode().
-const ENV_HOST = String(process.env.AICONVO_HOST || '').trim();
-const LAN_BY_ENV = process.env.AICONVO_LAN === '1';
+const ENV_HOST = String(process.env.CHATTERING_HOST || '').trim();
+const LAN_BY_ENV = process.env.CHATTERING_LAN === '1';
 let HOST = ENV_HOST || (LAN_BY_ENV ? '0.0.0.0' : '127.0.0.1');
 const isLoopback = host => host === '127.0.0.1' || host === '::1' || host === 'localhost';
-const TLS_PORT = process.env.AICONVO_TLS_PORT ? Number(process.env.AICONVO_TLS_PORT) : 7443;
+const TLS_PORT = process.env.CHATTERING_TLS_PORT ? Number(process.env.CHATTERING_TLS_PORT) : 7443;
 const LAN_TOKEN_FILE = path.join(CACHE_DIR, 'lan-token');
 function loadLanToken() {
-  if (process.env.AICONVO_TOKEN) return String(process.env.AICONVO_TOKEN);
+  if (process.env.CHATTERING_TOKEN) return String(process.env.CHATTERING_TOKEN);
   if (isLoopback(HOST)) return '';
   try {
     const existing = fs.readFileSync(LAN_TOKEN_FILE, 'utf8').trim();
@@ -96,7 +100,7 @@ let LAN_TOKEN = loadLanToken();
 const authGuard = require('./authguard.js');
 const frontDoor = require('./frontdoor.js');
 const signInLimiter = authGuard.createLimiter();
-const signInLog = authGuard.createAuthLog(path.join(os.homedir(), '.local', 'share', 'aiconvo', 'sign-ins.jsonl'));
+const signInLog = authGuard.createAuthLog(path.join(os.homedir(), '.local', 'share', 'chattering', 'sign-ins.jsonl'));
 function requestIp(req) {
   return String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
 }
@@ -120,7 +124,7 @@ const isConsoleRequest = req => isLocalRequest(req) && !!req.identity && req.ide
 // certificate). Connect links and cross-registration prefer it, so other
 // machines land on a secure page where copy, microphone and offline mode
 // work, instead of the bare http LAN address.
-const PUBLIC_URL = String(process.env.AICONVO_PUBLIC_URL || '').trim().replace(/\/+$/, '');
+const PUBLIC_URL = String(process.env.CHATTERING_PUBLIC_URL || '').trim().replace(/\/+$/, '');
 function cookieValue(req, name) {
   const raw = String(req.headers.cookie || '');
   for (const part of raw.split(';')) {
@@ -132,12 +136,12 @@ function cookieValue(req, name) {
   return '';
 }
 function lanLoginPage(error = '') {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo</title>
-<style>html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:28rem;margin:12vh auto;padding:1rem}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}</style></head>
-<body><main><p>Enter your token for this aiconvo (your invite link, or the install token from settings → machines). After this, the device stays signed in as you.</p>
-<p><small>On this machine itself: the install token is in <code>~/.cache/aiconvo/lan-token</code>, and <code>open.sh</code> signs the browser in with it.</small></p>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering</title>
+<style>html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:28rem;margin:12vh auto;padding:1rem}h1{font-size:1.4rem;margin:0 0 .2rem}h1 small{font-weight:400;font-size:.8rem;color:#555}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}</style></head>
+<body><main><h1>Chattering <small>by Rockfrog</small></h1><p>Enter your token for this Chattering (your invite link, or the install token from settings → machines). After this, the device stays signed in as you.</p>
+<p><small>On this machine itself: the install token is in <code>~/.cache/chattering/lan-token</code>, and <code>open.sh</code> signs the browser in with it.</small></p>
 ${error ? `<p class="err">${error.replace(/</g, '&lt;')}</p>` : ''}
-<form method="post" action="/login"><label for="token">token</label><input id="token" name="token" autocomplete="off" autofocus><button type="submit">open aiconvo</button></form></main></body></html>`;
+<form method="post" action="/login"><label for="token">token</label><input id="token" name="token" autocomplete="off" autofocus><button type="submit">open Chattering</button></form></main></body></html>`;
 }
 // The page an invite link lands on: who invited you, to what, your name,
 // and the one command for people who want the project on their own
@@ -146,31 +150,31 @@ ${error ? `<p class="err">${error.replace(/</g, '&lt;')}</p>` : ''}
 const escapeHtml = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function invitePage({ secret, invite, inviter, error = '', joinLink = '' }) {
   const style = 'html,body{margin:0;background:#fff;color:#000;font:18px/1.4 monospace}main{max-width:34rem;margin:8vh auto;padding:1rem}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.6rem;margin:.4rem 0;border:2px solid #000;background:#fff;color:#000}button{font-weight:700}p{margin:0 0 1rem}.err{font-weight:700}code{display:block;white-space:pre-wrap;word-break:break-all;border:1px solid #000;padding:.6rem;margin:.4rem 0}small{display:block;opacity:.75;margin:.2rem 0 1rem}';
-  if (!invite) return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo</title><style>${style}</style></head><body><main><p class="err">${escapeHtml(error || 'This invite link is not valid here.')}</p><p>Ask the person who invited you for a new link.</p></main></body></html>`;
+  if (!invite) return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering</title><style>${style}</style></head><body><main><p class="err">${escapeHtml(error || 'This invite link is not valid here.')}</p><p>Ask the person who invited you for a new link.</p></main></body></html>`;
   const projects = invite.projects.map(p => `<b>${escapeHtml(p.name)}</b>${p.right === 'see' ? ' (read only)' : ''}`).join(', ');
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo — invitation</title><style>${style}</style></head>
-<body><main><p>${escapeHtml(inviter || 'Someone')} invited you to work on ${projects} in their aiconvo.</p>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering — invitation</title><style>${style}</style></head>
+<body><main><p>${escapeHtml(inviter || 'Someone')} invited you to work on ${projects} in their Chattering.</p>
 <p>You will see that project's conversations, notes and memory${invite.projects.some(p => p.right === 'act') ? ', and you can send messages to its agents here' : ''}. Nothing else on this machine is visible to you.</p>
 ${error ? `<p class="err">${escapeHtml(error)}</p>` : ''}
 <form method="post" action="/invite/claim"><input type="hidden" name="invite" value="${escapeHtml(secret)}"><label for="name">your name</label><input id="name" name="name" autocomplete="name" value="${escapeHtml(invite.name)}" autofocus><button type="submit">join in the browser</button></form>
 <small>This link works once. After joining, this device stays signed in as you. <a href="/guests">What a guest can and cannot do here.</a></small>
-<p>Want the project on your own computer too? Install aiconvo there, then run:</p>
-<code>aiconvo join ${escapeHtml(joinLink)} --name "${escapeHtml(invite.name || 'Your Name')}" [--folder /path/to/your/checkout]</code>
-<small>That pairs your aiconvo with this one: the project's conversations and memory copy both ways (each side only ever writes its own), and your agents run on your machine.</small>
+<p>Want the project on your own computer too? Install Chattering there, then run:</p>
+<code>chattering join ${escapeHtml(joinLink)} --name "${escapeHtml(invite.name || 'Your Name')}" [--folder /path/to/your/checkout]</code>
+<small>That pairs your Chattering with this one: the project's conversations and memory copy both ways (each side only ever writes its own), and your agents run on your machine.</small>
 </main></body></html>`;
 }
 // The plain-words page (design/56): what being a guest means, stated so a
 // smart sixteen-year-old could hold the owner to it.
 function guestRulesPage({ walls }) {
   const style = 'html,body{margin:0;background:#fff;color:#000;font:18px/1.5 monospace}main{max-width:38rem;margin:6vh auto;padding:1rem}h1{font-size:1.3em}h2{font-size:1em;margin-top:1.6em}ul{padding-left:1.2em}li{margin:.3em 0}p{margin:0 0 1em}.no{opacity:.75}';
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>aiconvo — guests</title><style>${style}</style></head><body><main>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chattering — guests</title><style>${style}</style></head><body><main>
 <h1>What a guest can and cannot do here</h1>
-<p>Someone invited you to <b>one project</b> on their aiconvo. This page says exactly what that means. It is the same for every guest.</p>
+<p>Someone invited you to <b>one project</b> on their Chattering. This page says exactly what that means. It is the same for every guest.</p>
 <h2>You can</h2><ul>
 <li>Read that project's conversations, notes and generated memory.</li>
 <li>If your invite says <b>act</b>: send messages to agents in that project, run commands and notebook cells, edit files in the project folder, and commit. Your commits carry your name.</li>
 <li>See who else is in the project right now, and go where they are.</li>
-<li>Connect your own aiconvo later, so the project's conversations and memory copy to your machine as well.</li>
+<li>Connect your own Chattering later, so the project's conversations and memory copy to your machine as well.</li>
 </ul>
 <h2>You cannot</h2><ul class="no">
 <li>See any other project, conversation or file on this machine. They are not hidden from you — for you they do not exist.</li>
@@ -231,15 +235,15 @@ const usageIdx = usageLib.openUsageIndex(USAGE_DB_FILE);
 // derived cache too; the boot backfill rebuilds it when it is missing.
 const fileLedgerLib = require('./fileledger.js');
 const recentFilesLib = require('./recent-files.js');
-const fileLedger = process.env.AICONVO_NO_LEDGER === '1' ? null : fileLedgerLib.openFileLedger(path.join(CACHE_DIR, 'files.db'));
+const fileLedger = process.env.CHATTERING_NO_LEDGER === '1' ? null : fileLedgerLib.openFileLedger(path.join(CACHE_DIR, 'files.db'));
 // This archive is durable user data, not part of CACHE_DIR or the note index.
 let fileArchive = null, fileArchiveError = '';
-if (process.env.AICONVO_NO_FILE_HISTORY !== '1') {
+if (process.env.CHATTERING_NO_FILE_HISTORY !== '1') {
   try {
     const { FileArchive } = require('./file-archive.js');
-    const budgetMB = Number(process.env.AICONVO_FILE_HISTORY_MB || 512);
-    if (!Number.isFinite(budgetMB) || budgetMB < 1) throw new Error('AICONVO_FILE_HISTORY_MB must be at least 1');
-    fileArchive = new FileArchive(path.join(process.env.AICONVO_FILE_HISTORY_DIR || path.join(os.homedir(), '.local/share/aiconvo/file-history'), 'versions.sqlite'), { budget: budgetMB * 1024 * 1024 });
+    const budgetMB = Number(process.env.CHATTERING_FILE_HISTORY_MB || 512);
+    if (!Number.isFinite(budgetMB) || budgetMB < 1) throw new Error('CHATTERING_FILE_HISTORY_MB must be at least 1');
+    fileArchive = new FileArchive(path.join(process.env.CHATTERING_FILE_HISTORY_DIR || path.join(os.homedir(), '.local/share/chattering/file-history'), 'versions.sqlite'), { budget: budgetMB * 1024 * 1024 });
   } catch (e) { fileArchiveError = e.message; console.error('File history unavailable:', e.message); }
 }
 let checkpointStore = null, changeReviews = null;
@@ -280,7 +284,7 @@ async function reviewInput(key, requested) {
 }
 const checkpointTimers = new Map(), checkpointCapturing = new Set(), checkpointDirty = new Map();
 function scheduleWorkspaceCheckpoint(cwd, phase) {
-  if (!cwd || process.env.AICONVO_NO_CHECKPOINTS === '1' || foldsLib.isLooseCwd(cwd)) return;
+  if (!cwd || process.env.CHATTERING_NO_CHECKPOINTS === '1' || foldsLib.isLooseCwd(cwd)) return;
   if (checkpointCapturing.has(cwd)) { checkpointDirty.set(cwd, phase); return; }
   clearTimeout(checkpointTimers.get(cwd));
   checkpointTimers.set(cwd, setTimeout(async () => {
@@ -439,7 +443,7 @@ function saveIndexSoon() {
 }
 
 // All calls made through the Settings "memory model" share one health gate.
-// Its cache survives restarts, so restarting aiconvo cannot create a new retry
+// Its cache survives restarts, so restarting Chattering cannot create a new retry
 // storm while a provider is down. Explicit user work gets one probe during a
 // pause; automatic work waits for the half-open probe after the pause.
 let savedModelHealth = null;
@@ -514,7 +518,7 @@ function isBootstrapMessage(text) {
   const t = String(text || '').trim();
   if (!t) return true;
   if (/\/briefings\/\S+\.md/.test(t) && /work memory|project memory/i.test(t)) return true;
-  if (/^read\b[^\n]*\.cache\/aiconvo\//i.test(t)) return true;
+  if (/^read\b[^\n]*\.cache\/chattering\//i.test(t)) return true;
   return false;
 }
 
@@ -677,10 +681,10 @@ async function parseFile(absPath) {
   // they get off:true so the transcript can fold them.
   const parents = new Map();
   let leafId = null;
-  // Who sent each user message: an aiconvo-author entry sits right before
+  // Who sent each user message: a chattering-author entry sits right before
   // it in the tree (pisdk-runtime.js writes it for web sends).
   const authorEntries = new Map(); // entry id → { id, name, input, coauthors }
-  // How fast each reply streamed: an aiconvo-speed entry after the run
+  // How fast each reply streamed: a chattering-speed entry after the run
   // names the reply entries it measured (pisdk-runtime.js writes it).
   const speedByEntry = new Map(); // reply entry id → compact sample
   const stream = fs.createReadStream(absPath, { encoding: 'utf8' });
@@ -717,10 +721,10 @@ async function parseFile(absPath) {
       if (!meta.cwd && d.cwd) meta.cwd = d.cwd;
       if (d.parentSession) meta.parentSession = d.parentSession; // pi fork origin
       continue;
-    } else if (d.type === 'custom' && d.customType === 'aiconvo-author' && d.data && d.data.user && typeof d.data.user.id === 'string') {
+    } else if (d.type === 'custom' && (d.customType === 'chattering-author' || d.customType === 'aiconvo-author') && d.data && d.data.user && typeof d.data.user.id === 'string') {
       if (eid) authorEntries.set(eid, { id: d.data.user.id, name: String(d.data.user.name || ''), input: d.data.input || undefined, coauthors: Array.isArray(d.data.coauthors) ? d.data.coauthors : undefined, via: 'entry' });
       continue;
-    } else if (d.type === 'custom' && d.customType === 'aiconvo-speed' && d.data?.v === 1 && Array.isArray(d.data.samples)) {
+    } else if (d.type === 'custom' && (d.customType === 'chattering-speed' || d.customType === 'aiconvo-speed') && d.data?.v === 1 && Array.isArray(d.data.samples)) {
       for (const raw of d.data.samples) {
         const s = usageLib.normalizeSpeedSample(raw);
         if (s?.entryId && s.text.chars) speedByEntry.set(s.entryId, { waitMs: s.waitMs, chars: s.text.chars, timedChars: s.text.timedChars, ms: s.text.ms });
@@ -770,8 +774,8 @@ async function parseFile(absPath) {
     }
     if ((text.trim() || turnImages.length) && !(role === 'user' && isNoise(text))) {
       const msg = { role, text, images: turnImages, ts: d.timestamp || null, _eid: eid,
-        operation: d.aiconvo || conversationFlow.operation({ text, role }) || undefined,
-        rewriteOf: role === 'assistant' ? d.message?.aiconvoRewrite?.sourceEntryId : undefined };
+        operation: d.chattering || d.aiconvo || conversationFlow.operation({ text, role }) || undefined,
+        rewriteOf: role === 'assistant' ? (d.message?.chatteringRewrite || d.message?.aiconvoRewrite)?.sourceEntryId : undefined };
       // Both formats store the generating model on the assistant entry
       // (pi also stores the provider). Kept per message: models can change
       // mid-conversation and per branch.
@@ -1425,7 +1429,7 @@ function provenanceMarkdown(s) {
   if (s.gitBranch) lines.push(`- **Branch:** \`${s.gitBranch}\``);
   lines.push(
     `- **Date:** ${s.firstTs || '?'} → ${s.lastTs || '?'}`,
-    `- **Session id (aiconvo):** \`${key || s.relPath || '?'}\``,
+    `- **Session id (Chattering):** \`${key || s.relPath || '?'}\``,
     `- **Original transcript (raw JSONL, full record):** \`${(key && absPathForKey(key)) || '?'}\``,
     `- **Extracted conversation (JSON, user/assistant text only):** \`${key ? cachePathFor(key) : '?'}\``,
     `- **Distilled note (markdown):** ${notePath ? `\`${notePath}\`` : '(none yet)'}`,
@@ -1434,7 +1438,7 @@ function provenanceMarkdown(s) {
     if ((e.sessionIds || []).includes(key))
       lines.push(`- **Part of epic:** ${e.title} — \`${epicPathFor(e.id)}\``);
   }
-  lines.push(`- **Open in aiconvo:** <http://localhost:${PORT}/#${encodeURIComponent(key)}>`);
+  lines.push(`- **Open in chattering:** <http://localhost:${PORT}/#${encodeURIComponent(key)}>`);
   return lines.join('\n') + '\n';
 }
 
@@ -1522,7 +1526,7 @@ function parseTreeEntries(kind, raw) {
       if (d.type === 'message' && d.message && (d.message.role === 'user' || d.message.role === 'assistant')) {
         node.role = d.message.role;
         node.text = textOf(d.message.content);
-        node.operation = d.aiconvo || conversationFlow.operation({ text: node.text, role: node.role });
+        node.operation = d.chattering || d.aiconvo || conversationFlow.operation({ text: node.text, role: node.role });
         node.bridge = ['both', 'merge', 'regenerate'].includes(node.operation?.kind) ? node.operation.kind : undefined;
         if (Array.isArray(d.message.content)) {
           node.names = d.message.content.filter(b => b && (b.type === 'toolCall' || b.type === 'toolUse' || b.type === 'tool_use')).map(b => b.name || '?');
@@ -1838,10 +1842,10 @@ async function conversationContextResponse(key, leafId) {
 
 // ---------- session operations (fork / branch) ----------
 // pi session operations run through pi's own runtime (pirpc.js + the
-// aiconvo-bridge extension). Claude keeps a hand copier: no native
+// chattering-bridge extension). Claude keeps a hand copier: no native
 // arbitrary-node fork exists (verified empirically).
 // Two interchangeable pi engines behind one surface. 'sdk' (default) runs
-// sessions in-process — aiconvo as a pi face: ms forks, MB sessions, full
+// sessions in-process — Chattering as a pi face: ms forks, MB sessions, full
 // extension dialogs. 'rpc' spawns pi child processes — the isolation
 // fallback (settings.json: "piEngine": "rpc"). Events and handles have
 // identical shapes, so everything downstream works on either engine.
@@ -1907,7 +1911,7 @@ function withSessionOp(absPath, fn) {
   return run;
 }
 
-// Index a session file that pi just wrote and return its aiconvo key.
+// Index a session file that pi just wrote and return its Chattering key.
 // pi decides the location (the session dir for the session's cwd), so map
 // the absolute path back onto a known source.
 async function indexNewSessionFile(newAbs) {
@@ -2099,7 +2103,7 @@ try {
     if (j.status === 'running') {
       // The previous process ended without a clean shutdown (SIGKILL, crash).
       j.status = 'error';
-      j.statusText = 'stopped — aiconvo restarted during this run';
+      j.statusText = 'stopped — chattering restarted during this run';
       j.error = 'server restart';
       j.finishedAt = j.finishedAt || Date.now();
     }
@@ -2159,7 +2163,7 @@ function scanAgentProcs() {
     let kind = null;
     if (base0 === 'pi' || ((base0 === 'node' || base0 === 'bun') && base1 === 'pi')) kind = 'pi';
     else if (base0 === 'claude' || ((base0 === 'node' || base0 === 'bun') && base1 === 'claude')) kind = 'claude';
-    else if (base1 === 'aiconvo-bridge.py') kind = 'bridge';
+    else if (base1 === 'chattering-bridge.py' || base1 === 'aiconvo-bridge.py') kind = 'bridge';
     if (!kind) continue;
     if (kind === 'bridge') bridgeArgs.set(pid, argv);
     let sessionPath = null;
@@ -2380,7 +2384,7 @@ function runEventForwarder(job) {
   const speed = responseSpeed.createSpeedMeter();
   return event => {
     try {
-      const speedAt = Number.isFinite(event.aiconvoSpeedAt) ? event.aiconvoSpeedAt : performance.now();
+      const speedAt = Number.isFinite(event.chatteringSpeedAt) ? event.chatteringSpeedAt : performance.now();
       speed.observe(event, speedAt);
       if (event.type === 'run_note') {
         addRunNotice(job, event.text || 'Run notice');
@@ -2893,7 +2897,7 @@ let delegationTimer = null;
 function startDelegationMonitor() {
   if (delegationTimer) return;
   const tick = () => abortCancelledDelegationRuns().then(() => {
-    if (process.env.AICONVO_DISABLE_DELEGATION_CALLBACKS !== '1') return delegationCoordinator.processPending();
+    if (process.env.CHATTERING_DISABLE_DELEGATION_CALLBACKS !== '1') return delegationCoordinator.processPending();
   }).catch(e => console.error('[delegation]', e.message));
   tick(); delegationTimer = setInterval(tick, 2000); delegationTimer.unref();
 }
@@ -3056,11 +3060,11 @@ async function sweepOrphanFanouts() {
 
 function isMergeBridgeText(text) {
   const t = String(text || '');
-  if (/<!--\s*aiconvo:merge\s*-->/.test(t)) return true;
+  if (/<!--\s*(?:chattering|aiconvo):merge\s*-->/.test(t)) return true;
   return /^\d+ models answered my last message in parallel\./i.test(t.trim());
 }
 function isBothBridgeText(text) {
-  return /<!--\s*aiconvo:both\s*-->/.test(String(text || ''));
+  return /<!--\s*(?:chattering|aiconvo):both\s*-->/.test(String(text || ''));
 }
 function bridgeKindOf(text) {
   if (isMergeBridgeText(text)) return 'merge';
@@ -3134,7 +3138,7 @@ async function startAggregate(key, { node, provider, modelId, instruction, answe
   // Branch ids stay in the labels: the merge keeps its provenance in the transcript.
   const parts = children.map((c, i) =>
     `=== reply ${i + 1} of ${children.length} · ${c.model || 'unknown model'} · branch ${c.id} ===\n${c.fullText.trim()}`);
-  const message = `${children.length} models answered my last message in parallel. Their replies:\n\n${parts.join('\n\n')}\n\n${String(instruction || '').trim() || 'You have the full conversation context. Write the single best reply to my last message. Take the strongest parts of these replies, fix their mistakes, and resolve their disagreements. Your reply replaces them: answer me directly, and do not describe the replies or this merge.'}\n\n<!-- aiconvo:merge -->\n<!-- aiconvo:operation ${JSON.stringify({ kind: 'merge', sources: children.map(c => ({ id: c.id, key: c.key, model: c.model || null, entryIds: c.entryIds || [c.id] })) })} -->`;
+  const message = `${children.length} models answered my last message in parallel. Their replies:\n\n${parts.join('\n\n')}\n\n${String(instruction || '').trim() || 'You have the full conversation context. Write the single best reply to my last message. Take the strongest parts of these replies, fix their mistakes, and resolve their disagreements. Your reply replaces them: answer me directly, and do not describe the replies or this merge.'}\n\n<!-- chattering:merge -->\n<!-- chattering:operation ${JSON.stringify({ kind: 'merge', sources: children.map(c => ({ id: c.id, key: c.key, model: c.model || null, entryIds: c.entryIds || [c.id] })) })} -->`;
   const job = await startAgentRun(key, { node, provider, modelId, message, force });
   return { job, answers: children.length };
 }
@@ -3760,7 +3764,7 @@ async function dismissFoldSuggestion(from, into) {
 }
 
 // ---- created projects (directory-first birth registry) ----
-// A project born in aiconvo exists on disk before any conversation. The
+// A project born in Chattering exists on disk before any conversation. The
 // registry pins it into the project list until real conversations take over.
 // It records durable human intent, so it lives in ~/notes, not the cache.
 const CREATED_PROJECTS_FILE = path.join(NOTES_DIR, 'projects.json');
@@ -3789,7 +3793,7 @@ function createdProjectsList() {
 // ---- project ids (projectid.js) ----
 // A project's name is its folder; its id is what crosses machines. The
 // registry lives with the other durable project data under ~/notes; the
-// marker (.aiconvo/project.json) travels inside the checkout.
+// marker (.chattering/project.json) travels inside the checkout.
 const projectIdLib = require('./projectid.js');
 const PROJECT_IDS_FILE = path.join(NOTES_DIR, 'projects', 'ids.json');
 let projectIds = projectIdLib.loadRegistry(PROJECT_IDS_FILE);
@@ -4042,7 +4046,7 @@ const segHash = (seg, title) => crypto.createHash('sha256').update('v1\x00' + ti
 const TREES_DIR = path.join(CACHE_DIR, 'trees');
 fs.mkdirSync(TREES_DIR, { recursive: true });
 const treePathFor = key => path.join(TREES_DIR, key.replace(/[:\/\\]/g, '__') + '.json');
-const SETTINGS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'settings.json');
+const SETTINGS_FILE = path.join(os.homedir(), '.config', 'chattering', 'settings.json');
 const THEMES_DIR = themesLib.defaultThemeDir(os.homedir());
 // ---- captured system prompts ----
 // The prompt-capture extension (extensions/prompt-capture.ts, loaded from
@@ -4074,7 +4078,7 @@ memoryModelHealth.setIdentity(currentModelLabel());
 const recoveryLib = require('./agent-recovery.js');
 const agentRecovery = new recoveryLib.AgentRecovery({
   file: path.join(CACHE_DIR, 'agent-interruptions.json'),
-  enabled: () => appSettings.autoResumeNetwork && !shuttingDown && process.env.AICONVO_DISABLE_NETWORK_RECOVERY !== '1',
+  enabled: () => appSettings.autoResumeNetwork && !shuttingDown && process.env.CHATTERING_DISABLE_NETWORK_RECOVERY !== '1',
   changed: recovery => broadcast({ type: 'agent-recovery', recovery }),
   endpoint: r => {
     let custom = {};
@@ -4128,8 +4132,8 @@ function saveAppSettings() {
 const usersLib = require('./users.js');
 const accessLib = require('./access.js');
 const { PresenceBook } = require('./presence.js');
-const USERS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'users.json');
-const INSTALL_KEY_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'install-key.json');
+const USERS_FILE = path.join(os.homedir(), '.config', 'chattering', 'users.json');
+const INSTALL_KEY_FILE = path.join(os.homedir(), '.config', 'chattering', 'install-key.json');
 const ACCESS_FILE = path.join(NOTES_DIR, 'access.json');
 const AUTHORSHIP_FILE = path.join(NOTES_DIR, 'authorship.jsonl');
 function accountPersonName() {
@@ -4158,7 +4162,7 @@ const currentIdentity = () => (requestContext.getStore() || {}).identity || null
 const currentPrincipal = async project => { const id = currentIdentity(); return id ? principalInProject(principalFor(id), project) : principalFor(null); };
 function identifyRequest(req) {
   if (!LAN_TOKEN) return ownerIdentity();
-  return usersLib.identify({ roster, installToken: LAN_TOKEN, isLocal: isLocalRequest(req), cookie: cookieValue(req, 'aiconvo'), authorization: req.headers.authorization });
+  return usersLib.identify({ roster, installToken: LAN_TOKEN, isLocal: isLocalRequest(req), cookie: cookieValue(req, 'chattering'), authorization: req.headers.authorization });
 }
 const publicUsers = () => roster.users.map(usersLib.publicUser);
 const userById = id => usersLib.publicUser(usersLib.findUser(roster, id));
@@ -4169,7 +4173,7 @@ const userById = id => usersLib.publicUser(usersLib.findUser(roster, id));
 // here instead, and nothing else changes. See design/46, "Team scale".
 function principalFor(identity, { project = null } = {}) {
   const user = usersLib.publicUser((identity && identity.user) || usersLib.ownerOf(roster));
-  const base = { user, spawnAs: null, env: { AICONVO_USER: user.id, AICONVO_USER_NAME: user.name }, guest: false, sandbox: null, project };
+  const base = { user, spawnAs: null, env: { CHATTERING_USER: user.id, CHATTERING_USER_NAME: user.name }, guest: false, sandbox: null, project };
   if (!identity || !usersLib.isGuest(identity.user)) return base;
   // A guest runs behind walls (sandbox.js): only the project exists for
   // their processes. Which project is decided by the caller from the
@@ -4205,7 +4209,7 @@ function assertNotGuest(identity, what = 'this') {
 // when the proxy or the provider list changed.
 const sandboxLib = require('./sandbox.js');
 const { createKeyProxy } = require('./keyproxy.js');
-const GUESTS_DIR = path.join(os.homedir(), '.local', 'share', 'aiconvo', 'guests');
+const GUESTS_DIR = path.join(os.homedir(), '.local', 'share', 'chattering', 'guests');
 const OWNER_AGENT_DIR = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
 const BWRAP = sandboxLib.findBwrap();
 // Resource caps (design/55): one systemd slice per guest. Probed once, the
@@ -4216,7 +4220,7 @@ let cgroupProbe = null; // Promise<boolean>
 let cgroupState = SYSTEMD_RUN ? null : false; // null: not probed yet
 function cgroupsAvailable() {
   if (!SYSTEMD_RUN) return Promise.resolve(false);
-  if (!cgroupProbe) cgroupProbe = execText(SYSTEMD_RUN, ['--user', '--scope', '--quiet', '-p', 'CollectMode=inactive-or-failed', '--slice=aiconvo-guest.slice', '--', 'true'], { timeout: 8000 })
+  if (!cgroupProbe) cgroupProbe = execText(SYSTEMD_RUN, ['--user', '--scope', '--quiet', '-p', 'CollectMode=inactive-or-failed', '--slice=chattering-guest.slice', '--', 'true'], { timeout: 8000 })
     .then(() => { cgroupState = true; return true; }, e => { cgroupState = false; console.error('[guest caps] no user systemd manager, guests run uncapped:', String(e.message).split('\n')[0]); return false; });
   return cgroupProbe;
 }
@@ -4278,7 +4282,7 @@ function guestModelChoice(provider, modelId, providers) {
 }
 const guestCredentialLabel = 'sandbox';
 const guestApiSecrets = new Map(); // guest id -> secret (memory only; the roster keeps the hash)
-// A credential for the guest's own processes: the aiconvo CLI and the Pi
+// A credential for the guest's own processes: the Chattering CLI and the Pi
 // records tools inside the walls act as the guest, never as the console.
 // One per server lifetime; the previous boot's is dropped from the roster.
 function guestApiTokenFor(user) {
@@ -4315,11 +4319,11 @@ async function guestSandboxFor(user, project) {
   fs.mkdirSync(mainSessionDir, { recursive: true });
   if (!sessionBinds.some(b => b.src === mainSessionDir)) sessionBinds.push({ src: mainSessionDir, dst: mainSessionDir, rw: true });
   const piPkg = (() => { try { return require('./pisdk-runtime.js').piPackageDir(); } catch { return null; } })();
-  const env = sandboxLib.sandboxEnv({ principalEnv: { AICONVO_USER: user.id, AICONVO_USER_NAME: user.name, AICONVO_PORT: String(PORT) }, guest: user, agentDir: insideAgentDir, piPackageDir: piPkg, token: guestApiTokenFor(user),
-    extra: { PATH: agentPath(process.env.PATH), PI_CLAUDE_CODE_TRANSPORT: 'api', PI_CLAUDE_CODE_BASE_URL: proxyUrl + '/claude-code', AICONVO_GUEST_PROJECT: project, ...(hostFacts.claudeVersion ? { CLAUDE_CODE_VERSION: hostFacts.claudeVersion } : {}) } });
+  const env = sandboxLib.sandboxEnv({ principalEnv: { CHATTERING_USER: user.id, CHATTERING_USER_NAME: user.name, CHATTERING_PORT: String(PORT) }, guest: user, agentDir: insideAgentDir, piPackageDir: piPkg, token: guestApiTokenFor(user),
+    extra: { PATH: agentPath(process.env.PATH), PI_CLAUDE_CODE_TRANSPORT: 'api', PI_CLAUDE_CODE_BASE_URL: proxyUrl + '/claude-code', CHATTERING_GUEST_PROJECT: project, ...(hostFacts.claudeVersion ? { CLAUDE_CODE_VERSION: hostFacts.claudeVersion } : {}) } });
   const cgroup = await guestCgroupFor(user);
   const sb = sandboxLib.createSandbox({ id: 'guest:' + user.id + ':' + projectRoot, bwrap: BWRAP, home: os.homedir(), projectRoot, guest: { id: user.id, name: user.name },
-    binds: [...prepared.binds, ...sessionBinds], env, piPackageDir: piPkg, aiconvoDir: __dirname, nodePath: process.execPath, cgroup });
+    binds: [...prepared.binds, ...sessionBinds], env, piPackageDir: piPkg, chatteringDir: __dirname, nodePath: process.execPath, cgroup });
   sb.sessionDir = mainSessionDir;
   return sb;
 }
@@ -4412,9 +4416,9 @@ function projectVisible(identity, name) { return canDo(identity, 'see', { projec
 // An invite admits one person to one or more projects: it creates a
 // guest on the roster and writes the access rules that make those
 // projects visible. The same link, claimed from another install with
-// `aiconvo join`, also pairs that install as a sync peer.
+// `chattering join`, also pairs that install as a sync peer.
 const syncLib = require('./sync.js');
-const PEERS_FILE = path.join(os.homedir(), '.config', 'aiconvo', 'peers.json');
+const PEERS_FILE = path.join(os.homedir(), '.config', 'chattering', 'peers.json');
 const MIRROR_NOTES_DIR = path.join(NOTES_DIR, 'mirrors');
 const MIRROR_MANIFEST_FILE = path.join(path.dirname(SOURCES.mirror), 'manifest.json');
 // key -> { peer, projectId, originKey, notePath, notedAt, host }: what each
@@ -4461,7 +4465,7 @@ const syncEngine = syncLib.createSyncEngine({
     if (!local || !local.name) return [];
     const meta = projectMetaFor(local.name);
     if (!meta) return [];
-    return meta.entries.filter(({ key }) => !syncLib.isMirrorKey(key) && key !== 'aiconvo:internal')
+    return meta.entries.filter(({ key }) => !syncLib.isMirrorKey(key) && key !== 'chattering:internal')
       .map(({ key, entry }) => { const [source, rel] = splitKey(key); return { key, entry, source, rel, absPath: absPathForKey(key) }; })
       .filter(c => c.absPath);
   },
@@ -4513,7 +4517,7 @@ function applyInviteGrants(invite, user) {
   }
   saveAccessRules();
 }
-// This install joins a project on another person's aiconvo, as the owner
+// This install joins a project on another person's Chattering, as the owner
 // of this install. `link` is the invite link (or a device link of an
 // existing person there); `folder` is an optional local checkout to bind
 // the project to. Returns what happened in words the CLI can print.
@@ -4537,7 +4541,7 @@ async function joinRemoteProject({ link, name, folder }) {
   // 2. They become a guest here, listed on the joined projects, with a
   // credential so their install can pull from ours.
   const { user: them } = usersLib.upsertHandoffUser(roster, { ...first.owner, scope: 'guest' });
-  const { secret: theirCredential } = usersLib.issueCredential(roster, them.id, { kind: 'invite', label: 'aiconvo on ' + String(first.host.name || 'their machine').slice(0, 30) });
+  const { secret: theirCredential } = usersLib.issueCredential(roster, them.id, { kind: 'invite', label: 'chattering on ' + String(first.host.name || 'their machine').slice(0, 30) });
   const bound = [];
   for (const pr of first.projects) {
     let localName = null, cwd = null;
@@ -4706,7 +4710,7 @@ function piContextTokens() {
 }
 function piTargetTokens() { return Math.floor(piContextTokens() * 0.80); }
 function currentModelLabel() { return settingsLib.modelLabel(appSettings, readPiDefault()); }
-// ---- machines: pairing between aiconvo installs ----
+// ---- machines: pairing between Chattering installs ----
 // A connect link is this install's URL plus its LAN token. Pasting one into
 // another install adds this machine there, and that install registers itself
 // back here, so one paste links both ways.
@@ -4840,7 +4844,7 @@ function settingsResponse(identity = ownerIdentity()) {
 }
 
 // The state the settings ask for: an explicit choice wins, else the service
-// environment. AICONVO_HOST pins the address and ignores both.
+// environment. CHATTERING_HOST pins the address and ignores both.
 function lanWanted() {
   if (ENV_HOST) return !isLoopback(ENV_HOST);
   return appSettings.lan === null || appSettings.lan === undefined ? LAN_BY_ENV : appSettings.lan;
@@ -4861,9 +4865,9 @@ function usageIndexEntries() {
   }]);
   try {
     const stat = fs.statSync(INTERNAL_USAGE_FILE);
-    entries.push(['aiconvo:internal', {
+    entries.push(['chattering:internal', {
       source: 'pi', mtimeMs: stat.mtimeMs, size: stat.size,
-      firstTs: null, lastTs: new Date(stat.mtimeMs).toISOString(), project: 'Aiconvo system',
+      firstTs: null, lastTs: new Date(stat.mtimeMs).toISOString(), project: 'Chattering system',
     }]);
   } catch {}
   return entries;
@@ -4937,7 +4941,7 @@ function splitTextToTokenBudget(text, tokenBudget) {
 }
 
 async function runPi(fileContent, prompt, onChunk, options = {}) {
-  const tmp = path.join(os.tmpdir(), 'aiconvo-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
+  const tmp = path.join(os.tmpdir(), 'chattering-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
   fs.writeFileSync(tmp, fileContent, { mode: 0o600 });
   const inherited = modelCallContext.getStore();
   const automatic = options.automatic == null ? !!(inherited && inherited.automatic) : !!options.automatic;
@@ -4980,7 +4984,7 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
       const record = {
         type: 'message', id: crypto.randomUUID(), parentId: null,
         timestamp: new Date(finalMessage.timestamp || Date.now()).toISOString(),
-        aiconvoCategory: 'internal',
+        chatteringCategory: 'internal',
         message: { ...finalMessage, content: [] },
       };
       try { fs.appendFileSync(INTERNAL_USAGE_FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); } catch {}
@@ -6394,7 +6398,7 @@ async function buildEpicStory(evidenceInputs, focus, emit = () => {}) {
 
 // Absolute path of the original transcript behind an index key ("source:relPath").
 function absPathForKey(key) {
-  if (key === 'aiconvo:internal') return INTERNAL_USAGE_FILE;
+  if (key === 'chattering:internal') return INTERNAL_USAGE_FILE;
   const i = key.indexOf(':');
   const base = SOURCES[key.slice(0, i)];
   return base ? path.join(base, key.slice(i + 1)) : null;
@@ -6411,7 +6415,7 @@ function renderEpicMarkdown(epic, story, sessions) {
     `- **Epic:** ${epic.id}`,
     `- **This file:** \`${epicPathFor(epic.id)}\``,
     `- **Evidence inputs for the last build:** \`${epicInputsPathFor(epic.id)}\``,
-    `- **Open in aiconvo:** <http://localhost:${PORT}/>`, '',
+    `- **Open in chattering:** <http://localhost:${PORT}/>`, '',
     'Each session id below maps to full file paths in the "Source conversations" section. ' +
     'To learn more about a session, read its distilled note first, then its original transcript.', '',
     '## Timeline', '',
@@ -6437,7 +6441,7 @@ function renderEpicMarkdown(epic, story, sessions) {
       `- **Original transcript (raw JSONL, full record):** \`${absPathForKey(s.key) || '?'}\``,
       `- **Extracted conversation (JSON, user/assistant text only):** \`${cachePathFor(s.key)}\``,
       `- **Distilled note (markdown):** ${notePath ? `\`${notePath}\`` : '(none yet)'}`,
-      `- **Open in aiconvo:** <http://localhost:${PORT}/#${encodeURIComponent(s.key)}>`, ''
+      `- **Open in chattering:** <http://localhost:${PORT}/#${encodeURIComponent(s.key)}>`, ''
     );
   }
   return parts.join('\n');
@@ -7090,7 +7094,7 @@ function firstExisting(paths) {
 }
 
 function alacrittyBin() {
-  return process.env.AICONVO_TERMINAL
+  return process.env.CHATTERING_TERMINAL
     || firstExisting(['/snap/bin/alacritty', '/usr/bin/alacritty', '/usr/local/bin/alacritty'])
     || 'alacritty';
 }
@@ -7100,15 +7104,15 @@ function python3Bin() {
 }
 
 function bridgeScript() {
-  return path.join(__dirname, 'aiconvo-bridge.py');
+  return path.join(__dirname, 'chattering-bridge.py');
 }
 
 function socketPathForTitle(title) {
   return path.join(CACHE_DIR, 'pty', String(title || 'unknown') + '.sock');
 }
 
-// Launched-window registry: maps a custom Alacritty title (aiconvo-project-*,
-// aiconvo-git-*) to the conversation key discovered after launch. Without it,
+// Launched-window registry: maps a custom Alacritty title (chattering-project-*,
+// chattering-git-*) to the conversation key discovered after launch. Without it,
 // the app cannot bind a project-start terminal to its conversation, thinks no
 // live terminal exists, and a send spawns a second writer on the same session.
 const LAUNCHED_TITLES_FILE = path.join(CACHE_DIR, 'launched-windows.json');
@@ -7141,7 +7145,7 @@ function keyForLaunchedTitle(title) {
 }
 
 function piBin() {
-  return process.env.AICONVO_PI
+  return process.env.CHATTERING_PI
     || firstExisting([
       path.join(os.homedir(), '.nvm/versions/node/v22.23.1/bin/pi'),
       '/usr/local/bin/pi',
@@ -7150,7 +7154,7 @@ function piBin() {
 }
 
 function claudeBin() {
-  return process.env.AICONVO_CLAUDE
+  return process.env.CHATTERING_CLAUDE
     || firstExisting([
       path.join(os.homedir(), '.local/bin/claude'),
       '/usr/local/bin/claude',
@@ -7161,7 +7165,7 @@ function claudeBin() {
 // The environment an agent starts with. `principal` says who is driving
 // (principalFor); absent, the account's owner. In a team deployment this
 // is also where the spawn changes user; today every principal runs as the
-// account, and only the AICONVO_USER* variables differ.
+// account, and only the CHATTERING_USER* variables differ.
 function agentEnv(principal = null) {
   if (principal && principal.sandbox) return principal.sandbox.env();
   const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
@@ -7194,7 +7198,7 @@ function conversationKind(entry) {
 }
 
 function windowTitleFor(key) {
-  return 'aiconvo-' + crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
+  return 'chattering-' + crypto.createHash('sha256').update(key).digest('hex').slice(0, 16);
 }
 
 function flagValue(args, names) {
@@ -7230,7 +7234,7 @@ function matchArgsToKey(args) {
     const mapped = keyForLaunchedTitle(title);
     if (mapped && index[mapped]) return mapped;
   }
-  if (title && title.startsWith('aiconvo-') && !title.startsWith('aiconvo-project-')) {
+  if (title && title.startsWith('chattering-') && !title.startsWith('chattering-project-')) {
     for (const key of Object.keys(index)) {
       if (windowTitleFor(key) === title) return key;
     }
@@ -7289,7 +7293,7 @@ function listRunningAgents() {
     const title = flagValue(args, ['--title', '-t']);
     const names = args.map(a => path.basename(a).toLowerCase());
     const kind = names.includes('claude') ? 'claude' : names.includes('pi') ? 'pi' : null;
-    if (!key && !(title && title.startsWith('aiconvo-'))) continue;
+    if (!key && !(title && title.startsWith('chattering-'))) continue;
     const id = key || title;
     if (!id || seen.has(id)) continue;
     seen.add(id);
@@ -7820,7 +7824,7 @@ async function sendFileFeedback(body) {
 // ---------- agent file diffs ----------
 // Extract intended file changes from edit/write tool calls. These are agent
 // file touches, not Git diffs: a tool call can fail and files can change later.
-// One cache file per conversation under ~/.cache/aiconvo/diff-cache/. The
+// One cache file per conversation under ~/.cache/chattering/diff-cache/. The
 // previous single diff-cache.json grew to ~80 MB and was re-serialized on
 // the main thread after every transcript parse (~1 s of blocked event loop
 // per save, and a 1.8 s parse at boot). Entries now load lazily on first
@@ -8795,7 +8799,7 @@ async function sendGitFileFeedback(body) {
   }
   const prompt = prefix +
     `Read ${mdPath} and the PNG at ${pngPath}. The red ink is requested file feedback for ${rel} lines ${body.fromLine}–${body.toLine} (page ${body.page}/${body.pages}), comparing ${fromId || 'an older Git point'} to ${toId || 'a newer Git point'} in ${root}. Apply those edits.`;
-  const name = 'aiconvo-git-' + crypto.createHash('sha256').update(root + stamp).digest('hex').slice(0, 12);
+  const name = 'chattering-git-' + crypto.createHash('sha256').update(root + stamp).digest('hex').slice(0, 12);
   const argv = kind === 'claude'
     ? [claudeBin(), prompt]
     : [piBin(), '--name', String(repo.name + ' git ink').slice(0, 80), '@' + pngPath, prompt];
@@ -9159,7 +9163,7 @@ async function updateWatchedProjectFile(root, relativePath, project = '') {
   else broadcastFileActivity({ ...row, actor: 'unknown' }); // explained elsewhere; the open editor still wants to reload
 }
 
-const NO_WATCH = process.env.AICONVO_NO_WATCH === '1';
+const NO_WATCH = process.env.CHATTERING_NO_WATCH === '1';
 // Directories no edit of interest lives in. Node's recursive fs.watch on
 // Linux is a JS walk that keeps one watcher per directory — including
 // node_modules and build trees, hundreds of megabytes across forty
@@ -9531,7 +9535,7 @@ async function backfillFileLedger() {
       await new Promise(r => setImmediate(r));
     }
     job.statusText = 'reading repositories';
-    if (process.env.AICONVO_LEDGER_DEBUG) console.log('ledger debug: after conversations heapUsed', Math.round(process.memoryUsage().heapUsed / 1e6), 'MB');
+    if (process.env.CHATTERING_LEDGER_DEBUG) console.log('ledger debug: after conversations heapUsed', Math.round(process.memoryUsage().heapUsed / 1e6), 'MB');
     for (const project of activeProjectNames()) {
       const meta = projectMetaFor(project);
       if (!meta) continue;
@@ -9559,13 +9563,13 @@ async function backfillFileLedger() {
     if (job.total || repos) announce();
     ledgerBackfillRunning = false;
   }
-  if (process.env.AICONVO_LEDGER_DEBUG) console.log('ledger debug: after repositories heapUsed', Math.round(process.memoryUsage().heapUsed / 1e6), 'MB');
+  if (process.env.CHATTERING_LEDGER_DEBUG) console.log('ledger debug: after repositories heapUsed', Math.round(process.memoryUsage().heapUsed / 1e6), 'MB');
   console.log(`file ledger: ${conversations} conversations, ${repos} repositories, ${fileLedger.count()} rows in ${Date.now() - t0} ms`);
 }
 
 // Projects with a conversation in the last 30 days, plus every registered
 // project: the set whose repositories get boot watchers. Trade-off: one
-// recursive inotify watch per repository; AICONVO_NO_WATCH=1 turns them off.
+// recursive inotify watch per repository; CHATTERING_NO_WATCH=1 turns them off.
 function activeProjectNames() {
   const cutoff = Date.now() - 30 * PROJECT_FILE_DAY;
   const names = new Set(Object.keys(createdProjects).map(name => projectNameOf(createdProjects[name] && createdProjects[name].cwd) || name));
@@ -10458,7 +10462,7 @@ async function revealNativePath(abs, stat) {
 }
 
 // Explicit host actions. The operating system owns file-type associations;
-// aiconvo only checks the path and forwards the user's local gesture.
+// Chattering only checks the path and forwards the user's local gesture.
 async function nativePathAction(key, pathValue, action) {
   const { abs, stat } = await transcriptPathInfo(key, pathValue, { local: true });
   if (action === 'reveal') {
@@ -10511,7 +10515,7 @@ async function fileSaveResponse(body, user = null) {
 }
 
 // ---- documents: MRMD-backed markdown editing ----
-// Aiconvo owns the file lifecycle: reads, autosaves, conflict checks, Git
+// Chattering owns the file lifecycle: reads, autosaves, conflict checks, Git
 // commits, and the provenance ledger. MRMD (vendored light bundle) owns the
 // editing surface only. The ledger is durable append-only JSONL: it records
 // who changed a document (human/ai) and through which input, outside the
@@ -10637,7 +10641,7 @@ async function docCommitResponse(body, user = null) {
   // A guest on this machine is the commit's author (git is the one identity
   // carrier every tool reads); the owner keeps their own git identity.
   const guest = user && user.id !== usersLib.ownerOf(roster).id ? user : null;
-  await gitText(root, ['commit', '--no-verify', ...(guest ? ['--author', `${guest.name} <${guest.id}@aiconvo>`] : []), '-m', subject, '--', rel]);
+  await gitText(root, ['commit', '--no-verify', ...(guest ? ['--author', `${guest.name} <${guest.id}@chattering>`] : []), '-m', subject, '--', rel]);
   const hash = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
   await recordDocEdit({ ts: Date.now(), path: abs, action: 'commit', hash, subject, user: user ? user.id : undefined });
   ledgerRecordEditorSave(abs, { added: Number(addedRaw) || 0, removed: Number(removedRaw) || 0, chars: null, sha, commitHash: hash });
@@ -10712,7 +10716,7 @@ async function noteFileSaveResponse(body) {
   const { path: p, text } = body;
   if (typeof text !== 'string') throw new Error('missing text');
   const abs = path.resolve(expandHomePath(p || ''));
-  if (!abs.endsWith('.md') || !abs.startsWith(NOTES_DIR + path.sep)) throw new Error('only markdown files under ~/notes/aiconvo are editable here');
+  if (!abs.endsWith('.md') || !abs.startsWith(NOTES_DIR + path.sep)) throw new Error('only markdown files under ~/notes/chattering are editable here');
   await fsp.stat(abs); // the file must already exist: this edits, it does not create
   await writeFileAtomic(abs, text);
   return { ok: true, path: abs };
@@ -10720,7 +10724,7 @@ async function noteFileSaveResponse(body) {
 
 // ---- trust: the vouch ledger ----
 // Pure logic lives in trust.js (tested). Records are append-only JSONL under
-// ~/notes/aiconvo/vouches.jsonl, so the ledger stays a plain, durable,
+// ~/notes/chattering/vouches.jsonl, so the ledger stays a plain, durable,
 // auditable file. Trust never excludes content; it only labels it.
 const trustLib = require('./trust.js');
 const VOUCH_LEDGER = path.join(NOTES_DIR, 'vouches.jsonl');
@@ -10927,7 +10931,7 @@ async function transcriptEditResponse(body) {
       target.apply(text);
       const node = crypto.randomBytes(8).toString('hex');
       target.d.id = node;
-      target.d.aiconvo = { kind: 'edit', sourceEntryId: body.eid, author: 'user' };
+      target.d.chattering = { kind: 'edit', sourceEntryId: body.eid, author: 'user' };
       target.d.timestamp = new Date().toISOString();
       // Append a sibling. All existing descendants keep their original parent.
       await fsp.appendFile(sessionPath, (target.lines.at(-1) === '' ? '' : '\n') + JSON.stringify(target.d) + '\n');
@@ -11457,7 +11461,7 @@ async function areaFoldersResponse(rawProject) {
 }
 
 // The "memory to include" selection becomes a briefing FILE, not an inline
-// prompt: aiconvo's provenance pattern. The briefing maps the project's work
+// prompt: Chattering's provenance pattern. The briefing maps the project's work
 // memory (notes, epics, evidence) to real file paths; the agent reads what it
 // needs instead of receiving one giant paste.
 const BRIEFINGS_DIR = path.join(CACHE_DIR, 'briefings');
@@ -11469,14 +11473,14 @@ fs.mkdirSync(BRIEFINGS_DIR, { recursive: true });
 function recordsHowToSection(project, conversationCount) {
   const p = /\s/.test(project) ? JSON.stringify(project) : project;
   return [
-    '## Looking things up (aiconvo records)',
+    '## Looking things up (Chattering records)',
     '',
     `This project has ${conversationCount} conversations on record, plus notes, evidence and memory documents; only a map is inlined here.`,
-    'Before you ask the user what was decided, tried, or why, look it up. The `aiconvo` command works from any folder (Pi also has the aiconvo_search / aiconvo_show tools):',
+    'Before you ask the user what was decided, tried, or why, look it up. The `chattering` command works from any folder (Pi also has the chattering_search / chattering_show tools):',
     '',
-    `- aiconvo search "<words>" [--project ${p}] [--since 30d]   ranked passages across all conversations, notes, memory`,
-    '- aiconvo show <id> [--at N]                                one conversation: outline, or the messages around #N',
-    `- aiconvo conversations ${p} · aiconvo notes ${p} · aiconvo memory ${p} · aiconvo help`,
+    `- chattering search "<words>" [--project ${p}] [--since 30d]   ranked passages across all conversations, notes, memory`,
+    '- chattering show <id> [--at N]                                one conversation: outline, or the messages around #N',
+    `- chattering conversations ${p} · chattering notes ${p} · chattering memory ${p} · chattering help`,
     '',
     'Records are AI transcripts and AI-written notes: what was said, not verified truth. Quote the conversation id and date when you use one. Prefer [vouched] notes over [unverified] ones, and the transcript over both when it matters.',
   ].join('\n');
@@ -11486,7 +11490,7 @@ async function buildProjectBriefing(project, include, focusName) {
   const info = await projectResponse(project);
   const meta = projectMetaFor(project);
   const lines = [];
-  lines.push(`# aiconvo project briefing: ${project}`);
+  lines.push(`# Chattering project briefing: ${project}`);
   lines.push('');
   lines.push(`- Generated: ${new Date().toISOString()}`);
   lines.push(`- Project root: ${info.cwd || '(unknown)'}`);
@@ -11591,7 +11595,7 @@ function includeFlag(include, name) {
 // The modes extension (modes.ts in ~/.pi/agent/extensions) owns mode
 // semantics: opener/appendix ride on the base system prompt, systemPrompt
 // replaces it, removeSections drops named sections, tools replaces the tool
-// set. aiconvo only reads and writes the same JSON files with the same
+// set. Chattering only reads and writes the same JSON files with the same
 // validation, so the TUI and this UI stay one source of truth.
 const MODES_DIR = path.join(os.homedir(), '.pi', 'agent', 'modes');
 const SNIPPET_USES_FILE = path.join(CACHE_DIR, 'snippet-uses.json');
@@ -11662,7 +11666,7 @@ async function buildProjectContextBundle(project, include, focusName) {
   const meta = projectMetaFor(project);
   if (!meta) throw new Error('project not found');
   const parts = [];
-  parts.push(`# aiconvo project context: ${project}`);
+  parts.push(`# Chattering project context: ${project}`);
   parts.push('');
   parts.push(`- Generated: ${new Date().toISOString()}`);
   parts.push(`- Project root: ${info.cwd || '(unknown)'}`);
@@ -11670,7 +11674,7 @@ async function buildProjectContextBundle(project, include, focusName) {
   if (typeof include.area === 'string' && include.area) parts.push(`- Working area (inner scope): ${include.area} — the conversation runs inside this subfolder`);
   if (focusName) parts.push(`- Focus for this new conversation: ${focusName}`);
   parts.push('');
-  parts.push('Injected by aiconvo at conversation start. This is AI-generated work memory — a map, not verified truth. Items labeled [unverified] were never human-reviewed.');
+  parts.push('Injected by Chattering at conversation start. This is AI-generated work memory — a map, not verified truth. Items labeled [unverified] were never human-reviewed.');
   parts.push('', recordsHowToSection(project, info.conversations));
 
   let docCount = 0;
@@ -11878,9 +11882,9 @@ async function fileContextBlock(item) {
     const touched = fileLedger.touched(abs, { limit: 5 });
     ledgerSessionTitles(touched.sessions);
     if (touched.sessions.length) {
-      parts.push('', '#### Recent changes to this file (the aiconvo file ledger)', '');
+      parts.push('', '#### Recent changes to this file (the Chattering file ledger)', '');
       for (const sn of touched.sessions) {
-        const who = sn.actor === 'ai' ? `agent · conversation "${sn.title || sn.convKey}"` : sn.actor === 'human' ? 'the user, in the aiconvo editor' : 'an unexplained write on disk';
+        const who = sn.actor === 'ai' ? `agent · conversation "${sn.title || sn.convKey}"` : sn.actor === 'human' ? 'the user, in the Chattering editor' : 'an unexplained write on disk';
         parts.push(`- ${new Date(sn.start).toISOString()}${sn.end !== sn.start ? ' → ' + new Date(sn.end).toISOString() : ''} · ${who} · +${sn.added} −${sn.removed} lines${sn.n > 1 ? ` · ${sn.n} edits` : ''}`);
       }
       const neighbours = new Map();
@@ -11908,7 +11912,7 @@ async function writeAttachedContextFile(items, { preview = false } = {}) {
     chatByKey.set(c.key + '\0' + (c.i == null ? '*' : c.i), c);
   }
   const parts = [];
-  parts.push('# aiconvo attached context');
+  parts.push('# Chattering attached context');
   parts.push('');
   parts.push('- Generated: ' + new Date().toISOString());
   parts.push('');
@@ -11956,7 +11960,7 @@ async function writeAttachedContextFile(items, { preview = false } = {}) {
     const blocks = [];
     for (const item of files) { blocks.push(await fileContextBlock(item)); fileCount++; }
     parts.push('', '## Attached files', '',
-      'The user is reading or editing these files in aiconvo and watches them live. When asked for a change, edit the file in place with your tools; do not rewrite unrelated parts; keep the author\'s formatting.', '',
+      'The user is reading or editing these files in Chattering and watches them live. When asked for a change, edit the file in place with your tools; do not rewrite unrelated parts; keep the author\'s formatting.', '',
       blocks.join('\n\n---\n\n'));
   }
   if (!docCount && !chatCount && !fileCount && !noteCount) throw new Error('none of those context items exist yet');
@@ -12160,7 +12164,7 @@ async function startProjectConversation(options) {
   const kind = options.agent === 'claude' ? 'claude' : 'pi';
   const impliedProject = projectless ? projectNameOf(cwd) : project;
   const label = String(options.name || (impliedProject === LOOSE_PROJECT ? 'Loose conversation' : 'Project: ' + impliedProject)).slice(0, 80);
-  const name = 'aiconvo-' + (projectless ? 'loose-' : 'project-') + crypto.createHash('sha256').update(project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
+  const name = 'chattering-' + (projectless ? 'loose-' : 'project-') + crypto.createHash('sha256').update(project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
   const mode = kind === 'pi' && typeof options.mode === 'string' && options.mode.trim() ? options.mode.trim() : null;
   // Lead model for the kickoff run; any further models stay in the project's
   // composer strip for later fan-out sends.
@@ -12434,7 +12438,7 @@ async function deriveNotebookFromAnswer(key, entryId) {
     const contextItems = conversationContextOf(key);
     const ctxBundle = contextItems.length ? await writeAttachedContextFile(contextItems) : null;
     const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', ctxBundle.file] : [])];
-    const stage = await fsp.mkdtemp(path.join(os.tmpdir(), 'aiconvo-derive-'));
+    const stage = await fsp.mkdtemp(path.join(os.tmpdir(), 'chattering-derive-'));
     let result;
     try {
       const forked = await pisdk.piForkAt({ sessionPath, cwd }, entryId, { dir: stage });
@@ -12446,7 +12450,7 @@ async function deriveNotebookFromAnswer(key, entryId) {
     if (result.usage) {
       // Same ledger as the other no-session model calls, so cost reports see it.
       const record = { type: 'message', id: crypto.randomUUID(), parentId: null, timestamp: new Date(result.timestamp || Date.now()).toISOString(),
-        aiconvoCategory: 'internal', aiconvoPurpose: 'notebook', message: { role: 'assistant', content: [], usage: result.usage, model: result.model.split('/').slice(1).join('/'), provider: result.model.split('/')[0] } };
+        chatteringCategory: 'internal', chatteringPurpose: 'notebook', message: { role: 'assistant', content: [], usage: result.usage, model: result.model.split('/').slice(1).join('/'), provider: result.model.split('/')[0] } };
       try { fs.appendFileSync(INTERNAL_USAGE_FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); } catch {}
     }
     let text = notebookDerive.shapeReply(result.text);
@@ -12666,14 +12670,14 @@ async function synthesizeSpeech(text, rewrite, speed = 1) {
 const SPEAK_SUMMARY_PROMPT = 'You are a voice announcer for a person who runs several coding-agent conversations. One conversation just returned a new reply. You get an OPENING line, the conversation title, and the full reply. Speak a short digest: start with the OPENING exactly as given, then say in two to four short sentences what there is to read in the reply — what it did, what it found, and what it asks or recommends, if anything. Talk about the reply in the third person ("it says", "it recommends"). Plain spoken words only: no code, no file paths, no markdown, no lists. Keep the whole thing under sixty words.';
 
 // Spoken playback speed for announcements and confirmations.
-const VOICE_SPEED = Number(process.env.AICONVO_VOICE_SPEED) || 1.5;
+const VOICE_SPEED = Number(process.env.CHATTERING_VOICE_SPEED) || 1.5;
 
 // The effective finished-run sound mode. The two env vars predate the
 // setting and still act as hard caps for deployments that set them.
 function doneSoundMode() {
-  if (process.env.AICONVO_SPEAK_DONE === '0') return 'off';
+  if (process.env.CHATTERING_SPEAK_DONE === '0') return 'off';
   const mode = settingsLib.DONE_SOUND_MODES.includes(appSettings.doneSound) ? appSettings.doneSound : 'voice';
-  if (mode === 'voice' && process.env.AICONVO_VOICE_REPLY === '0') return 'summary';
+  if (mode === 'voice' && process.env.CHATTERING_VOICE_REPLY === '0') return 'summary';
   return mode;
 }
 
@@ -12979,7 +12983,7 @@ async function voiceGate(transcript) {
   return { action: 'ignore', command: 'none', text: '' };
 }
 
-// Resolve a spoken name ("the dspy conversation", "aiconvo") to the best
+// Resolve a spoken name ("the dspy conversation", "chattering") to the best
 // matching recent conversation. Titles and project names are both searched;
 // word overlap scores the match, recency breaks ties.
 function voiceResolveTarget(spoken) {
@@ -13039,7 +13043,7 @@ function voiceStatusLine() {
 // the microphone open — the user thinks between phrases and only an explicit
 // send word (send, done, go, submit, control enter) closes and sends.
 async function voiceListen(item) {
-  if (process.env.AICONVO_VOICE_REPLY === '0') return;
+  if (process.env.CHATTERING_VOICE_REPLY === '0') return;
   await playTone('open');
   let transcript = '';
   const sessionStart = Date.now();
@@ -13266,10 +13270,10 @@ async function handleRequest(req, res) {
     };
     const setSignInCookie = (secret, next, who = null) => {
       noteSignIn('ok', { user: who ? { id: who.id, name: who.name } : undefined, via: u.pathname });
-      res.writeHead(302, { Location: next || '/', 'Set-Cookie': authGuard.cookieHeader('aiconvo', secret, req) });
+      res.writeHead(302, { Location: next || '/', 'Set-Cookie': authGuard.cookieHeader('chattering', secret, req) });
       res.end();
     };
-    // An install joining as a person (aiconvo join): the credential is in
+    // An install joining as a person (chattering join): the credential is in
     // the body — an invite link (a new person) or a device link (an
     // existing one). Answers with a credential for that install and the
     // projects it may sync; registers the install as a peer when it says
@@ -13280,7 +13284,7 @@ async function handleRequest(req, res) {
       let p = {};
       try { p = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
       try {
-        if (!LAN_TOKEN) throw new Error('this aiconvo is not reachable from other machines (settings → machines)');
+        if (!LAN_TOKEN) throw new Error('this Chattering is not reachable from other machines (settings → machines)');
         if (!(await gate())) return;
         let user, projects;
         if (p.invite) {
@@ -13299,7 +13303,7 @@ async function handleRequest(req, res) {
         // Resolve ids to the projects as this install names them, so the
         // peer asks for the right feed.
         projects = projects.map(pr => { const local = localProjectForId(pr.id); return { id: pr.id, name: (local && local.name) || pr.name, right: pr.right }; });
-        const { secret } = usersLib.issueCredential(roster, user.id, { kind: 'invite', label: 'aiconvo on ' + String((p.install && p.install.name) || 'another machine').slice(0, 30) });
+        const { secret } = usersLib.issueCredential(roster, user.id, { kind: 'invite', label: 'chattering on ' + String((p.install && p.install.name) || 'another machine').slice(0, 30) });
         let peer = null;
         if (p.install && typeof p.install === 'object') {
           peer = syncEngine.addPeer({ name: String(p.install.name || user.name).slice(0, 60), url: String(p.install.url || ''), credential: String(p.install.credential || ''), publicKey: String(p.install.publicKey || ''), role: 'host',
@@ -13384,11 +13388,11 @@ async function handleRequest(req, res) {
     if (!identity) {
       // A credential was presented and named nobody: that is a guess. A bare
       // visit to the page costs nothing.
-      const stale = cookieValue(req, 'aiconvo');
+      const stale = cookieValue(req, 'chattering');
       const presented = stale || String(req.headers.authorization || '');
       if (presented) { if (!(await gate())) return; noteSignIn('fail', { via: stale ? 'cookie' : 'bearer' }, presented); }
       // A stale cookie is cleared so the browser stops presenting it.
-      if (stale) res.setHeader('Set-Cookie', authGuard.cookieHeader('aiconvo', '', req, { maxAge: 0 }));
+      if (stale) res.setHeader('Set-Cookie', authGuard.cookieHeader('chattering', '', req, { maxAge: 0 }));
       if (u.pathname.startsWith('/api/')) return json(res, 401, { error: 'sign in first' });
       res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(lanLoginPage());
@@ -13396,7 +13400,7 @@ async function handleRequest(req, res) {
     req.identity = identity;
     requestContext.getStore().identity = identity;
     if (u.pathname === '/logout' && req.method === 'POST') {
-      res.writeHead(302, { Location: '/', 'Set-Cookie': authGuard.cookieHeader('aiconvo', '', req, { maxAge: 0 }) });
+      res.writeHead(302, { Location: '/', 'Set-Cookie': authGuard.cookieHeader('chattering', '', req, { maxAge: 0 }) });
       return res.end();
     }
     if (u.pathname === '/manifest.webmanifest') {
@@ -13461,7 +13465,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.12.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
-      '/aiconvo.apk': { file: 'aiconvo.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
+      '/chattering.apk': { file: 'chattering.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
     if (staticFile) {
       return sendStatic(req, res, path.join(__dirname, staticFile.file), staticFile.type, staticFile.cache, { compress: staticFile.compress !== false });
@@ -13600,7 +13604,7 @@ async function handleRequest(req, res) {
         assertPathAccess(identity, found.abs, 'see');
         // Retain only the proof, not the HTTP request/socket. Re-resolve it so
         // sign-in revocation, disabled accounts and sharing changes take effect.
-        const proof = { isLocal: isLocalRequest(req), cookie: cookieValue(req, 'aiconvo'), authorization: req.headers.authorization };
+        const proof = { isLocal: isLocalRequest(req), cookie: cookieValue(req, 'chattering'), authorization: req.headers.authorization };
         const authorize = abs => assertPathAccess(LAN_TOKEN ? usersLib.identify({ roster, installToken: LAN_TOKEN, ...proof }) : ownerIdentity(), abs, 'see');
         json(res, 200, { ...previewAssets.create(found, { authorize }), folder: path.dirname(found.abs) });
       } catch (e) { json(res, 400, { error: e.message }); }
@@ -13887,7 +13891,7 @@ async function handleRequest(req, res) {
       try { json(res, 200, filesTimelineResponse(u.searchParams)); }
       catch (e) { json(res, 503, { error: e.message }); }
     } else if (u.pathname === '/api/files/stats') {
-      if (u.searchParams.get('heap') === '1' && isConsoleRequest(req)) require('v8').writeHeapSnapshot('/tmp/aiconvo-heap.heapsnapshot');
+      if (u.searchParams.get('heap') === '1' && isConsoleRequest(req)) require('v8').writeHeapSnapshot('/tmp/chattering-heap.heapsnapshot');
       const mem = process.memoryUsage();
       json(res, 200, { rows: fileLedger ? fileLedger.count() : null, version: fileLedger ? fileLedger.version : null, backfilling: ledgerBackfillRunning, watchers: projectFileWatchers.size, watchedDirs: [...projectFileWatchers.values()].reduce((n, w) => n + (w.count ? w.count() : 1), 0), snapshots: projectFileSnapshots.size, snapshotBytes: projectFileSnapshotBytes, diffCacheRows: Object.keys(diffCache).length, gitHistories: gitHistoryCache.size, memory: { rss: mem.rss, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal, external: mem.external, arrayBuffers: mem.arrayBuffers } });
     } else if (u.pathname === '/api/files/touched') {
@@ -14679,7 +14683,7 @@ async function handleRequest(req, res) {
         saveRoster();
         // Which door the link goes through. 'tailnet': also mint a Tailscale
         // device invite, so the person can reach the https name at all;
-        // the two links are sent together. The aiconvo link itself is the
+        // the two links are sent together. The Chattering link itself is the
         // same either way: one credential, whichever door it arrives by.
         const doors = await doorsResponse();
         let tailnetInvite = null, tailnetError = null;
@@ -14783,11 +14787,11 @@ async function handleRequest(req, res) {
         json(res, 200, { id: r.id, policy: p.policy });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/sync/join-remote' && req.method === 'POST') {
-      // This install joins another person's project (aiconvo join). Two
+      // This install joins another person's project (chattering join). Two
       // round trips: claim the link to learn who they are and get our
       // credential there; then make them a guest here and register our
       // install with them so they can pull from us.
-      if (!usersLib.isOwnerTier(identity)) return json(res, 403, { error: 'only the owner joins another aiconvo from this machine' });
+      if (!usersLib.isOwnerTier(identity)) return json(res, 403, { error: 'only the owner joins another Chattering from this machine' });
       let body = '';
       for await (const chunk of req) body += chunk;
       try {
@@ -14907,7 +14911,7 @@ async function handleRequest(req, res) {
       if (semanticEnabled()) scheduleSemanticSync(500); // backfill starts now
       // The browser that just opened the machine to the network stays signed
       // in: from now on this machine's own requests need the install token.
-      if (lanWanted() && !prevLan && LAN_TOKEN && isLocalRequest(req)) res.setHeader('Set-Cookie', `aiconvo=${encodeURIComponent(LAN_TOKEN)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+      if (lanWanted() && !prevLan && LAN_TOKEN && isLocalRequest(req)) res.setHeader('Set-Cookie', `chattering=${encodeURIComponent(LAN_TOKEN)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
       json(res, 200, settingsResponse(identity));
     } else if (u.pathname === '/api/models') {
       const listed = await listPiModels(u.searchParams.get('refresh') === '1');
@@ -15483,7 +15487,7 @@ function ensureLanTls() {
   if (!reuse) {
     fs.mkdirSync(dir, { recursive: true });
     execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-days', '825', '-nodes',
-      '-keyout', keyFile, '-out', certFile, '-subj', '/CN=aiconvo', '-addext', 'subjectAltName=' + san], { stdio: 'ignore' });
+      '-keyout', keyFile, '-out', certFile, '-subj', '/CN=chattering', '-addext', 'subjectAltName=' + san], { stdio: 'ignore' });
     fs.writeFileSync(stampFile, san + '\n');
   }
   return { key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) };
@@ -15504,7 +15508,7 @@ async function shutdownGracefully() {
   const hardExit = setTimeout(() => process.exit(0), 8000);
   try {
     const active = [...headlessRuns.values()];
-    for (const record of active) record.yielded = 'aiconvo restarted';
+    for (const record of active) record.yielded = 'chattering restarted';
     await Promise.race([
       Promise.allSettled(active.map(async record => {
         try { if (record.handle && record.handle.abort) await record.handle.abort(); } catch {}
@@ -15516,7 +15520,7 @@ async function shutdownGracefully() {
     for (const job of agentRunJobs.values()) {
       if (job.status === 'running') {
         job.status = 'done';
-        job.statusText = 'stopped — aiconvo restarted';
+        job.statusText = 'stopped — chattering restarted';
         job.finishedAt = Date.now();
       }
       captureInterruptedRun(job, job.key);
@@ -15635,13 +15639,13 @@ server.on('upgrade', (req, socket, head) => {
 let everListened = false;
 server.on('listening', () => { everListened = true; });
 server.on('error', e => {
-  console.error('aiconvo listener: ' + e.message);
+  console.error('chattering listener: ' + e.message);
   if (!everListened) process.exit(1);
 });
 
 let recoveryReady = false;
 const recoveryTimer = setInterval(() => {
-  if (recoveryReady && !shuttingDown && process.env.AICONVO_DISABLE_NETWORK_RECOVERY !== '1') agentRecovery.tick().catch(e => console.error('[agent recovery]', e.message));
+  if (recoveryReady && !shuttingDown && process.env.CHATTERING_DISABLE_NETWORK_RECOVERY !== '1') agentRecovery.tick().catch(e => console.error('[agent recovery]', e.message));
 }, 15000);
 recoveryTimer.unref();
 function restoreInterruptedRuns() {
@@ -15666,8 +15670,8 @@ function applyLanMode(on, onListening) {
   LAN_TOKEN = loadLanToken();
   if (server.listening) server.close();
   server.listen(PORT, HOST, () => {
-    console.log(`aiconvo → http://localhost:${PORT}`);
-    if (isLoopback(HOST)) console.log('aiconvo reachable from this computer only');
+    console.log(`chattering → http://localhost:${PORT}`);
+    if (isLoopback(HOST)) console.log('chattering reachable from this computer only');
     if (onListening) onListening();
   });
   if (tlsServer) { try { tlsServer.close(); } catch {} tlsServer = null; }
@@ -15676,8 +15680,8 @@ function applyLanMode(on, onListening) {
   // for the Windows ones before making it.
   const ready = ON_WSL ? refreshWindowsHostAddresses() : Promise.resolve();
   ready.then(() => {
-    for (const ip of lanAddresses()) console.log(`aiconvo LAN → http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
-    console.log(`aiconvo LAN token file → ${LAN_TOKEN_FILE}`);
+    for (const ip of lanAddresses()) console.log(`chattering LAN → http://${ip}:${PORT}/?token=${LAN_TOKEN}`);
+    console.log(`chattering LAN token file → ${LAN_TOKEN_FILE}`);
     if (!isLoopback(HOST) && !tlsServer) startLanTls();
   });
 }
@@ -15686,13 +15690,13 @@ function startLanTls() {
     const tls = ensureLanTls();
     tlsServer = https.createServer(tls, (req, res) => server.emit('request', req, res));
     tlsServer.on('upgrade', speechStreamUpgrade);
-    tlsServer.on('error', e => console.log('aiconvo TLS listener: ' + e.message));
+    tlsServer.on('error', e => console.log('chattering TLS listener: ' + e.message));
     tlsServer.listen(TLS_PORT, HOST, () => {
-      for (const ip of lanAddresses()) console.log(`aiconvo PWA → https://${ip}:${TLS_PORT}/?token=${LAN_TOKEN}`);
+      for (const ip of lanAddresses()) console.log(`chattering PWA → https://${ip}:${TLS_PORT}/?token=${LAN_TOKEN}`);
       console.log('Install the tablet icon from the HTTPS URL: browser menu → Add to Home screen.');
     });
   } catch (error) {
-    console.log('aiconvo TLS skipped: ' + error.message);
+    console.log('chattering TLS skipped: ' + error.message);
   }
 }
 
@@ -15712,7 +15716,7 @@ applyLanMode(lanWanted(), () => {
     // conversations file under the local folder's name; peers are polled.
     try { adoptProjectMarkers(); } catch (e) { console.error('[project ids]', e.message); }
     for (const id of new Set(Object.values(mirrorManifest).map(m => m.projectId))) rebindMirrors(id).catch(() => {});
-    if (process.env.AICONVO_NO_SYNC !== '1') syncEngine.start(ownerIdentity());
+    if (process.env.CHATTERING_NO_SYNC !== '1') syncEngine.start(ownerIdentity());
   });
   listPiModels().finally(() => setTimeout(() => listPiModels(true), 2500));
 });

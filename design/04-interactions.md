@@ -92,4 +92,4 @@ Current behavior is correct and must be kept: no view yanking.
 | Search returns nothing | Keep rows area: "No matches for “q”. Try different words." + button "Clear search". |
 | Conversation file deleted on disk | Open shows an empty state: "This conversation is no longer available." + back action. |
 | Very long title | 2-line clamp in rows, 1-line ellipsis in headers, full title in `title` tooltip. |
-| Very long directory | Middle-ellipsis in meta lines: `~/Projects/…/aiconvo`. |
+| Very long directory | Middle-ellipsis in meta lines: `~/Projects/…/chattering`. |

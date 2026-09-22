@@ -4,7 +4,7 @@
 
 "Here is a Markdown notebook; run it." From the phone, the tablet, VS Code,
 a terminal, or an agent — on this machine or the next one. Before this
-note, a cell run from aiconvo could land on the wrong kernel (`py@docs`
+note, a cell run from Chattering could land on the wrong kernel (`py@docs`
 because `docs/` carried a `requirements.txt`), on the wrong interpreter
 (no `dspy`), or on no rat at all ("the rat CLI is not installed"), and the
 only repair was a per-cell `uv pip install` that no other machine would
@@ -17,7 +17,7 @@ Three responsibilities, each in one place:
 - **The notebook declares what it needs** — in its front matter, under
   `rat:` (`project`, `python.requires`, `python.dependencies` as
   `requirements.txt` lines). PEP 723 blocks in python cells merge in. The
-  format is rat's; aiconvo only reads and edits it
+  format is rat's; Chattering only reads and edits it
   (`notebook-env.js`). A local checkout (`-e .`), a git branch
   (`name @ git+…`) and a published package are each one line, so the
   awkward development layouts are ordinary.
@@ -27,7 +27,7 @@ Three responsibilities, each in one place:
   or an editable install needs a fresh interpreter). Idempotent: a receipt
   in the venv plus an interpreter check make the second call a no-op.
   `rat run --doc <notebook>` resolves the same kernel every client gets.
-- **aiconvo shows and asks** — the strip under the editor carries rat's
+- **chattering shows and asks** — the strip under the editor carries rat's
   answer (kernel · environment · Python) and, when something is missing,
   one line of ✗ items with **▶ make it run**. Nothing installs without a
   click; destructive steps (`--recreate`) are offered by their real name
@@ -47,7 +47,7 @@ Three responsibilities, each in one place:
 - The focused (checkpoint-review) view stays minimal: a ready notebook
   shows the strip only after the first run; one that needs setup shows
   the setup line at open, before a run can fail.
-- The document text is the user's: the only edit aiconvo makes is the
+- The document text is the user's: the only edit Chattering makes is the
   requirement line the user asked for, through `NotebookEnv.addDependency`,
   which refuses front-matter shapes it does not understand instead of
   guessing (the person is then asked to add the line by hand).
@@ -64,7 +64,7 @@ keep the fix durable: declare in the header, never pip in a cell, do not
 replace what is installed, prove it with `rat play` before claiming
 success. Commands are written as the agent will run them, from the
 project root. The person reads and edits the text; nothing is sent until
-they press send — the same rule as every other prompt in aiconvo.
+they press send — the same rule as every other prompt in Chattering.
 
 ## A notebook from an answer
 
@@ -84,7 +84,7 @@ on disk as an ordinary file, and points back:
   nothing can execute; the provider prefix matches the conversation's, so
   the cache can be reused. The snapshot is deleted afterwards; the real
   session file is never written. Usage lands in the internal ledger
-  (`aiconvoPurpose: notebook`).
+  (`chatteringPurpose: notebook`).
 - **File:** `<project>/documents/notebooks/<date>-<slug>.md` (a loose
   conversation uses the folder it ran in; the home folder is refused). The
   model writes `title` and `rat.python`; the server owns `rat.project`
@@ -114,5 +114,5 @@ on disk as an ordinary file, and points back:
   with a different prompt; keeping them apart keeps each honest.
 - Claude conversations: the derivation replays pi's prepared context;
   Claude sessions cannot be replayed this way.
-- Packaging aiconvo itself for Mac/Windows/Linux. See the roadmap in the
-  conversation that produced this note (aiconvo, 2026-09-18).
+- Packaging Chattering itself for Mac/Windows/Linux. See the roadmap in the
+  conversation that produced this note (Chattering, 2026-09-18).

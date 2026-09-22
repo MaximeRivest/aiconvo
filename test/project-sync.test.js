@@ -1,6 +1,6 @@
 'use strict';
 // Project invites and sync between two real installs: the host invites a
-// person to one project; that person's own aiconvo joins with the link;
+// person to one project; that person's own chattering joins with the link;
 // conversations mirror both ways (redacted at the border), memory leaves
 // travel, the guest sees nothing but the shared project, and a mirrored
 // conversation cannot be driven from the other side.
@@ -46,7 +46,7 @@ function sessionFile(dir, id, cwd, text, { tools = false } = {}) {
 
 // Homes live under the real home, not /tmp: a folder under /tmp is "loose"
 // by the project convention, and the id marker must land in a real folder.
-const TMP_ROOT = path.join(os.homedir(), '.cache', 'aiconvo-test-homes');
+const TMP_ROOT = path.join(os.homedir(), '.cache', 'chattering-test-homes');
 async function boot(t, { label, sessions, publicUrlFor }) {
   fs.mkdirSync(TMP_ROOT, { recursive: true });
   const home = fs.mkdtempSync(path.join(TMP_ROOT, 'sync-' + label + '-'));
@@ -56,9 +56,9 @@ async function boot(t, { label, sessions, publicUrlFor }) {
   registerConsole(port, 'tok-' + label);
   const publicUrl = publicUrlFor(port);
   let log = '';
-  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: String(tlsPort), AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1', AICONVO_NO_SYNC: '1',
-    AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent,
-    AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_PUBLIC_URL: publicUrl, AICONVO_TOKEN: 'tok-' + label, AICONVO_HOSTNAME: label }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: String(tlsPort), CHATTERING_NO_WATCH: '1', CHATTERING_NO_LEDGER: '1', CHATTERING_NO_SYNC: '1',
+    CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent,
+    CHATTERING_HOST: '', CHATTERING_LAN: '1', CHATTERING_PUBLIC_URL: publicUrl, CHATTERING_TOKEN: 'tok-' + label, CHATTERING_HOSTNAME: label }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', b => log += b); child.stderr.on('data', b => log += b);
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const local = 'http://127.0.0.1:' + port;
@@ -90,17 +90,17 @@ test('invite, join from another install, mirror both ways, guest walls', { skip:
   const invited = await (await post(host.local + '/api/invites', { project: 'open', right: 'act', name: 'Sam' })).json();
   assert.ok(invited.link && invited.link.includes('?invite='), JSON.stringify(invited));
   assert.equal(invited.runsAsAccount, true, 'the answer says plainly that act means running as the account');
-  assert.ok(fs.existsSync(path.join(host.home, 'Projects', 'open', '.aiconvo', 'project.json')), 'the id marker is written into the checkout');
-  const marker = JSON.parse(fs.readFileSync(path.join(host.home, 'Projects', 'open', '.aiconvo', 'project.json'), 'utf8'));
+  assert.ok(fs.existsSync(path.join(host.home, 'Projects', 'open', '.chattering', 'project.json')), 'the id marker is written into the checkout');
+  const marker = JSON.parse(fs.readFileSync(path.join(host.home, 'Projects', 'open', '.chattering', 'project.json'), 'utf8'));
   assert.match(marker.id, /^p_[0-9a-f]{16}$/);
 
   // The invite page shows what is shared and the join command; a wrong link is refused.
   const page = await (await fetch(invited.link)).text();
   assert.match(page, /invited you to work on <b>open<\/b>/);
-  assert.match(page, /aiconvo join http/);
+  assert.match(page, /chattering join http/);
   assert.equal((await fetch(host.remote + '/?invite=nope')).status, 410);
 
-  // Sam's own aiconvo joins with the link, binding the project to a local folder.
+  // Sam's own chattering joins with the link, binding the project to a local folder.
   const folder = path.join(guest.home, 'work', 'open-clone');
   const joined = await (await post(guest.local + '/api/sync/join-remote', { link: invited.link, name: 'Sam', folder })).json();
   assert.equal(joined.ok, true, JSON.stringify(joined));
@@ -108,13 +108,13 @@ test('invite, join from another install, mirror both ways, guest walls', { skip:
   assert.equal(joined.me.scope, 'guest');
   assert.equal(joined.projects[0].id, marker.id);
   assert.equal(joined.registered, true, 'the guest install is registered as a peer on the host');
-  assert.equal(JSON.parse(fs.readFileSync(path.join(folder, '.aiconvo', 'project.json'), 'utf8')).id, marker.id, 'the clone carries the same id');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(folder, '.chattering', 'project.json'), 'utf8')).id, marker.id, 'the clone carries the same id');
 
   // The host now has Sam as a guest listed on open only; the secret project stays out of the feed.
   const hostUsers = await (await fetch(host.local + '/api/users')).json();
   const sam = hostUsers.users.find(u => u.name === 'Sam');
   assert.ok(sam && sam.scope === 'guest');
-  const hostAccess = JSON.parse(fs.readFileSync(path.join(host.home, 'notes', 'aiconvo', 'access.json'), 'utf8'));
+  const hostAccess = JSON.parse(fs.readFileSync(path.join(host.home, 'notes', 'chattering', 'access.json'), 'utf8'));
   assert.equal(hostAccess.rules['project:open'].listed['user:' + sam.id], 'act');
   assert.equal(hostAccess.rules['project:secret'], undefined);
   const hostPeers = await (await fetch(host.local + '/api/sync/peers')).json();
@@ -167,7 +167,7 @@ test('invite, join from another install, mirror both ways, guest walls', { skip:
   const removed = await (await post(host.local + '/api/users/remove', { id: sam.id })).json();
   assert.equal(removed.removed, sam.id);
   assert.equal((await (await fetch(host.local + '/api/sync/peers')).json()).peers.length, 0);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(host.home, 'notes', 'aiconvo', 'access.json'), 'utf8')).rules['project:open']?.listed?.['user:' + sam.id], undefined);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(host.home, 'notes', 'chattering', 'access.json'), 'utf8')).rules['project:open']?.listed?.['user:' + sam.id], undefined);
 });
 
 test('a guest install with no public address pushes its side instead', { skip: !lanIp() && 'no LAN address' }, async t => {

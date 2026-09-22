@@ -1,6 +1,6 @@
 'use strict';
 // Links inside an open markdown document: the MRMD bundle dispatches
-// `file-link-navigate` with the raw `[text](target)` target and aiconvo
+// `file-link-navigate` with the raw `[text](target)` target and Chattering
 // resolves it against the open file, checks it on the server, and opens it
 // in the same editor. These tests run the production filesmode.js in a vm.
 const test = require('node:test');

@@ -40,10 +40,10 @@ test('recovery drafts retain their save version and saving preserves the review 
   assert.equal(context.liveLanguage('/project/LICENSE'), 'text');
   const ws = { path: '/file.js', editor: { getContent: () => 'newer typing' }, live: { sha: 'old-sha', original: 'old text', baseline: 'review baseline', blame: new Map(), refresh() {} } };
   context.liveFileStash(ws);
-  assert.equal(JSON.parse(stored.get('aiconvo.draft:/file.js')).sha, 'old-sha');
+  assert.equal(JSON.parse(stored.get('chattering.draft:/file.js')).sha, 'old-sha');
   context.liveFileSaved(ws, 'submitted text', 'new-sha');
   context.liveFileStash(ws);
-  const draft = JSON.parse(stored.get('aiconvo.draft:/file.js'));
+  const draft = JSON.parse(stored.get('chattering.draft:/file.js'));
   assert.equal(draft.sha, 'new-sha'); assert.equal(draft.text, 'newer typing');
   assert.equal(ws.live.baseline, 'review baseline');
 });

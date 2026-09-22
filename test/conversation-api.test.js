@@ -39,8 +39,8 @@ test('real tree and comparison APIs preserve complete text and stable answer ide
 test('merge source subsets and include-all snapshots survive API projection', async () => {
   const sources = [{ id: 'a', key: 'chat', model: 'A', entryIds: ['a'] }, { id: 'b', key: 'chat', model: 'B', entryIds: ['b'] }];
   const entries = [msg('p', null, 'user', 'question'), msg('a', 'p', 'assistant', 'A'), msg('b', 'p', 'assistant', 'B'),
-    msg('all', 'p', 'assistant', 'A + B\n<!-- aiconvo:both -->', { aiconvo: { kind: 'both', sources } }),
-    msg('merge', 'p', 'user', '<!-- aiconvo:merge -->\n<!-- aiconvo:operation ' + JSON.stringify({ kind: 'merge', sources }) + ' -->'),
+    msg('all', 'p', 'assistant', 'A + B\n<!-- chattering:both -->', { chattering: { kind: 'both', sources } }),
+    msg('merge', 'p', 'user', '<!-- chattering:merge -->\n<!-- chattering:operation ' + JSON.stringify({ kind: 'merge', sources }) + ' -->'),
     msg('merged', 'merge', 'assistant', 'Combined answer'), msg('later', 'p', 'assistant', 'C')];
   const { ctx } = graphFixture({ chat: raw(entries) });
   const result = await ctx.compareGroupsResponse('chat');
@@ -50,7 +50,7 @@ test('merge source subsets and include-all snapshots survive API projection', as
 });
 test('include-all bridges never swallow an assistant continuation into their snapshot', async () => {
   const entries = [msg('p', null, 'user', 'question'), msg('a', 'p', 'assistant', 'A'), msg('b', 'p', 'assistant', 'B'),
-    msg('all', 'p', 'assistant', 'A + B\n<!-- aiconvo:both -->'), msg('follow', 'all', 'assistant', 'Unprompted follow-up')];
+    msg('all', 'p', 'assistant', 'A + B\n<!-- chattering:both -->'), msg('follow', 'all', 'assistant', 'Unprompted follow-up')];
   const { ctx } = graphFixture({ chat: raw(entries) });
   const result = await ctx.compareGroupsResponse('chat');
   assert.equal(result.groups[0].both.id, 'all');
@@ -59,7 +59,7 @@ test('include-all bridges never swallow an assistant continuation into their sna
 });
 test('different prompts become labelled paths; separate conversation origin remains linked', async () => {
   const common = [msg('p', null, 'user', 'question'), msg('a', 'p', 'assistant', 'answer')];
-  const { ctx, index } = graphFixture({ chat: raw([...common, msg('q1', 'a', 'user', 'first direction')]), fork: raw([...common, msg('q2', 'a', 'user', 'edited direction', { aiconvo: { kind: 'edit', sourceEntryId: 'q1' } })]) });
+  const { ctx, index } = graphFixture({ chat: raw([...common, msg('q1', 'a', 'user', 'first direction')]), fork: raw([...common, msg('q2', 'a', 'user', 'edited direction', { chattering: { kind: 'edit', sourceEntryId: 'q1' } })]) });
   index.fork.parentSession = 'chat';
   const result = await ctx.compareGroupsResponse('fork');
   assert.equal(result.groups.length, 0);

@@ -73,7 +73,7 @@ Warm web sessions still stop with the web service. Detached delegation superviso
 
 ## Storage and delivery
 
-Durable records live under `~/.local/share/aiconvo/delegations`. They are not disposable cache files. Saved worker sessions live under `~/.pi/agent/sessions/--delegated--` with their real working directory in each header.
+Durable records live under `~/.local/share/chattering/delegations`. They are not disposable cache files. Saved worker sessions live under `~/.pi/agent/sessions/--delegated--` with their real working directory in each header.
 
 `delegation.js` validates and launches. `delegation-supervisor.js` owns each process. `extensions/delegation.ts` exposes the runner to Pi. The web host supplies this extension explicitly, as do child launches.
 

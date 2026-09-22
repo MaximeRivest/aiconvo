@@ -46,7 +46,7 @@ This is **agent-attributed blame**, not Git blame:
 ## Layout
 
 ```text
-~ server.js · aiconvo · blame
+~ server.js · chattering · blame
 42 attributed lines · 84 events · 3 skipped · ⚠ file changed outside recorded edits
 [back to diffs] [agent: all ▾] [filter text]
 
@@ -92,7 +92,7 @@ GET /api/file/blame?path=<path>&key=<conversation-key>
 
 ```json
 {
-  "path": "/home/maxime/Projects/aiconvo/server.js",
+  "path": "/home/maxime/Projects/chattering/server.js",
   "lines": [{ "n": 91, "text": "...", "event": { "id": "...", "ts": "...", "agent": "claude", "kind": "edit", "conversationTitle": "..." } }],
   "events": 84,
   "applied": 81,

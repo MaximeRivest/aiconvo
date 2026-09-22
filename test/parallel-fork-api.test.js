@@ -63,8 +63,8 @@ if (process.argv[1] === ${JSON.stringify(path.join(root, 'server.js'))}) {
   const port = socket.address().port; await new Promise(resolve => socket.close(resolve));
   let log = '';
   child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env,
-    HOME: home, PORT: String(port), AICONVO_HOST: '127.0.0.1', AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1',
-    AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'),
+    HOME: home, PORT: String(port), CHATTERING_HOST: '127.0.0.1', CHATTERING_NO_WATCH: '1', CHATTERING_NO_LEDGER: '1',
+    CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'),
     PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent, NODE_OPTIONS: '--require=' + preload,
   }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', b => log += b); child.stderr.on('data', b => log += b);

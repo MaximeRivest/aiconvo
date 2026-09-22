@@ -2,7 +2,7 @@
 
 ## Problem
 
-Most of aiconvo's memory — notes, intent, environment, status, epics — is AI-generated. It is valuable, but it is not verified truth. The same is true for most repository files: an agent wrote them, and nobody re-read them. Some content, however, *was* reviewed, corrected, or hand-edited by the user. The system had no way to record that difference, so agents and readers had to treat everything with the same (unknown) confidence.
+Most of Chattering's memory — notes, intent, environment, status, epics — is AI-generated. It is valuable, but it is not verified truth. The same is true for most repository files: an agent wrote them, and nobody re-read them. Some content, however, *was* reviewed, corrected, or hand-edited by the user. The system had no way to record that difference, so agents and readers had to treat everything with the same (unknown) confidence.
 
 ## Model
 
@@ -37,7 +37,7 @@ Vouches anchor to **exact line text, matched in order** (`trust.js`, tested):
 
 ## Storage
 
-`~/notes/aiconvo/vouches.jsonl` — append-only JSONL, one record per line:
+`~/notes/chattering/vouches.jsonl` — append-only JSONL, one record per line:
 
 ```json
 { "id": "…", "ts": "…", "action": "vouch|dispute|retract", "path": "/abs/path",
@@ -66,7 +66,7 @@ Briefings carry a **Trust warning** section explaining the labels, and every lis
 
 ```
 - Deep user intent: /home/…/intent.md [partly vouched 2026-08-19, changed since review]
-- /home/…/notes/aiconvo/2026-08-18-….md [unverified]
+- /home/…/notes/chattering/2026-08-18-….md [unverified]
 ```
 
 Everything is still included; the agent decides how much weight to give it.

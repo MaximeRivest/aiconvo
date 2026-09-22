@@ -167,7 +167,7 @@ function fixture() {
     stage.querySelector('[data-live-select]').value='1';stage.querySelector('[data-live-select]').dispatchEvent(new Event('change'));
     // The real stage wrapper normally re-renders this; the fixture calls its renderer directly.
     renderReaderParallel(stage,entries);check(stage.querySelector('[data-live-job="job1"]').hidden===false,'live selection was lost');
-    const all={eid:'all',role:'assistant',text:'=== Model A ===\\n'+messages[1].text+'\\n\\n=== Model B ===\\nANSWER B\\n\\n<!-- aiconvo:both -->',operation:{kind:'both',unresolved:true,sources:[{id:'a',key:'chat',model:'Model A',entryIds:['a']},{id:'b',key:'chat',model:'Model B',entryIds:['b']}]}};
+    const all={eid:'all',role:'assistant',text:'=== Model A ===\\n'+messages[1].text+'\\n\\n=== Model B ===\\nANSWER B\\n\\n<!-- chattering:both -->',operation:{kind:'both',unresolved:true,sources:[{id:'a',key:'chat',model:'Model A',entryIds:['a']},{id:'b',key:'chat',model:'Model B',entryIds:['b']}]}};
     store.chat.entryParents.push(['all','p']);store.chat.messages.push(all);
     flow={groups:[{...groups[0],runId:'fresh-run',both:{id:'all',key:'chat'}}],branches:[]};compareCache.delete('chat');await open('chat','preserve');
     check(computeTrace(current).leaf==='b','settlement failed to retain the answer being read');

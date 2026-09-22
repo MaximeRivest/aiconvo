@@ -9,12 +9,12 @@
 // /tmp, its own PID namespace, the network left on (agents talk to model
 // APIs; the key proxy is where the keys are). Files written are owned by
 // the account, so git, tests and every tool behave as for the owner.
-// ~/.ssh, ~/.pi/agent/auth.json, the other projects and the aiconvo cache
+// ~/.ssh, ~/.pi/agent/auth.json, the other projects and the Chattering cache
 // do not exist inside. The kernel enforces it; nothing here is a policy
 // an agent could talk its way around.
 //
 // Everything in this file is pure or touches only the guest's own
-// directory under ~/.local/share/aiconvo/guests/<id>/. The server decides
+// directory under ~/.local/share/chattering/guests/<id>/. The server decides
 // who is a guest and threads the sandbox through every spawn.
 const fs = require('fs');
 const os = require('os');
@@ -22,10 +22,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Environment that crosses into the sandbox. Deny by default: a guest's
-// agent gets what a fresh login shell would, plus what Pi and aiconvo need.
+// agent gets what a fresh login shell would, plus what Pi and Chattering need.
 const ENV_ALLOW = new Set(['PATH', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'USER', 'LOGNAME', 'SHELL', 'COLORTERM',
   'SSL_CERT_FILE', 'NIX_SSL_CERT_FILE', 'NIX_PATH', 'NIX_PROFILES', 'CURL_CA_BUNDLE', 'GIT_SSL_CAINFO', 'NODE_EXTRA_CA_CERTS']);
-const ENV_ALLOW_PREFIX = /^(?:PI_|AICONVO_|NODE_CHANNEL_|NODE_OPTIONS$|CLAUDE_CODE_VERSION$)/;
+const ENV_ALLOW_PREFIX = /^(?:PI_|CHATTERING_|NODE_CHANNEL_|NODE_OPTIONS$|CLAUDE_CODE_VERSION$)/;
 
 // System trees a process needs to run at all. Read-only, bound only when
 // they exist (NixOS and FHS distributions differ).
@@ -34,7 +34,7 @@ const ENV_ALLOW_PREFIX = /^(?:PI_|AICONVO_|NODE_CHANNEL_|NODE_OPTIONS$|CLAUDE_CO
 const SYSTEM_RO = ['/nix', '/run/current-system', '/run/wrappers', '/run/opengl-driver', '/run/systemd/resolve', '/run/nscd', '/etc', '/bin', '/sbin', '/usr', '/lib', '/lib32', '/lib64', '/opt', '/snap'];
 
 function findBwrap({ env = process.env, exists = fs.existsSync } = {}) {
-  if (env.AICONVO_BWRAP && exists(env.AICONVO_BWRAP)) return env.AICONVO_BWRAP;
+  if (env.CHATTERING_BWRAP && exists(env.CHATTERING_BWRAP)) return env.CHATTERING_BWRAP;
   for (const dir of String(env.PATH || '').split(':')) {
     const p = path.join(dir, 'bwrap');
     if (dir && exists(p)) return p;
@@ -48,7 +48,7 @@ const piSessionDirName = cwd => '--' + String(cwd || '').replace(/^[\/\\]+/, '')
 
 // The session folders of one project: every folder under the sessions
 // root whose conversations ran inside the project (Pi's encoding cannot
-// tell `aiconvo/test` from `aiconvo-test`, so the header's cwd decides).
+// tell `chattering/test` from `chattering-test`, so the header's cwd decides).
 function projectSessionDirs(sessionsRoot, projectRoot, { readdir = fs.readdirSync, readHead = defaultReadHead } = {}) {
   const root = String(projectRoot || '').replace(/\/+$/, '');
   if (!root) return [];
@@ -130,7 +130,7 @@ function prepareGuestAgentDir({ dir, insideDir, ownerAgentDir, proxy, allowedPro
 // ---- resource caps (design/55) ----
 // The walls say where a guest's processes may look; the caps say how much
 // of the machine they may use. One systemd slice per guest under
-// aiconvo-guest.slice (the dash naming nests it), so three parallel runs
+// chattering-guest.slice (the dash naming nests it), so three parallel runs
 // share one budget instead of tripling it. Properties are written as unit
 // drop-ins (`systemctl set-property` without --runtime): a slice that went
 // idle and was garbage-collected comes back capped, and `revert` removes
@@ -139,7 +139,7 @@ function prepareGuestAgentDir({ dir, insideDir, ownerAgentDir, proxy, allowedPro
 // the server holds is still the sandbox, descriptors (the IPC channel)
 // included, and --die-with-parent still means the server.
 function findSystemdRun({ env = process.env, exists = fs.existsSync } = {}) {
-  if (env.AICONVO_NO_CGROUP === '1') return null;
+  if (env.CHATTERING_NO_CGROUP === '1') return null;
   for (const dir of String(env.PATH || '').split(':')) {
     const p = path.join(dir, 'systemd-run');
     if (dir && exists(p)) return p;
@@ -150,7 +150,7 @@ function findSystemdRun({ env = process.env, exists = fs.existsSync } = {}) {
 // Unit names allow [a-zA-Z0-9:_.\-]; a guest id is u_<hex>, anything else is escaped.
 function guestSliceName(guestId) {
   const safe = String(guestId || 'guest').replace(/[^a-zA-Z0-9_]/g, c => '_' + c.charCodeAt(0).toString(16));
-  return 'aiconvo-guest-' + safe + '.slice';
+  return 'chattering-guest-' + safe + '.slice';
 }
 const GiB = 1024 ** 3;
 // What a guest gets when the owner set nothing: a quarter of the memory
@@ -200,7 +200,7 @@ function busEnv(hostEnv = process.env) {
 
 // ---- the sandbox ----
 // spec: { bwrap, home, projectRoot, guest: {id, name}, agentDir (inside home path),
-//         binds: [{src, dst, rw}], env: {...}, piPackageDir, aiconvoDir,
+//         binds: [{src, dst, rw}], env: {...}, piPackageDir, chatteringDir,
 //         cgroup: { systemdRun, slice } | null }
 function createSandbox(spec) {
   if (!spec.bwrap) throw new Error('bubblewrap is not installed on this machine, so guests cannot run anything here');
@@ -208,7 +208,7 @@ function createSandbox(spec) {
   const id = spec.id || 'sb_' + crypto.randomBytes(6).toString('hex');
   const prefix = spec.cgroup && spec.cgroup.systemdRun && spec.cgroup.slice ? scopePrefix(spec.cgroup.systemdRun, spec.cgroup.slice) : [];
   const bus = prefix.length ? busEnv(spec.cgroup.hostEnv || process.env) : {};
-  const args = ['--die-with-parent', '--new-session', '--unshare-pid', '--unshare-uts', '--unshare-ipc', '--hostname', 'aiconvo-guest'];
+  const args = ['--die-with-parent', '--new-session', '--unshare-pid', '--unshare-uts', '--unshare-ipc', '--hostname', 'chattering-guest'];
   for (const p of SYSTEM_RO) if (fs.existsSync(p)) args.push('--ro-bind', p, p);
   args.push('--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp', '--tmpfs', '/run/user', '--tmpfs', home);
   // Binds inside the home come after the tmpfs that hides it. Order matters
@@ -219,7 +219,7 @@ function createSandbox(spec) {
   // install); its prefix rides in read-only. Under /nix or /usr it is
   // already there.
   const nodePrefix = spec.nodePath ? path.dirname(path.dirname(spec.nodePath)) : null;
-  for (const p of [spec.piPackageDir, spec.aiconvoDir, nodePrefix && inside(nodePrefix, home) ? nodePrefix : null].filter(Boolean)) if (!inside(p, spec.projectRoot)) binds.push({ src: p, dst: p, rw: false });
+  for (const p of [spec.piPackageDir, spec.chatteringDir, nodePrefix && inside(nodePrefix, home) ? nodePrefix : null].filter(Boolean)) if (!inside(p, spec.projectRoot)) binds.push({ src: p, dst: p, rw: false });
   binds.push(...(spec.binds || []));
   const seen = new Set();
   for (const b of binds.sort((a, b) => a.dst.length - b.dst.length)) {
@@ -248,7 +248,7 @@ function createSandbox(spec) {
 function inside(p, root) { const r = String(root || '').replace(/\/+$/, ''); return !!r && (p === r || String(p).startsWith(r + '/')); }
 
 // The environment a sandbox carries in: the host's PATH and locale, the
-// principal's AICONVO_* variables, the guest's git identity, and Pi's
+// principal's CHATTERING_* variables, the guest's git identity, and Pi's
 // pointers to its directory and package.
 function sandboxEnv({ hostEnv = process.env, principalEnv = {}, guest, agentDir, piPackageDir, token, extra = {} }) {
   const env = {};
@@ -257,12 +257,12 @@ function sandboxEnv({ hostEnv = process.env, principalEnv = {}, guest, agentDir,
   Object.assign(env, principalEnv);
   env.PI_CODING_AGENT_DIR = agentDir;
   env.PI_AGENT_DIR = agentDir;
-  if (piPackageDir) env.AICONVO_PI_PACKAGE_DIR = piPackageDir;
-  if (token) env.AICONVO_TOKEN = token;
-  env.AICONVO_SANDBOXED = '1';
+  if (piPackageDir) env.CHATTERING_PI_PACKAGE_DIR = piPackageDir;
+  if (token) env.CHATTERING_TOKEN = token;
+  env.CHATTERING_SANDBOXED = '1';
   if (guest) {
     env.GIT_AUTHOR_NAME = env.GIT_COMMITTER_NAME = guest.name || 'guest';
-    env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = (guest.id || 'guest') + '@aiconvo';
+    env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = (guest.id || 'guest') + '@chattering';
   }
   return { ...env, ...extra };
 }

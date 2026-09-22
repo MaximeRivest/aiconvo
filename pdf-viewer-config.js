@@ -1,7 +1,7 @@
 // Bootstrap the pinned, otherwise unmodified Mozilla viewer with a read-only,
 // embedded policy before PDFViewerApplication.run reads its preferences.
 const PDF_ROOT = '/vendor/pdfjs/6.3.289';
-const notify = data => parent.postMessage({ type: 'aiconvo:pdf', ...data }, location.origin);
+const notify = data => parent.postMessage({ type: 'chattering:pdf', ...data }, location.origin);
 let documentLoadError = false;
 // The stock viewer reports documenterror and then rethrows the loading promise.
 // Our outer viewer already presents that expected failure with recovery actions.
@@ -42,8 +42,8 @@ document.addEventListener('click', event => {
     event.preventDefault(); event.stopImmediatePropagation(); parent.document.getElementById('mediaDownload').click(); return;
   }
   const link = event.target.closest?.('a[href]');
-  if (link && parent.AiconvoApp?.openExternal && /^(https?:|mailto:|tel:)/.test(link.href) && !link.href.startsWith(location.href.split('#')[0] + '#')) {
-    event.preventDefault(); event.stopImmediatePropagation(); parent.AiconvoApp.openExternal(link.href);
+  if (link && parent.ChatteringApp?.openExternal && /^(https?:|mailto:|tel:)/.test(link.href) && !link.href.startsWith(location.href.split('#')[0] + '#')) {
+    event.preventDefault(); event.stopImmediatePropagation(); parent.ChatteringApp.openExternal(link.href);
   }
 }, true);
 document.addEventListener('keydown', event => {

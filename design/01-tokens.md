@@ -136,7 +136,7 @@ Dense 8-point grid: `--sp-1: 4` `--sp-2: 8` `--sp-3: 12` `--sp-4: 16` `--sp-6: 2
 - `design/tokens.css` is the runtime source. `app.html` loads it from `/tokens.css`.
 - Dark is the default. Light activates via `prefers-color-scheme: light`.
 - Manual override: `<html data-theme="light">` or `"dark"`.
-- User themes live in `~/.config/aiconvo/themes`. See `25-themes.md`.
+- User themes live in `~/.config/chattering/themes`. See `25-themes.md`.
 - Components must never reference theme-specific hex values. Tokens only.
   If a component needs a new color, add a token to all built-in themes first.
 

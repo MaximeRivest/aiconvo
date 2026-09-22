@@ -44,21 +44,21 @@ This requires the updated server as well as the UI. Do not restart it during
 active runs merely to enable pictures; the profile form reports an older
 server rather than claiming the photo was saved.
 
-## What aiconvo is today, seen from the question "who did this?"
+## What Chattering is today, seen from the question "who did this?"
 
 Every fact below shapes what a *user* can be. None of them are opinions.
 
 1. **An install is a Unix account's home directory on one host.** Conversations
    are Pi and Claude session files under `~/.pi/agent/sessions` and
    `~/.claude/projects`; notes, vouches, the ledger and settings are files under
-   `~/notes/aiconvo`, `~/.config/aiconvo`, `~/.cache/aiconvo`. Agents run as
+   `~/notes/chattering`, `~/.config/chattering`, `~/.cache/chattering`. Agents run as
    that account, with that account's API keys and git identity. When Maxime
-   opens Lilly's aiconvo, everything he does happens *as her account*: the file
+   opens Lilly's Chattering, everything he does happens *as her account*: the file
    lands in her home, the agent spends her key, `git` records her name. The
    files cannot tell people apart because the machine cannot.
 
 2. **There is no identity, only admission.** One token per install
-   (`~/.cache/aiconvo/lan-token`). Whoever has it in a cookie or `Bearer`
+   (`~/.cache/chattering/lan-token`). Whoever has it in a cookie or `Bearer`
    header is "in". A request from loopback without proxy headers is "local"
    and skips the token. The server cannot distinguish Maxime's phone from
    Lilly's laptop from the e-ink tablet.
@@ -79,7 +79,7 @@ Every fact below shapes what a *user* can be. None of them are opinions.
    TUI running in Alacritty through the bridge. Neither path records who typed.
    Pi's session format has a hook for this: `custom` entries
    (`sessionManager.appendCustomEntry`) live in the same tree as messages;
-   aiconvo already writes one per mode switch (`extensions/modes.ts`).
+   Chattering already writes one per mode switch (`extensions/modes.ts`).
    Claude Code sessions are read-only here.
 
 6. **Files are single-player with a lock.** The editor is the vendored
@@ -93,18 +93,18 @@ Every fact below shapes what a *user* can be. None of them are opinions.
    `conversation-draft.js`). Two people cannot see the same draft even on the
    same install.
 
-8. **A project is a folder name.** Registered in `~/notes/aiconvo/projects.json`,
+8. **A project is a folder name.** Registered in `~/notes/chattering/projects.json`,
    matched by session `cwd`. No owner, no visibility.
 
 9. **Admitted means powerful.** `/api/exec` runs any bash line as the account;
-   agents read any file; the `aiconvo` CLI and the Pi records tools run as the
+   agents read any file; the `chattering` CLI and the Pi records tools run as the
    Unix user and see every conversation. 187 `/api/*` routes; 9 places check
    `isLocalRequest`. There is no middle tier between "outside" and "the
    account".
 
 10. **Tailscale cannot name people here.** Every device, Lilly's PC included,
     joined under one Tailscale login, so `Tailscale-User-Login` says the same
-    name for everyone. The identity has to be aiconvo's own.
+    name for everyone. The identity has to be Chattering's own.
 
 ## The concept
 
@@ -138,7 +138,7 @@ Three consequences that should be stated plainly and never fudged:
 ```
 
 `id` is random at creation and never changes; `name` is display only. The
-roster lives at `~/.config/aiconvo/users.json` per install, and is a plain
+roster lives at `~/.config/chattering/users.json` per install, and is a plain
 file like everything else. One roster entry is marked `owner`: the person
 whose account this is. On first run, the roster is created with the owner
 named after the account (Maxime on lambda and XPSwhite, Lilly on lilly-pc),
@@ -199,20 +199,20 @@ handed to it; nothing else about routing changes.
 Once a request carries a user, record it where the artifact lives:
 
 - **Web-run messages.** Right before `session.prompt`, the runtime appends a
-  custom entry `aiconvo-author {user, device, input}` meaning "the next user
+  custom entry `chattering-author {user, device, input}` meaning "the next user
   message is by…". It sits in Pi's entry tree, so it travels with the file,
   survives forks, and survives copying the session to another machine. The
   indexer (`indexFile`) reads it and sets `author` on the following user
   message, plus `participants` on the conversation.
 - **Terminal-bridge messages.** The server does not own that file (the TUI
   does; two writers corrupt JSONL). A sidecar
-  `~/notes/aiconvo/authorship.jsonl` `{key, ts, user, chars}` is matched to
+  `~/notes/chattering/authorship.jsonl` `{key, ts, user, chars}` is matched to
   the next user message by time and length. Weaker, local to the install,
   and honest about it: the index marks these `author.via: "bridge"`.
 - **Files.** `file_events` gets a `user` column (SQLite migration, nullable),
   `doc-edits.jsonl` a `user` field; `/api/file/save`, `/api/doc/save` and
-  `/api/doc/commit` fill it from the request. Commits made by aiconvo set
-  `--author "Name <id@aiconvo>"`, so git, the one identity carrier every tool
+  `/api/doc/commit` fill it from the request. Commits made by Chattering set
+  `--author "Name <id@chattering>"`, so git, the one identity carrier every tool
   already reads, agrees with the ledger.
 - **Vouches** get `user`; the trust label becomes "vouched by Maxime". This
   changes the meaning of `vouched` from "a human" to "this human", which is
@@ -258,7 +258,7 @@ What it costs, honestly:
    agents write the same files with plain `write`/`edit`, and those changes
    must appear in everyone's editor without clobbering typed text. mrmd-sync
    (now inside the mrmd daemon) already does the disk↔CRDT reconciliation.
-   For aiconvo that is either a vendored server bundle of Yjs (the project
+   For Chattering that is either a vendored server bundle of Yjs (the project
    has no npm dependencies and it is a stated property worth keeping) or the
    first dependency. Vendoring is consistent with how the editor bundle
    arrived.
@@ -306,7 +306,7 @@ Keep it small enough to be enforced in one module.
 - **Private:** the owner marks a project or a conversation "only me" or
   "me and Lilly". It disappears from lists, search, memory briefings and the
   home Gantt for others, and their `send`/`act` calls are refused.
-- **Storage:** `~/notes/aiconvo/access.json` `{ "project:name": {...},
+- **Storage:** `~/notes/chattering/access.json` `{ "project:name": {...},
   "conversation:key": {...} }`, per install. Sharing does not federate:
   Maxime's setting on lambda says nothing about Lilly's PC, which has its
   own files and its own owner.
@@ -335,7 +335,7 @@ Keep it small enough to be enforced in one module.
 
 **Hard:**
 - Collaborative files with agent edits merging live (the mrmd-sync problem,
-  redone inside aiconvo's history/ledger model).
+  redone inside Chattering's history/ledger model).
 - Cross-install presence and roster sync beyond handoff.
 - Real (not polite) permissions: per-user agent sandboxes, gating every file
   route and `/api/exec`. Not for a household; noted so no one mistakes the
@@ -364,7 +364,7 @@ In a household, the person and the account the agent runs as are the same
 thing, and that is fine: everyone in the house is trusted with the account.
 In a company on one server, they must be different: **who you are**
 (identity) and **what the agent runs as** (the execution principal: a Unix
-user, its home, its groups, its API keys). Today aiconvo collapses the two:
+user, its home, its groups, its API keys). Today Chattering collapses the two:
 every agent is spawned as the service's account. That is why the household
 plan can only offer polite walls.
 
@@ -373,7 +373,7 @@ already has one that every tool honours: users, groups, directory modes.
 Departments are groups; projects are directories owned by a group; an agent
 spawned as `lilly` in group `eng` can read `/srv/work/eng/*` and nothing in
 `/srv/work/finance/*`, and so can `cat`, `/api/exec`, the records tools and
-anything else. aiconvo then *reflects* the filesystem's answer instead of
+anything else. Chattering then *reflects* the filesystem's answer instead of
 inventing its own. Auditable with `ls -l`. That is what the best sysadmin
 would do, and why an ACL table in JSON would be the wrong choice for a
 company.
@@ -461,7 +461,7 @@ bundle 0.12.0 with `mrmdDocument.collab`. Tests: `users`, `access`,
 presence, handoff), `people-app` (two people in a real browser).
 
 ### Identity
-- Roster at `~/.config/aiconvo/users.json`, owner made on first run from
+- Roster at `~/.config/chattering/users.json`, owner made on first run from
   `git config user.name` (else the account name). Owner credential = the
   install token, so every signed-in device keeps working. Members get
   invite links; secrets are stored hashed and shown once (like API tokens).
@@ -485,13 +485,13 @@ presence, handoff), `people-app` (two people in a real browser).
 `principalFor(identity)` → `{user, spawnAs: null, env}`; `agentEnv(principal)`
 threads it into every spawn (`startAgentRun`, fan-out, terminal sends,
 draft starts, delegation resume). Today every principal runs as the
-account with `AICONVO_USER` / `AICONVO_USER_NAME` in the environment.
+account with `CHATTERING_USER` / `CHATTERING_USER_NAME` in the environment.
 
 ### Attribution
-- SDK runs: `pisdk-runtime.js` appends an `aiconvo-author` custom entry
+- SDK runs: `pisdk-runtime.js` appends an `chattering-author` custom entry
   (user, input, coauthors) right before the user message. `parseFile`
   attaches it to the message whose parent it is.
-- Bridge and rpc sends: `~/notes/aiconvo/authorship.jsonl`, matched to the
+- Bridge and rpc sends: `~/notes/chattering/authorship.jsonl`, matched to the
   next unattributed user message within two minutes (`via: bridge|rpc`).
   Weaker by design and labelled.
 - Index entries carry `participants` and `createdBy`; `/api/session`
@@ -500,7 +500,7 @@ account with `AICONVO_USER` / `AICONVO_USER_NAME` in the environment.
 - File ledger gains a nullable `user_id` column (migration, rows kept);
   human sessions group per person. `doc-edits.jsonl` and vouches carry
   `user`; the trust label says "vouched … by Lilly".
-- Trade-off: a guest's Markdown commit gets `--author "Name <id@aiconvo>"`;
+- Trade-off: a guest's Markdown commit gets `--author "Name <id@chattering>"`;
   the owner keeps their own git identity. Members are not made the git
   author of the owner's repositories by accident, and the owner's commits
   do not change.
@@ -521,7 +521,7 @@ Chokepoints: sessions list (ETag includes the person and the rules
 version), session read, tree, search (both stages), related, project page
 and folds, files browse, file read/save, doc save/commit, vouch, exec
 (cwd), node/send, conversation/send, act, fork, branch, retitle, distill,
-the collab upgrade, presence. Not gated: the `aiconvo` CLI and the Pi
+the collab upgrade, presence. Not gated: the `chattering` CLI and the Pi
 records tools (they run as the account) — the "polite walls" boundary,
 said in the sharing dialog.
 

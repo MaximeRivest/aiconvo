@@ -1,7 +1,7 @@
 'use strict';
 
-// Build an aiconvo theme from a terminal or OS color scheme.
-// Terminal palettes and aiconvo tokens have the same shape: a background,
+// Build a Chattering theme from a terminal or OS color scheme.
+// Terminal palettes and Chattering tokens have the same shape: a background,
 // a foreground, and 16 ANSI colors. The mapping is mechanical; contrast
 // repair makes the result pass the theme validator (themes.js).
 //
@@ -325,7 +325,7 @@ function buildTheme(palette, { id, name }) {
   ansi.forEach((rgb, i) => { declarations[`--ansi-${i}`] = toHex(rgb); });
 
   const body = Object.entries(declarations).map(([k, v]) => `  ${k}: ${v};`).join('\n');
-  const css = `/* aiconvo-theme
+  const css = `/* chattering-theme
 name: ${name}
 scheme: ${dark ? 'dark' : 'light'}
 mode: color
@@ -403,7 +403,7 @@ function main(argv) {
   fs.writeFileSync(file, css);
   console.log(`wrote ${file}`);
   console.log(`theme: ${name} (${scheme}) from ${sourceLabel}`);
-  console.log('Open aiconvo, focus the theme selector, and pick it under "custom themes".');
+  console.log('Open Chattering, focus the theme selector, and pick it under "custom themes".');
 }
 
 if (require.main === module) main(process.argv.slice(2));

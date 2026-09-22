@@ -1,6 +1,6 @@
 # Run with Windows PowerShell 5.1. No admin rights or real port forwards needed.
 $ErrorActionPreference = 'Stop'
-$root = Join-Path ([IO.Path]::GetTempPath()) ('aiconvo runner test ' + [Guid]::NewGuid())
+$root = Join-Path ([IO.Path]::GetTempPath()) ('chattering runner test ' + [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $root | Out-Null
 try {
     $runner = Join-Path $root 'lan-forward.exe'

@@ -36,7 +36,7 @@ function bothOf(content) {
   for (const l of content.split('\n')) {
     if (!l.trim()) continue;
     const d = JSON.parse(l);
-    if (d.type === 'message' && d.message && /aiconvo:both/.test(d.message.content[0].text)) return d;
+    if (d.type === 'message' && d.message && /chattering:both/.test(d.message.content[0].text)) return d;
   }
   return null;
 }

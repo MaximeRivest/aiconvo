@@ -198,14 +198,14 @@ function fileWsCloseEditor({ keepDraft = true } = {}) {
   fileWs.mediaView?.dispose();
   fileWs.htmlPreview?.dispose();
   if (fileWs.editor && fileWs.editor.selection) {
-    try { localStorage.setItem('aiconvo.cursor:' + fileWs.path, String(fileWs.editor.selection().line)); } catch {}
+    try { localStorage.setItem('chattering.cursor:' + fileWs.path, String(fileWs.editor.selection().line)); } catch {}
   }
   if (fileWs.kind === 'md') { flushAndCloseDocument(); }
   else if (fileWs.editor) {
     if (keepDraft && fileWs.dirty && !fileWs.wasShared) {
       // Code never autosaves (design §5.3). An unsaved draft survives a
       // navigation in sessionStorage and comes back with a banner.
-      try { sessionStorage.setItem('aiconvo.draft:' + fileWs.path, JSON.stringify({ sha: fileWs.sha, text: fileWs.editor.getContent(), at: Date.now() })); } catch {}
+      try { sessionStorage.setItem('chattering.draft:' + fileWs.path, JSON.stringify({ sha: fileWs.sha, text: fileWs.editor.getContent(), at: Date.now() })); } catch {}
     }
     try { fileWs.editor.destroy(); } catch {}
   }
@@ -223,7 +223,7 @@ function closeFileWorkspace() {
 // write merges in, and the disk follows as people type. When it does not
 // (old server, no WebSockets), the single-player lock-and-save path runs.
 async function fileWsJoinShared(ws) {
-  if (typeof collabJoin !== 'function' || !window.aiconvoMe || ws.reviewRef) return null;
+  if (typeof collabJoin !== 'function' || !window.chatteringMe || ws.reviewRef) return null;
   try { const s = await collabJoin('file:' + ws.path); if (fileWs !== ws) { collabLeave(s); return null; } ws.collab = s; return s; }
   catch { return null; }
 }
@@ -325,7 +325,7 @@ async function fileWsMountCode(ws, opts) {
   const shared = d.readOnly || d.canAct === false ? null : await fileWsJoinShared(ws);
   if (fileWs !== ws || !$('codeEditor')) return;
   if (shared) { text = shared.ytext.toString(); ws.wasShared = true; }
-  else try { draft = JSON.parse(sessionStorage.getItem('aiconvo.draft:' + ws.path) || 'null'); } catch {}
+  else try { draft = JSON.parse(sessionStorage.getItem('chattering.draft:' + ws.path) || 'null'); } catch {}
   if (draft && draft.text !== d.text) text = draft.text;
   else draft = null;
   const status = t => { const el = $('docStatus'); if (el) el.textContent = t; };
@@ -400,7 +400,7 @@ async function fileWsSaveCode(ws) {
   // revision was saved; retain the newer text as an unsaved draft.
   ws.dirty = ws.editor.getContent() !== text;
   $('fwSave').disabled = !ws.dirty;
-  if (!ws.dirty) try { sessionStorage.removeItem('aiconvo.draft:' + ws.path); } catch {}
+  if (!ws.dirty) try { sessionStorage.removeItem('chattering.draft:' + ws.path); } catch {}
   const el = $('docStatus'); if (el) el.textContent = ws.dirty ? 'Unsaved' : 'Saved';
   fileWsBanner(ws, out.historyWarning ? 'Saved, but history capture failed: ' + out.historyWarning : null);
   liveFileSaved(ws, text, out.sha);
@@ -417,7 +417,7 @@ async function fileWsReloadCode(ws, { dropDraft = false } = {}) {
   const sel = ws.editor.selection();
   ws.editor.setContent(d.text);
   ws.baseText = d.text; ws.sha = d.sha; ws.dirty = false;
-  if (dropDraft) try { sessionStorage.removeItem('aiconvo.draft:' + ws.path); } catch {}
+  if (dropDraft) try { sessionStorage.removeItem('chattering.draft:' + ws.path); } catch {}
   $('fwSave').disabled = true;
   $('docReload').hidden = true;
   try { ws.editor.gotoLine(sel.line); } catch {}
@@ -448,7 +448,7 @@ function fileWsBanner(ws, text, actions = []) {
 function fileWsMountLine(ws, opts) {
   const asked = opts.line || ws.line || null;
   let remembered = null;
-  try { const saved = Number(localStorage.getItem('aiconvo.cursor:' + ws.path)); if (saved > 1) remembered = saved; } catch {}
+  try { const saved = Number(localStorage.getItem('chattering.cursor:' + ws.path)); if (saved > 1) remembered = saved; } catch {}
   return opts.restore ? remembered || asked : asked || remembered;
 }
 

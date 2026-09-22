@@ -32,7 +32,7 @@ const until = async (fn, ms = 8000) => { const t0 = Date.now(); for (;;) { const
 // The throwaway HOME sits under the real home: the sandbox mounts the real
 // home as tmpfs and binds the project back in at its true path, so the
 // project must live somewhere the sandbox can name.
-const TMP_ROOT = path.join(os.homedir(), '.cache', 'aiconvo-test-homes');
+const TMP_ROOT = path.join(os.homedir(), '.cache', 'chattering-test-homes');
 
 test('a guest runs commands only inside the project, and cannot reach the machine or the API as the owner', { skip: (!lanIp() && 'no LAN address') || (!bwrap && 'bubblewrap is not installed here') }, async t => {
   fs.mkdirSync(TMP_ROOT, { recursive: true });
@@ -53,9 +53,9 @@ test('a guest runs commands only inside the project, and cannot reach the machin
   const port = await freePort(), tlsPort = await freePort();
   registerConsole(port, 'install-tok');
   let log = '';
-  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: String(tlsPort), AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1', AICONVO_NO_SYNC: '1',
-    AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent,
-    AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_PUBLIC_URL: '', AICONVO_TOKEN: 'install-tok', AICONVO_BWRAP: bwrap, AICONVO_NO_CGROUP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: String(tlsPort), CHATTERING_NO_WATCH: '1', CHATTERING_NO_LEDGER: '1', CHATTERING_NO_SYNC: '1',
+    CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent,
+    CHATTERING_HOST: '', CHATTERING_LAN: '1', CHATTERING_PUBLIC_URL: '', CHATTERING_TOKEN: 'install-tok', CHATTERING_BWRAP: bwrap, CHATTERING_NO_CGROUP: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', b => log += b); child.stderr.on('data', b => log += b);
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const local = 'http://127.0.0.1:' + port, remote = 'http://' + lanIp() + ':' + port;
@@ -82,7 +82,7 @@ test('a guest runs commands only inside the project, and cannot reach the machin
   assert.match(ssh.out, /"anthropic"|\{\}|guest/, 'the guest sees its own pi directory, not the owner\'s');
   const write = await run('echo "by sam" > sam.txt && git init -q . && git add sam.txt && git -c commit.gpgsign=false commit -q -m "sam" && git log --format=%an%x20%ae -1');
   assert.equal(write.code, 0, write.out);
-  assert.match(write.out, /Sam u_[0-9a-f]+@aiconvo/, 'commits carry the guest\'s identity');
+  assert.match(write.out, /Sam u_[0-9a-f]+@chattering/, 'commits carry the guest\'s identity');
   assert.equal(fs.readFileSync(path.join(open, 'sam.txt'), 'utf8').trim(), 'by sam', 'and land on the real disk');
   // A cwd outside the project is refused before anything runs.
   const outside = await post(remote + '/api/exec', { cmd: 'ls', cwd: secret }, sam);
@@ -91,11 +91,11 @@ test('a guest runs commands only inside the project, and cannot reach the machin
   assert.equal(nowhere.status, 403);
 
   // From inside the walls, the API answers as Sam — never as the owner.
-  const who = await run(`curl -s http://127.0.0.1:${port}/api/users; echo; curl -s -H "Authorization: Bearer $AICONVO_TOKEN" http://127.0.0.1:${port}/api/users`);
+  const who = await run(`curl -s http://127.0.0.1:${port}/api/users; echo; curl -s -H "Authorization: Bearer $CHATTERING_TOKEN" http://127.0.0.1:${port}/api/users`);
   assert.match(who.out, /sign in first/, 'no credential, no identity, even from this machine');
   assert.match(who.out, /"name":"Sam"/, 'with its own token, the guest');
   assert.doesNotMatch(who.out.split('\n').slice(1).join('\n'), /"tier":"console"/);
-  const listed = await run(`curl -s -H "Authorization: Bearer $AICONVO_TOKEN" http://127.0.0.1:${port}/api/sessions`);
+  const listed = await run(`curl -s -H "Authorization: Bearer $CHATTERING_TOKEN" http://127.0.0.1:${port}/api/sessions`);
   assert.doesNotMatch(listed.out, /secret plan/, 'the records tools inside the walls see only the shared project');
   assert.match(listed.out, /open plan/);
 

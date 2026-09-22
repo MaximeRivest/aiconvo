@@ -77,7 +77,7 @@ Leaf shape:
 
 Rules:
 
-- Leaves live under `~/.cache/aiconvo/memory-leaves/<session-key>.json`.
+- Leaves live under `~/.cache/chattering/memory-leaves/<session-key>.json`.
 - Leaves are keyed by **conversation, not project**. Project folds regroup
   conversations; the leaves follow without any rebuild.
 - The project primer is context for weighing only — quotes stay verbatim
@@ -115,7 +115,7 @@ the pyramid inputs snapshot.
 ### Layer 2 — documents: fresh full-span synthesis
 
 Four documents, same files and same on-disk locations as today
-(`~/notes/aiconvo/projects/<slug>/`). Each is one synthesis pass over one
+(`~/notes/chattering/projects/<slug>/`). Each is one synthesis pass over one
 lane, across all leaves of the project, ordered by date:
 
 | Document | Input | Synthesis rule |
@@ -165,7 +165,7 @@ Freshness becomes exact and cheap:
 
 - Extraction: ~0.8k tokens per user message → 10–40k per conversation, once.
 - Regeneration: 20–80k tokens per document set on normal projects.
-- The old pipeline reclassified everything each build: aiconvo ~487k tokens
+- The old pipeline reclassified everything each build: Chattering ~487k tokens
   per press; a 249-session project ~4.8M tokens per press. Under the pyramid
   the same press costs one regeneration, and daily upkeep is a trickle of
   per-conversation extractions.
@@ -196,7 +196,7 @@ includes verbatim and never rewrites.
 
 An epic owns a session subset, so the same regeneration core
 (`regenerateDocsCore`) builds the same four documents per epic under
-`~/notes/aiconvo/epics/<id>-mem/`. The epic panel mirrors the project panel:
+`~/notes/chattering/epics/<id>-mem/`. The epic panel mirrors the project panel:
 hero conversation gantt, identity + summary, four document buttons, and a
 reviewed conversation start whose context bundles the project map plus the
 epic memory (`include.epicMemory`).

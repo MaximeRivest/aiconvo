@@ -190,14 +190,14 @@ test('images that do not fit the store stay in memory and the draft says so', ()
   const back = h.loadDraft(d.id);
   assert.equal(back.text, 'with picture');
   assert.equal(back.images.length, 1, 'served from memory while the page lives');
-  const stored = JSON.parse(h.store.get('aiconvo.draft.v1:' + d.id));
+  const stored = JSON.parse(h.store.get('chattering.draft.v1:' + d.id));
   assert.equal(stored.images.length, 0, 'not in the store');
   const small = h.newDraft();
   small.text = 'small';
   small.images = [{ mime: 'image/png', data: 'abc', preview: '' }];
   h.saveDraft(small);
   assert.equal(small.imagesVolatile, false);
-  assert.equal(JSON.parse(h.store.get('aiconvo.draft.v1:' + small.id)).images.length, 1);
+  assert.equal(JSON.parse(h.store.get('chattering.draft.v1:' + small.id)).images.length, 1);
 });
 
 test('stale drafts are dropped from the list; corrupt records are ignored', () => {
@@ -205,10 +205,10 @@ test('stale drafts are dropped from the list; corrupt records are ignored', () =
   const old = h.newDraft();
   old.text = 'ancient';
   h.saveDraft(old);
-  const raw = JSON.parse(h.store.get('aiconvo.draft.v1:' + old.id));
+  const raw = JSON.parse(h.store.get('chattering.draft.v1:' + old.id));
   raw.updatedAt = Date.now() - 61 * 86400000;
-  h.store.set('aiconvo.draft.v1:' + old.id, JSON.stringify(raw));
-  h.store.set('aiconvo.draft.v1:broken', '{not json');
+  h.store.set('chattering.draft.v1:' + old.id, JSON.stringify(raw));
+  h.store.set('chattering.draft.v1:broken', '{not json');
   assert.deepEqual(plain(h.listDrafts()), []);
-  assert.equal(h.store.has('aiconvo.draft.v1:' + old.id), false);
+  assert.equal(h.store.has('chattering.draft.v1:' + old.id), false);
 });

@@ -4,7 +4,7 @@ The app has one window with five view states. Layout skeleton:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ aiconvo   [ search ………………………… ⏎ ]   Filters Mode ⚙N ⋯ │  52px
+│ chattering   [ search ………………………… ⏎ ]   Filters Mode ⚙N ⋯ │  52px
 ├───────────────┬──────────────────────────────────────────┤
 │ [Conv|Notes|Epics]                                       │
 │ ┌───────────┐ │                                          │

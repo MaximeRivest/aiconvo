@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "aiconvo",
-  "short_name": "aiconvo",
-  "description": "Local AI work memory",
+  "name": "Chattering",
+  "short_name": "Chattering",
+  "description": "by Rockfrog — a place to think and to work with AI agents, with everything on record",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

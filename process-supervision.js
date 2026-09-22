@@ -18,7 +18,7 @@ function supervisionPlan(command, args, { id, mode = 'auto', env = process.env,
       return true;
     } catch { return false; }
   });
-  if (available()) return { command: 'systemd-run', args: ['--user', '--scope', '--quiet', '--unit=aiconvo-delegation-' + id, '--', command, ...args], kind: 'user-scope', survivesServiceRestart: true };
+  if (available()) return { command: 'systemd-run', args: ['--user', '--scope', '--quiet', '--unit=chattering-delegation-' + id, '--', command, ...args], kind: 'user-scope', survivesServiceRestart: true };
   if (mode === 'scope' || /\.service(?:\/|\s|$)/.test(cgroup)) throw new Error('Cannot start durable delegated work: the systemd user manager is unavailable. A detached process would still belong to this service.');
   return { command, args, kind: 'process-group', survivesServiceRestart: false };
 }

@@ -9,13 +9,13 @@
   function operation(message) {
     if (message && message.operation) return message.operation;
     const text = String(message && message.text || '');
-    const marked = text.match(/(?:^|\n)<!--\s*aiconvo:operation\s+(\{[^\n]*\})\s*-->\s*$/);
+    const marked = text.match(/(?:^|\n)<!--\s*(?:chattering|aiconvo):operation\s+(\{[^\n]*\})\s*-->\s*$/);
     if (marked && message?.role === 'user') {
       try { const op = JSON.parse(marked[1]); if (['merge', 'regenerate'].includes(op.kind)) return op; } catch {}
     }
-    if (message?.role === 'user' && (/(?:^|\n)<!--\s*aiconvo:merge\s*-->\s*$/.test(text) || /^\d+ models answered my last message in parallel\. Their replies:/i.test(text.trim()))) return { kind: 'merge' };
-    if (message?.role === 'assistant' && /(?:^|\n)<!--\s*aiconvo:both\s*-->\s*$/.test(text)) return { kind: 'both' };
-    if (message?.role === 'user' && /(?:^|\n)<!--\s*aiconvo:regenerate\s*-->\s*$/.test(text)) return { kind: 'regenerate' };
+    if (message?.role === 'user' && (/(?:^|\n)<!--\s*(?:chattering|aiconvo):merge\s*-->\s*$/.test(text) || /^\d+ models answered my last message in parallel\. Their replies:/i.test(text.trim()))) return { kind: 'merge' };
+    if (message?.role === 'assistant' && /(?:^|\n)<!--\s*(?:chattering|aiconvo):both\s*-->\s*$/.test(text)) return { kind: 'both' };
+    if (message?.role === 'user' && /(?:^|\n)<!--\s*(?:chattering|aiconvo):regenerate\s*-->\s*$/.test(text)) return { kind: 'regenerate' };
     return null;
   }
   function transport(m) { return ['merge', 'both', 'regenerate'].includes(operation(m)?.kind); }

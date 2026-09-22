@@ -2,7 +2,7 @@
 // A small WebSocket server (RFC 6455) for one purpose: the collaboration
 // endpoint. Server side only, no extensions, no compression; clients must
 // mask (the standard requires it), fragments are reassembled, control
-// frames (ping, pong, close) are answered. Aiconvo has no npm dependencies
+// frames (ping, pong, close) are answered. Chattering has no npm dependencies
 // and the speech relay only pipes bytes; this is the first place frames
 // are read. Tests drive it with Node's built-in WebSocket client.
 const crypto = require('crypto');

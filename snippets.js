@@ -4,8 +4,8 @@
 // The store is pi's own prompt-template folders, one Markdown file each:
 //   global   ~/.pi/agent/prompts/<name>.md
 //   project  <conversation cwd>/.pi/prompts/<name>.md
-// pi already reads these as /name commands, so the TUI and aiconvo share one
-// set of files. aiconvo adds one frontmatter key pi ignores: `kind: snippet`
+// pi already reads these as /name commands, so the TUI and Chattering share one
+// set of files. Chattering adds one frontmatter key pi ignores: `kind: snippet`
 // (text meant to sit inside a prompt) versus the default `template` (a whole
 // message). Use counts are derived data and live in the cache, never in the
 // user's files — a file must not change just because it was used.
@@ -20,7 +20,7 @@ const KINDS = new Set(['snippet', 'template']);
 const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
 
 // Flat `key: value` frontmatter. pi parses these files with a full YAML
-// parser; the files aiconvo writes use only flat scalar keys, so both
+// parser; the files Chattering writes use only flat scalar keys, so both
 // readers agree. Nested YAML in hand-written files is kept as raw text.
 function parseFrontmatter(text) {
   const src = String(text || '').replace(/\r\n?/g, '\n');
@@ -102,7 +102,7 @@ function projectDirFor(cwd) {
 }
 
 // pi loads a project's .pi/prompts only after the user trusted that
-// project (~/.pi/agent/trust.json, nearest ancestor wins). aiconvo inserts
+// project (~/.pi/agent/trust.json, nearest ancestor wins). Chattering inserts
 // the text itself either way, but the /name command in the pi terminal
 // exists only once the project is trusted — the UI says so.
 const TRUST_FILE = path.join(os.homedir(), '.pi', 'agent', 'trust.json');
@@ -197,7 +197,7 @@ async function bumpUse(file, absPath) {
   return uses[absPath];
 }
 
-// A path aiconvo may edit as a snippet file: inside the global folder or
+// A path Chattering may edit as a snippet file: inside the global folder or
 // inside any <dir>/.pi/prompts folder.
 function isSnippetPath(abs, globalDir = GLOBAL_DIR) {
   const p = path.resolve(abs);

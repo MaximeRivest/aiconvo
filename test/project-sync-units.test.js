@@ -18,21 +18,21 @@ const line = o => JSON.stringify(o);
 test('project ids: minted once, the marker in a checkout wins, clones carry it', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pid-'));
   const reg = projectId.normalizeRegistry(null);
-  const a = projectId.ensureId(reg, { name: 'aiconvo', cwd: dir });
+  const a = projectId.ensureId(reg, { name: 'chattering', cwd: dir });
   assert.match(a.id, /^p_[0-9a-f]{16}$/);
   assert.equal(a.created, true);
   assert.equal(a.markerWritten, false, 'listing never writes into a repository');
-  assert.equal(projectId.ensureId(reg, { name: 'aiconvo', cwd: dir }).id, a.id, 'stable');
+  assert.equal(projectId.ensureId(reg, { name: 'chattering', cwd: dir }).id, a.id, 'stable');
   // An invite writes the marker; a clone (another folder with the same marker) resolves to the same id under another name.
-  assert.equal(projectId.ensureId(reg, { name: 'aiconvo', cwd: dir, marker: true }).markerWritten, true);
+  assert.equal(projectId.ensureId(reg, { name: 'chattering', cwd: dir, marker: true }).markerWritten, true);
   const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'pid-clone-'));
-  fs.mkdirSync(path.join(clone, '.aiconvo'));
-  fs.copyFileSync(path.join(dir, '.aiconvo', 'project.json'), path.join(clone, '.aiconvo', 'project.json'));
+  fs.mkdirSync(path.join(clone, '.chattering'));
+  fs.copyFileSync(path.join(dir, '.chattering', 'project.json'), path.join(clone, '.chattering', 'project.json'));
   const reg2 = projectId.normalizeRegistry(null);
-  const b = projectId.ensureId(reg2, { name: 'aiconvo-fork', cwd: clone });
+  const b = projectId.ensureId(reg2, { name: 'chattering-fork', cwd: clone });
   assert.equal(b.id, a.id);
   assert.equal(b.fromMarker, true);
-  assert.equal(reg2.projects[a.id].name, 'aiconvo-fork', 'the local folder names the project locally');
+  assert.equal(reg2.projects[a.id].name, 'chattering-fork', 'the local folder names the project locally');
   assert.throws(() => projectId.writeMarker(clone, { id: projectId.newProjectId(), name: 'x' }), /already carries/);
   assert.equal(projectId.projectOfCwd(reg2, path.join(clone, 'src', 'deep')).id, a.id);
   const file = path.join(dir, 'ids.json');
@@ -98,7 +98,7 @@ test('invites: one link, one person, spent on claim, expiring, revocable', () =>
 });
 
 test('redaction: tool steps outside the project folder or smelling of secrets are blanked; policies', () => {
-  const root = '/home/maxime/Projects/aiconvo';
+  const root = '/home/maxime/Projects/chattering';
   const transcript = [
     line({ type: 'session', id: 's', cwd: root }),
     line({ type: 'message', id: 'a', message: { role: 'assistant', content: [

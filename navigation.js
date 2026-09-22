@@ -18,7 +18,7 @@
   root.Navigation = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
 
-  const STORAGE_KEY = 'aiconvo.nav';
+  const STORAGE_KEY = 'chattering.nav';
   const LIMIT = 200;
   const VERSION = 1;
 

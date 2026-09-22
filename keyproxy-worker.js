@@ -128,13 +128,13 @@ const server = http.createServer(async (req, res) => {
   const provider = decodeURIComponent(m[1]);
   const rest = m[2] || '/';
   const grant = grantOf(req.headers);
-  if (!grant) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { type: 'authentication_error', message: 'aiconvo key proxy: no live grant for this credential' } })); }
-  if (grant.providers && !grant.providers.has(provider)) { res.writeHead(403, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { type: 'permission_error', message: `aiconvo key proxy: ${provider} is not available to guests` } })); }
+  if (!grant) { res.writeHead(401, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { type: 'authentication_error', message: 'Chattering key proxy: no live grant for this credential' } })); }
+  if (grant.providers && !grant.providers.has(provider)) { res.writeHead(403, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { type: 'permission_error', message: `Chattering key proxy: ${provider} is not available to guests` } })); }
   const base = baseFor(provider);
-  if (!base) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { type: 'not_found_error', message: 'aiconvo key proxy: unknown provider ' + provider } })); }
+  if (!base) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { type: 'not_found_error', message: 'Chattering key proxy: unknown provider ' + provider } })); }
   let real;
   try { real = await credentialFor(provider); } catch (e) { real = null; }
-  if (!real) { res.writeHead(502, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { type: 'api_error', message: 'aiconvo key proxy: the owner has no working credential for ' + provider } })); }
+  if (!real) { res.writeHead(502, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: { type: 'api_error', message: 'Chattering key proxy: the owner has no working credential for ' + provider } })); }
   const target = new URL(base.baseUrl + rest);
   const { headers } = swapHeader(req.headers, () => real);
   delete headers.host; delete headers.connection; delete headers['content-length'];
@@ -153,7 +153,7 @@ const server = http.createServer(async (req, res) => {
     upRes.pipe(res);
     upRes.on('end', () => { try { process.send({ type: 'usage', guest: grant.guest, provider, status: upRes.statusCode, ms: Date.now() - t0, bytesOut: payload.length, bytesIn: bytes }); } catch {} });
   });
-  up.on('error', e => { if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { type: 'api_error', message: 'aiconvo key proxy: ' + e.message } })); });
+  up.on('error', e => { if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { type: 'api_error', message: 'Chattering key proxy: ' + e.message } })); });
   req.on('close', () => { if (!res.writableEnded) up.destroy(); });
   up.end(payload);
 });

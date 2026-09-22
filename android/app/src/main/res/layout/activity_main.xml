@@ -4,12 +4,12 @@
     android:layout_height="match_parent"
     android:background="#FFFFFF">
 
-    <app.aiconvo.PasteSafeWebView
+    <app.rockfrog.chattering.PasteSafeWebView
         android:id="@+id/web"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <app.aiconvo.InkOverlay
+    <app.rockfrog.chattering.InkOverlay
         android:id="@+id/ink"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
@@ -43,7 +43,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:paddingBottom="12dp"
-                android:text="aiconvo"
+                android:text="Chattering"
                 android:textColor="#000000"
                 android:textSize="28sp"
                 android:textStyle="bold" />
@@ -52,7 +52,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:paddingBottom="16dp"
-                android:text="Connect to your aiconvo server. Use its Tailscale address so it works at home and away; the app turns Tailscale on when needed."
+                android:text="Connect to your Chattering server (by Rockfrog). Use its Tailscale address so it works at home and away; the app turns Tailscale on when needed."
                 android:textColor="#000000"
                 android:textSize="16sp" />
 
@@ -85,7 +85,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
-                android:hint="from ~/.cache/aiconvo/lan-token"
+                android:hint="from ~/.cache/chattering/lan-token"
                 android:inputType="textVisiblePassword|textNoSuggestions"
                 android:textColor="#000000"
                 android:textColorHint="#666666" />
@@ -94,7 +94,7 @@
                 android:id="@+id/connect"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="open aiconvo"
+                android:text="open Chattering"
                 android:textAllCaps="false" />
 
             <TextView

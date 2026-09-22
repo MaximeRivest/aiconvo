@@ -31,4 +31,4 @@ Keyframes are Git commits and the current file only. Snapshots are exact blobs o
 
 ## Ink send
 
-**send** starts a new Pi or Claude session in the repository root. The prompt includes the ink PNG, the compare points, and, when aiconvo already has project memory for that directory, the project briefing and current notes.
+**send** starts a new Pi or Claude session in the repository root. The prompt includes the ink PNG, the compare points, and, when Chattering already has project memory for that directory, the project briefing and current notes.

@@ -1,4 +1,4 @@
-package app.aiconvo
+package app.rockfrog.chattering
 
 import android.annotation.SuppressLint
 import android.Manifest
@@ -136,8 +136,8 @@ class MainActivity : AppCompatActivity() {
         get() = !isEinkDevice && resources.configuration.smallestScreenWidthDp < 600
 
     private fun deviceScript(): String = when {
-        isEinkDevice -> "try{localStorage.setItem('aiconvo.theme','eink');document.documentElement.dataset.theme='eink';document.documentElement.dataset.form='eink'}catch(e){}"
-        isPhone -> "try{let t=localStorage.getItem('aiconvo.theme');if(!t||t==='eink'){t='light';localStorage.setItem('aiconvo.theme',t)}document.documentElement.dataset.theme=t;document.documentElement.dataset.form='phone'}catch(e){}"
+        isEinkDevice -> "try{localStorage.setItem('chattering.theme','eink');document.documentElement.dataset.theme='eink';document.documentElement.dataset.form='eink'}catch(e){}"
+        isPhone -> "try{let t=localStorage.getItem('chattering.theme');if(!t||t==='eink'){t='light';localStorage.setItem('chattering.theme',t)}document.documentElement.dataset.theme=t;document.documentElement.dataset.form='phone'}catch(e){}"
         else -> "try{document.documentElement.dataset.form='tablet'}catch(e){}"
     }
 
@@ -152,7 +152,7 @@ class MainActivity : AppCompatActivity() {
         status = findViewById(R.id.status)
         val server = findViewById<EditText>(R.id.server)
         val token = findViewById<EditText>(R.id.token)
-        val prefs = getSharedPreferences("aiconvo", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("chattering", Context.MODE_PRIVATE)
         server.setText(prefs.getString("server", "http://100.86.49.54:7433"))
         token.setText(prefs.getString("token", ""))
         findViewById<Button>(R.id.connect).setOnClickListener {
@@ -274,10 +274,10 @@ class MainActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         }
-        web.addJavascriptInterface(InkBridge(), "AiconvoInk")
-        web.addJavascriptInterface(speech, "AiconvoSpeech")
-        web.addJavascriptInterface(NotifyBridge(), "AiconvoNotify")
-        web.addJavascriptInterface(AppBridge(), "AiconvoApp")
+        web.addJavascriptInterface(InkBridge(), "ChatteringInk")
+        web.addJavascriptInterface(speech, "ChatteringSpeech")
+        web.addJavascriptInterface(NotifyBridge(), "ChatteringNotify")
+        web.addJavascriptInterface(AppBridge(), "ChatteringApp")
         web.setDownloadListener { url, userAgent, disposition, mime, _ ->
             downloadMedia(url, userAgent, disposition, mime)
         }
@@ -367,11 +367,11 @@ class MainActivity : AppCompatActivity() {
                 if (!autoRetry()) fail(reachFailureText(ServerReach.host(serverBase), error?.description?.toString()))
             }
 
-            // The page routes links to other sites through AiconvoApp
+            // The page routes links to other sites through ChatteringApp
             // .openExternal (it knows a link from the machine switcher; this
             // side does not). Here only non-web schemes (mailto:, tel:,
             // intent:) are handed out: the WebView cannot show them and
-            // would replace aiconvo with an error page.
+            // would replace Chattering with an error page.
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url ?: return false
                 val scheme = url.scheme?.lowercase() ?: return false
@@ -419,7 +419,7 @@ class MainActivity : AppCompatActivity() {
             (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
             Toast.makeText(this, "Downloading $name — see Downloads", Toast.LENGTH_LONG).show()
         } catch (_: Exception) {
-            Toast.makeText(this, "Could not start this download. Try opening Aiconvo in your browser.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Could not start this download. Try opening Chattering in your browser.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -465,7 +465,7 @@ class MainActivity : AppCompatActivity() {
                 val what = if (uris.size == 1) "that picture" else "$failed of ${uris.size} pictures"
                 Toast.makeText(this, "Could not read $what.", Toast.LENGTH_LONG).show()
             }
-        }, "aiconvo-pick").start()
+        }, "chattering-pick").start()
     }
 
     override fun onRequestPermissionsResult(
@@ -497,7 +497,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // Page-side bridge: a link to another site leaves for the device
-    // browser instead of replacing aiconvo inside this WebView (which has no
+    // browser instead of replacing Chattering inside this WebView (which has no
     // way back on a device without a navigation bar). Never fall back to
     // loading an untrusted site in the WebView that exposes native bridges.
     inner class AppBridge {
@@ -545,7 +545,7 @@ class MainActivity : AppCompatActivity() {
                         val target = if (pin.isEmpty()) "$base/$hash" else "$base/?token=$pin$hash"
                         web.loadUrl(target)
                     }
-                    401, 403 -> fail("$host answered, but the token is wrong. It is in ~/.cache/aiconvo/lan-token on the server.")
+                    401, 403 -> fail("$host answered, but the token is wrong. It is in ~/.cache/chattering/lan-token on the server.")
                     null -> fail(reachFailureText(host, probe.error))
                     else -> fail("$host answered with HTTP ${probe.status}.")
                 }
@@ -556,8 +556,8 @@ class MainActivity : AppCompatActivity() {
     private fun reachFailureText(host: String, detail: String?): String {
         val where = when {
             ServerReach.isTailnetHost(host) && !ServerReach.hasVpn(this) -> "Tailscale is off, so $host cannot be reached."
-            ServerReach.isTailnetHost(host) -> "Tailscale is on but $host does not answer. Is aiconvo running there?"
-            else -> "$host does not answer on this network. Is aiconvo running, and is this device on the same network?"
+            ServerReach.isTailnetHost(host) -> "Tailscale is on but $host does not answer. Is Chattering running there?"
+            else -> "$host does not answer on this network. Is Chattering running, and is this device on the same network?"
         }
         return if (detail.isNullOrBlank()) where else "$where ($detail)"
     }
@@ -615,7 +615,7 @@ class MainActivity : AppCompatActivity() {
             setup.visibility == View.VISIBLE -> super.onBackPressed()
             // The page goes first (design/58): a sheet, a menu, a picker or a
             // dialog closes; only with nothing open does history move.
-            else -> web.evaluateJavascript("!!(window.aiconvoBack&&window.aiconvoBack())") { handled ->
+            else -> web.evaluateJavascript("!!(window.chatteringBack&&window.chatteringBack())") { handled ->
                 if (handled == "true") return@evaluateJavascript
                 when {
                     web.canGoBack() -> web.goBack()

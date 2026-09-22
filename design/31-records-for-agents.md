@@ -8,9 +8,9 @@ A conversation started from a project gets a snapshot: the four memory documents
 
 One read-only view of the records, rendered as plain text for a context window. `records.js` owns it. Three doors open onto the same text:
 
-- The `aiconvo` command (any agent with a shell, any folder, any project; also people).
+- The `chattering` command (any agent with a shell, any folder, any project; also people).
 - `GET /api/records/<op>` (curl, scripts, other tools).
-- Five Pi tools in `extensions/records.ts`: `aiconvo_search`, `aiconvo_show`, `aiconvo_memory`, `aiconvo_read`, `aiconvo_list`.
+- Five Pi tools in `extensions/records.ts`: `chattering_search`, `chattering_show`, `chattering_memory`, `chattering_read`, `chattering_list`.
 
 The text is one format everywhere, so a bash user and a tool user read the same thing and the three doors cannot drift.
 
@@ -19,7 +19,7 @@ Ops: `search`, `show`, `conversations`, `projects`, `memory`, `notes`, `note`, `
 ## Rules of the renderer
 
 - Bounded. Every answer stops at `max` characters on a line boundary and says how much is left and how to page.
-- Actionable. An answer never ends in a dead end. Each hit carries the follow-up command (`aiconvo show <id> --at N`); each list ends with the next command.
+- Actionable. An answer never ends in a dead end. Each hit carries the follow-up command (`chattering show <id> --at N`); each list ends with the next command.
 - Honest. Records are AI transcripts and AI-written notes. Every note, memory document and epic prints its trust label next to its path. A stale note (the conversation continued after distillation) says `STALE`. A conversation with a live agent says `LIVE`.
 - Short ids. A conversation key is a long path. The renderer prints the first 8 hex characters of the session uuid; the resolver accepts a short id, a full key, a session file path, or any unique substring, and lists the candidates when several match.
 - Local time for dates and times, both, so a day never disagrees with the clock next to it.
@@ -42,9 +42,9 @@ Per-message clips keep what people and the model said nearly whole (4000 chars) 
 
 ## Where agents learn about it
 
-- The inline context bundle and the file briefing carry one fixed section, "Looking things up (aiconvo records)": the three commands that matter and the trust rule.
+- The inline context bundle and the file briefing carry one fixed section, "Looking things up (Chattering records)": the three commands that matter and the trust rule.
 - The Pi tool descriptions and prompt guidelines repeat the rule.
-- The user's global `AGENTS.md` names the command for sessions that start outside aiconvo (terminal Pi, Claude Code).
+- The user's global `AGENTS.md` names the command for sessions that start outside Chattering (terminal Pi, Claude Code).
 
 ## Limits and trade-offs
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Install aiconvo as a systemd user service on this machine.
+# Install Chattering as a systemd user service on this machine.
 # Works on Ubuntu and on WSL2 (with systemd enabled).
 # Run it from the repo checkout: ./setup.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO="$(pwd)"
-PORT="${AICONVO_PORT:-7433}"
+PORT="${CHATTERING_PORT:-7433}"
 
 # --- 1. systemd user manager -------------------------------------------------
 if ! systemctl --user show-environment >/dev/null 2>&1; then
@@ -81,15 +81,15 @@ for mode in "$REPO"/extensions/modes/*.json; do
   fi
 done
 
-# --- 3c. the `aiconvo` command ---------------------------------------------
+# --- 3c. the `chattering` command ---------------------------------------------
 # Agents and people query the records from any folder with it. A symlink,
 # so `git pull` updates it. Only a foreign file at that path is left alone.
 mkdir -p "$HOME/.local/bin"
-CLI_LINK="$HOME/.local/bin/aiconvo"
+CLI_LINK="$HOME/.local/bin/chattering"
 if [ -L "$CLI_LINK" ] || [ ! -e "$CLI_LINK" ]; then
-  ln -sfn "$REPO/aiconvo" "$CLI_LINK"
-  chmod +x "$REPO/aiconvo"
-  echo "installed command: aiconvo → $CLI_LINK"
+  ln -sfn "$REPO/chattering" "$CLI_LINK"
+  chmod +x "$REPO/chattering"
+  echo "installed command: chattering → $CLI_LINK"
 else
   echo "note: $CLI_LINK exists and is not a symlink — not replaced."
 fi
@@ -119,9 +119,9 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
   command -v paplay >/dev/null 2>&1 \
     || echo "note: 'paplay' is missing — sound extensions need: sudo apt install pulseaudio-utils"
 fi
-cat > "$UNIT_DIR/aiconvo.service" <<EOF
+cat > "$UNIT_DIR/chattering.service" <<EOF
 [Unit]
-Description=aiconvo conversation browser
+Description=Chattering (by Rockfrog) — the workspace server
 
 [Service]
 ExecStart=$NODE_BIN $REPO/server.js
@@ -134,7 +134,7 @@ Restart=on-failure
 WantedBy=default.target
 EOF
 systemctl --user daemon-reload
-systemctl --user enable --now aiconvo
+systemctl --user enable --now chattering
 # Keep the user manager (and this service) alive without an open shell.
 loginctl enable-linger "$USER" 2>/dev/null || true
 
@@ -145,7 +145,7 @@ for _ in $(seq 1 20); do
   sleep 0.5
 done
 if [ -z "$ok" ]; then
-  echo "The server did not answer on port $PORT. See: journalctl --user -u aiconvo -n 50" >&2
+  echo "The server did not answer on port $PORT. See: journalctl --user -u chattering -n 50" >&2
   exit 1
 fi
 
@@ -154,14 +154,14 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
 fi
 
 echo
-echo "aiconvo is running → http://localhost:$PORT"
+echo "Chattering is running → http://localhost:$PORT"
 echo
 echo "Next steps:"
 echo "  1. Open http://localhost:$PORT in Chrome or Edge."
 if grep -qi microsoft /proc/version 2>/dev/null; then
-  echo "     Use the Windows desktop Aiconvo shortcut. It starts WSL automatically."
+  echo "     Use the Windows desktop Chattering shortcut. It starts WSL automatically."
 fi
-echo "  2. Install it as an app: browser menu → 'Install aiconvo' (or 'Install app')."
+echo "  2. Install it as an app: browser menu → 'Install Chattering' (or 'Install app')."
 echo "     This gives an own window, own icon, and a launcher entry."
 echo "  3. Optional: settings → semantic search. Enable it, set the server URL,"
 echo "     and keep the namespace (default: your username). One namespace per user."

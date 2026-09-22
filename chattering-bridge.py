@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Transparent PTY bridge for aiconvo.
+"""Transparent PTY bridge for chattering.
 
 Alacritty runs this process. This process runs the agent on a real PTY.
-A Unix socket lets aiconvo capture the screen and inject keys.
+A Unix socket lets chattering capture the screen and inject keys.
 The terminal still looks like a normal Alacritty session.
 """
 from __future__ import annotations
@@ -348,12 +348,12 @@ class Screen:
 
 def parse_args(argv: list[str]) -> tuple[str, list[str]]:
     if len(argv) < 3 or "--" not in argv:
-        sys.stderr.write("usage: aiconvo-bridge.py SOCKET -- COMMAND...\n")
+        sys.stderr.write("usage: chattering-bridge.py SOCKET -- COMMAND...\n")
         sys.exit(2)
     sock = argv[1]
     cmd = argv[argv.index("--") + 1 :]
     if not cmd:
-        sys.stderr.write("aiconvo-bridge: missing command\n")
+        sys.stderr.write("chattering-bridge: missing command\n")
         sys.exit(2)
     return sock, cmd
 

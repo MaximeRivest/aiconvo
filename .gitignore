@@ -1,4 +1,4 @@
-# Local caches live under ~/.cache/aiconvo/, not here.
+# Local caches live under ~/.cache/chattering/, not here.
 node_modules/
 *.log
 .DS_Store
@@ -6,7 +6,7 @@ node_modules/
 *.swp
 
 # Build artifacts. The APK rebuilds from android/ (see README).
-aiconvo.apk
+chattering.apk
 android/.gradle/
 android/build/
 android/app/build/

@@ -22,7 +22,7 @@ three zones with separate jobs:
 ```
 ┌────────────────────────────────────────────────────────────┐
 │ Title (one line, ellipsis)              [copy] [distill]   │  identity + actions
-│ ■ pi · aiconvo · main · 13 Aug 08:38 → 12:46  view [▾] [↻] │  meta + view controls
+│ ■ pi · chattering · main · 13 Aug 08:38 → 12:46  view [▾] [↻] │  meta + view controls
 │ [transcript|note|evidence|▸epic]                           │  artifact switcher
 └────────────────────────────────────────────────────────────┘
 ```

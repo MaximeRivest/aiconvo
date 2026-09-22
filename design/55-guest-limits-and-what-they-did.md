@@ -14,8 +14,8 @@ nothing about how much of the machine those processes may use: a guest's
 agent could take every core and all the memory, and a fork bomb typed into
 a prompt would have taken the owner's work down with it.
 
-Every guest now has a systemd slice, `aiconvo-guest-<id>.slice`, nested by
-the dash naming under `aiconvo-guest.slice` under `aiconvo.slice`. Every
+Every guest now has a systemd slice, `chattering-guest-<id>.slice`, nested by
+the dash naming under `chattering-guest.slice` under `chattering.slice`. Every
 launch of theirs — the Pi worker behind a send, a run-bash block, a
 notebook cell — is `systemd-run --user --scope … --slice=<theirs> -- bwrap
 …`. systemd-run registers its own pid in the scope and execs bwrap, so the
@@ -48,7 +48,7 @@ nothing inside ever sees the host's runtime directory. The test asserts
 both: the process is in its slice, and the bus never crossed.
 
 **Where there is no user manager** (a container, a WSL distribution
-without systemd, `AICONVO_NO_CGROUP=1` in tests), the walls stand without
+without systemd, `CHATTERING_NO_CGROUP=1` in tests), the walls stand without
 caps; settings → people and the invite dialog say so in words.
 
 ## What each person did here
@@ -65,7 +65,7 @@ Three records already name the person, and none of them was new:
 - A human save in the file ledger carries `user_id`; an agent edit carries
   the conversation it came from — and that conversation's writers were
   driving it.
-- A guest's commit carries `<id>@aiconvo` as its email (sandbox.js). For a
+- A guest's commit carries `<id>@chattering` as its email (sandbox.js). For a
   household member committing under their own git identity, an exact
   roster name matches; otherwise the commit belongs to nobody here.
 
@@ -102,9 +102,9 @@ never rebuilds under a click.
   contention and quota as the cap.
 - **The caps are persistent unit configuration** (files under
   `~/.config/systemd/user.control/`), not runtime state. That is what makes
-  them survive an idle slice; it also means they outlive an aiconvo that
+  them survive an idle slice; it also means they outlive a Chattering that
   was uninstalled without removing guests. `systemctl --user revert
-  aiconvo-guest-<id>.slice` cleans up by hand.
+  chattering-guest-<id>.slice` cleans up by hand.
 - **Same uid still.** A cgroup bounds resources; it is not a second user.
   The design/53 trade-off stands.
 - **Network stays on inside the walls.** Unchanged from design/53; the

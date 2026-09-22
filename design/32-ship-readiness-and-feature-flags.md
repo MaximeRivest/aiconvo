@@ -25,9 +25,9 @@ Corrections to the original audit:
 - Vendor files, platform setup, security changes, and feature flags were not part of this cleanup.
 
 This is not proof of zero dead code or release readiness. The original estimates and proposals below are historical.
-Companion reports with line numbers: `/tmp/aiconvo-audit-app.md`, `/tmp/aiconvo-audit-server.md`
-(copies live in the delegation output folders under `~/.local/share/aiconvo/delegations/`).
-The platform and security audit of 2026-09-06 (`/tmp/aiconvo-distribution-audit.md`) is not repeated here.
+Companion reports with line numbers: `/tmp/chattering-audit-app.md`, `/tmp/chattering-audit-server.md`
+(copies live in the delegation output folders under `~/.local/share/chattering/delegations/`).
+The platform and security audit of 2026-09-06 (`/tmp/chattering-distribution-audit.md`) is not repeated here.
 
 ## 1. What ships as-is, what needs a flag, what is personal
 
@@ -59,7 +59,7 @@ Today these are gated by *accident*: browser capability, a hardcoded URL, or not
 | **Terminal launch (Alacritty + bridge)** | `alacrittyBin()` probes fixed paths | "Alacritty did not open" errors; xdotool fallback silently no-ops. | Flag `terminal`, on only when the binary is found at startup. Hide "shift+enter → terminal" hint when off. |
 | **Claude continuation** | `claude` on PATH | Same as terminal (it goes through Alacritty). | Part of `terminal`. |
 | **Code cells in documents (rat)** | None; run button always shown | "rat CLI is not installed" on click. | Flag `codeCells`, on when `rat` is on PATH. |
-| **Android native ink / mic bridges** | `window.AiconvoInk`, `window.AiconvoSpeech` | Fine (present only in the APK). | Leave; but APK hardcodes two LAN IPs. |
+| **Android native ink / mic bridges** | `window.ChatteringInk`, `window.ChatteringSpeech` | Fine (present only in the APK). | Leave; but APK hardcodes two LAN IPs. |
 | **E-ink theme/gestures** | theme = `binary` | Fine, user-chosen. | Leave. |
 
 ### Tier C — personal, do not ship
@@ -94,7 +94,7 @@ capabilities: {
 
 - `enabled` = the user's switch in settings. `configured` = the server found what it needs (URL set, binary on PATH). `reason` is a short human string ("no speech URL", "alacritty not found") shown in settings.
 - Probes run **once at startup** and when the user saves settings, not on every request. Reachability of a URL is *not* probed for gating (flaky); it is shown as a status line in settings after a manual "test" button.
-- Move `KOKORO_URL`, `SPEECH_URL`, `REWRITE_URL`, `KOKORO_VOICE`, `REWRITE_MODEL` from env-only constants into `settings.json` keys (`speechUrl`, `ttsUrl`, `ttsVoice`, `rewriteUrl`, `rewriteModel`), with env as override. Defaults: **empty**. Your current values go into your own `~/.config/aiconvo/settings.json` by a one-time migration that reads the env if set.
+- Move `KOKORO_URL`, `SPEECH_URL`, `REWRITE_URL`, `KOKORO_VOICE`, `REWRITE_MODEL` from env-only constants into `settings.json` keys (`speechUrl`, `ttsUrl`, `ttsVoice`, `rewriteUrl`, `rewriteModel`), with env as override. Defaults: **empty**. Your current values go into your own `~/.config/chattering/settings.json` by a one-time migration that reads the env if set.
 
 ### Frontend: one gate function
 

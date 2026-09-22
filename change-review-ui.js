@@ -2,9 +2,9 @@
 let changeReview = null;
 let changeReviewSeq = 0;
 function crDraft(s, slot, value) {
-  const key = 'aiconvo.review-draft:' + s.id + ':' + s.step + ':' + (s.scope || 'task') + ':' + slot;
+  const key = 'chattering.review-draft:' + s.id + ':' + s.step + ':' + (s.scope || 'task') + ':' + slot;
   try {
-    const legacy = 'aiconvo.review-draft:' + s.id + ':' + s.step + ':' + slot;
+    const legacy = 'chattering.review-draft:' + s.id + ':' + s.step + ':' + slot;
     const legacyView = s.schema !== 2 && (s.scope || 'task') === 'task';
     if (value === undefined) return JSON.parse(sessionStorage.getItem(key) || (legacyView ? sessionStorage.getItem(legacy) : null) || 'null');
     if (value === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, JSON.stringify(value));

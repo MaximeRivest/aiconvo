@@ -1,8 +1,8 @@
-# aiconvo — Design brief
+# Chattering — Design brief
 
 ## 1. What this product is
 
-aiconvo is a personal desktop utility. It runs on localhost as a system service.
+Chattering is a personal desktop utility. It runs on localhost as a system service.
 The user opens it in a browser tab.
 
 It does four jobs:

@@ -42,7 +42,7 @@ const DEFAULT_SETTINGS = {
   autoResumeNetwork: false,
   resumePrompt: DEFAULT_RESUME_PROMPT,
   // pi theme for hosted extension views (custom TUI components rendered
-  // in the browser). 'light' matches aiconvo's paper look.
+  // in the browser). 'light' matches Chattering's paper look.
   piTheme: 'light',
   // Typed in the composer, this opens the snippet picker inline. Two
   // semicolons: almost never in prose or code, and one key on most layouts.
@@ -51,12 +51,12 @@ const DEFAULT_SETTINGS = {
   // Cost analytics keeps billing classification separate from Pi's retail
   // cost estimate. Rules are provider-scoped and never contain credentials.
   usageBilling: { providerModes: {}, monthlyFees: {} },
-  // Other aiconvo installs reachable from the header machine switcher.
+  // Other Chattering installs reachable from the header machine switcher.
   // Each entry: { name, url, token, publicKey? }. The token is that
   // machine's LAN token; publicKey its handoff signing key, when known.
   machines: [],
   // Reachable from other devices on the network. null: never chosen in the
-  // app, so the service environment (AICONVO_LAN=1) decides. Once someone
+  // app, so the service environment (CHATTERING_LAN=1) decides. Once someone
   // flips the switch in settings → machines, that choice wins and persists.
   lan: null,
   // What one guest may use of this machine, all their processes together

@@ -83,8 +83,8 @@ test('addresses and doors: proxied loopback is the forwarded hop; the door is na
   assert.equal(ag.doorOf(req('127.0.0.1', { 'x-forwarded-for': '100.64.1.2', 'tailscale-user-login': 'x@y' })), 'tailnet');
   assert.equal(ag.doorOf(req('127.0.0.1', { 'x-forwarded-for': '203.0.113.9' })), 'public');
   assert.equal(ag.doorOf(req('192.168.2.5')), 'lan');
-  assert.match(ag.cookieHeader('aiconvo', 'a b', req('127.0.0.1', { 'x-forwarded-proto': 'https' })), /aiconvo=a%20b; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000; Secure$/);
-  assert.doesNotMatch(ag.cookieHeader('aiconvo', 'x', req('192.168.2.5')), /Secure/);
+  assert.match(ag.cookieHeader('chattering', 'a b', req('127.0.0.1', { 'x-forwarded-proto': 'https' })), /chattering=a%20b; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000; Secure$/);
+  assert.doesNotMatch(ag.cookieHeader('chattering', 'x', req('192.168.2.5')), /Secure/);
   const h = ag.securityHeaders(req('127.0.0.1', { 'x-forwarded-proto': 'https' }));
   assert.equal(h['X-Frame-Options'], 'SAMEORIGIN'); assert.equal(h['Referrer-Policy'], 'no-referrer'); assert.ok(h['Strict-Transport-Security']);
   assert.ok(!ag.securityHeaders(req('192.168.2.5'))['Strict-Transport-Security'], 'no HSTS over plain http');

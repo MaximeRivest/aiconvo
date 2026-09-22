@@ -26,7 +26,7 @@ function fakeBrowser() {
     hash() { return location.hash.slice(1); },
   };
 }
-const titles = { '': 'home', 'project=aiconvo': 'aiconvo', 'k1': 'Chat flow', 'k2': 'Diff links', 'file=/a.md': 'a.md' };
+const titles = { '': 'home', 'project=chattering': 'chattering', 'k1': 'Chat flow', 'k2': 'Diff links', 'file=/a.md': 'a.md' };
 const describe = hash => ({ kind: hash ? hash.split('=')[0] : 'home', title: titles[hash] || hash });
 const make = (browser, extra = {}) => Navigation.createStack({ history: browser.history, location: browser.location, storage: browser.storage, describe, now: () => 1, ...extra });
 
@@ -34,7 +34,7 @@ test('project scope travels with each history entry, including explicit All and 
   const b = fakeBrowser(), nav = make(b);
   nav.load('');
   const chat = nav.push('k1', { projectScope: '' });
-  nav.push('project=aiconvo', { projectScope: 'aiconvo' });
+  nav.push('project=chattering', { projectScope: 'chattering' });
   b.history.go(-1);
   assert.equal(nav.arrive(b.history.state, b.hash()).entry.projectScope, '');
   const restored = make(b); restored.load(b.hash());
@@ -43,7 +43,7 @@ test('project scope travels with each history entry, including explicit All and 
   restored.replace('k1', { kind: 'conversation' });
   assert.equal(restored.current().projectScope, 'Loose conversations');
   b.history.go(1);
-  assert.equal(restored.arrive(b.history.state, b.hash()).entry.projectScope, 'aiconvo');
+  assert.equal(restored.arrive(b.history.state, b.hash()).entry.projectScope, 'chattering');
 });
 
 test('push, back, forward: one entry per screen, forward dropped by a new push', () => {
@@ -53,21 +53,21 @@ test('push, back, forward: one entry per screen, forward dropped by a new push',
   assert.equal(nav.length(), 1);
   assert.equal(nav.canBack(), false);
   assert.equal(nav.canForward(), false);
-  nav.push('project=aiconvo', { kind: 'project' });
+  nav.push('project=chattering', { kind: 'project' });
   nav.push('k1', { kind: 'conversation' });
-  assert.deepEqual(nav.entries().map(e => e.title), ['home', 'aiconvo', 'Chat flow']);
+  assert.deepEqual(nav.entries().map(e => e.title), ['home', 'chattering', 'Chat flow']);
   assert.equal(b.history.state.nav.id, nav.current().id, 'the browser entry carries our stamp');
   assert.equal(b.hash(), 'k1');
   assert.ok(nav.back());
   const arrived = nav.arrive(b.history.state, b.hash());
-  assert.equal(arrived.entry.title, 'aiconvo');
+  assert.equal(arrived.entry.title, 'chattering');
   assert.equal(arrived.delta, -1);
   assert.equal(nav.canForward(), true);
   assert.deepEqual(nav.ahead().map(e => e.title), ['Chat flow']);
   assert.deepEqual(nav.behind().map(e => e.title), ['home']);
   nav.push('k2', { kind: 'conversation' });
   assert.equal(nav.canForward(), false, 'a new screen forgets the forward path');
-  assert.deepEqual(nav.entries().map(e => e.title), ['home', 'aiconvo', 'Diff links']);
+  assert.deepEqual(nav.entries().map(e => e.title), ['home', 'chattering', 'Diff links']);
   assert.equal(b.list.length, 3);
   assert.equal(nav.go(1), false, 'no forward → no browser call');
   assert.equal(nav.go(0), false);
@@ -77,10 +77,10 @@ test('go(n) walks several steps and reports the distance on arrival', () => {
   const b = fakeBrowser();
   const nav = make(b);
   nav.load('');
-  for (const h of ['project=aiconvo', 'k1', 'file=/a.md', 'k2']) nav.push(h);
+  for (const h of ['project=chattering', 'k1', 'file=/a.md', 'k2']) nav.push(h);
   assert.ok(nav.go(-3));
   let a = nav.arrive(b.history.state, b.hash());
-  assert.equal(a.entry.title, 'aiconvo');
+  assert.equal(a.entry.title, 'chattering');
   assert.equal(a.delta, -3);
   assert.equal(nav.behind(15).length, 1);
   assert.equal(nav.ahead(15).length, 3);
@@ -107,7 +107,7 @@ test('scroll positions are remembered per entry and survive traversal', () => {
   const b = fakeBrowser();
   const nav = make(b);
   nav.load('');
-  nav.push('project=aiconvo');
+  nav.push('project=chattering');
   const project = nav.current().id;
   nav.push('k1');
   assert.ok(nav.remember(project, { view: 740, win: 0 }));
@@ -121,13 +121,13 @@ test('a reload adopts the persisted stack at the stamped entry', () => {
   const b = fakeBrowser();
   const nav = make(b);
   nav.load('');
-  nav.push('project=aiconvo');
+  nav.push('project=chattering');
   nav.push('k1');
   nav.back(); nav.arrive(b.history.state, b.hash());
   // Reload: a new stack object, the same tab storage, the same browser entry.
   const again = make(b);
   const entry = again.load(b.hash());
-  assert.equal(entry.title, 'aiconvo');
+  assert.equal(entry.title, 'chattering');
   assert.equal(again.index(), 1);
   assert.equal(again.canForward(), true);
   assert.equal(again.length(), 3);
@@ -137,14 +137,14 @@ test('a foreign entry (link click, typed hash, pre-upgrade entry) joins as the n
   const b = fakeBrowser();
   const nav = make(b);
   nav.load('');
-  nav.push('project=aiconvo');
+  nav.push('project=chattering');
   nav.push('k1');
   nav.back(); nav.arrive(b.history.state, b.hash());
   b.foreign('k2');
   const a = nav.arrive(b.history.state, b.hash());
   assert.equal(a.foreign, true);
   assert.equal(a.entry.title, 'Diff links');
-  assert.deepEqual(nav.entries().map(e => e.title), ['home', 'aiconvo', 'Diff links'], 'the forward path was dropped, as the browser did');
+  assert.deepEqual(nav.entries().map(e => e.title), ['home', 'chattering', 'Diff links'], 'the forward path was dropped, as the browser did');
   assert.equal(b.history.state.nav.id, a.entry.id, 'the foreign entry is stamped so the next reload knows it');
   // First load of a tab whose history predates the stack: same rule.
   const fresh = fakeBrowser();

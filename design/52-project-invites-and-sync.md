@@ -2,22 +2,22 @@
 
 *2026-09-20. Builds on design/46 (users and multiplayer). Modules:
 `projectid.js`, `sync.js`, changes in `users.js`, `access.js`, `server.js`,
-`people.js`, the `aiconvo` CLI. Tests: `project-sync-units`,
+`people.js`, the `chattering` CLI. Tests: `project-sync-units`,
 `project-sync` (two real installs).*
 
 ## The question
 
-"I am hiring someone to keep building aiconvo. I want to send them a link,
+"I am hiring someone to keep building Chattering. I want to send them a link,
 have them get the whole project memory, let them build on my machine or on
 theirs, share all the conversations and knowledge, and keep our agents
 from getting confused about whose commands and environment are whose."
 
 The word *invite* mixes three things that must stay separate:
 
-1. **Access** — the person can log into *my* aiconvo and act as themselves.
+1. **Access** — the person can log into *my* Chattering and act as themselves.
    Design/46 built most of this (members, invite links, `identify(req)`,
    `access.json`).
-2. **Replication** — they run *their own* aiconvo and the project's
+2. **Replication** — they run *their own* Chattering and the project's
    knowledge flows both ways.
 3. **Execution location** — whose computer the agent runs on when a message
    is sent. That is a property of a conversation, not of a person: a
@@ -30,13 +30,13 @@ install things before seeing anything"; both are wrong.
 ## The primitive that was missing: a project identity that is not a path
 
 On this install a project *is* its folder (`~/Projects/<name>`). On the
-hire's laptop the same project sits at `~/work/aiconvo`, so nothing lines
+hire's laptop the same project sits at `~/work/chattering`, so nothing lines
 up. `projectid.js` gives each project a random stable id (`p_` + 16 hex)
 kept in two places:
 
-- the registry `~/notes/aiconvo/projects/ids.json` (`id → { name, cwd,
+- the registry `~/notes/chattering/projects/ids.json` (`id → { name, cwd,
   origin, policy }`), local to the install;
-- the marker `.aiconvo/project.json` inside the checkout, which travels
+- the marker `.chattering/project.json` inside the checkout, which travels
   with every clone.
 
 The marker wins over the registry: a clone that carries it resolves to the
@@ -68,10 +68,10 @@ it.
 
 Opening the link shows a plain page: who invited you, to what, your name,
 and — for people who want the project on their own machine — the one
-command `aiconvo join <link> [--name] [--folder]`. Joining in the browser
+command `chattering join <link> [--name] [--folder]`. Joining in the browser
 creates the guest, writes the grants, sets the cookie, lands on the app.
 The person works on the host's machine immediately; connecting their own
-aiconvo is a later, optional step, never a fork in the road.
+Chattering is a later, optional step, never a fork in the road.
 
 `act` on the host's machine is stated plainly in the dialog: **the guest's
 agents run as your account there**. Hidden things stay hidden in the app,
@@ -92,8 +92,8 @@ A project, for sharing, is four things:
 | --- | --- | --- |
 | code and docs | the git repository | git, already solved |
 | conversations | `~/.pi/agent/sessions/…`, `~/.claude/projects/…` | append-only files, copied |
-| memory leaves and notes | `~/.cache/aiconvo/memory-leaves`, the notes tree | keyed by conversation, copied |
-| synthesized documents (overview, intent, environment, status) | `~/notes/aiconvo/projects/<slug>/` | **never copied — regenerated** |
+| memory leaves and notes | `~/.cache/chattering/memory-leaves`, the notes tree | keyed by conversation, copied |
+| synthesized documents (overview, intent, environment, status) | `~/notes/chattering/projects/<slug>/` | **never copied — regenerated** |
 
 **Every record has one origin install and only the origin writes it.** A
 conversation made on lambda is lambda's; the hire's install holds a
@@ -116,10 +116,10 @@ existing rule (documents regenerate from evidence, never accumulate).
   a home router): it computes the same feed of its own side and posts it.
   Needs `act` on the project there: contributing conversations is acting.
 - Pull and push land in the same import path. No server in the middle;
-  each side polls every minute (`sync.js` engine) and `aiconvo sync` runs
+  each side polls every minute (`sync.js` engine) and `chattering sync` runs
   one now.
 
-### The join handshake (`aiconvo join <link>`)
+### The join handshake (`chattering join <link>`)
 
 Two round trips to the host's `/api/sync/join`: first with the invite (or
 a device link of an existing person) to learn who they are and receive a
@@ -135,7 +135,7 @@ its mirrors until a checkout with the marker appears.
 ### Mirrors on disk
 
 A new conversation source, `mirror`, at
-`~/.local/share/aiconvo/mirrors/sessions/<peer>/<origin source>/<rel>`
+`~/.local/share/chattering/mirrors/sessions/<peer>/<origin source>/<rel>`
 (durable user data, not cache). Keys look like `mirror:<peer>/pi/…`. The
 ordinary indexer, search, notes and memory pipelines see them as any
 transcript; a manifest next to them records the peer, the project id and
@@ -185,7 +185,7 @@ agent reading it would run your addresses with confidence. Now:
   states the caution in one line.
 
 A leaf without a host was extracted before hosts existed, on this
-machine; it is labelled with this host, which is correct. `AICONVO_HOSTNAME`
+machine; it is labelled with this host, which is correct. `CHATTERING_HOSTNAME`
 overrides the name an install goes by (tests, and hosts with unhelpful
 names).
 

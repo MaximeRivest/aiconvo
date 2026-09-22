@@ -1,7 +1,7 @@
 # Markdown editing performance — 0.10.1
 
 Investigated and measured on 2026-09-10. Source changes are in
-`../mrmd-packages/mrmd-editor` relative to the aiconvo repository.
+`../mrmd-packages/mrmd-editor` relative to the chattering repository.
 
 ## Cause and changes
 
@@ -71,10 +71,10 @@ Set `MRMD_BUNDLE=/path/to/0.10.0/mrmd-document.iife.min.js` to run the baseline.
 - `npm run build && npm run test:render`: existing full-editor browser suite,
   including stable block heights while typing, click-to-edit, comments,
   drag-selection across output widgets and reading mode.
-- Aiconvo: `node --test test/document-bundle.test.js` checks route/artifact
+- Chattering: `node --test test/document-bundle.test.js` checks route/artifact
   consistency, concurrent loading, fallback on old servers and retry after
   failure; `node --check server.js` checks syntax.
-- Live-host browser smoke (read-only test): opened Aiconvo's README with the
+- Live-host browser smoke (read-only test): opened Chattering's README with the
   current server/fallback, then with the new bundle supplied by request
   interception to simulate the upgraded route. Both rendered 26 visible lines
   at the same content height, source toggles worked, the file stayed clean,
@@ -88,4 +88,4 @@ invalidation have deterministic assertions.
 0.10.0 is untouched. The new immutable URL is allowlisted in `server.js`.
 The frontend falls back to 0.10.0 if the running server does not serve 0.10.1
 yet. **No live server restart was performed:** wait for active runs to finish,
-restart `aiconvo`, and reload the client to use the optimized editor.
+restart `chattering`, and reload the client to use the optimized editor.

@@ -8,8 +8,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="aiconvo">
-<title>aiconvo</title>
+<meta name="apple-mobile-web-app-title" content="Chattering">
+<title>Chattering</title>
 <link id="appManifest" rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -33,14 +33,34 @@ window.setAppFont = function (id) {
 // Apply defaults even when browser storage is unavailable.
 window.setAppFont('sans');
 document.documentElement.dataset.layout = 'side';
+// Browser settings saved under the old product name (before 2026-09-22)
+// move to the new one, once, before anything reads them.
+try {
+  for (const store of [localStorage, sessionStorage]) {
+    for (const key of Object.keys(store)) {
+      if (!/^aiconvo([.-])/.test(key)) continue;
+      const next = key.replace(/^aiconvo/, 'chattering');
+      if (store.getItem(next) === null) store.setItem(next, store.getItem(key));
+      store.removeItem(key);
+    }
+  }
+} catch {}
+// The Android app built before the rename injects its bridges and calls
+// the page under the old names. Until every device runs the new build,
+// both names point at the same objects. Delete this block afterwards.
+try {
+  for (const b of ['Speech', 'Notify', 'App', 'Ink']) if (window['Aiconvo' + b] && !window['Chattering' + b]) window['Chattering' + b] = window['Aiconvo' + b];
+  window.aiconvoAcceptImage = (...a) => window.chatteringAcceptImage?.(...a);
+  window.aiconvoBack = (...a) => window.chatteringBack?.(...a);
+} catch {}
 // Apply saved appearance before first paint. '' theme = follow the OS.
 try {
-  window.setAppFont(localStorage.getItem('aiconvo.font') || 'sans');
-  const t = localStorage.getItem('aiconvo.theme');
+  window.setAppFont(localStorage.getItem('chattering.font') || 'sans');
+  const t = localStorage.getItem('chattering.theme');
   if (t) document.documentElement.dataset.theme = t;
   // The side-panel layout (design/42) is a device choice; the class lands
   // before first paint so the column never flashes in or out.
-  document.documentElement.dataset.layout = localStorage.getItem('aiconvo.layout') === 'top' ? '' : 'side';
+  document.documentElement.dataset.layout = localStorage.getItem('chattering.layout') === 'top' ? '' : 'side';
   const manifestTheme = t || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.getElementById('appManifest').href = `/manifest.webmanifest?theme=${encodeURIComponent(manifestTheme)}`;
 } catch {}
@@ -356,7 +376,7 @@ body.conv #convHeadExtra { display: inline-flex; flex-shrink: 0; }
 #settingsBtn { height: 26px; padding: 0 7px; border-color: transparent; background: transparent; color: var(--text-dim); font-size: 14px; }
 #settingsBtn:hover { background: var(--surface-2); color: var(--text); }
 #settingsBtn.on { color: var(--accent); }
-/* Machine switcher: which aiconvo install this page talks to, and the others. */
+/* Machine switcher: which chattering install this page talks to, and the others. */
 #machineBtn { height: 26px; padding: 0 7px; border-color: transparent; background: transparent; color: var(--magenta); font-size: var(--fs-micro); white-space: nowrap; }
 #machineBtn:hover { background: var(--surface-2); }
 #machineBtn[hidden] { display: none; }
@@ -749,7 +769,7 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .pfolds, .pfold-suggest, #pFoldPanel { margin-bottom: var(--sp-3); }
 
 /* project documents: the complete markdown list beside the editor */
-/* ---- document view: aiconvo chrome around the MRMD editing surface ---- */
+/* ---- document view: Chattering chrome around the MRMD editing surface ---- */
 .doc-view { height: calc(100vh - 82px); min-height: 400px; display: flex; flex-direction: column; margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-6)); }
 
 .doc-editor-host { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
@@ -902,6 +922,9 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .settings-nav button:hover { background: var(--surface-2); color: var(--text); }
 .settings-nav button.on { background: var(--surface-2); color: var(--text); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
 .settings-nav .sep { border-top: 1px solid var(--border); margin: 8px 6px; }
+.settings-nav .brand { margin-top: auto; padding: 14px 10px 6px; font-size: var(--fs-small, 12px); color: var(--text-dim); }
+.settings-nav .brand a { color: inherit; text-decoration: none; }
+.settings-nav .brand a:hover { text-decoration: underline; }
 .settings-pane { max-width: 620px; min-width: 0; }
 .settings-pane h2 { margin: 0 0 4px; font-size: var(--fs-title); }
 .settings-pane .lead { color: var(--text-dim); margin: 0 0 var(--sp-4); }
@@ -2138,7 +2161,7 @@ body.side-layout.conv.chrome-min #floatHead > * { pointer-events: none; }
 <script>
 // The blocking theme sheets are loaded. Copy CSS capabilities to attributes
 // before body paint, then update browser and PWA chrome from the active bg.
-window.aiconvoSyncTheme = function () {
+window.chatteringSyncTheme = function () {
   const root = document.documentElement;
   const style = getComputedStyle(root);
   const mode = style.getPropertyValue('--theme-mode').trim() || 'color';
@@ -2149,7 +2172,7 @@ window.aiconvoSyncTheme = function () {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta && bg) meta.content = bg;
 };
-window.aiconvoSyncTheme();
+window.chatteringSyncTheme();
 </script>
 </head>
 <body class="home">
@@ -2175,7 +2198,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <button id="ticker" hidden title="Open the latest active conversation"></button>
   <span class="count" id="count"></span>
   <button id="activeBtn" hidden title="Agents and replies (a)"><span id="activeGlyph">⚇</span><span id="agentUnreadCount" aria-label="Unread replies"></span></button>
-  <button id="machineBtn" hidden title="Switch to another aiconvo machine"></button>
+  <button id="machineBtn" hidden title="Switch to another Chattering machine"></button>
   <button id="settingsBtn" title="Your profile and Settings (,)" aria-label="Open settings and profile"><span class="user-bubble me">?</span></button>
   <button id="phoneMore" title="More for this conversation" aria-label="More for this conversation" aria-haspopup="menu">⋯</button>
   <button id="barFold" title="Fold the top bar — click the rail to bring it back (`)">▴</button>
@@ -2450,7 +2473,7 @@ function setRouteKind(kind) {
   document.body.classList.remove('chrome-min'); // navigation always shows the chrome again
   chromeScrollLast = -1;
   chromeUpAcc = chromeDownAcc = 0;
-  window.dispatchEvent(new Event('aiconvo:route'));
+  window.dispatchEvent(new Event('chattering:route'));
 }
 
 function setRoute(kind, hash, { project, selectScope = false } = {}) {
@@ -2794,7 +2817,7 @@ async function copyText(text) {
   try { ok = document.execCommand('copy'); } catch { ok = false; }
   ta.remove();
   if (active && typeof active.focus === 'function') active.focus({ preventScroll: true });
-  if (!ok) throw new Error(window.isSecureContext ? 'Could not copy.' : 'Could not copy: this page is on plain http, and the browser blocks the clipboard here. Open aiconvo over https to fix it.');
+  if (!ok) throw new Error(window.isSecureContext ? 'Could not copy.' : 'Could not copy: this page is on plain http, and the browser blocks the clipboard here. Open Chattering over https to fix it.');
 }
 
 let relatedCache = new Map();
@@ -2955,10 +2978,10 @@ function openJobNotification(job) {
 // so zen composes with every view without a duplicate code path.
 function setZen(on) {
   document.body.classList.toggle('zen', on);
-  try { on ? localStorage.setItem('aiconvo.zen', '1') : localStorage.removeItem('aiconvo.zen'); } catch {}
+  try { on ? localStorage.setItem('chattering.zen', '1') : localStorage.removeItem('chattering.zen'); } catch {}
   toast(on ? 'zen · z brings everything back' : 'zen off');
 }
-try { if (localStorage.getItem('aiconvo.zen') === '1') document.body.classList.add('zen'); } catch {}
+try { if (localStorage.getItem('chattering.zen') === '1') document.body.classList.add('zen'); } catch {}
 $('zenExit').onclick = () => setZen(false);
 
 $('gRecenter').onclick = () => jumpToNow();
@@ -2968,14 +2991,14 @@ const BUILTIN_THEMES = new Set(['dark', 'light', 'gray', 'eink']);
 function themeToken(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function themeMode() { return document.documentElement.dataset.themeMode || themeToken('--theme-mode') || 'color'; }
 function syncActiveTheme() {
-  if (window.aiconvoSyncTheme) window.aiconvoSyncTheme();
+  if (window.chatteringSyncTheme) window.chatteringSyncTheme();
   const selected = document.documentElement.dataset.theme
     || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   const href = `/manifest.webmanifest?theme=${encodeURIComponent(selected)}`;
   if ($('appManifest').getAttribute('href') !== href) $('appManifest').setAttribute('href', href);
 }
 function selectTheme(t, repaint = true) {
-  try { t ? localStorage.setItem('aiconvo.theme', t) : localStorage.removeItem('aiconvo.theme'); } catch {}
+  try { t ? localStorage.setItem('chattering.theme', t) : localStorage.removeItem('chattering.theme'); } catch {}
   if (t) document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
   syncActiveTheme();
@@ -3161,7 +3184,7 @@ const BUILTIN_THEME_OPTIONS = [['', 'auto (system)'], ['dark', 'dark'], ['light'
 function paintThemeSelect() {
   const sel = $('themeSel');
   if (!sel) return;
-  const saved = localStorage.getItem('aiconvo.theme') || '';
+  const saved = localStorage.getItem('chattering.theme') || '';
   const custom = customThemeCatalog.themes || [];
   const missing = saved && !BUILTIN_THEMES.has(saved) && !custom.some(t => t.id === saved);
   sel.innerHTML = BUILTIN_THEME_OPTIONS.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')
@@ -3210,7 +3233,7 @@ function renderMachineBtn() {
   const host = (settingsState && settingsState.hostname) || '';
   btn.hidden = !list.length;
   btn.textContent = '@' + (host || 'this machine');
-  btn.title = 'This is ' + (host || 'this machine') + ' — switch to another aiconvo machine';
+  btn.title = 'This is ' + (host || 'this machine') + ' — switch to another Chattering machine';
   if (typeof paintSideRail === 'function' && $('railMachine')) paintSideRail();
 }
 function toggleMachinePop(show) {
@@ -3228,7 +3251,7 @@ function toggleMachinePop(show) {
   pop.style.top = Math.max(8, Math.min(rect.bottom + 6, innerHeight - pop.offsetHeight - 8)) + 'px';
   pop.style.right = 'auto';
   // Check that the other install answers before leaving this page: a
-  // machine whose aiconvo is off would only give a blank tab.
+  // machine whose Chattering is off would only give a blank tab.
   pop.querySelectorAll('button[data-i]').forEach(b => b.onclick = async () => {
     const i = Number(b.dataset.i), m = list[i];
     const url = b.querySelector('.mach-url');
@@ -3244,7 +3267,7 @@ function toggleMachinePop(show) {
       location.href = machineUrl(m); return;
     }
     b.disabled = false;
-    url.textContent = m.name + ' does not answer — is aiconvo running there? (' + (probe.why || 'no answer') + ')';
+    url.textContent = m.name + ' does not answer — is chattering running there? (' + (probe.why || 'no answer') + ')';
     url.classList.add('mach-down');
   });
 }
@@ -3300,8 +3323,8 @@ setInterval(renderTicker, 30000);
 // sends them in small batches; a read on the laptop clears the phone's dot.
 // The server clock wins for every timestamp, so the copy is replaced by what
 // the server echoes back rather than merged.
-const AGENT_READ_LEGACY_KEY = 'aiconvo.agentRead.v1'; // per-browser state, imported once
-const AGENT_READ_CACHE_KEY = 'aiconvo.agentRead.v2';  // last server state, boot copy
+const AGENT_READ_LEGACY_KEY = 'chattering.agentRead.v1'; // per-browser state, imported once
+const AGENT_READ_CACHE_KEY = 'chattering.agentRead.v2';  // last server state, boot copy
 // Besides reads and finishes, four explicit marks (design/42, design/59):
 // opened (a person opened it: it belongs to the side list), flagged (marked
 // unread by hand), dismissed (closed from the list), pinned.
@@ -3679,7 +3702,7 @@ function paintTreeDelegations() {
 document.addEventListener('visibilitychange', () => delegationUI.visibilityChanged());
 // Per-device panel choices (file source, project scope, rail counts).
 // Project scope is a separate, explicit workspace choice.
-const AGENT_SEC_KEY = 'aiconvo.agentSections.v1';
+const AGENT_SEC_KEY = 'chattering.agentSections.v1';
 let agentSecState = {};
 try { agentSecState = JSON.parse(localStorage.getItem(AGENT_SEC_KEY) || '{}') || {}; } catch {}
 function saveAgentSecState() { try { localStorage.setItem(AGENT_SEC_KEY, JSON.stringify(agentSecState)); } catch {} }
@@ -3874,7 +3897,7 @@ function paintSideRail() {
   const host = (settingsState && settingsState.hostname) || '';
   const others = (settingsOf().machines || []).length;
   machine.querySelector('.rail-initials').textContent = host || 'Machine';
-  machine.title = (host ? 'This is ' + host : 'This machine') + (others ? ' — switch to another aiconvo machine' : ' — connect other machines under settings → machines');
+  machine.title = (host ? 'This is ' + host : 'This machine') + (others ? ' — switch to another Chattering machine' : ' — connect other machines under settings → machines');
   machine.setAttribute('aria-label', machine.title);
 }
 const railBadgeState = { unread: 0, working: false };
@@ -4211,7 +4234,7 @@ async function renderAgentsPop(refetch) {
     `<span class="ag-acts">${kill(p.pid, p.title || p.kind + ' pid ' + p.pid)}</span></div>`).join('');
   const orphanDelegated = [...orchestrations.keys()].filter(k => orchProgress.get(k).live && !listedKeys.has(k)).map(k => {
     const o = orchestration(k);
-    if (!k) return `<div class="ag-row working off" data-key=""><span class="ag-main"><span class="ag-title"><span>Delegated work from an unindexed conversation</span>${typingHtml}</span><span class="ag-sub"><span class="ag-dir">records under ~/.local/share/aiconvo/delegations</span>${o.badge}</span></span></div>` + o.children;
+    if (!k) return `<div class="ag-row working off" data-key=""><span class="ag-main"><span class="ag-title"><span>Delegated work from an unindexed conversation</span>${typingHtml}</span><span class="ag-sub"><span class="ag-dir">records under ~/.local/share/chattering/delegations</span>${o.badge}</span></span></div>` + o.children;
     return row(byKey(k), k, { closable: false });
   }).join('');
   const otherRows = orphanDelegated + processRows(others);
@@ -4725,7 +4748,7 @@ const isActive = s => s.mtimeMs && Date.now() - s.mtimeMs < ACTIVE_MS;
 // family: the origin's title, the whole family's time span, a ⤑N badge.
 // Opening the row lands on the newest branch (or the one already open).
 function showBranchRows() {
-  try { return localStorage.getItem('aiconvo.showBranchRows') === '1'; } catch { return false; }
+  try { return localStorage.getItem('chattering.showBranchRows') === '1'; } catch { return false; }
 }
 function collapseFamilies(list) {
   const groups = new Map();
@@ -4828,9 +4851,9 @@ const DAY_MS = 86400000;
 const PX_DAY_BASE = 160;
 const ZOOM_MIN = 0.08, ZOOM_MAX = 8;
 const ZOOM_PRESETS = { hours: 6, days: 1, weeks: 0.15 };
-let ganttZoom = Number(localStorage.getItem('aiconvo.ganttZoom')) || 0;
+let ganttZoom = Number(localStorage.getItem('chattering.ganttZoom')) || 0;
 if (!ganttZoom) { // migrate the old discrete scale setting
-  ganttZoom = ZOOM_PRESETS[localStorage.getItem('aiconvo.ganttScale')] || 1;
+  ganttZoom = ZOOM_PRESETS[localStorage.getItem('chattering.ganttScale')] || 1;
 }
 const nearPreset = () => Object.entries(ZOOM_PRESETS).find(([, z]) => Math.abs(Math.log(ganttZoom / z)) < 0.18)?.[0] || null;
 const LANE_H = 26;    // vertical pixels per lane
@@ -4844,10 +4867,10 @@ const MARGIN_R = 60;  // room past "now" for labels
 // Home is the timeline. Older builds stored left/full/off; full hid #view.
 let ganttMode = 'h';
 try {
-  const saved = localStorage.getItem('aiconvo.gantt');
-  if (saved && saved !== 'h') localStorage.setItem('aiconvo.gantt', 'h');
+  const saved = localStorage.getItem('chattering.gantt');
+  if (saved && saved !== 'h') localStorage.setItem('chattering.gantt', 'h');
 } catch {}
-let ganttGroup = localStorage.getItem('aiconvo.ganttGroup') || 'project'; // project | compact
+let ganttGroup = localStorage.getItem('chattering.ganttGroup') || 'project'; // project | compact
 if (!['project', 'compact'].includes(ganttGroup)) ganttGroup = 'project';
 const CLOSE_MS = 10 * 1000;
 const SHORT_MS = 5 * 60 * 1000;
@@ -4947,7 +4970,7 @@ function timelineLanes(items) {
 // Full-screen mode has one horizontal swimlane per project. Projects with the
 // newest message appear first. Conversations from one project share its row.
 // ---- project row ordering (home Gantt top-left buttons) ----
-let projSortMode = localStorage.getItem('aiconvo.projSort') || 'recent';
+let projSortMode = localStorage.getItem('chattering.projSort') || 'recent';
 if (!['recent', 'alpha', 'born', 'size'].includes(projSortMode)) projSortMode = 'recent';
 let projSortAsc = null; // null = the mode's default direction
 let projFilterOn = false;   // the magnifier toggles the filter input
@@ -5034,7 +5057,7 @@ $('projSort').addEventListener('click', e => {
   const id = b.dataset.psort;
   if (projSortMode === id) projSortAsc = !(projSortAsc === null ? defaultProjAsc(id) : projSortAsc);
   else { projSortMode = id; projSortAsc = null; }
-  localStorage.setItem('aiconvo.projSort', projSortMode);
+  localStorage.setItem('chattering.projSort', projSortMode);
   render();
 });
 $('projSort').addEventListener('input', e => {
@@ -5352,7 +5375,7 @@ function paintHomeTimeline(rows, layout, marks) {
       const zoom = state.scale / PX_DAY_BASE;
       if (zoom !== ganttZoom) { ganttZoom = zoom; updateScaleSeg(); }
     },
-    onSettle: () => { try { localStorage.setItem('aiconvo.ganttZoom', ganttZoom); } catch {} },
+    onSettle: () => { try { localStorage.setItem('chattering.ganttZoom', ganttZoom); } catch {} },
     // Only drawn marks can be hit by the rubber band or asked for details.
     onDraw: frame => { timelineGeom = { marks: frame.marks.filter(mark => mark.row) }; },
   });
@@ -5573,10 +5596,10 @@ async function openNoteFile(file) {
     activeRel = session.key;
     setRoute('note', 'note=' + encodeURIComponent(file), { project: projectOf(session), selectScope: sideLayoutOn() && sidePanel() === 'inbox' });
     const related = await relatedFor(session.key);
-    noteViewer(n.text, '~/notes/aiconvo/' + n.file, { kind: 'note', key: session.key, related });
+    noteViewer(n.text, '~/notes/chattering/' + n.file, { kind: 'note', key: session.key, related });
   } else {
     setRoute('note', 'note=' + encodeURIComponent(file));
-    noteViewer(n.text, '~/notes/aiconvo/' + n.file);
+    noteViewer(n.text, '~/notes/chattering/' + n.file);
   }
 }
 
@@ -5675,7 +5698,7 @@ function fenceLang(spec) {
 function fileHighlightLang(pathValue) {
   const name = String(pathValue || '').split('/').pop().toLowerCase();
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name;
-  if (name === 'aiconvo') return 'sh';
+  if (name === 'chattering') return 'sh';
   const lang = fenceLang(ext);
   return lang === 'txt' && (ext === 'md' || ext === 'markdown') ? 'md' : lang;
 }
@@ -5854,7 +5877,7 @@ function fileCompareCell(kind, n, html) {
 // ---- trust: vouch / dispute ----
 // A vouch says: "a human checked this exact content at this time." Nothing is
 // ever hidden by trust state; content is only labeled. The ledger lives in
-// ~/notes/aiconvo/vouches.jsonl on the server.
+// ~/notes/chattering/vouches.jsonl on the server.
 async function fetchTrust(pathValue, content) {
   try {
     return await (await fetch('/api/vouch/status', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6268,10 +6291,10 @@ async function renderReposTab(refresh = false) {
 }
 
 // ---- documents: the MRMD-backed markdown editor ----
-// Aiconvo owns files, autosave, conflict checks, Git commits, and the
+// Chattering owns files, autosave, conflict checks, Git commits, and the
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
-// lazily: normal aiconvo startup never pays for the editor.
+// lazily: normal chattering startup never pays for the editor.
 const MRMD_DOC_SRC = '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
@@ -6322,7 +6345,7 @@ function appThemeIsDark() {
   return (0.299 * rr + 0.587 * gg + 0.114 * bb) / 255 < 0.5;
 }
 
-// Build an MRMD theme object out of aiconvo's own design tokens. Every
+// Build an MRMD theme object out of Chattering's own design tokens. Every
 // value is a var() reference, so the editor repaints with the app theme
 // (light, dark, custom, and binary e-ink) with no color literals here.
 // The syntax map mirrors the app's sx-* palette (keyword=accent,
@@ -6330,7 +6353,7 @@ function appThemeIsDark() {
 function mrmdHostTheme() {
   const binary = themeMode() === 'binary';
   return {
-    name: 'aiconvo',
+    name: 'chattering',
     isDark: appThemeIsDark(),
 
     // editor surface
@@ -7025,8 +7048,8 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   const shared = focused && fileWs && d.canAct !== false ? await fileWsJoinShared(fileWs) : null;
   if (seq !== docMountSeq || !$('docEditor')) return;
   let draft = null;
-  if (focused && !shared) try { draft = JSON.parse(sessionStorage.getItem('aiconvo.draft:' + d.path) || 'null'); } catch {}
-  if (draft?.text === d.text) { try { sessionStorage.removeItem('aiconvo.draft:' + d.path); } catch {} draft = null; }
+  if (focused && !shared) try { draft = JSON.parse(sessionStorage.getItem('chattering.draft:' + d.path) || 'null'); } catch {}
+  if (draft?.text === d.text) { try { sessionStorage.removeItem('chattering.draft:' + d.path); } catch {} draft = null; }
   const st = { path: d.path, project, sha: draft?.sha || d.sha, baseText: d.text, dirty: !!draft, saveTimer: 0, saving: false, source: false, focused };
   const ws = focused ? fileWs : null;
   st.reviewId = ws?.reviewRef?.id || null;
@@ -8663,7 +8686,7 @@ function openFileActionMenu(ctx, x, y) {
   const image = FILE_IMAGE_PATH.test(ctx.path), preview = FILE_PREVIEW_PATH.test(ctx.path);
   const items = [];
   if (ctx.change && !preview) items.push(['View this change', () => viewFileChange(ctx)]);
-  items.push([image ? 'Open image in aiconvo' : 'Open current file in aiconvo', () => openPathInApp(ctx)]);
+  items.push([image ? 'Open image in Chattering' : 'Open current file in Chattering', () => openPathInApp(ctx)]);
   if (ctx.change && preview) items.push(['View this change', () => viewFileChange(ctx)]);
   items.push(['Open with system application', () => runNativePathAction(ctx, 'open')]);
   items.push(['Show in folder', () => runNativePathAction(ctx, 'reveal')]);
@@ -8752,7 +8775,7 @@ document.addEventListener('pointerover', e => {
   const b = e.target && e.target.closest ? e.target.closest('[data-file-diff], [data-transcript-path]') : null;
   if (!b || b.dataset.fileHinted) return;
   const ctx = fileControlContext(b);
-  b.title = `${ctx.change ? (FILE_PREVIEW_PATH.test(ctx.path) ? 'Click: preview file' : 'Click: view this change') : 'Click: open in aiconvo'}\nCtrl-click: open with system application\nRight-click: more file actions\n${ctx.path}`;
+  b.title = `${ctx.change ? (FILE_PREVIEW_PATH.test(ctx.path) ? 'Click: preview file' : 'Click: view this change') : 'Click: open in Chattering'}\nCtrl-click: open with system application\nRight-click: more file actions\n${ctx.path}`;
   b.dataset.fileHinted = '1';
 });
 
@@ -9308,7 +9331,7 @@ async function regenerateMessage(btn) {
   btn.textContent = 'starting…';
   // The marker lets the transcript distinguish this transport turn from a
   // real user message. Markdown does not show the comment if it ever renders.
-  const payload = { id: activeRel, node, prompt: `Continue.\n<!-- aiconvo:regenerate -->\n<!-- aiconvo:operation ${JSON.stringify({ kind: 'regenerate', sourceEntryId: message.eid })} -->`, models: fanModels().slice(0, 1), images: [] };
+  const payload = { id: activeRel, node, prompt: `Continue.\n<!-- chattering:regenerate -->\n<!-- chattering:operation ${JSON.stringify({ kind: 'regenerate', sourceEntryId: message.eid })} -->`, models: fanModels().slice(0, 1), images: [] };
   let out = await postJson('/api/node/send', payload);
   if (out && out.needsForce) {
     if (confirm('A terminal owns this conversation. Stop the terminal and regenerate?')) out = await postJson('/api/node/send', { ...payload, force: true });
@@ -9362,7 +9385,7 @@ async function openTranscriptEditor(btn) {
     if (out.branched) {
       close();
       if (out.role === 'user') {
-        const run = await postJson('/api/node/send', { id: key, node: out.node, prompt: `Continue.\n<!-- aiconvo:regenerate -->\n<!-- aiconvo:operation ${JSON.stringify({ kind: 'regenerate', sourceEntryId: out.node })} -->`, models: pickedModels, images: [] });
+        const run = await postJson('/api/node/send', { id: key, node: out.node, prompt: `Continue.\n<!-- chattering:regenerate -->\n<!-- chattering:operation ${JSON.stringify({ kind: 'regenerate', sourceEntryId: out.node })} -->`, models: pickedModels, images: [] });
         if (run.error) errToast('Your edited branch is saved, but the answer could not start: ' + run.error);
         else toast('Prompt saved on a new branch. Generating an answer.');
       } else toast('Correction saved on a new branch. Write below to continue.');
@@ -9792,7 +9815,7 @@ function showThinkingPicker(anchor, { levels, current: selected, note, onPick })
   const close = (restoreFocus = false) => {
     pop.remove(); anchor.setAttribute('aria-expanded', 'false');
     document.removeEventListener('click', outside, true);
-    window.removeEventListener('aiconvo:route', routeChanged);
+    window.removeEventListener('chattering:route', routeChanged);
     if (thinkingPickerClose === close) thinkingPickerClose = null;
     if (restoreFocus && anchor.isConnected) anchor.focus({ preventScroll: true });
   };
@@ -9800,7 +9823,7 @@ function showThinkingPicker(anchor, { levels, current: selected, note, onPick })
   const routeChanged = () => close();
   thinkingPickerClose = close;
   document.addEventListener('click', outside, true);
-  window.addEventListener('aiconvo:route', routeChanged);
+  window.addEventListener('chattering:route', routeChanged);
   const buttons = [...pop.querySelectorAll('[data-thinking-level]')];
   buttons.forEach(button => button.onclick = () => { const level = button.dataset.thinkingLevel; close(true); onPick(level); });
   pop.onkeydown = e => {
@@ -11317,7 +11340,7 @@ async function openSnippetForm(seed, onSaved) {
         <label><input type="radio" name="sf-scope" value="global"${def.scope !== 'project' ? ' checked' : ''}> everywhere <span class="np-cap">~/.pi/agent/prompts</span></label>
         <label${hasProject ? '' : ' class="dim" title="this conversation has no project folder"'}><input type="radio" name="sf-scope" value="project"${def.scope === 'project' && hasProject ? ' checked' : ''}${hasProject ? '' : ' disabled'}> this project <span class="np-cap">.pi/prompts</span></label>
       </div>
-      ${hasProject && !trusted ? '<div class="hint">aiconvo inserts project snippets either way. The pi terminal shows them as /name only after you trust this project in pi.</div>' : ''}
+      ${hasProject && !trusted ? '<div class="hint">Chattering inserts project snippets either way. The pi terminal shows them as /name only after you trust this project in pi.</div>' : ''}
       <label>text<span class="np-cap">$1, $2 or $@ become blanks you tab through after inserting</span><textarea id="sf-body" spellcheck="false">${esc(def.body)}</textarea></label>
     </div>
     <div class="mf-foot"><span class="hint mf-err"></span>
@@ -11379,7 +11402,7 @@ async function renderSettingsSnippets() {
 }
 
 // Browser path only: inside the Android app the picker never reaches
-// this (the app decodes pictures natively and calls aiconvoAcceptImage).
+// this (the app decodes pictures natively and calls chatteringAcceptImage).
 // A browser decodes the whole photo before the canvas shrinks it, so very
 // large files are refused up front rather than failing part-way.
 function fileToImage(file) {
@@ -11414,7 +11437,7 @@ function fileToImage(file) {
     im.onerror = () => {
       try { URL.revokeObjectURL(url); } catch {}
       const name = file && file.name ? ` (${file.name})` : '';
-      reject(new Error(`This browser could not decode that image${name}. HEIC photos and very large photos need the Aiconvo app, or a JPEG/PNG copy.`));
+      reject(new Error(`This browser could not decode that image${name}. HEIC photos and very large photos need the Chattering app, or a JPEG/PNG copy.`));
     };
     im.src = url;
   });
@@ -11536,7 +11559,7 @@ async function agentLiveKeys(data) {
 // The Android app attaches pictures through here: pasted ones, and those
 // picked with "Attach image" (the app decodes them itself; see
 // android/.../ImageIngest.kt). The page never sees the original file.
-window.aiconvoAcceptImage = function (mime, b64, name) {
+window.chatteringAcceptImage = function (mime, b64, name) {
   try {
     if (!b64) return;
     if (settingsOpen && settingsPane === 'profile') { acceptProfileNativeImage(mime, b64); return; }
@@ -11806,7 +11829,7 @@ async function stopBrowserAgentSpeech() {
 
 function wireAgentSpeech(ta) {
   const mic = $('agentMic');
-  const nativeSpeech = window.AiconvoSpeech;
+  const nativeSpeech = window.ChatteringSpeech;
   const nativeAvailable = !!(nativeSpeech && typeof nativeSpeech.toggle === 'function');
   if (!mic || (!nativeAvailable && !browserAgentSpeechAvailable())) return;
   mic.hidden = false;
@@ -13017,7 +13040,7 @@ async function showNotePane(rel, text, savedPath) {
   if (savedPath) {
     activeRel = rel;
     // A saved note is a place: the same address the notes tab opens it by.
-    const rel_ = savedPath.split('/notes/aiconvo/')[1];
+    const rel_ = savedPath.split('/notes/chattering/')[1];
     const session = sessions.find(s => s.key === rel);
     if (rel_) setRoute('note', 'note=' + encodeURIComponent(rel_), { project: session ? projectOf(session) : undefined, selectScope: sideLayoutOn() && sidePanel() === 'inbox' }); else setRouteKind('note');
     const related = await relatedFor(rel, true);
@@ -13110,7 +13133,7 @@ function mdRender(src, q = '') {
   // to any target, bare absolute file paths, bare URLs.
   //  - [text](https://…) and bare URLs open in a new tab.
   //  - [text](/abs/path) and bare /abs/paths become open buttons: a plain
-  //    click previews in aiconvo, Ctrl-click sends the path to the desktop.
+  //    click previews in Chattering, Ctrl-click sends the path to the desktop.
   //  - [text](website/index.md) is a relative file link. The conversation
   //    view asks the server whether it exists next to the session's cwd and
   //    links it then (wireTranscriptPathCandidates); the target stays in the
@@ -13256,8 +13279,8 @@ function mdRender(src, q = '') {
 function noteViewer(text, pathLabel, context = null) {
   markSettingsClosed();
   const n = parseNote(text);
-  // Markdown under ~/notes/aiconvo (notes, epics, project memory) is editable.
-  const savePath = pathLabel && /(^~\/|^\/)/.test(pathLabel) && pathLabel.includes('notes/aiconvo/') && pathLabel.endsWith('.md') ? pathLabel : null;
+  // Markdown under ~/notes/chattering (notes, epics, project memory) is editable.
+  const savePath = pathLabel && /(^~\/|^\/)/.test(pathLabel) && pathLabel.includes('notes/chattering/') && pathLabel.endsWith('.md') ? pathLabel : null;
   const treeHtml = nodes => '<ul>' + nodes.map(c => {
     const id = 'n' + Math.random().toString(36).slice(2, 9);
     c.id = id;
@@ -13342,7 +13365,7 @@ function noteViewer(text, pathLabel, context = null) {
 
 // ---- note editor ----
 // Edits a whole markdown file, or splices one section (heading + own body)
-// back into it. Saves go to the file's native place under ~/notes/aiconvo.
+// back into it. Saves go to the file's native place under ~/notes/chattering.
 function noteFileEditor(text, pathLabel, context, section) {
   const lines = text.split('\n');
   const chunk = section ? lines.slice(section.start, section.end).join('\n') : text;
@@ -13635,7 +13658,7 @@ function paintTreeBar() {
       const out = await postJson('/api/node/both', { id: key, node: n.promptId });
       if (!out || out.error) {
         const stale = out && out.error === 'not found';
-        errToast(stale ? 'server update pending — try both again after aiconvo restarts' : ((out && out.error) || 'could not build the both-continue'));
+        errToast(stale ? 'server update pending — try both again after chattering restarts' : ((out && out.error) || 'could not build the both-continue'));
         return null;
       }
       pick.id = out.id;
@@ -14110,7 +14133,7 @@ function applyGanttMode(persist = true) {
   document.body.classList.remove('g-v', 'g-full', 'g-off');
   ganttMode = 'h';
   if (persist) {
-    try { localStorage.setItem('aiconvo.gantt', 'h'); } catch {}
+    try { localStorage.setItem('chattering.gantt', 'h'); } catch {}
   }
   renderTabList();
 }
@@ -14157,7 +14180,7 @@ function paintGanttGroupButton() {
 paintGanttGroupButton();
 $('ganttGroup').onclick = () => {
   ganttGroup = ganttGroup === 'project' ? 'compact' : 'project';
-  localStorage.setItem('aiconvo.ganttGroup', ganttGroup);
+  localStorage.setItem('chattering.ganttGroup', ganttGroup);
   paintGanttGroupButton();
   disposeHomeTimeline(); // rows are laid out anew: open the new layout at "now"
   renderTabList();
@@ -14244,7 +14267,7 @@ function openProjectSetup() {
   </div>`);
   const {q} = d;
   let operation = 'create', browseVersion = 0;
-  q('.ps-parent').value = localStorage.getItem('aiconvo.newProjectParent') || '~/Projects';
+  q('.ps-parent').value = localStorage.getItem('chattering.newProjectParent') || '~/Projects';
   q('.ps-existing').value = '';
   const update = () => {
     q('.ps-create').hidden = operation !== 'create'; q('.ps-add').hidden = operation !== 'add';
@@ -14292,12 +14315,12 @@ function openProjectSetup() {
     try {
       let capability;
       try { capability = await (await fetch('/api/project/setup')).json(); } catch {}
-      if (!capability || capability.version !== 1) throw new Error('Project setup needs the updated server. Wait for active work to finish, restart Aiconvo, then retry.');
+      if (!capability || capability.version !== 1) throw new Error('Project setup needs the updated server. Wait for active work to finish, restart Chattering, then retry.');
       out = await postJson('/api/project/create', body);
       if (out.error) throw new Error(out.error);
     }
     catch (error) { d.busy(false); d.status(error.message + ' Your entries are kept.'); return; }
-    if (operation === 'create') localStorage.setItem('aiconvo.newProjectParent', parent);
+    if (operation === 'create') localStorage.setItem('chattering.newProjectParent', parent);
     d.busy(false); d.close();
     toast((operation === 'create' ? 'Project created' : 'Project added') + ' · ' + out.cwd);
     if (out.warning) errToast(out.warning);
@@ -14334,7 +14357,7 @@ $('newProject').onclick = openNewProjectForm;
 
 // Drag the top edge of the bottom tray. Store a viewport-independent ratio.
 let trayResize = null;
-const savedTrayRatio = Number(localStorage.getItem('aiconvo.ganttTrayRatio'));
+const savedTrayRatio = Number(localStorage.getItem('chattering.ganttTrayRatio'));
 if (savedTrayRatio >= 0.12 && savedTrayRatio <= 0.85)
   document.documentElement.style.setProperty('--list-h', Math.round(innerHeight * savedTrayRatio) + 'px');
 $('ganttResize').addEventListener('pointerdown', e => {
@@ -14354,11 +14377,11 @@ $('ganttResize').addEventListener('pointerup', e => {
   trayResize = null;
   $('ganttResize').classList.remove('dragging');
   const ratio = $('left').getBoundingClientRect().height / innerHeight;
-  localStorage.setItem('aiconvo.ganttTrayRatio', String(ratio));
+  localStorage.setItem('chattering.ganttTrayRatio', String(ratio));
   try { $('ganttResize').releasePointerCapture(e.pointerId); } catch {}
 });
 $('ganttResize').addEventListener('dblclick', () => {
-  localStorage.removeItem('aiconvo.ganttTrayRatio');
+  localStorage.removeItem('chattering.ganttTrayRatio');
   document.documentElement.style.setProperty('--list-h', '220px');
 });
 
@@ -14646,7 +14669,7 @@ const SETTINGS_PANES = [
   ['sound', 'sound', 'What the speakers do when a run finishes.'],
   ['search', 'search', 'Meaning-based search on the GPU server.'],
   ['snippets', 'snippets', 'Sentences you type often.'],
-  ['machines', 'machines', 'Other aiconvo installs to switch to.'],
+  ['machines', 'machines', 'Other Chattering installs to switch to.'],
   ['people', 'people', 'Who is admitted on this machine, and their links.'],
   ['appearance', 'appearance', 'Colors for the app and for pi views.'],
   ['jobs', 'background jobs', 'Routine indexing, notes, memory and other background work.'],
@@ -14803,7 +14826,7 @@ function paneSound() {
 // The setting lives on the device, not in settings.json: each phone decides
 // for itself whether it wants to be told.
 function phoneNotifyRowHtml() {
-  const bridge = window.AiconvoNotify;
+  const bridge = window.ChatteringNotify;
   if (!bridge) return '';
   let on = false;
   try { on = !!bridge.isEnabled(); } catch {}
@@ -14821,12 +14844,12 @@ window.nativeNotifyChanged = on => {
 
 // In the Android app a link to another site must leave for the device
 // browser. The app's single WebView ignores target="_blank" and would load
-// the page in place of aiconvo, with no way back on a device without a
+// the page in place of Chattering, with no way back on a device without a
 // navigation bar (the e-ink tablet). Same-host links (this server, any
 // port) and the machine switcher (a plain navigation, not a link) stay in
 // the app. Capture phase: it runs before any handler of the link itself.
 document.addEventListener('click', e => {
-  const bridge = window.AiconvoApp;
+  const bridge = window.ChatteringApp;
   if (!bridge || !bridge.openExternal || e.defaultPrevented) return;
   const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
   if (!a) return;
@@ -14852,7 +14875,7 @@ function bindPaneSound(root) {
   const phone = $('setPhoneNotify');
   if (phone) phone.onchange = () => {
     if (phone.checked) phone.dataset.wanted = '1';
-    try { window.AiconvoNotify.setEnabled(phone.checked); }
+    try { window.ChatteringNotify.setEnabled(phone.checked); }
     catch (e) { phone.checked = !phone.checked; errToast('could not change notifications: ' + e.message); }
   };
 }
@@ -14934,14 +14957,14 @@ function paneMachines() {
     <p class="lead">This page is talking to <b>${esc(host)}</b>. Connected machines appear in the header switcher; each one keeps its own conversations, agents, and notes.</p>
     <div class="set-group">
       <h3>reach this machine from other devices</h3>
-      <label class="set-check"><input id="setLan" type="checkbox"${lan.on ? ' checked' : ''}${lan.fixed ? ' disabled' : ''}> let phones, tablets and other aiconvo installs on my network open this one</label>
-      ${lan.fixed ? '<div class="set-help">The service configuration pins the address (AICONVO_HOST), so this switch cannot change it.</div>' : ''}
+      <label class="set-check"><input id="setLan" type="checkbox"${lan.on ? ' checked' : ''}${lan.fixed ? ' disabled' : ''}> let phones, tablets and other Chattering installs on my network open this one</label>
+      ${lan.fixed ? '<div class="set-help">The service configuration pins the address (CHATTERING_HOST), so this switch cannot change it.</div>' : ''}
       ${lan.on
         ? `<div class="set-help">Takes effect at once, no restart. Open one of these links on the other device, or paste it into that device's settings → machines to connect both ways:</div>
            ${links.length
              ? `<div class="set-field">${links.map(l => `<div class="row"><code class="mach-link">${esc(l)}</code><button type="button" class="ghost" data-copy="${esc(l)}">copy</button></div>`).join('')}</div>`
              : '<span class="hint">no network address found on this machine yet — connect to Wi‑Fi or a cable and reopen this page.</span>'}
-           <div class="set-help">Anyone with a link can open this aiconvo. Share it only with your own devices.</div>`
+           <div class="set-help">Anyone with a link can open this Chattering. Share it only with your own devices.</div>`
         : '<div class="set-help">Off: only this computer can open it. Turn it on to get a link for your other devices. If you are reading this from another device, turning it off will cut you off.</div>'}
     </div>
     ${settingsState && settingsState.canManageUsers ? `<div class="set-group" id="setDoors"><h3>doors through Tailscale</h3><div class="set-help" id="setDoorsBody">asking tailscale…</div></div>` : ''}
@@ -15062,7 +15085,7 @@ function bindPaneAppearance(root) {
   $('setRailCounts').onchange = e => { agentSecState.railCounts = e.target.checked; saveAgentSecState(); paintRailBadges(); };
   $('setAppFont').onchange = e => {
     window.setAppFont(e.target.value);
-    try { localStorage.setItem('aiconvo.font', e.target.value); } catch {}
+    try { localStorage.setItem('chattering.font', e.target.value); } catch {}
     if ($('agentText')) autoGrowCompose();
   };
   bindOptions(root, 'setLayout', v => { setLayoutPref(v); toast(v === 'side' ? 'side panel layout' : 'top bar layout'); renderSettings(); });
@@ -15090,7 +15113,7 @@ function paneAdvanced() {
     </div>
     <div class="set-group">
       <h3>environment overrides</h3>
-      <div class="set-help">These cap the sound setting for a whole deployment: <code>AICONVO_SPEAK_DONE=0</code> forces off; <code>AICONVO_VOICE_REPLY=0</code> keeps the microphone closed. <code>AICONVO_VOICE_SPEED</code> sets the speech rate.</div>
+      <div class="set-help">These cap the sound setting for a whole deployment: <code>CHATTERING_SPEAK_DONE=0</code> forces off; <code>CHATTERING_VOICE_REPLY=0</code> keeps the microphone closed. <code>CHATTERING_VOICE_SPEED</code> sets the speech rate.</div>
     </div>`;
 }
 
@@ -15142,6 +15165,7 @@ function renderSettings() {
       ${SETTINGS_PANES.map(([id, label, hint]) => `<button type="button" class="${id === settingsPane ? 'on' : ''}" data-pane="${id}" title="${esc(hint)}">${esc(label)}</button>`).join('')}
       <div class="sep"></div>
       <button type="button" data-go="usage" title="Tokens, cost estimates, and subscription value">usage and cost →</button>
+      <div class="brand">Chattering, by <a href="https://rockfrog.ai" target="_blank" rel="noopener">Rockfrog</a></div>
     </nav>
     <section class="settings-pane">${settingsState && settingsState.canEditSettings === false && !['profile', 'people', 'appearance', 'jobs'].includes(settingsPane) ? `<div class="set-readonly hint">These are ${esc((settingsState.hostname || 'this machine'))}'s settings; only its owner or an admin can change them. Your appearance choices stay yours.</div>` : ''}${settingsState ? paint() : '<div class="empty">loading settings…</div>'}</section>
   </div>`;
@@ -15249,20 +15273,20 @@ $('shareBtn').onclick = () => openShareDialog();
 const barFolded = () => document.body.classList.contains('bar-fold');
 function setBarFold(fold) {
   document.body.classList.toggle('bar-fold', fold);
-  try { fold ? localStorage.setItem('aiconvo.barFold', '1') : localStorage.removeItem('aiconvo.barFold'); } catch {}
+  try { fold ? localStorage.setItem('chattering.barFold', '1') : localStorage.removeItem('chattering.barFold'); } catch {}
 }
 $('barFold').onclick = e => { e.stopPropagation(); setBarFold(true); };
 document.querySelector('header').addEventListener('click', () => { if (barFolded()) setBarFold(false); });
-if (localStorage.getItem('aiconvo.barFold')) setBarFold(true);
+if (localStorage.getItem('chattering.barFold')) setBarFold(true);
 
 // ---- side-panel layout (design/42): the tray becomes a left column ----
 // A device choice (localStorage), like the theme. Below 701px the phone
 // keeps the top bar whatever the choice says. The same #agentsPop element
 // moves into the column and stays open; the bar's global controls move too.
 const SIDE_LAYOUT_MQ = matchMedia('(min-width: 701px)');
-function layoutPref() { try { return localStorage.getItem('aiconvo.layout') === 'top' ? 'top' : 'side'; } catch { return 'side'; } }
+function layoutPref() { try { return localStorage.getItem('chattering.layout') === 'top' ? 'top' : 'side'; } catch { return 'side'; } }
 function setLayoutPref(v) {
-  try { localStorage.setItem('aiconvo.layout', v === 'side' ? 'side' : 'top'); } catch {}
+  try { localStorage.setItem('chattering.layout', v === 'side' ? 'side' : 'top'); } catch {}
   document.documentElement.dataset.layout = v === 'side' ? 'side' : '';
   applyLayout();
 }
@@ -15298,7 +15322,7 @@ function applyLayout() {
     agentsTimer = setInterval(() => { if (!document.hidden) renderAgentsPop(true); }, 15000);
     loadRecentFiles();
     let fold = false;
-    try { fold = !!localStorage.getItem('aiconvo.sideFold'); } catch {}
+    try { fold = !!localStorage.getItem('chattering.sideFold'); } catch {}
     document.body.classList.toggle('side-fold', fold);
     $('sideUnfold').setAttribute('aria-expanded', String(!fold));
     renderSideNew();
@@ -15324,7 +15348,7 @@ const sideFolded = () => document.body.classList.contains('side-fold');
 function setSideFold(fold) {
   document.body.classList.toggle('side-fold', fold);
   $('sideUnfold').setAttribute('aria-expanded', String(!fold));
-  try { fold ? localStorage.setItem('aiconvo.sideFold', '1') : localStorage.removeItem('aiconvo.sideFold'); } catch {}
+  try { fold ? localStorage.setItem('chattering.sideFold', '1') : localStorage.removeItem('chattering.sideFold'); } catch {}
   if ($('agentCompose')) observeComposeHeight();
   window.dispatchEvent(new Event('resize'));
 }
@@ -15399,7 +15423,7 @@ function openWorkspaceProjectPicker(anchor = $('sideProjectMore')) {
   const input = pop.querySelector('input'), list = pop.querySelector('.mp-list');
   const close = (focus = false) => {
     pop.remove(); anchor.setAttribute('aria-expanded', 'false'); workspacePickerClose = null;
-    document.removeEventListener('click', outside, true); window.removeEventListener('aiconvo:route', routeChanged);
+    document.removeEventListener('click', outside, true); window.removeEventListener('chattering:route', routeChanged);
     window.removeEventListener('resize', position);
     if (focus && anchor.isConnected) anchor.focus({ preventScroll: true });
   };
@@ -15443,7 +15467,7 @@ function openWorkspaceProjectPicker(anchor = $('sideProjectMore')) {
     } else if (e.key === 'Enter' && e.target === input) { e.preventDefault(); (buttons.find(b => b.getAttribute('aria-pressed') === 'true') || buttons[0])?.click(); }
   };
   paint(); input.focus();
-  document.addEventListener('click', outside, true); window.addEventListener('aiconvo:route', routeChanged);
+  document.addEventListener('click', outside, true); window.addEventListener('chattering:route', routeChanged);
   window.addEventListener('resize', position);
   loadSidebarProjectCatalog().then(paint);
 }
@@ -15572,12 +15596,12 @@ $('phoneBar').onclick = e => {
 $('agentsSheetClose').onclick = e => { e.stopPropagation(); toggleAgents(false); };
 // A sheet is a detour: leaving for a page (a row, a project link, Back)
 // closes it. Settings is a modal over the page and keeps the sheet.
-window.addEventListener('aiconvo:route', () => { if (phoneSheetOpen() && viewKind !== 'settings') closePhoneSheets(); else paintPhoneBar(); });
+window.addEventListener('chattering:route', () => { if (phoneSheetOpen() && viewKind !== 'settings') closePhoneSheets(); else paintPhoneBar(); });
 PHONE_MQ.addEventListener('change', applyPhoneShell);
 // The Android app asks the page first when the back button is pressed:
 // anything transient (a menu, a picker, a sheet, a dialog) closes; only
 // with nothing open does the app move through the page history.
-window.aiconvoBack = () => {
+window.chatteringBack = () => {
   const esc = el => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   const pop = document.querySelector('.file-action-menu, .mpick, .thinking-picker');
   if (pop) { esc(pop); if (pop.isConnected) pop.remove(); return true; }
@@ -15775,7 +15799,7 @@ function refreshCurrentTab() {
 $('densityTools').addEventListener('change', () => render());
 $('showBranches').checked = showBranchRows();
 $('showBranches').addEventListener('change', () => {
-  try { localStorage.setItem('aiconvo.showBranchRows', $('showBranches').checked ? '1' : '0'); } catch {}
+  try { localStorage.setItem('chattering.showBranchRows', $('showBranches').checked ? '1' : '0'); } catch {}
   render();
 });
 
@@ -15869,7 +15893,7 @@ function einkEdgePlace() {
   el.style.top = y + 'px';
   el.hidden = false;
 }
-window.addEventListener('aiconvo:route', () => {
+window.addEventListener('chattering:route', () => {
   if ($('einkEdge')) $('einkEdge').hidden = true;
   einkEdge = null;
 });
@@ -16363,7 +16387,7 @@ function toggleHelpOverlay() {
 
 function setHelpMini(on) {
   helpMiniOn = !!on;
-  try { localStorage.setItem('aiconvo-help-mini', on ? '1' : '0'); } catch {}
+  try { localStorage.setItem('chattering-help-mini', on ? '1' : '0'); } catch {}
   let el = $('helpMini');
   if (!on) { if (el) el.remove(); return; }
   if (!el) { el = document.createElement('div'); el.id = 'helpMini'; cornerStack().prepend(el); }
@@ -16386,7 +16410,7 @@ function renderHelpMini(force) {
   };
 }
 
-try { if (localStorage.getItem('aiconvo-help-mini') === '1') setHelpMini(true); } catch {}
+try { if (localStorage.getItem('chattering-help-mini') === '1') setHelpMini(true); } catch {}
 // Both help surfaces follow the live view: focus, editors, pickers, panels.
 // Content-compare in the renderers keeps the repaints cheap.
 function refreshHelp() {
@@ -16857,7 +16881,7 @@ live.onmessage = ev => {
       }
       // A new boot id after a reconnect: the server was replaced. This tab
       // may run an old interface — offer a reload, never navigate by itself.
-      if (serverBoot && serverBoot !== d.boot) toast('↻ aiconvo restarted — tap to reload the interface', () => location.reload(), 'ok');
+      if (serverBoot && serverBoot !== d.boot) toast('↻ chattering restarted — tap to reload the interface', () => location.reload(), 'ok');
       serverBoot = d.boot;
     }
     updateLiveBadges();

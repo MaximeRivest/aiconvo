@@ -35,9 +35,9 @@ Pure event consumer with injectable monotonic and wall clocks. One current assis
 
 ### `pisdk-runtime.js`
 
-A fresh meter binds to each session. It observes session events before forwarding, and adds `aiconvoSpeedAt` to a copy of the forwarded event. The server uses that source timestamp, not arrival time. No SDK event object is mutated.
+A fresh meter binds to each session. It observes session events before forwarding, and adds `chatteringSpeedAt` to a copy of the forwarded event. The server uses that source timestamp, not arrival time. No SDK event object is mutated.
 
-Pi emits `message_end` before appending its entry. Accumulate samples with message object references, then match those exact objects to saved assistant entries at `agent_end`. Timestamps are not identities: two replies can share a millisecond. Append one versioned `aiconvo-speed` **custom entry**, not a custom message, per agent run. The entry cannot reach model context. Recording failures emit a notice without failing the response.
+Pi emits `message_end` before appending its entry. Accumulate samples with message object references, then match those exact objects to saved assistant entries at `agent_end`. Timestamps are not identities: two replies can share a millisecond. Append one versioned `chattering-speed` **custom entry**, not a custom message, per agent run. The entry cannot reach model context. Recording failures emit a notice without failing the response.
 
 Each record has a full measurement UUID and an array of samples, including reply entry IDs, provider/model, completion reason, wait, part counters and usage needed for calibration. Sample identity is measurement UUID + array index, not Pi's short entry ID. Copies retaining the metadata deduplicate without collisions between unrelated sessions.
 

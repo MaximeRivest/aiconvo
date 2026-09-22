@@ -11,7 +11,7 @@ test('uses a separate user scope and preserves argument boundaries', () => {
   assert.equal(result.survivesServiceRestart, true);
 });
 test('fails closed inside a service without a user manager', () => {
-  assert.throws(() => supervisionPlan('node', [], { id, platform: 'linux', cgroup: '/aiconvo.service\n', probe: () => false }), /still belong/);
+  assert.throws(() => supervisionPlan('node', [], { id, platform: 'linux', cgroup: '/chattering.service\n', probe: () => false }), /still belong/);
 });
 test('standalone fallback makes no service-survival promise', () => {
   const result = supervisionPlan('node', [], { id, platform: 'linux', cgroup: '/session-1.scope\n', probe: () => false });

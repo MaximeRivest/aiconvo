@@ -57,11 +57,11 @@ until it settles.
 ## Durable records
 
 - The editing request is a native `custom_message` with
-  `customType: aiconvo-answer-rewrite`, `display: false`, and source entry ID in
+  `customType: chattering-answer-rewrite`, `display: false`, and source entry ID in
   `details`. It stays in future context as the exact user-role request that was
   sent, but is not attributed to a person in the web transcript.
 - A successful rewrite is a native assistant message, with its provider usage
-  intact and `message.aiconvoRewrite.sourceEntryId` linking the original.
+  intact and `message.chatteringRewrite.sourceEntryId` linking the original.
 - The parser exposes this link as `rewriteOf`. Pairing is restricted to the
   selected reading path/package and matching model/provider; it cannot reach
   across another user question.

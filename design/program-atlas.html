@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Program atlas · aiconvo design study</title>
+<title>Program atlas · Chattering design study</title>
 <style>
 /* Frozen subset of design/tokens.css so this study opens as a single offline file. */
 :root{--bg:#f2f6f3;--surface-1:#eaeeea;--surface-2:#dfe4e0;--border:#c3c9c4;--border-strong:#9aa09b;--text:#1b211c;--text-dim:#525953;--green:#1d7d3e;--cyan:#0076a0;--yellow:#816600;--red:#a7463e;--accent-strong:#005f21;--accent-ink:#fff;--font:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;color-scheme:light}
@@ -23,7 +23,7 @@ main{overflow:auto;min-width:0}.page{max-width:1450px;margin:0 auto;padding:28px
 <a class="skip" href="#main">Skip to examples</a>
 <header class="topbar">
 <button class="menu-toggle" id="menu" aria-expanded="false" aria-controls="sidebar">Programs</button>
-<div class="brand"><span>❯</span> aiconvo</div><div class="crumb">/ &nbsp; program atlas</div>
+<div class="brand"><span>❯</span> Chattering</div><div class="crumb">/ &nbsp; program atlas</div>
 <div class="demo">DESIGN STUDY · FICTIONAL DATA</div><button id="theme" aria-label="Switch to dark theme">Dark</button>
 </header>
 <div class="shell">
@@ -82,7 +82,7 @@ example({transcript:'[#1] User: Fix the login loop.\n[#2] Assistant: Corrected t
 example({transcript:'[#1] User: Fix the login loop.\n[#2] Assistant: Fixed.\n[#3] User: Also add PDF zoom.'},{problem_tree:[{title:'Login',from:1,to:3,children:[]},{title:'PDF',from:3,to:3,children:[]}]},'issue','Message 3 belongs to two sibling ranges.',{tag:'Overlapping ranges'})
 ], 'Cover every numbered message. Sibling ranges must not overlap.');
 add('problem-note','Notes','Distill one problem','distill · DISTILL_PROMPT','problem_title, session_outline, problem_transcript -> note','Preserve what worked, what failed and what is worth remembering.',[
-example({problem_title:'Search index recovery',session_outline:'Index recovery → improve status messages',problem_transcript:'User: Search returns nothing.\nAssistant: The index is stale. Run aiconvo sync.\nUser: That restored the results.'},{note:'**Problem:** Search returned no results.\n**Worked:** `aiconvo sync` restored them.\n**Remember:** Check index freshness before changing the query.'},'good','Preserves the exact command and the observed result.'),
+example({problem_title:'Search index recovery',session_outline:'Index recovery → improve status messages',problem_transcript:'User: Search returns nothing.\nAssistant: The index is stale. Run chattering sync.\nUser: That restored the results.'},{note:'**Problem:** Search returned no results.\n**Worked:** `chattering sync` restored them.\n**Remember:** Check index freshness before changing the query.'},'good','Preserves the exact command and the observed result.'),
 example({problem_title:'Small talk',session_outline:'Greetings → search work',problem_transcript:'User: Hello!\nAssistant: Hello.'},{note:'NOTHING-TO-KEEP'},'good','Abstains rather than manufacturing a lesson.',{kind:'Edge case'}),
 example({problem_title:'Cache trial',session_outline:'Explore faster search',problem_transcript:'Assistant: Redis might help; not tested.\nUser: Leave it for later.'},{note:'**Worked:** Redis improved search latency.'},'issue','An untested suggestion became an observed result.',{tag:'Unsupported claim'})
 ], 'Under 250 words. Preserve important commands exactly. Return NOTHING-TO-KEEP when appropriate.');

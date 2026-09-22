@@ -6,7 +6,7 @@
    currentHash, sessions, renderSettings, saveSettings. */
 
 const peopleState = { me: null, tier: null, users: [], groups: [], aliases: {}, conn: null, people: [], docs: new Map(), lastReport: '' };
-window.aiconvoMe = null;
+window.chatteringMe = null;
 
 function peopleCanonicalId(id) {
   if (!id) return null;
@@ -18,13 +18,13 @@ function peopleIsMe(person) {
   const id = typeof person === 'string' ? person : person?.id;
   return !!id && !!peopleState.me && peopleCanonicalId(id) === peopleCanonicalId(peopleState.me.id);
 }
-window.aiconvoIsSelf = peopleIsMe;
-window.aiconvoPersonId = peopleCanonicalId;
+window.chatteringIsSelf = peopleIsMe;
+window.chatteringPersonId = peopleCanonicalId;
 const peopleUserById = id => peopleState.users.find(u => u.id === peopleCanonicalId(id)) || null;
 function peopleIdentityChanged() {
   renderPeopleHeader(); renderPresenceMarks();
   if (typeof renderAgentsPopSoon === 'function') renderAgentsPopSoon();
-  window.dispatchEvent(new Event('aiconvo:identity'));
+  window.dispatchEvent(new Event('chattering:identity'));
 }
 let peopleIdentityRequest = 0;
 async function peopleRefreshIdentity() {
@@ -38,7 +38,7 @@ async function peopleRefreshIdentity() {
     peopleState.walls = data.walls || null;
     peopleState.users = data.users || peopleState.users;
     peopleState.groups = data.groups || peopleState.groups;
-    peopleState.me = data.me; window.aiconvoMe = data.me;
+    peopleState.me = data.me; window.chatteringMe = data.me;
     peopleIdentityChanged();
   } catch {} // Live identity still works when the roster request is unavailable.
 }
@@ -63,7 +63,7 @@ function peopleLiveEvent(d) {
   if (d.type === 'hello') {
     peopleState.me = d.me; peopleState.tier = d.tier; peopleState.conn = d.conn;
     peopleState.users = d.users || []; peopleState.people = d.people || [];
-    window.aiconvoMe = d.me;
+    window.chatteringMe = d.me;
     peopleState.lastReport = '';
     peopleIdentityChanged();
     peopleRefreshIdentity();
@@ -78,7 +78,7 @@ function peopleLiveEvent(d) {
   if (d.type === 'users') {
     peopleState.users = d.users || []; peopleState.groups = d.groups || [];
     peopleState.me = peopleUserById(peopleState.me?.id) || peopleState.me;
-    window.aiconvoMe = peopleState.me;
+    window.chatteringMe = peopleState.me;
     if (typeof settingsOpen !== 'undefined' && settingsOpen) renderSettings();
     peopleIdentityChanged(); peopleRefreshIdentity(); return true;
   }
@@ -121,7 +121,7 @@ function peopleTyping() {
   clearTimeout(peopleTyping.t);
   peopleTyping.t = setTimeout(() => peopleReportRoute({ kind: 'viewing' }), 6500);
 }
-window.addEventListener('aiconvo:route', () => { peopleKind = 'viewing'; peoplePosition = null; peopleReportRoute(); peopleFollowRouteChanged(); });
+window.addEventListener('chattering:route', () => { peopleKind = 'viewing'; peoplePosition = null; peopleReportRoute(); peopleFollowRouteChanged(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { peopleState.lastReport = ''; peopleReportRoute({ position: peoplePosition }); } });
 
 /* ---- where exactly: the position that "take me there" lands on ---- */
@@ -193,7 +193,7 @@ function composeShareDetach() {
   collabLeave(c.s);
 }
 async function composeShareAttach(name, ta) {
-  if (!ta || !name || !window.aiconvoMe || typeof collabJoin !== 'function') return;
+  if (!ta || !name || !window.chatteringMe || typeof collabJoin !== 'function') return;
   if (composeShare && composeShare.name === name && composeShare.ta === ta && ta.isConnected) return;
   if (composeShare && composeShare.name !== name) composeShareDetach();
   const host = ta.closest('.agent-compose') || ta.parentElement;
@@ -245,7 +245,7 @@ function composeShareCheck() {
   if (kind === 'draft' && typeof draftState !== 'undefined' && draftState) return composeShareAttach('draft:' + draftState.d.id, ta);
   composeShareDetach();
 }
-window.addEventListener('aiconvo:route', () => { const k = typeof viewKind !== 'undefined' ? viewKind : ''; if (k !== 'conversation' && k !== 'draft') composeShareDetach(); });
+window.addEventListener('chattering:route', () => { const k = typeof viewKind !== 'undefined' ? viewKind : ''; if (k !== 'conversation' && k !== 'draft') composeShareDetach(); });
 document.addEventListener('input', e => { if (e.target && e.target.id === 'agentText') peopleTyping(); });
 
 /* ---- header: me, and the others on this install ---- */
@@ -480,12 +480,12 @@ async function renderDoors() {
   if (!$('setDoorsBody')) return;
   const owner = peopleIsOwner();
   if (d.error) { host.innerHTML = esc(d.error); return; }
-  if (!d.installed) { host.innerHTML = 'Tailscale is not installed on this machine. With it, this aiconvo gets a stable https name for your own devices, and can open one door to the internet for a guest who installs nothing.'; return; }
+  if (!d.installed) { host.innerHTML = 'Tailscale is not installed on this machine. With it, this Chattering gets a stable https name for your own devices, and can open one door to the internet for a guest who installs nothing.'; return; }
   if (!d.running) { host.innerHTML = 'Tailscale is installed but ' + esc(d.why || 'not running') + '.'; return; }
   const set = typeof settingsOf === 'function' ? settingsOf() : {};
   host.innerHTML = `
     <div class="row"><code class="mach-link">${esc(d.url)}</code><button type="button" class="ghost" data-copy="${esc(d.url)}">copy</button></div>
-    <div class="set-help">${d.serve ? 'The <b>tailnet door</b> is open: anyone on your Tailscale network reaches this name, with a real certificate, and still needs their aiconvo link to get in.' : 'This name is not pointing at aiconvo yet. Once, on this machine: <code>tailscale serve --bg --https=443 http://127.0.0.1:' + esc(String((settingsState && settingsState.port) || 7433)) + '</code>.'}</div>
+    <div class="set-help">${d.serve ? 'The <b>tailnet door</b> is open: anyone on your Tailscale network reaches this name, with a real certificate, and still needs their Chattering link to get in.' : 'This name is not pointing at Chattering yet. Once, on this machine: <code>tailscale serve --bg --https=443 http://127.0.0.1:' + esc(String((settingsState && settingsState.port) || 7433)) + '</code>.'}</div>
     <label class="set-check"><input id="setPublicDoor" type="checkbox"${d.funnel ? ' checked' : ''}${owner && d.serve ? '' : ' disabled'}> open the <b>public door</b>: the same name reachable from the whole internet</label>
     <div class="set-help" id="setPublicDoorHelp">${d.funnel
       ? 'Open. Anyone on the internet can reach the sign-in page; only a valid invite link or token gets past it. Ten wrong tries lock an address out for fifteen minutes; every sign-in is logged below. Close it when the guest is done.'
@@ -498,7 +498,7 @@ async function renderDoors() {
   if (sw) sw.onchange = async () => {
     sw.disabled = true;
     const on = sw.checked;
-    if (on && !confirm('Open this aiconvo\'s sign-in page to the whole internet? Only a valid invite link or token gets past it, and you can close the door any time.')) { sw.checked = false; sw.disabled = false; return; }
+    if (on && !confirm('Open this chattering\'s sign-in page to the whole internet? Only a valid invite link or token gets past it, and you can close the door any time.')) { sw.checked = false; sw.disabled = false; return; }
     const r = await postJson('/api/doors/public', { on });
     if (r.error) { errToast(r.error); if (r.enableUrl) $('setPublicDoorHelp').innerHTML = esc(r.error) + ` <a href="${esc(r.enableUrl)}" target="_blank" rel="noopener">Enable Funnel on the tailnet</a>, then flip the switch again.`; else $('setPublicDoorHelp').textContent = r.error; sw.checked = !on; sw.disabled = false; return; }
     toast(on ? 'public door open' : 'public door closed');
@@ -737,7 +737,7 @@ function openShareDialog() {
 function inviteSectionHtml(project) {
   return `<div class="share-invite" id="shareInvite">
     <h3>Invite someone to ${esc(project)}</h3>
-    <p class="hint">For a collaborator or a hire who is not part of this household: they get this project only. They can work in the browser here right away, and connect their own aiconvo later so the project's conversations and memory copy both ways. <a href="/guests" target="_blank" rel="noopener">What a guest can and cannot do</a> — the page they see too.</p>
+    <p class="hint">For a collaborator or a hire who is not part of this household: they get this project only. They can work in the browser here right away, and connect their own Chattering later so the project's conversations and memory copy both ways. <a href="/guests" target="_blank" rel="noopener">What a guest can and cannot do</a> — the page they see too.</p>
     <div class="row"><input type="text" id="invName" placeholder="their name" maxlength="60"><select id="invRight"><option value="see">can read</option><option value="act">can read and act</option></select><button type="button" id="invMake">make invite link</button></div>
     <div class="row inv-door" id="invDoorRow" hidden><span class="hint">through</span><select id="invDoor"></select><span class="hint" id="invDoorHint"></span></div>
     <div class="warn" id="invWarn" hidden></div>
@@ -780,16 +780,16 @@ function bindInviteSection(dlg, project) {
     if (r.error) return errToast(r.error);
     out.innerHTML = `<div class="invite-box"><b>${esc(name || 'Their')}${name ? "'s" : ''} invite link</b> — send it to them, once. It is shown only now and works for 14 days.
       <div class="row"><code class="mach-link">${esc(r.link)}</code><button type="button" class="ghost" data-copy="${esc(r.link)}">copy</button></div>
-      ${r.door === 'tailnet' ? (r.tailnetInvite ? `<div class="hint">First, they accept this Tailscale share (it lets their Tailscale login reach this one machine, nothing else), then open the link above:</div><div class="row"><code class="mach-link">${esc(r.tailnetInvite.url)}</code><button type="button" class="ghost" data-copy="${esc(r.tailnetInvite.url)}">copy</button></div>` : `<div class="warn">Could not make the Tailscale share: ${esc(r.tailnetError || 'unknown')}. The aiconvo link above still works for anyone already on your tailnet.</div>`) : ''}
+      ${r.door === 'tailnet' ? (r.tailnetInvite ? `<div class="hint">First, they accept this Tailscale share (it lets their Tailscale login reach this one machine, nothing else), then open the link above:</div><div class="row"><code class="mach-link">${esc(r.tailnetInvite.url)}</code><button type="button" class="ghost" data-copy="${esc(r.tailnetInvite.url)}">copy</button></div>` : `<div class="warn">Could not make the Tailscale share: ${esc(r.tailnetError || 'unknown')}. The Chattering link above still works for anyone already on your tailnet.</div>`) : ''}
       ${r.door === 'public' ? '<div class="hint">Goes through the public door: works from anywhere with nothing installed. Close the door in settings → machines when they are done.</div>' : ''}
-      ${r.markersWritten.length ? `<div class="hint">Wrote <code>${esc(r.markersWritten[0].replace(/^.*\/(?=\.aiconvo)/, ''))}</code> into the checkout — commit it, so their clone carries the same project id.</div>` : ''}</div>`;
+      ${r.markersWritten.length ? `<div class="hint">Wrote <code>${esc(r.markersWritten[0].replace(/^.*\/(?=\.chattering)/, ''))}</code> into the checkout — commit it, so their clone carries the same project id.</div>` : ''}</div>`;
     out.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { try { await copyText(b.dataset.copy); toast('copied'); } catch (e) { errToast(e.message); } });
   };
   fetch('/api/project-id?project=' + encodeURIComponent(project)).then(r => r.json()).then(info => {
     if (info.error) return;
     const radio = dlg.querySelector(`input[name=invPolicy][value="${info.policy}"]`);
     if (radio) radio.checked = true;
-    dlg.querySelector('#invIdLine').textContent = `Project id ${info.id}` + (info.marker ? ' · in .aiconvo/project.json' : ' · not yet written into the checkout (an invite does that)');
+    dlg.querySelector('#invIdLine').textContent = `Project id ${info.id}` + (info.marker ? ' · in .chattering/project.json' : ' · not yet written into the checkout (an invite does that)');
     dlg.querySelectorAll('input[name=invPolicy]').forEach(x => x.onchange = async () => {
       if (!peopleIsOwner()) return errToast('only the owner sets what leaves this machine');
       const r = await postJson('/api/sync/policy', { project, policy: x.value });
@@ -816,8 +816,8 @@ function panePeersHtml() {
   const inviteRow = i => `<div class="person-row" data-invite="${esc(i.id)}"><span class="user-bubble group">✉</span><div class="person-main"><b>${esc(i.name || 'someone')}</b><div class="hint">${i.projects.map(p => esc(p.name) + ' (' + p.right + ')').join(', ')} · expires ${when(i.expiresAt)}</div></div><div class="person-actions"><button type="button" class="ghost" data-iact="revoke">revoke</button></div></div>`;
   return `<div class="set-group">
       <div class="set-group-head"><h3>shared with other machines</h3><button type="button" class="ghost" id="setSyncNow">sync all now</button></div>
-      <p class="hint">Peers are other people's aiconvos that share a project with this one (they joined with an invite link, or you joined theirs with <code>aiconvo join</code>). Every minute each side pulls what is new; what arrives is mirrored read-only under the project. ${peersState.publicUrl ? 'This machine answers at ' + esc(peersState.publicUrl) + '.' : 'This machine has no public address: peers cannot pull from it, so it pushes its side to them.'}</p>
-      <div id="setPeerList">${peersState.peers.map(peerRow).join('') || '<span class="hint">no peers yet — invite someone from a project\'s sharing dialog (◎), or join theirs: aiconvo join &lt;link&gt;</span>'}</div>
+      <p class="hint">Peers are other people's chatterings that share a project with this one (they joined with an invite link, or you joined theirs with <code>chattering join</code>). Every minute each side pulls what is new; what arrives is mirrored read-only under the project. ${peersState.publicUrl ? 'This machine answers at ' + esc(peersState.publicUrl) + '.' : 'This machine has no public address: peers cannot pull from it, so it pushes its side to them.'}</p>
+      <div id="setPeerList">${peersState.peers.map(peerRow).join('') || '<span class="hint">no peers yet — invite someone from a project\'s sharing dialog (◎), or join theirs: chattering join &lt;link&gt;</span>'}</div>
       ${peersState.invites.length ? `<h4 class="hint">open invite links</h4>${peersState.invites.map(inviteRow).join('')}` : ''}
     </div>`;
 }
@@ -945,7 +945,7 @@ function bindPaneProfile(root) {
       if (d.avatar && !out.user?.avatar) throw new Error('Picture saving needs the updated server. Restart it after running agents finish, then save again.');
       if (!out.user) throw new Error('The server did not return your saved profile.');
       peopleState.users = out.users || peopleState.users;
-      peopleState.me = out.user; window.aiconvoMe = out.user;
+      peopleState.me = out.user; window.chatteringMe = out.user;
       profileDraft = null; renderPeopleHeader(); renderPresenceMarks();
       toast('Profile saved');
     } catch (error) { d.error = error.message || 'Could not save your profile.'; }
@@ -988,7 +988,7 @@ function panePeople() {
       <div class="set-group-head"><h3>groups</h3><button type="button" class="ghost" id="setGroupAdd">new group</button></div>
       <div id="setGroupList">${peopleState.groups.length ? peopleState.groups.map(g => `<div class="person-row" data-gid="${esc(g.id)}"><span class="user-bubble group">#</span><div class="person-main"><b>${esc(g.name)}</b><div class="hint">${esc(g.id)} · ${peopleState.users.filter(u => u.groups.includes(g.id)).map(u => u.name).join(', ') || 'nobody yet'}</div></div><div class="person-actions"><button type="button" class="ghost" data-gact="remove">✕</button></div></div>`).join('') : '<span class="hint">none — a group lets you share a project with several people at once (say, a department).</span>'}</div>
     </div>` : ''}
-    <details class="set-more"><summary>how sharing works</summary><p>Everything on a machine is shared with everyone admitted to it, unless its owner hides it (the ⊘ button on a conversation or a project). Hidden things leave the lists, search and memory of the people they are hidden from. The owner of the machine — the account the agents run as — always sees everything on it; these are polite walls between people who share a computer, not vaults. Who typed each message, saved each file and vouched each note is recorded by name.</p><p>A <b>guest</b> is the other way round: someone invited to one project (from the project's sharing dialog) sees nothing on this machine except what is listed for them, and everything they run here starts inside a sandbox that holds only that project's folder${peopleState.walls && peopleState.walls.available ? '' : ' (<b>not on this machine</b>: bubblewrap is not installed, so guest agents would run unwalled)'}. Guests may connect their own aiconvo; the project's conversations and memory then copy both ways, and each machine only ever writes its own.</p></details>`;
+    <details class="set-more"><summary>how sharing works</summary><p>Everything on a machine is shared with everyone admitted to it, unless its owner hides it (the ⊘ button on a conversation or a project). Hidden things leave the lists, search and memory of the people they are hidden from. The owner of the machine — the account the agents run as — always sees everything on it; these are polite walls between people who share a computer, not vaults. Who typed each message, saved each file and vouched each note is recorded by name.</p><p>A <b>guest</b> is the other way round: someone invited to one project (from the project's sharing dialog) sees nothing on this machine except what is listed for them, and everything they run here starts inside a sandbox that holds only that project's folder${peopleState.walls && peopleState.walls.available ? '' : ' (<b>not on this machine</b>: bubblewrap is not installed, so guest agents would run unwalled)'}. Guests may connect their own Chattering; the project's conversations and memory then copy both ways, and each machine only ever writes its own.</p></details>`;
 }
 // What one guest may use of this machine (design/55). Empty = derived
 // from the machine; the server reports what is in force either way.

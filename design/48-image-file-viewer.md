@@ -133,7 +133,7 @@ JDK 17, Android platform/build tools 35 and Gradle 8.9. The shipped APK must use
 the existing signing certificate so it upgrades without a reinstall/data reset.
 The September 19 builds were signed on XPSwhite without copying private keys to
 the build host. The tablet uses `~/.config/.android/debug.keystore` (certificate
-SHA-256 starts `66715edc`), matching `aiconvo.apk`. The Samsung phone uses the
+SHA-256 starts `66715edc`), matching `chattering.apk`. The Samsung phone uses the
 **different** `~/.android/debug.keystore` (starts `7d58ac15`). Its matching build
 is `android/app/build/outputs/apk/phone/app-phone.apk`; the default APK does not
 upgrade that phone. Check the installed certificate before choosing a key. Never
@@ -172,6 +172,6 @@ Unicode filename from the authorized media URL rather than naming every file
   do not equate phone verification or device emulation with Safari/tablet testing.
 
 Deploy the matching server and frontend together, then refresh clients. **Do not
-restart Aiconvo while managed web agents are busy.** The new APK can be installed
+restart Chattering while managed web agents are busy.** The new APK can be installed
 independently once the web server is current. No Rust build, OS rebuild, conversion
 service or runtime npm install is needed.

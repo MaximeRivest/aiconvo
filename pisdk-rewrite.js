@@ -1,6 +1,6 @@
 'use strict';
 
-const CUSTOM_TYPE = 'aiconvo-answer-rewrite';
+const CUSTOM_TYPE = 'chattering-answer-rewrite';
 const PROMPT = 'Wait, I don’t get it. Re-explain your entire last answer simply, for a smart 16-year-old with no background in this subject. This is a full explanation, not a summary: don’t leave things out to make it simpler. Use everyday words. If a technical term is necessary, explain it when you first use it. Change how you explain things, not what you’re saying. Just rewrite the answer; don’t do any additional work or use tools.';
 const LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 const textOf = message => (message?.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
@@ -58,7 +58,7 @@ function captureRewriteRequest(session, prompt = PROMPT) {
           throw new Error(response.errorMessage || (response.stopReason === 'toolUse' ? 'Rewrite tried to use tools; none were executed' : 'Rewrite did not finish'));
         }
         // A native assistant message preserves provider usage and reasoning blocks.
-        const saved = { ...response, aiconvoRewrite: { ...details, requestId } };
+        const saved = { ...response, chatteringRewrite: { ...details, requestId } };
         const answerId = sm.appendMessage(saved);
         session.agent.state.messages = [...session.agent.state.messages, saved];
         emit({ type: 'answer_rewrite', state: 'ready', answerId, text: textOf(response), ...details });

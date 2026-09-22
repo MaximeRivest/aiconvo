@@ -19,7 +19,7 @@ test('saved history hides the request, links both answers, and counts successful
     { type: 'message', id: 'q', parentId: null, message: { role: 'user', content: 'Explain it.' } },
     { type: 'message', id: 'a', parentId: 'q', message: response('Technical original.') },
     { type: 'custom_message', id: 'request', parentId: 'a', customType: CUSTOM_TYPE, content: PROMPT, display: false, details: { sourceEntryId: 'a' } },
-    { type: 'message', id: 's', parentId: 'request', message: { ...response('Everyday explanation.'), aiconvoRewrite: { sourceEntryId: 'a', requestId: 'request' } } },
+    { type: 'message', id: 's', parentId: 'request', message: { ...response('Everyday explanation.'), chatteringRewrite: { sourceEntryId: 'a', requestId: 'request' } } },
     { type: 'custom', id: 'failed', parentId: 's', customType: CUSTOM_TYPE, data: { state: 'failed', response: { ...response('Incomplete'), stopReason: 'length' } } },
   ].map(JSON.stringify).join('\n'));
   const source = fs.readFileSync(require.resolve('../server'), 'utf8');

@@ -43,7 +43,7 @@ test('billing rules override safe provider and credential inferences', () => {
 });
 
 test('parses assistant, compaction, and Claude sidechain usage', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-usage-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chattering-usage-'));
   const piFile = path.join(dir, 'pi.jsonl');
   fs.writeFileSync(piFile, [
     { type: 'model_change', id: 'm', timestamp: '2026-01-01T00:00:00Z', provider: 'openai', modelId: 'gpt-x' },
@@ -66,7 +66,7 @@ test('parses assistant, compaction, and Claude sidechain usage', async () => {
 });
 
 test('SQLite index deduplicates copied fork entries and aggregates by project', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-usage-db-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chattering-usage-db-'));
   const transcript = path.join(dir, 'one.jsonl');
   fs.writeFileSync(transcript, JSON.stringify({
     type: 'message', id: 'shared', timestamp: '2026-01-01T00:00:00Z',
@@ -98,12 +98,12 @@ const speedSample = (overrides = {}) => ({
 });
 
 test('reply-speed entries are read from transcripts and deduplicated across forks', async t => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-usage-speed-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chattering-usage-speed-'));
   const transcript = path.join(dir, 'one.jsonl');
   fs.writeFileSync(transcript, [
     { type: 'model_change', id: 'm', timestamp: '2026-01-01T00:00:00Z', provider: 'acme', modelId: 'fast-1' },
     { type: 'message', id: 'r1', timestamp: '2026-01-01T00:00:01Z', message: { role: 'assistant', provider: 'acme', model: 'fast-1', usage: { input: 1, output: 300, cacheRead: 0, cacheWrite: 0 } } },
-    { type: 'custom', customType: 'aiconvo-speed', id: 's1', timestamp: '2026-01-01T00:00:05Z', data: { v: 1, samples: [
+    { type: 'custom', customType: 'chattering-speed', id: 's1', timestamp: '2026-01-01T00:00:05Z', data: { v: 1, samples: [
       speedSample(),
       // No entry id (the reply could not be matched): keyed by the entry that holds it.
       speedSample({ entryId: null, provider: null, model: null, text: { chars: 50, timedChars: 0, ms: 0, chunks: 0 } }),
@@ -200,12 +200,12 @@ test('failed and aborted replies remain recorded but never enter comparison dist
 });
 
 test('measurement UUIDs keep identical short Pi entry ids from unrelated sessions separate', async t => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-speed-identities-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chattering-speed-identities-'));
   const idx = new UsageIndex(path.join(dir, 'usage.db'));
   t.after(() => { idx.db.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   for (const measurementId of ['record-one', 'record-two']) {
     const file = path.join(dir, measurementId + '.jsonl');
-    fs.writeFileSync(file, JSON.stringify({ type: 'custom', id: 'same-short-id', customType: 'aiconvo-speed', data: { v: 1, measurementId, samples: [speedSample()] } }));
+    fs.writeFileSync(file, JSON.stringify({ type: 'custom', id: 'same-short-id', customType: 'chattering-speed', data: { v: 1, measurementId, samples: [speedSample()] } }));
     const st = fs.statSync(file);
     await idx.updateFile('pi:' + measurementId, { source: 'pi', project: 'test', mtimeMs: st.mtimeMs, size: st.size }, file, new PricingCatalog());
   }

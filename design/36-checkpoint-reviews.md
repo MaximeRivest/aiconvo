@@ -41,7 +41,7 @@ A review is immutable as a file comparison. It offers:
 ## Capture architecture
 
 `checkpoint-extension.js` is an inline Pi extension installed by
-`pisdk-runtime.js` in aiconvo-managed SDK workers. It registers awaited
+`pisdk-runtime.js` in chattering-managed SDK workers. It registers awaited
 `before_agent_start`, `tool_call`, `tool_result`, `agent_settled`, and shutdown
 handlers. It does not wrap or replace tool implementations, change their inputs,
 change results, or write messages into the transcript.
@@ -62,7 +62,7 @@ Existing per-file history is retained rather than destructively migrated.
 ## Storage and concurrency
 
 `checkpoint-store.js` owns private bare Git repositories and SQLite metadata
-under `~/.local/share/aiconvo/checkpoints/` (`AICONVO_CHECKPOINT_DIR` overrides it).
+under `~/.local/share/chattering/checkpoints/` (`CHATTERING_CHECKPOINT_DIR` overrides it).
 Directories and metadata are owner-only. This store is outside project folders
 and the rebuildable activity cache. Back up the complete store while writers
 are stopped; a raw copy of a live SQLite database alone is not a consistent backup.
@@ -102,14 +102,14 @@ are stopped; a raw copy of a live SQLite database alone is not a consistent back
   The scan loop and individual Git commands have 15-second limits. Capturing
   before tools adds latency; stat/contents caching and snapshot deduplication
   reduce repeated work without interpreting Bash command strings.
-- `AICONVO_CHECKPOINT_MB` defaults to 1024 MiB of reserved compressed blob
+- `CHATTERING_CHECKPOINT_MB` defaults to 1024 MiB of reserved compressed blob
   storage. SQLite metadata, Git trees/commits, journals and temporary indexes
   are additional. This is a content budget, not a strict total disk quota.
   Reservations are coordinated across workers. Failed writes may conservatively
   retain reservations. No automatic pruning or manual-Git maintenance UI is
   implemented; do not run arbitrary Git cleanup on the managed store.
-- `AICONVO_NO_CHECKPOINTS=1` disables automatic capture. Loose launch directories
-  (home, `/tmp`, etc.) are not automatically scanned. Aiconvo-managed SDK sessions
+- `CHATTERING_NO_CHECKPOINTS=1` disables automatic capture. Loose launch directories
+  (home, `/tmp`, etc.) are not automatically scanned. Chattering-managed SDK sessions
   are instrumented; standalone terminal Pi/RPC/other agents are not automatically
   installed or intercepted. Their disk changes can be observed by the server.
 - Copies can retain removed secrets. They are local and permission-restricted,

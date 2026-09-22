@@ -21,7 +21,7 @@ const REQUIRED_COLOR_TOKENS = [
 ];
 
 function defaultThemeDir(home) {
-  return path.join(home, '.config', 'aiconvo', 'themes');
+  return path.join(home, '.config', 'chattering', 'themes');
 }
 
 function validThemeId(id) {
@@ -29,8 +29,8 @@ function validThemeId(id) {
 }
 
 function parseMetadata(css) {
-  const match = String(css).match(/\/\*\s*aiconvo-theme\s*\n([\s\S]*?)\*\//i);
-  if (!match) return { metadata: null, error: 'missing /* aiconvo-theme metadata block */' };
+  const match = String(css).match(/\/\*\s*(?:chattering|aiconvo)-theme\s*\n([\s\S]*?)\*\//i);
+  if (!match) return { metadata: null, error: 'missing /* chattering-theme metadata block */' };
   const metadata = {};
   for (const raw of match[1].split(/\r?\n/)) {
     const line = raw.trim().replace(/^\*\s?/, '');

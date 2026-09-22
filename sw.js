@@ -5,7 +5,7 @@
 // on the next load and a plain reload never re-downloads 1–4 MB.
 // Everything else goes straight to the network: the app's own freshness
 // rules (ETag + no-cache) stay with the server.
-const VENDOR_CACHE = 'aiconvo-vendor-v1';
+const VENDOR_CACHE = 'chattering-vendor-v1';
 
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());

@@ -52,9 +52,9 @@ if (process.argv[1] === ${JSON.stringify(path.join(root, 'server.js'))}) {
   let log = '';
   const start = () => {
     server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env,
-      HOME: home, PORT: String(port), AICONVO_HOST: '127.0.0.1', AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1',
-      AICONVO_NO_FILE_HISTORY: '1', AICONVO_NO_CHECKPOINTS: '1', AICONVO_DISABLE_NETWORK_RECOVERY: '1',
-      AICONVO_CACHE_DIR: cache, AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'),
+      HOME: home, PORT: String(port), CHATTERING_HOST: '127.0.0.1', CHATTERING_NO_WATCH: '1', CHATTERING_NO_LEDGER: '1',
+      CHATTERING_NO_FILE_HISTORY: '1', CHATTERING_NO_CHECKPOINTS: '1', CHATTERING_DISABLE_NETWORK_RECOVERY: '1',
+      CHATTERING_CACHE_DIR: cache, CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'),
       PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent, NODE_OPTIONS: '--require=' + preload,
     }, stdio: ['ignore', 'pipe', 'pipe'] });
     server.stdout.on('data', b => log += b); server.stderr.on('data', b => log += b);

@@ -49,7 +49,7 @@ Two different continuations, two different actions:
 
 - **branch from here** (pi only) — the SAME conversation grows a new path. pi's session
   manager picks its leaf as the last entry in the file on load, and pi's own `branch()`
-  writes a no-op `label` entry parented at the branch point. aiconvo appends exactly that
+  writes a no-op `label` entry parented at the branch point. Chattering appends exactly that
   one entry; the next resume continues from the chosen message, and the old path stays as
   a dashed branch. Refuses if a pi process still holds the session file (a running pi
   keeps its leaf in memory). Quit that Alacritty window first. Verified end-to-end with `pi -p --session`.
@@ -67,7 +67,7 @@ therefore unions the whole family:
 
 - Membership: sessions that share their first entry id (every fork copies the root chain
   verbatim, so the first `id`/`uuid` matches), plus sessions linked by pi's `parentSession`
-  header field (written by the pi TUI's native fork and by aiconvo's fork).
+  header field (written by the pi TUI's native fork and by Chattering's fork).
 - The `rootId` and `parentSession` are captured at index time (CACHE_VERSION 4), so family
   lookup is an in-memory scan — no file reads until a tree is actually opened.
 - Entries dedupe by id across files; each fork's new messages attach to the shared chain

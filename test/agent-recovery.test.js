@@ -24,7 +24,7 @@ function fixture(t, options = {}) {
 test('network classification is conservative; stop, auth, capacity and context failures win', () => {
   for (const e of ['fetch failed', 'TypeError: fetch failed\ncause: ECONNRESET', 'Connection error.', 'getaddrinfo EAI_AGAIN', 'UND_ERR_SOCKET']) assert.equal(failureKind(e), 'network', e);
   for (const e of ['API timeout', 'model activity timeout', 'Worker exited', '429 network request failed', 'invalid_grant: fetch failed', 'context length exceeded', '503 connection error', 'quota exhausted']) assert.equal(failureKind(e), 'other', e);
-  for (const e of ['aborted by you', 'stopped — aiconvo restarted', 'cancelled: network error']) assert.equal(failureKind(e), 'stopped', e);
+  for (const e of ['aborted by you', 'stopped — chattering restarted', 'cancelled: network error']) assert.equal(failureKind(e), 'stopped', e);
 });
 test('automatic recovery is strict opt-in in both settings modes', () => {
   for (const usePiDefault of [true, false]) {

@@ -20,7 +20,7 @@ each said in words.
 ## The doors
 
 All three share one https name — `https://lambda.tail69222b.ts.net` — and
-one handler in tailscaled's state (port 443, proxied to aiconvo). What
+one handler in tailscaled's state (port 443, proxied to Chattering). What
 differs is who may reach the name.
 
 - **Your network** (what existed): the LAN address, plus the tailnet
@@ -31,14 +31,14 @@ differs is who may reach the name.
   — a single-use link that shares this one device with the person who
   accepts it, nothing else of the tailnet. The invite dialog offers this
   when an API access token is saved in settings → machines; the two
-  links (the share, then the aiconvo link) come out together. Traffic is
+  links (the share, then the Chattering link) come out together. Traffic is
   direct, machine to machine, relayed encrypted only when punching fails;
-  nothing about aiconvo is on the public internet. The price: the person
+  nothing about Chattering is on the public internet. The price: the person
   installs Tailscale and signs in with a Google/GitHub/Apple account. Two
   minutes, free, once.
 - **The public door** (Funnel): the same name, opened to the internet.
-  Nothing to install on their side. The price: aiconvo's sign-in page is
-  on the internet while the door is open, and aiconvo's own gate is the
+  Nothing to install on their side. The price: Chattering's sign-in page is
+  on the internet while the door is open, and Chattering's own gate is the
   only gate — which is why the guard below exists, and why the walls came
   first. A switch on settings → machines, owner only, with a confirm;
   turning it off re-declares the *serve* handler (which clears the funnel
@@ -47,7 +47,7 @@ differs is who may reach the name.
 
 The invite dialog shows only the doors that are open right now, with a
 hint under each saying what the person on the other side must have. The
-aiconvo link is the same credential whichever door it arrives by.
+Chattering link is the same credential whichever door it arrives by.
 
 Tailscale itself gates two things: Funnel must be enabled once on the
 tailnet (an admin click; the refusal carries the link and the settings
@@ -58,7 +58,7 @@ refusal says that too.
 ## The guard
 
 With a door on the internet, the sign-in page will be visited by scanners
-within the hour. Aiconvo's credentials are 128-bit random tokens; guessing
+within the hour. Chattering's credentials are 128-bit random tokens; guessing
 one is hopeless. The guard exists so that nobody has to trust that
 sentence, and so that the owner can *see* what is happening.
 
@@ -80,7 +80,7 @@ sentence, and so that the owner can *see* what is happening.
   fills.
 - **A log of every outcome** — time, address, door (local, lan, tailnet,
   public), outcome, who, how — appended to
-  `~/.local/share/aiconvo/sign-ins.jsonl`, outside the cache, bounded in
+  `~/.local/share/chattering/sign-ins.jsonl`, outside the cache, bounded in
   memory. Settings → machines → "recent sign-ins" shows the tail; opening
   and closing the public door is logged there too.
 - **Headers on every answer**: `X-Frame-Options: SAMEORIGIN` (the app
@@ -101,7 +101,7 @@ between people who share a computer, not a hosting service.
 
 ## The machine side (NixOS)
 
-`os/machines/modules/aiconvo.nix` (`services.aiconvo.frontDoor.*`): the
+`os/machines/modules/chattering.nix` (`services.chattering.frontDoor.*`): the
 LAN ports, bubblewrap, the Tailscale Serve unit for the tailnet name, and
 the operator right. Both hosts use it. The serve unit re-declares the
 tailnet-only handler at every boot, so **a reboot closes the public

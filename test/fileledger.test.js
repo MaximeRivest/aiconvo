@@ -8,7 +8,7 @@ const path = require('path');
 const L = require('../fileledger.js');
 
 function tmpDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-ledger-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chattering-ledger-'));
   return path.join(dir, 'files.db');
 }
 

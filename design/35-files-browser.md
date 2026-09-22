@@ -57,11 +57,11 @@ visual reference; the primary history axis is recorded time, not branches.
 
 ## Archive limits and operating choices
 
-- Default durable store: `~/.local/share/aiconvo/file-history/versions.sqlite`.
+- Default durable store: `~/.local/share/chattering/file-history/versions.sqlite`.
   Back up this directory; deleting the activity cache does not delete it.
-  `AICONVO_FILE_HISTORY_DIR` overrides the private directory,
-  `AICONVO_FILE_HISTORY_MB` changes the default 512 MiB database budget,
-  and `AICONVO_NO_FILE_HISTORY=1` disables capture. SQLite journal overhead is
+  `CHATTERING_FILE_HISTORY_DIR` overrides the private directory,
+  `CHATTERING_FILE_HISTORY_MB` changes the default 512 MiB database budget,
+  and `CHATTERING_NO_FILE_HISTORY=1` disables capture. SQLite journal overhead is
   additional to the database budget. There is no automatic pruning.
 - At capacity or on capture failure, file editing continues. Save responses,
   activity notices and the history drawer report warnings; prior versions are

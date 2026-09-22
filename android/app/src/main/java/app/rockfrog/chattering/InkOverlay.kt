@@ -1,4 +1,4 @@
-package app.aiconvo
+package app.rockfrog.chattering
 
 import android.content.Context
 import android.graphics.Canvas

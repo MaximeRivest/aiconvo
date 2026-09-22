@@ -4,7 +4,7 @@
 awareness) and lib0's encoding/decoding, built as one CommonJS file for
 the Node host. `collab.js` uses it to hold the shared documents (compose
 boxes, files) and to speak the y-websocket wire protocol over
-`wsserver.js`. Aiconvo keeps no npm dependencies; this is vendored like
+`wsserver.js`. Chattering keeps no npm dependencies; this is vendored like
 the editor bundle.
 
 Build (from the mrmd editor checkout, which owns the toolchain):
@@ -12,7 +12,7 @@ Build (from the mrmd editor checkout, which owns the toolchain):
 ```bash
 cd ~/Projects/mrmd-packages/mrmd-editor
 npx rollup -c rollup.yjs-server.config.js
-cp dist/yjs-server.cjs ~/Projects/aiconvo/vendor/yjs-server/<version>/
+cp dist/yjs-server.cjs ~/Projects/chattering/vendor/yjs-server/<version>/
 ```
 
 The browser side of the same protocol (Y.Doc, WebsocketProvider,

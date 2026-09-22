@@ -19,8 +19,8 @@ test('image attachments keep valid files after a decode failure and preserve nat
   assert.deepEqual(result.names, ['valid.png']);
   assert.equal(result.errors.length, 1);
   assert.match(result.errors[0], /could not decode.*broken\.png/);
-  assert.deepEqual(await ev(`aiconvoAcceptImage('image/jpeg','dGVzdA==','Photo.jpg');window._agentImages.map(i=>i.name)`), ['valid.png', 'Photo.jpg']);
-  await ev(`for(let i=0;i<10;i++)aiconvoAcceptImage('image/jpeg','dGVzdA==');errToast=savedErrToast`);
+  assert.deepEqual(await ev(`chatteringAcceptImage('image/jpeg','dGVzdA==','Photo.jpg');window._agentImages.map(i=>i.name)`), ['valid.png', 'Photo.jpg']);
+  await ev(`for(let i=0;i<10;i++)chatteringAcceptImage('image/jpeg','dGVzdA==');errToast=savedErrToast`);
   assert.equal(await ev(`window._agentImages.length`), 8);
   assert.equal(await ev(`imageErrors.at(-1)`), 'Up to 8 images per message.');
   assert.deepEqual(exceptions, []);

@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-// aiconvo — query the conversation records from any folder, for people and
-// for agents. `aiconvo` alone answers "where was I?". The other commands
+// chattering — query the conversation records from any folder, for people and
+// for agents. `chattering` alone answers "where was I?". The other commands
 // search and read conversations, notes, project memory, epics and evidence.
 // Every answer is plain text rendered by the server (records.js), so this
-// file only parses arguments and prints. Run `aiconvo help` for the list.
+// file only parses arguments and prints. Run `chattering help` for the list.
 'use strict';
 const http = require('http');
 const path = require('path');
 
-const PORT = Number(process.env.AICONVO_PORT || process.env.PORT || 7433);
+const PORT = Number(process.env.CHATTERING_PORT || process.env.PORT || 7433);
 // Being on this machine is not a credential (a guest's sandboxed agent is
 // on it too): the token comes from the environment, else from the install
 // token file, which only the account can read.
-const TOKEN = process.env.AICONVO_TOKEN || (() => {
-  try { return require('fs').readFileSync(require('path').join(require('os').homedir(), '.cache', 'aiconvo', 'lan-token'), 'utf8').trim(); } catch { return ''; }
+const TOKEN = process.env.CHATTERING_TOKEN || (() => {
+  try { return require('fs').readFileSync(require('path').join(require('os').homedir(), '.cache', 'chattering', 'lan-token'), 'utf8').trim(); } catch { return ''; }
 })();
 
 // Long options that take a value. Anything else that starts with -- is a flag.
@@ -62,13 +62,13 @@ function plan(positional, opts) {
       return { op: 'here', params };
     case 'search': {
       const q = rest.join(' ').trim();
-      if (!q) fail('usage: aiconvo search "<words>" [--project NAME] [--since 30d]');
+      if (!q) fail('usage: chattering search "<words>" [--project NAME] [--since 30d]');
       params.q = q;
       pass(['project', 'since', 'role', 'type', 'limit', 'offset', 'exclude', 'max', 'semantic', 'prefix']);
       return { op: 'search', params };
     }
     case 'show': {
-      if (!rest[0]) fail('usage: aiconvo show <id> [--at N] [--context K] [--from A --to B] [--last N] [--roles all]');
+      if (!rest[0]) fail('usage: chattering show <id> [--at N] [--context K] [--from A --to B] [--last N] [--roles all]');
       params.id = rest[0];
       pass(['at', 'context', 'from', 'to', 'last', 'roles', 'max']);
       return { op: 'show', params };
@@ -80,7 +80,7 @@ function plan(positional, opts) {
       return { op: 'conversations', params };
     case 'projects': return { op: 'projects', params };
     case 'memory': case 'map': {
-      // aiconvo memory [PROJECT] [KIND] | aiconvo memory --epic ID [KIND]
+      // chattering memory [PROJECT] [KIND] | chattering memory --epic ID [KIND]
       const kinds = new Set(['overview', 'intent', 'environment', 'status']);
       for (const r of rest) { if (kinds.has(r)) params.kind = r; else params.project = r; }
       pass(['project', 'area', 'epic', 'kind', 'max']);
@@ -91,7 +91,7 @@ function plan(positional, opts) {
       pass(['project', 'limit', 'max']);
       return { op: 'notes', params };
     case 'note':
-      if (!rest[0]) fail('usage: aiconvo note <conversation id | file under ~/notes/aiconvo>');
+      if (!rest[0]) fail('usage: chattering note <conversation id | file under ~/notes/chattering>');
       params.id = rest[0].startsWith('~/') ? path.join(require('os').homedir(), rest[0].slice(2)) : rest[0];
       pass(['max']);
       return { op: 'note', params };
@@ -100,26 +100,26 @@ function plan(positional, opts) {
       pass(['project', 'limit', 'max']);
       return { op: 'epics', params };
     case 'epic':
-      if (!rest[0]) fail('usage: aiconvo epic <id>');
+      if (!rest[0]) fail('usage: chattering epic <id>');
       params.id = rest[0];
       pass(['max']);
       return { op: 'epic', params };
     // Sharing with other installs: these talk to this machine's server,
     // which does the handshake and the copying (design/52).
     case 'join': {
-      if (!rest[0]) fail('usage: aiconvo join <invite link> [--name "Your Name"] [--folder /path/to/checkout]');
+      if (!rest[0]) fail('usage: chattering join <invite link> [--name "Your Name"] [--folder /path/to/checkout]');
       return { op: 'sync/join-remote', method: 'POST', params: { link: rest[0], name: opts.name || '', folder: opts.folder ? path.resolve(opts.folder) : '' } };
     }
     case 'sync': return { op: 'sync/now', method: 'POST', params: { all: opts.all === 'true' } };
     case 'peers': return { op: 'sync/peers', method: 'GET', params: {} };
     case 'project-id': return { op: 'project-id', method: 'GET', params: { project: rest[0] || '', dir: params.dir } };
     case 'evidence':
-      if (!rest[0]) fail('usage: aiconvo evidence <id>');
+      if (!rest[0]) fail('usage: chattering evidence <id>');
       params.id = rest[0];
       pass(['max']);
       return { op: 'evidence', params };
     default:
-      fail(`unknown command "${cmd}". Run: aiconvo help`);
+      fail(`unknown command "${cmd}". Run: chattering help`);
   }
 }
 
@@ -165,18 +165,18 @@ function sharingText(op, d) {
     if (!d.projects.some(p => p.cwd)) lines.push('No local folder yet: the project shows up here from its mirrors. Clone it and run the join again with --folder to bind it.');
     lines.push(d.reachableFromThem ? 'They can pull from this machine, and this one pulls from theirs.' : 'This machine has no public address, so it pushes its side to them and pulls theirs; nothing needs to reach it.');
     if (d.sync) lines.push(`First sync: ${d.sync.pulled} conversation${d.sync.pulled === 1 ? '' : 's'} pulled, ${d.sync.pushed} pushed${d.sync.skipped ? ' (' + d.sync.skipped + ')' : ''}.`);
-    lines.push('Peers sync every minute; `aiconvo sync` runs one now.');
+    lines.push('Peers sync every minute; `chattering sync` runs one now.');
     return lines.join('\n');
   }
   if (op === 'sync/now') {
     const rows = d.peers.map(p => { const r = (d.results || {})[p.id] || {}; return `${p.name}: ${r.skipped ? r.skipped : `${r.pulled || 0} pulled, ${r.pushed || 0} pushed`}${p.lastError ? ' — ' + p.lastError : ''}`; });
-    return rows.length ? rows.join('\n') : 'No peers. Someone invites you with a link, then: aiconvo join <link>.';
+    return rows.length ? rows.join('\n') : 'No peers. Someone invites you with a link, then: chattering join <link>.';
   }
   if (op === 'sync/peers') {
-    if (!d.peers.length) return `No peers on ${d.host}. Someone invites you with a link, then: aiconvo join <link>.`;
+    if (!d.peers.length) return `No peers on ${d.host}. Someone invites you with a link, then: chattering join <link>.`;
     return d.peers.map(p => `${p.name}${p.paused ? ' (paused)' : ''} — ${p.reachable ? p.url : 'pushes to us (no address)'}\n  projects: ${p.projects.map(x => x.name + ' (' + x.right + ')').join(', ') || '(none)'}\n  last pull ${p.lastPullAt || 'never'} · last push ${p.lastPushAt || 'never'}${p.lastError ? '\n  error: ' + p.lastError : ''}`).join('\n');
   }
-  if (op === 'project-id') return `${d.name}: ${d.id}\n  folder: ${d.cwd || '(none)'} · marker ${d.marker ? 'in .aiconvo/project.json (commit it)' : 'not written yet (an invite writes it)'} · sharing policy: ${d.policy}`;
+  if (op === 'project-id') return `${d.name}: ${d.id}\n  folder: ${d.cwd || '(none)'} · marker ${d.marker ? 'in .chattering/project.json (commit it)' : 'not written yet (an invite writes it)'} · sharing policy: ${d.policy}`;
   return JSON.stringify(d, null, 2);
 }
 
@@ -186,7 +186,7 @@ async function main() {
   let r;
   if (method) {
     try { r = await api(method, op, params); }
-    catch (e) { fail(`aiconvo server is not answering on port ${PORT} (${e.code || e.message}).`, 3); }
+    catch (e) { fail(`chattering server is not answering on port ${PORT} (${e.code || e.message}).`, 3); }
     if (opts.json) { process.stdout.write(JSON.stringify(r.data, null, 2) + '\n'); process.exit(r.status === 200 ? 0 : 1); }
     if (r.status !== 200) fail('error: ' + (r.data.error || r.status), 1);
     process.stdout.write(sharingText(op, r.data) + '\n');
@@ -194,8 +194,8 @@ async function main() {
   }
   try { r = await get(op, params); }
   catch (e) {
-    fail(`aiconvo server is not answering on port ${PORT} (${e.code || e.message}).\n` +
-      `Start it: systemctl --user start aiconvo   (or: node ~/Projects/aiconvo/server.js)`, 3);
+    fail(`chattering server is not answering on port ${PORT} (${e.code || e.message}).\n` +
+      `Start it: systemctl --user start chattering   (or: node ~/Projects/chattering/server.js)`, 3);
   }
   if (opts.json) {
     process.stdout.write(JSON.stringify(r.data, null, 2) + '\n');

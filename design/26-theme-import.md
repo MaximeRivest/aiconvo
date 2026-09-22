@@ -1,6 +1,6 @@
-# Theme import: match aiconvo to your terminal or OS
+# Theme import: match Chattering to your terminal or OS
 
-Terminal color schemes and aiconvo tokens have the same shape: one
+Terminal color schemes and Chattering tokens have the same shape: one
 background, one foreground, and 16 ANSI colors. The importer maps them
 mechanically and repairs contrast until the theme validator passes.
 
@@ -11,7 +11,7 @@ node themeimport.js            # auto-detect, write the theme, done
 node themeimport.js --list     # show which color sources exist on this machine
 ```
 
-The importer writes `~/.config/aiconvo/themes/<id>.css`. Open aiconvo,
+The importer writes `~/.config/chattering/themes/<id>.css`. Open Chattering,
 focus the theme selector, and pick the theme under **custom themes**.
 
 ## Sources
@@ -58,13 +58,13 @@ Re-run the importer after you switch Omarchy themes.
 
 ## Agent prompt
 
-Paste this into any coding agent to theme aiconvo from something the
+Paste this into any coding agent to theme Chattering from something the
 importer does not cover (a VS Code theme, a wallpaper, a brand palette):
 
 ```text
-Create a custom theme for aiconvo (the conversation browser).
+Create a custom theme for chattering (the conversation browser).
 
-1. Read design/25-themes.md in the aiconvo repo. It is the full file
+1. Read design/25-themes.md in the chattering repo. It is the full file
    contract: metadata block, one :root[data-theme="<id>"] rule, and the
    required color tokens. Only custom-property declarations are allowed.
 2. Extract my colors from <SOURCE>. I want the theme to feel like it.
@@ -75,10 +75,10 @@ Create a custom theme for aiconvo (the conversation browser).
    for warnings, green for success. Use the OS or brand accent for
    `--accent` when it is not green. Build the surface ramp as small steps
    from the background toward the foreground.
-5. Validate: `node test/theme-check.js ~/.config/aiconvo/themes/<id>.css`
+5. Validate: `node test/theme-check.js ~/.config/chattering/themes/<id>.css`
    Fix every reported error. Contrast failures: adjust lightness only.
-6. Write the file to ~/.config/aiconvo/themes/<id>.css. Then reload
-   aiconvo and select the theme in the header selector to verify it.
+6. Write the file to ~/.config/chattering/themes/<id>.css. Then reload
+   chattering and select the theme in the header selector to verify it.
 ```
 
 ## Limits

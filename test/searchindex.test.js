@@ -8,11 +8,11 @@ const path = require('path');
 const { openSearchIndex, SearchIndex, parseQuery, matchExpr, mdSections, mdKind } = require('../searchindex.js');
 
 function tmpDb() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-search-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chattering-search-'));
   return path.join(dir, 'search.db');
 }
 
-const ENTRY = { mtimeMs: 111, size: 222, title: 'Fix the flux capacitor', source: 'pi', lastTs: '2026-08-20T10:00:00Z', project: 'aiconvo' };
+const ENTRY = { mtimeMs: 111, size: 222, title: 'Fix the flux capacitor', source: 'pi', lastTs: '2026-08-20T10:00:00Z', project: 'chattering' };
 const MSGS = [
   { role: 'user', text: 'the flux capacitor breaks on boot', ts: '2026-08-20T09:00:00Z' },
   { role: 'assistant', text: 'I will inspect the capacitor wiring now.', ts: '2026-08-20T09:01:00Z' },
@@ -22,8 +22,8 @@ const MSGS = [
 ];
 
 test('query parsing: terms, phrases, operators', () => {
-  const p = parseQuery('project:aiconvo role:user "exact phrase" flux capa');
-  assert.deepStrictEqual(p.filters, { project: 'aiconvo', role: 'user' });
+  const p = parseQuery('project:chattering role:user "exact phrase" flux capa');
+  assert.deepStrictEqual(p.filters, { project: 'chattering', role: 'user' });
   assert.deepStrictEqual(p.phrases, ['exact phrase']);
   assert.deepStrictEqual(p.terms, ['flux', 'capa']);
   const m = matchExpr(p);
@@ -189,10 +189,10 @@ test('setProject re-attributes units after a project fold', () => {
   const idx = openSearchIndex(tmpDb());
   if (!idx) return;
   idx.putConversation('pi:one', ENTRY, MSGS);
-  assert.strictEqual(idx.search('capacitor project:aiconvo').total > 0, true);
+  assert.strictEqual(idx.search('capacitor project:chattering').total > 0, true);
   const changed = idx.setProject('conv:pi:one', 'merged');
   assert.ok(changed > 0);
-  assert.strictEqual(idx.search('capacitor project:aiconvo').total, 0);
+  assert.strictEqual(idx.search('capacitor project:chattering').total, 0);
   assert.ok(idx.search('capacitor project:merged').total > 0);
   // Same value again: nothing to do.
   assert.strictEqual(idx.setProject('conv:pi:one', 'merged'), 0);

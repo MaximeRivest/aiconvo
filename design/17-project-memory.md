@@ -4,14 +4,14 @@ A project needs memory above individual conversations and epics. This layer must
 
 ## Artifacts
 
-Each build writes four Markdown files under `~/notes/aiconvo/projects/<project>-<hash>/`:
+Each build writes four Markdown files under `~/notes/chattering/projects/<project>-<hash>/`:
 
 1. `overview.md` — purpose, vision, desired outcomes, principles, and non-goals.
 2. `intent.md` — implementation-independent user intent with source message excerpts.
 3. `environment.md` — setup, commands, services, addresses, paths, tools, and authentication methods.
 4. `status.md` — recent focus, unfinished work, todo items, and open questions.
 
-The build also saves its complete input and classification record under `~/.cache/aiconvo/project-memory/`.
+The build also saves its complete input and classification record under `~/.cache/chattering/project-memory/`.
 
 ## Intent pipeline
 

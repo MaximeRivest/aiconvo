@@ -1,12 +1,12 @@
 # Vendored: mrmd-document
 
-The light MRMD document editor bundle. It gives aiconvo the MRMD
+The light MRMD document editor bundle. It gives chattering the MRMD
 markdown writing experience: blur→render / focus→source editing,
 tables, images, task lists, math, alerts, syntax-highlighted code
 blocks, and MRMD themes.
 
 It excludes: runtimes, terminals, linked tables, AI panels, and MRP
-clients. Aiconvo owns files, saves, Git commits, and provenance; MRMD
+clients. Chattering owns files, saves, Git commits, and provenance; MRMD
 owns the editing surface.
 
 ## Current artifact
@@ -15,7 +15,7 @@ owns the editing surface.
 - 0.13.0: diagram fences drawn through a host renderer. `createDocumentEditor`
   accepts `diagrams: {languages, render}`; a closed fence in a named language
   is drawn while the cursor is outside it and shown as source inside, like
-  display math. The bundle ships no diagram library: aiconvo lends its
+  display math. The bundle ships no diagram library: chattering lends its
   vendored mermaid (`mermaidDiagramNode` in app.html), so documents draw the
   same diagrams as transcripts and notes, with the same theme. Drawings are
   cached by source; `refreshDiagrams()` redraws after a theme change. The
@@ -28,7 +28,7 @@ owns the editing surface.
   (extra CodeMirror extensions), so a host can make an editor shared with
   `extensions: [collab.yCollab(ytext, provider.awareness)]`. Nothing is
   wired by the bundle: the host owns document identity, the endpoint and
-  who is who. Aiconvo's `collab.js` speaks the y-websocket protocol on the
+  who is who. Chattering's `collab.js` speaks the y-websocket protocol on the
   server side. The bundle grows from 1.6 MB to 1.7 MB.
 - 0.11.0: shared host services for both document and code editors: an opt-in
   Markdown marker gutter, `onLineHover`, version-checked `setLineMarks`,
@@ -52,7 +52,7 @@ owns the editing surface.
   ruby, dockerfile, diff, markdown), search, and a host-marked gutter
   (`setLineMarks({line: {glyph, title, cls}})` for trust and provenance).
   Both editors gain `selection()` (1-based lines, selected text) and
-  `gotoLine(n)`. Aiconvo's files mode uses this instead of its old textarea
+  `gotoLine(n)`. Chattering's files mode uses this instead of its old textarea
   overlay. The bundle grows from 1.3 MB to 1.6 MB (the compiled-language
   grammars).
 - 0.9.4: notebook mechanics. `setCellOutput(cell, text)` writes an
@@ -68,11 +68,11 @@ owns the editing surface.
   detects cells, the host owns execution and output UI.
 - 0.9.2: the renderer adds unstyled line classes so hosts can restyle
   whole rows: `cm-md-heading-line` / `cm-md-h<n>-line` on headings and
-  `cm-md-codeblock-line` / `-first` / `-last` on fenced code. Aiconvo
+  `cm-md-codeblock-line` / `-first` / `-last` on fenced code. Chattering
   uses them to give the editor the conversation `.md` look (rule under
   h1/h2, boxed code blocks).
 - 0.9.1: `createDocumentEditor` and `setTheme` accept a theme OBJECT.
-  Aiconvo passes a theme built from its own tokens (`mrmdHostTheme()` in
+  Chattering passes a theme built from its own tokens (`mrmdHostTheme()` in
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
@@ -87,7 +87,7 @@ owns the editing surface.
   link opens in the app). Keep that artifact and route while the fallback
   exists.
 
-## Features enabled in aiconvo
+## Features enabled in chattering
 
 - `createDocumentEditor(target, options)` — hosted-mode editor
 - `getContent` / `setContent`
@@ -101,8 +101,8 @@ owns the editing surface.
 - `setTheme` / `getThemeNames` — MRMD themes, applied inline on the host
 - `setSourceMode` — raw markdown toggle
 - `setReadonly`
-- `assetResolver` — relative image paths resolve through aiconvo's API
-- `diagrams` — mermaid fences drawn with aiconvo's vendored mermaid;
+- `assetResolver` — relative image paths resolve through chattering's API
+- `diagrams` — mermaid fences drawn with chattering's vendored mermaid;
   `refreshDiagrams()` after a theme change
 - `file-link-navigate` — links inside the document open in the file
   workspace (filesmode.js `fileWsWireDocLinks`)
@@ -119,7 +119,7 @@ owns the editing surface.
 4. Update the SHA-256, commit hash, and version in this README.
 5. Add the new static route in `server.js`, point `MRMD_DOC_SRC` in `app.html`
    at it, and retain the previous path as `MRMD_DOC_FALLBACK_SRC` during rollout.
-   Run `node --test test/document-bundle.test.js` in aiconvo.
+   Run `node --test test/document-bundle.test.js` in chattering.
 6. Delete older version folders only after they are no longer referenced by
    the loader/fallback and the new version has run for a few days.
 

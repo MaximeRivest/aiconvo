@@ -1,7 +1,7 @@
 # Links and diagrams: a walk-through
 
-Open this file in aiconvo (Files → this folder → README.md, or paste
-`#file&focus&path=/home/maxime/Projects/aiconvo/manual-test/links-and-diagrams/README.md`
+Open this file in Chattering (Files → this folder → README.md, or paste
+`#file&focus&path=/home/maxime/Projects/chattering/manual-test/links-and-diagrams/README.md`
 after the `/#` in the address bar). Then follow the numbered steps in order;
 each one says what you should see.
 
@@ -45,7 +45,7 @@ here.
 ## 7. Ctrl-click (Cmd on a Mac)
 
 Ctrl-click [the decision](adr/0001-links.md). It should open in your system
-application, not in aiconvo (on lambda's own browser only; a remote browser
+application, not in Chattering (on lambda's own browser only; a remote browser
 gets a toast saying system actions are laptop-only).
 
 ## 8. A space and a percent in the file name
@@ -57,7 +57,7 @@ both open.
 
 Paste this in the address bar, after the host:
 
-    /#/file&focus&path=/home/maxime/Projects/aiconvo/manual-test/links-and-diagrams/notes/index.md
+    /#/file&focus&path=/home/maxime/Projects/chattering/manual-test/links-and-diagrams/notes/index.md
 
 It opens the notes index. Before, the leading slash made it a dead link.
 Press back once: one step returns here, not two.

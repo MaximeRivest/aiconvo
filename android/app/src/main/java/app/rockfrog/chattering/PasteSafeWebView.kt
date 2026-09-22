@@ -1,4 +1,4 @@
-package app.aiconvo
+package app.rockfrog.chattering
 
 import android.content.ClipboardManager
 import android.content.Context
@@ -100,7 +100,7 @@ class PasteSafeWebView @JvmOverloads constructor(
 
     // Same decoder as the file picker: sampled, upright, HEIC-capable.
     private fun injectImageUri(uri: Uri) {
-        thread(name = "aiconvo-paste") {
+        thread(name = "chattering-paste") {
             val jpeg = try { ImageIngest.toJpeg(context, uri) } catch (_: Throwable) { null } ?: return@thread
             ImageIngest.inject(this, jpeg, "paste.jpg")
         }

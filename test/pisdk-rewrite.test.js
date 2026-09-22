@@ -61,7 +61,7 @@ test('same model, exact prefix, schemas and session key; reasoning override neve
   assert.equal(f.entries[1].display, false);
   assert.equal(f.entries[1].customType, CUSTOM_TYPE);
   assert.equal(f.entries[1].content, PROMPT);
-  assert.equal(f.entries[2].message.aiconvoRewrite.sourceEntryId, f.entries[0].id);
+  assert.equal(f.entries[2].message.chatteringRewrite.sourceEntryId, f.entries[0].id);
   assert.equal(f.session.agent.state.messages.at(-1), f.entries[2].message);
   assert.deepEqual(f.events.map(e => e.state), ['running', 'ready']);
 });
@@ -136,5 +136,5 @@ test('changes to the model, branch or conversation supersede the optional rewrit
   const g = fixture({ onRewrite: session => session.sessionManager.appendMessage({ role: 'user', content: 'New question' }) });
   await g.prepare(); await g.run();
   assert.equal(g.events.at(-1).state, 'failed');
-  assert.equal(g.entries.filter(e => e.message?.aiconvoRewrite).length, 0);
+  assert.equal(g.entries.filter(e => e.message?.chatteringRewrite).length, 0);
 });

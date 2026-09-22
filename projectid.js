@@ -4,8 +4,8 @@
 // A project on this install is named by its folder (~/Projects/<name>);
 // on another person's machine the same project sits somewhere else and
 // nothing lines up. A stable random id fixes that: it lives in two places,
-// a registry on this install (~/notes/aiconvo/projects/ids.json) and a
-// marker inside the checkout (.aiconvo/project.json) that travels with
+// a registry on this install (~/notes/chattering/projects/ids.json) and a
+// marker inside the checkout (.chattering/project.json) that travels with
 // every clone. Anything that crosses machines — invites, mirrored
 // conversations, memory leaves — is keyed by the id, never by the path.
 //
@@ -16,7 +16,10 @@ const fs = require('fs');
 const path = require('path');
 
 const REGISTRY_VERSION = 1;
-const MARKER_REL = path.join('.aiconvo', 'project.json');
+const MARKER_REL = path.join('.chattering', 'project.json');
+// Checkouts marked before the rename (2026-09-22) carry the marker under
+// the old product name. Read it when the new one is absent; never write it.
+const LEGACY_MARKER_REL = path.join('.aiconvo', 'project.json');
 const ID_RE = /^p_[0-9a-f]{16}$/;
 
 const newProjectId = () => 'p_' + crypto.randomBytes(8).toString('hex');
@@ -58,7 +61,9 @@ function saveRegistry(file, registry) {
 function readMarker(cwd) {
   if (!cwd) return null;
   try {
-    const raw = JSON.parse(fs.readFileSync(path.join(cwd, MARKER_REL), 'utf8'));
+    let raw;
+    try { raw = JSON.parse(fs.readFileSync(path.join(cwd, MARKER_REL), 'utf8')); }
+    catch { raw = JSON.parse(fs.readFileSync(path.join(cwd, LEGACY_MARKER_REL), 'utf8')); }
     if (!raw || !isProjectId(raw.id)) return null;
     return { id: raw.id, name: String(raw.name || '').trim() || path.basename(cwd), createdAt: raw.createdAt || null };
   } catch { return null; }
@@ -71,9 +76,9 @@ function writeMarker(cwd, { id, name }) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const existing = readMarker(cwd);
   if (existing && existing.id !== id) throw new Error(`this folder already carries project id ${existing.id}`);
-  if (existing && existing.id === id) return file;
+  if (existing && existing.id === id && fs.existsSync(file)) return file; // an old-name marker with the same id is re-written under the new name
   fs.writeFileSync(file, JSON.stringify({ id, name: String(name || path.basename(cwd)), createdAt: new Date().toISOString(),
-    note: 'aiconvo project id: keeps conversations, memory and invites of this project aligned across machines. Commit this file.' }, null, 2) + '\n');
+    note: 'Chattering project id: keeps conversations, memory and invites of this project aligned across machines. Commit this file.' }, null, 2) + '\n');
   return file;
 }
 

@@ -43,7 +43,7 @@ The theme template now demonstrates the scale instead of fixing four radii.
   Joined table/tab edges, timeline cells/graph markers, full-screen surfaces,
   radio indicators and status circles remain intentional structural shapes.
 - Browser/OS-owned dialogs and vendor-rendered text frames are not CSS surfaces
-  owned by aiconvo. The app's editor tooltips and extension-view shell do follow
+  owned by Chattering. The app's editor tooltips and extension-view shell do follow
   the tokens; the contents retain their own meaning/layout.
 
 ## Painted edges, focus and scrolling

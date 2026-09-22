@@ -1,6 +1,6 @@
 'use strict';
 // Users: the people who type, edit, vouch and take control. One roster per
-// install (~/.config/aiconvo/users.json), plain JSON like everything else.
+// install (~/.config/chattering/users.json), plain JSON like everything else.
 // A machine is where agents run and files live; a user is a person, the same
 // person on every install. See design/46-users-and-multiplayer.md.
 //

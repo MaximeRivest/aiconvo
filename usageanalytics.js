@@ -292,10 +292,10 @@ async function parseUsageFile(file, context = {}, catalog = new PricingCatalog()
         model = d.message.model || model;
         api = d.message.api || null;
         stopReason = d.message.stopReason || null;
-        if (d.aiconvoCategory === 'internal') category = 'internal';
+        if (d.chatteringCategory === 'internal') category = 'internal';
         currentProvider = provider || currentProvider;
         currentModel = model || currentModel;
-      } else if (d.type === 'custom' && d.customType === 'aiconvo-answer-rewrite' && d.data?.response?.usage) {
+      } else if (d.type === 'custom' && d.customType === 'chattering-answer-rewrite' && d.data?.response?.usage) {
         const response = d.data.response;
         rawUsage = response.usage;
         provider = response.provider || provider;
@@ -306,7 +306,7 @@ async function parseUsageFile(file, context = {}, catalog = new PricingCatalog()
       } else if ((d.type === 'compaction' || d.type === 'branch_summary') && d.usage) {
         rawUsage = d.usage;
         category = d.type === 'compaction' ? 'compaction' : 'branch-summary';
-      } else if (d.type === 'custom' && d.customType === 'aiconvo-speed' && d.data?.v === 1 && Array.isArray(d.data.samples)) {
+      } else if (d.type === 'custom' && (d.customType === 'chattering-speed' || d.customType === 'aiconvo-speed') && d.data?.v === 1 && Array.isArray(d.data.samples)) {
         d.data.samples.forEach((raw, i) => {
           const sample = normalizeSpeedSample(raw, { provider: currentProvider, model: currentModel });
           if (!responseSpeed.sampleHasContent(sample)) return;

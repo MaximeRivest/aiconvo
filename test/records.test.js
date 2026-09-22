@@ -19,7 +19,7 @@ const KEY_C = 'claude:-home-me-Projects-beta/5e5e5e5e-3333-4000-8000-00000000000
 const SESSIONS_BASE = '/home/me/.pi/agent/sessions';
 
 function build(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aiconvo-records-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chattering-records-'));
   const notesDir = path.join(dir, 'notes');
   const sessDir = path.join(dir, 'sessions');
   fs.mkdirSync(path.join(notesDir, 'projects', 'alpha-1234'), { recursive: true });
@@ -132,10 +132,10 @@ test('search: ranked hits with short ids, follow-up commands, notes and filters'
   const out = await records.run('search', { q: 'capacitor', dir: '/home/me/Projects/alpha' });
   assert.match(out.text, /^search "capacitor" · \d+ passages in 3 records · lexical/);
   assert.match(out.text, /\[conversation\] alpha · 2026-08-20 · Fix the flux capacitor · id 0a1b2c3d/);
-  assert.match(out.text, /→ aiconvo show 0a1b2c3d --at \d/);
-  assert.match(out.text, /note: .*flux-capacitor\.md \[unverified\] → aiconvo note 0a1b2c3d/);
+  assert.match(out.text, /→ chattering show 0a1b2c3d --at \d/);
+  assert.match(out.text, /note: .*flux-capacitor\.md \[unverified\] → chattering note 0a1b2c3d/);
   assert.match(out.text, /\[note\] .*Flux capacitor fix \[unverified\]/);
-  assert.match(out.text, /→ aiconvo note '2026-08-20-flux-capacitor\.md'/);
+  assert.match(out.text, /→ chattering note '2026-08-20-flux-capacitor\.md'/);
   assert.ok(out.text.includes('«capacitor»'), 'matched words are marked');
   assert.ok(!out.text.includes('\u0001'), 'no raw marker bytes');
 
@@ -155,7 +155,7 @@ test('search: ranked hits with short ids, follow-up commands, notes and filters'
   const byPath = await records.run('search', { q: 'capacitor', excludePath: SESSIONS_BASE + '/' + KEY_A.slice(3) });
   assert.ok(!byPath.text.includes('id 0a1b2c3d'), 'a session file path excludes its own conversation');
   const page = await records.run('search', { q: 'capacitor', limit: 1 });
-  assert.match(page.text, /more records → aiconvo search 'capacitor' --offset 1/);
+  assert.match(page.text, /more records → chattering search 'capacitor' --offset 1/);
   const page2 = await records.run('search', { q: 'capacitor', limit: 1, offset: 1 });
   assert.ok(page2.groups.length === 1 && page2.groups[0] !== page.groups[0]);
 
@@ -193,7 +193,7 @@ test('show: outline, zoom, range, tail, roles, bounds, id resolution', async t =
   const outline = await records.run('show', { id: '0a1b2c3d' });
   assert.match(outline.text, /^Fix the flux capacitor\nid 0a1b2c3d · alpha · pi · 2026-08-20/);
   assert.match(outline.text, /7 messages: 2 user, 1 thinking, 2 assistant, 1 tool, 1 toolresult/);
-  assert.match(outline.text, /note .*flux-capacitor\.md \[unverified\] → aiconvo note 0a1b2c3d/);
+  assert.match(outline.text, /note .*flux-capacitor\.md \[unverified\] → chattering note 0a1b2c3d/);
   assert.match(outline.text, /epics: Capacitor saga \(ep1\)/);
   assert.match(outline.text, /record: AI transcript/);
   assert.match(outline.text, /outline: 2 user turns/);
@@ -205,7 +205,7 @@ test('show: outline, zoom, range, tail, roles, bounds, id resolution', async t =
   assert.match(zoom.text, /messages #2–#4 of 0–6 \(all roles\)/);
   assert.match(zoom.text, /#3 \d\d:\d\d tool bash\ngrep -r capacitor src\//);
   assert.match(zoom.text, /#4 \d\d:\d\d result\nsrc\/flux\.js/);
-  assert.match(zoom.text, /earlier: aiconvo show 0a1b2c3d --from 0 --to 1 --roles all\s+later: aiconvo show 0a1b2c3d --from 5 --to 6 --roles all/);
+  assert.match(zoom.text, /earlier: chattering show 0a1b2c3d --from 0 --to 1 --roles all\s+later: chattering show 0a1b2c3d --from 5 --to 6 --roles all/);
 
   const range = await records.run('show', { id: '0a1b2c3d', from: 0, to: 4 });
   assert.match(range.text, /user \+ assistant; add --roles all/);
@@ -234,7 +234,7 @@ test('conversations, projects, notes, note, epics, epic, evidence, here', async 
   const all = await records.run('conversations', { dir: '/tmp/nowhere' });
   assert.match(all.text, /all projects · 3 total/);
   const paged = await records.run('conversations', { limit: 1 });
-  assert.match(paged.text, /2 more → aiconvo conversations --limit 2/);
+  assert.match(paged.text, /2 more → chattering conversations --limit 2/);
   const since = await records.run('conversations', { since: '2026-08-26' });
   assert.match(since.text, /1 total/);
 
@@ -252,7 +252,7 @@ test('conversations, projects, notes, note, epics, epic, evidence, here', async 
   assert.match(note.text, /We replaced the capacitor wiring/);
   const byFile = await records.run('note', { id: '2026-08-20-flux-capacitor.md' });
   assert.equal(byFile.file, noteA);
-  await assert.rejects(records.run('note', { id: '9f8e7d6c' }), /has no distilled note.*aiconvo show 9f8e7d6c/);
+  await assert.rejects(records.run('note', { id: '9f8e7d6c' }), /has no distilled note.*chattering show 9f8e7d6c/);
   await assert.rejects(records.run('note', { id: '/etc/passwd.md' }), /note files must live under/);
   await assert.rejects(records.run('note', { id: '../../etc/passwd.md' }), /note files must live under/);
 
@@ -262,12 +262,12 @@ test('conversations, projects, notes, note, epics, epic, evidence, here', async 
   assert.match(epic.text, /epic ep1 · Capacitor saga/);
   assert.match(epic.text, /\n\nTwo sessions on the capacitor\.\n/, 'a missing epic note falls back to the abstract');
   assert.match(epic.text, /conversations \(2\):\n  0a1b2c3d/);
-  assert.match(epic.text, /epic map: aiconvo memory --epic ep1/);
+  assert.match(epic.text, /epic map: chattering memory --epic ep1/);
 
   const ev = await records.run('evidence', { id: '0a1b2c3d' });
   assert.match(ev.text, /cached-evidence-card · evidence card \(AI-written, unverified\)\n\nCard: wiring replaced\./);
   const noEv = await records.run('evidence', { id: '9f8e7d6c' });
-  assert.match(noEv.text, /no evidence card or note yet .* aiconvo show 9f8e7d6c/);
+  assert.match(noEv.text, /no evidence card or note yet .* chattering show 9f8e7d6c/);
 
   const here = await records.run('here', { dir: '/home/me/Projects/alpha' });
   assert.match(here.text, /^Deploy time circuits\nid 9f8e7d6c · alpha · 2 sessions under this folder/);
@@ -294,6 +294,6 @@ test('conversations, projects, notes, note, epics, epic, evidence, here', async 
 test('help and unknown ops', async t => {
   const { records } = build(t);
   const help = await records.run('help');
-  assert.match(help.text, /aiconvo search "<query>"/);
+  assert.match(help.text, /chattering search "<query>"/);
   await assert.rejects(records.run('nope', {}), /unknown records op "nope"\. Ops: help, search, show/);
 });

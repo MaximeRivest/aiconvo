@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Update this aiconvo checkout and restart the service.
+# Update this Chattering checkout and restart the service.
 # Run it from the repo: ./update.sh
 set -euo pipefail
 cd "$(dirname "$0")"
-PORT="${AICONVO_PORT:-7433}"
+PORT="${CHATTERING_PORT:-7433}"
 
 before="$(git rev-parse --short HEAD)"
 git pull --ff-only
@@ -41,7 +41,7 @@ done
 
 # Under WSL the Windows side keeps its own copies of the launcher and the
 # port-forward script (windows/install.ps1, windows/install-lan-forward.ps1
-# put them in %LOCALAPPDATA%\Aiconvo). The shortcut and the scheduled task
+# put them in %LOCALAPPDATA%\Chattering). The shortcut and the scheduled task
 # point at those copies by path, so refreshing the files is the whole update.
 if [ -n "${WSL_DISTRO_NAME:-}" ]; then
   PS=$(command -v powershell.exe || true)
@@ -50,11 +50,11 @@ if [ -n "${WSL_DISTRO_NAME:-}" ]; then
     winlocal=$("$PS" -NoProfile -Command 'Write-Output $env:LOCALAPPDATA' 2>/dev/null | tr -d '\r' || true)
     windest=""
     [ -n "$winlocal" ] && windest=$(wslpath -u "$winlocal" 2>/dev/null || true)
-    if [ -n "$windest" ] && [ -f "$windest/Aiconvo/config.json" ]; then
+    if [ -n "$windest" ] && [ -f "$windest/Chattering/config.json" ]; then
       for script in launch.ps1 lan-forward.ps1; do
-        [ -f "$windest/Aiconvo/$script" ] || continue
-        if ! cmp -s "windows/$script" "$windest/Aiconvo/$script"; then
-          cp "windows/$script" "$windest/Aiconvo/$script"
+        [ -f "$windest/Chattering/$script" ] || continue
+        if ! cmp -s "windows/$script" "$windest/Chattering/$script"; then
+          cp "windows/$script" "$windest/Chattering/$script"
           echo "updated Windows copy: $script"
         fi
       done
@@ -62,7 +62,7 @@ if [ -n "${WSL_DISTRO_NAME:-}" ]; then
   fi
 fi
 
-systemctl --user restart aiconvo
+systemctl --user restart chattering
 
 # /health answers before sign-in, so this works whatever the reach setting.
 ok=""
@@ -71,7 +71,7 @@ for _ in $(seq 1 20); do
   sleep 0.5
 done
 if [ -z "$ok" ]; then
-  echo "the server did not come back on port $PORT. See: journalctl --user -u aiconvo -n 50" >&2
+  echo "the server did not come back on port $PORT. See: journalctl --user -u chattering -n 50" >&2
   exit 1
 fi
-echo "aiconvo is running → http://localhost:$PORT ($after)"
+echo "chattering is running → http://localhost:$PORT ($after)"

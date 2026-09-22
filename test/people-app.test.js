@@ -16,7 +16,7 @@ const { spawn, spawnSync } = require('node:child_process');
 // `chromium` on PATH is a wrapper that owns the everyday profile and
 // refuses --user-data-dir; a raw binary sits beside it or in puppeteer's cache.
 function chromiumBinary() {
-  if (process.env.AICONVO_TEST_CHROMIUM) return process.env.AICONVO_TEST_CHROMIUM;
+  if (process.env.CHATTERING_TEST_CHROMIUM) return process.env.CHATTERING_TEST_CHROMIUM;
   const candidates = [];
   try { for (const d of fs.readdirSync('/nix/store')) if (/^[a-z0-9]{32}-chromium-\d/.test(d) && !/sandbox|unwrapped/.test(d)) candidates.push(path.join('/nix/store', d, 'bin', 'chromium')); } catch {}
   try { const base = path.join(os.homedir(), '.cache', 'puppeteer', 'chrome'); for (const d of fs.readdirSync(base)) candidates.push(path.join(base, d, 'chrome-linux64', 'chrome')); } catch {}
@@ -58,7 +58,7 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   const port = socket.address().port; await new Promise(r => socket.close(r));
   let serverLog = '';
   registerConsole(port, 'install-tok');
-  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: '0', AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_TOKEN: 'install-tok', AICONVO_PUBLIC_URL: '', AICONVO_NO_WATCH: '0', AICONVO_NO_LEDGER: '0', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: '0', CHATTERING_HOST: '', CHATTERING_LAN: '1', CHATTERING_TOKEN: 'install-tok', CHATTERING_PUBLIC_URL: '', CHATTERING_NO_WATCH: '0', CHATTERING_NO_LEDGER: '0', CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', b => serverLog += b); server.stderr.on('data', b => serverLog += b);
   const base = 'http://' + lanIp() + ':' + port, key = 'pi:shared/chat.jsonl';
   let indexed = false;
@@ -109,12 +109,12 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   const lilly = await person(base + '/?token=' + encodeURIComponent(lillyToken));
 
   // The header chip names each person, and shows the other one arriving.
-  await owner.until('window.aiconvoMe && window.aiconvoMe.role === "owner"');
-  await lilly.until('window.aiconvoMe && window.aiconvoMe.name === "Lilly"');
+  await owner.until('window.chatteringMe && window.chatteringMe.role === "owner"');
+  await lilly.until('window.chatteringMe && window.chatteringMe.name === "Lilly"');
   // Quiet self-presence: my own bubble is the settings button; the people
   // button shows only the others.
   await owner.until('document.querySelector("#peopleBtn.has-others .user-bubble:not(.me)")');
-  assert.equal(await owner.evaluate('document.querySelector("#settingsBtn .user-bubble.me").textContent'), await owner.evaluate('window.aiconvoMe.glyph'));
+  assert.equal(await owner.evaluate('document.querySelector("#settingsBtn .user-bubble.me").textContent'), await owner.evaluate('window.chatteringMe.glyph'));
   assert.equal(await lilly.evaluate('document.querySelector("#settingsBtn .user-bubble.me").textContent'), 'L');
   assert.equal(await owner.evaluate('document.querySelectorAll("#peopleBtn .user-bubble.me").length'), 0);
 
@@ -142,7 +142,7 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   await owner.go(base + '/' + fileHash);
   await lilly.go(base + '/' + fileHash);
   try { await owner.until('!!(fileWs && fileWs.collab && fileWs.editor)'); }
-  catch (e) { throw new Error(e.message + '\nstate: ' + JSON.stringify(await owner.evaluate('({ kind: viewKind, ws: fileWs && { path: fileWs.path, kind: fileWs.kind, collab: !!fileWs.collab, editor: !!fileWs.editor, ro: fileWs.readOnly }, status: document.querySelector("#docStatus")?.textContent, me: !!window.aiconvoMe, join: typeof collabJoin })'))); }
+  catch (e) { throw new Error(e.message + '\nstate: ' + JSON.stringify(await owner.evaluate('({ kind: viewKind, ws: fileWs && { path: fileWs.path, kind: fileWs.kind, collab: !!fileWs.collab, editor: !!fileWs.editor, ro: fileWs.readOnly }, status: document.querySelector("#docStatus")?.textContent, me: !!window.chatteringMe, join: typeof collabJoin })'))); }
   await lilly.until('!!(fileWs && fileWs.collab && fileWs.editor)');
   assert.equal(await owner.evaluate(`document.querySelector('#fwSave').disabled`), false, 'Save on a shared file means "write it now"');
   await lilly.evaluate("fileWs.editor.view.dispatch({ changes: { from: fileWs.editor.view.state.doc.length, insert: 'const lilly = 2;\\n' } }); true");
@@ -165,8 +165,8 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   await owner.until(`sessions.length === 2`);
   assert.equal(await lilly.evaluate(`fetch('/api/project?name=secret').then(r => r.json()).then(d => d.error)`), 'This project is not shared with you.');
   // The "mine" filter: Lilly wrote nothing recorded; the owner owns the rest.
-  assert.equal(await lilly.evaluate(`sessions.filter(s => sessionInvolves(s, window.aiconvoMe.id)).length`), 0);
-  assert.equal(await owner.evaluate(`sessions.filter(s => sessionInvolves(s, window.aiconvoMe.id)).length`), 2);
+  assert.equal(await lilly.evaluate(`sessions.filter(s => sessionInvolves(s, window.chatteringMe.id)).length`), 0);
+  assert.equal(await owner.evaluate(`sessions.filter(s => sessionInvolves(s, window.chatteringMe.id)).length`), 2);
   // Settings → people: the owner manages, Lilly only sees herself and her own link button.
   await owner.go(base + '/#settings=people');
   await owner.until(`document.querySelectorAll('#setPeopleList .person-row').length === 2`);
@@ -182,7 +182,7 @@ test('two people share a machine: sign-in, presence, one compose box, one file, 
   await owner.go(base + '/#' + encodeURIComponent(key));
   await owner.until(`!document.querySelector('#shareBtn').hidden`);
   await owner.evaluate(`openShareDialog()`);
-  await owner.until(`!!document.querySelector('.share-dialog select[data-subject="user:' + window.aiconvoMe.id.replace(window.aiconvoMe.id, '') + '"]') || document.querySelectorAll('.share-dialog select[data-subject]').length === 1`);
+  await owner.until(`!!document.querySelector('.share-dialog select[data-subject="user:' + window.chatteringMe.id.replace(window.chatteringMe.id, '') + '"]') || document.querySelectorAll('.share-dialog select[data-subject]').length === 1`);
   assert.equal(await owner.evaluate(`document.querySelector('.share-dialog h3').textContent`), 'Who can see this conversation');
   await owner.evaluate(`document.querySelector('#shareClose').click(); true`);
 

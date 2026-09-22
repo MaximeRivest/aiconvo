@@ -7,7 +7,7 @@
 // uncluttered and prevent accidental reading; the UI says "hidden from",
 // never "protected from". See design/46-users-and-multiplayer.md.
 //
-// Rules file (~/notes/aiconvo/access.json):
+// Rules file (~/notes/chattering/access.json):
 //   { v: 1, rules: { "project:name": RULE, "conversation:key": RULE } }
 //   RULE = { mode: "everyone" | "listed", listed: { "user:<id>" | "group:<g>": "see" | "act" }, owners: ["<user id>"] }
 // No rule means the household default: everyone admitted sees and acts;

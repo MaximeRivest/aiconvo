@@ -1,4 +1,4 @@
-package app.aiconvo
+package app.rockfrog.chattering
 
 import android.content.Context
 import android.content.Intent
@@ -21,7 +21,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 
 /**
- * One place that knows how to reach the aiconvo server from this device.
+ * One place that knows how to reach the chattering server from this device.
  *
  * The server is addressed by its Tailscale address, which works the same at
  * home (Tailscale takes the direct LAN path) and away. The only thing that can
@@ -59,7 +59,7 @@ object ServerReach {
         return second in 64..127 && parts.drop(2).all { it.toIntOrNull() in 0..255 }
     }
 
-    /** Home LAN, loopback or tailnet: the places a self-signed aiconvo lives. */
+    /** Home LAN, loopback or tailnet: the places a self-signed Chattering lives. */
     fun isPrivateHost(host: String): Boolean {
         if (host == "127.0.0.1" || host == "localhost") return true
         if (host.startsWith("192.168.") || host.startsWith("10.")) return true

@@ -1,4 +1,4 @@
-# Let other devices reach the aiconvo that runs inside WSL.
+# Let other devices reach the Chattering that runs inside WSL.
 #
 # WSL2 lives behind its own private address, which changes after a Windows
 # restart, so a one-time port forward goes stale. This script re-points the
@@ -26,8 +26,8 @@ foreach ($p in @($Port, $TlsPort)) {
     & netsh interface portproxy add v4tov4 listenport=$p listenaddress=0.0.0.0 connectport=$p connectaddress=$ip | Out-Null
     $changed += $p
 }
-if (-not (Get-NetFirewallRule -DisplayName 'Aiconvo' -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -DisplayName 'Aiconvo' -Direction Inbound -Protocol TCP -LocalPort @($Port, $TlsPort) -Action Allow -Profile Private,Domain | Out-Null
+if (-not (Get-NetFirewallRule -DisplayName 'Chattering' -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName 'Chattering' -Direction Inbound -Protocol TCP -LocalPort @($Port, $TlsPort) -Action Allow -Profile Private,Domain | Out-Null
 }
-if ($changed.Count) { Write-Output "aiconvo: ports $($changed -join ' and ') now forward to WSL at $ip" }
-else { Write-Output "aiconvo: ports $Port and $TlsPort already forward to WSL at $ip" }
+if ($changed.Count) { Write-Output "chattering: ports $($changed -join ' and ') now forward to WSL at $ip" }
+else { Write-Output "chattering: ports $Port and $TlsPort already forward to WSL at $ip" }

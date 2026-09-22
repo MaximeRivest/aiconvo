@@ -3,7 +3,7 @@
 //
 // One row per searchable unit: a conversation title, one message, or one
 // markdown section (note / epic / project memory). The database lives under
-// ~/.cache/aiconvo and can be deleted at any time; the next boot rebuilds it
+// ~/.cache/chattering and can be deleted at any time; the next boot rebuilds it
 // from the session caches and the notes tree. Queries never scan the caches.
 //
 // Node 22 ships SQLite with FTS5 (node:sqlite). No new dependency.

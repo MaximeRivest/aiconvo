@@ -7,7 +7,7 @@ end record where the build departed from this text. Date: 2026-09-08.
 
 ## 1. Purpose
 
-Today aiconvo is conversation-first. Home is a Gantt of conversations, a
+Today Chattering is conversation-first. Home is a Gantt of conversations, a
 project opens its memory, a conversation opens files as a side trip, and
 every side trip returns to the conversation. That funnel is finished and
 works.
@@ -28,7 +28,7 @@ entry, the grouping, and the back target change.
 
 ## 2. What already exists (reuse, do not rebuild)
 
-The file side of aiconvo is already deep. The implementer must build on
+The file side of Chattering is already deep. The implementer must build on
 these, not beside them.
 
 **Data and truth**
@@ -44,9 +44,9 @@ these, not beside them.
   and interval line history. **Line → conversation already works** through
   `toggleLineHistory` → `showDiffEvent` (`design/19`).
 - `fileBlameResponse`: agent-attributed blame by replay (`design/16`).
-- `~/notes/aiconvo/doc-edits.jsonl`: durable provenance of editor saves
+- `~/notes/chattering/doc-edits.jsonl`: durable provenance of editor saves
   (actor human/ai, input keyboard/voice/pen, ±lines, sha).
-- `~/.cache/aiconvo/project-file-activity.json` + `fs.watch` per repository
+- `~/.cache/chattering/project-file-activity.json` + `fs.watch` per repository
   root: a **24-hour rolling** activity index. It forgets after a day and only
   starts watching a repository after someone opened its code surface.
 - The trust ledger (vouch / dispute, line-anchored) labels file content.
@@ -89,7 +89,7 @@ these, not beside them.
 ### 3.1 One app, two lenses
 
 The mode is a top-level **lens**: `conversations | files`. It is one
-persisted value (`localStorage aiconvo.lens`), expressed in the hash for the
+persisted value (`localStorage Chattering.lens`), expressed in the hash for the
 two views it changes (home and project), and shown as one control in the top
 bar next to the brand button: `⌂` `[conversations ⇄ files]`. One key toggles
 it (pick a free key; `f` is taken by filters).
@@ -163,7 +163,7 @@ queries, Git is walked per repository per request.
 
 ### 4.1 Store
 
-`~/.cache/aiconvo/files.db` (`node:sqlite`, same pattern as `search.db` and
+`~/.cache/chattering/files.db` (`node:sqlite`, same pattern as `search.db` and
 `usage.db`; derived, deletable, rebuilt on boot when missing).
 
 ```sql
@@ -417,8 +417,8 @@ file=<abs>[&line=N][&from=&to=][&back=<hash>]   file workspace, lens-agnostic
 `#files&project=x` is not needed (explicit hashes always win). The toggle
 control rewrites the current home / project hash and re-renders in place.
 
-Breadcrumb: `❯ files ▸ aiconvo ▸ server.js` in files lens; a conversation
-opened from a file shows `❯ files ▸ aiconvo ▸ server.js ▸ Docs UI`, and its
+Breadcrumb: `❯ files ▸ Chattering ▸ server.js` in files lens; a conversation
+opened from a file shows `❯ files ▸ Chattering ▸ server.js ▸ Docs UI`, and its
 `←` returns to the file at the same keyframes and cursor. In conversations
 lens the root reads `home`, as today. The existing `#doc=`, `filecall=`,
 `blame=`, `git=` routes keep working; `doc=` becomes an alias of `file=`.
@@ -459,8 +459,8 @@ Each phase ships on its own and is useful alone.
   project and per day. Cost: one more derived database and a backfill job.
 - **Watchers at boot** for every registered repository. Cost: inotify
   watches on large trees; mitigated by the existing `.git` exclusion and by
-  honouring `AICONVO_NO_WATCH` if a machine hits the limit. Without this
-  the home chart would be blind to edits made outside aiconvo.
+  honouring `CHATTERING_NO_WATCH` if a machine hits the limit. Without this
+  the home chart would be blind to edits made outside Chattering.
 - **Code does not autosave.** Stated in §5.3.
 - **Editor locked while an agent run is active.** Stated in §5.4.
 - **One editor engine.** Adding a code entry to the vendored MRMD bundle is
@@ -481,7 +481,7 @@ Each phase ships on its own and is useful alone.
 1. The toggle key and the exact label (`files` vs `docs`; this document
    says files, since code and prose share the frame).
 2. The session gap (10 min proposed) and the per-project row cap at home.
-3. Whether `notes` (under `~/notes/aiconvo`) appear as file rows in files
+3. Whether `notes` (under `~/notes/chattering`) appear as file rows in files
    mode or stay only as glyphs. Proposed: glyphs only, they have their own
    lens.
 4. Whether the multi-file ask (§5.1) ships in phase 3 or waits.
@@ -522,5 +522,5 @@ Each phase ships on its own and is useful alone.
   (partial watching beyond that). Measured on this machine: 42 repositories,
   17k directories, ~130 MB RSS after boot (was 1.1 GB with Node's recursive
   watch). `GET /api/files/stats` reports rows, watchers, and memory.
-- `AICONVO_NO_LEDGER=1` disables the ledger and files mode data paths;
-  `AICONVO_CACHE_DIR` relocates every derived cache.
+- `CHATTERING_NO_LEDGER=1` disables the ledger and files mode data paths;
+  `CHATTERING_CACHE_DIR` relocates every derived cache.

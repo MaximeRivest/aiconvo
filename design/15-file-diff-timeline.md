@@ -53,7 +53,7 @@ Normalize Claude and pi into one event:
 {
   "key": "conversation key",
   "source": "claude | pi | pi-remote",
-  "project": "aiconvo",
+  "project": "chattering",
   "path": "/absolute/or/repo/relative/path",
   "relativePath": "server.js",
   "ts": "2026-08-13T18:00:00Z",
@@ -122,7 +122,7 @@ Collisions use the shortest unique suffix, such as `server.js` vs
 The card opens in the right pane, not as a modal:
 
 ```text
-~ server.js · aiconvo · 13 Aug 18:02
+~ server.js · chattering · 13 Aug 18:02
 Add provenance paths · claude · conversation ▸
 
 - 18 lines   + 21 lines
@@ -148,8 +148,8 @@ better than wrong highlighting.
 The project view gets a dedicated screen:
 
 ```text
-❯ aiconvo · file diffs
-/home/maxime/Projects/aiconvo · 84 touched files · 912 edits · latest 2m
+❯ chattering · file diffs
+/home/maxime/Projects/chattering · 84 touched files · 912 edits · latest 2m
 [all files | edited only | written only] [search file] [copy selected]
 
 [file rows over time]
@@ -259,9 +259,9 @@ Rows response should be small and renderable:
 
 ```json
 {
-  "project": "aiconvo",
+  "project": "chattering",
   "files": [{
-    "path": "/home/maxime/Projects/aiconvo/server.js",
+    "path": "/home/maxime/Projects/chattering/server.js",
     "relativePath": "server.js",
     "count": 84,
     "latestTs": "2026-08-13T18:02:00Z",

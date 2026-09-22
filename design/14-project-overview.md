@@ -33,8 +33,8 @@ inside the overview. The overview is one scannable page with jump links.
 ### Zone 1 — identity and actions
 
 ```text
-❯ aiconvo
-/home/maxime/Projects/aiconvo · 1672 conversations · 98 notes · 12 epics · active 2m ago
+❯ chattering
+/home/maxime/Projects/chattering · 1672 conversations · 98 notes · 12 epics · active 2m ago
 [refresh evidence] [start conversation ▾] [latest: WorkMemory]
 ```
 
@@ -127,7 +127,7 @@ project summary as current context?
 The primary action opens one inline launcher, not a modal.
 
 ```text
-new conversation in /home/maxime/Projects/aiconvo
+new conversation in /home/maxime/Projects/chattering
 agent     [pi ▾ | claude ▾]
 name      [ optional: workstream title ]
 memory    [x] project map
@@ -233,8 +233,8 @@ Response sketch:
 
 ```json
 {
-  "name": "aiconvo",
-  "cwd": "/home/maxime/Projects/aiconvo",
+  "name": "chattering",
+  "cwd": "/home/maxime/Projects/chattering",
   "conversations": 1672,
   "notes": 98,
   "epics": [{ "id": "...", "title": "...", "updatedAt": 0, "freshness": "fresh" }],
@@ -247,7 +247,7 @@ Launch sketch:
 
 ```text
 POST /api/project/start
-{ "project": "aiconvo", "agent": "pi", "name": "optional",
+{ "project": "chattering", "agent": "pi", "name": "optional",
   "include": { "map": true, "epics": ["..."], "notes": false, "evidence": [] },
   "budget": "medium" }
 ```

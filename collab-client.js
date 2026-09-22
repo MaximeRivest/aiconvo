@@ -14,14 +14,14 @@ const collabSessions = new Map(); // name → session (shared by every binding o
 
 function collabIsSelf(person) {
   if (typeof window === 'undefined') return false;
-  if (typeof window.aiconvoIsSelf === 'function') return window.aiconvoIsSelf(person);
-  return !!person?.id && person.id === window.aiconvoMe?.id;
+  if (typeof window.chatteringIsSelf === 'function') return window.chatteringIsSelf(person);
+  return !!person?.id && person.id === window.chatteringMe?.id;
 }
 function collabOtherPeople(people) {
   const seen = new Set();
   return (people || []).filter(p => {
     if (!p || collabIsSelf(p)) return false;
-    const id = typeof window !== 'undefined' && window.aiconvoPersonId ? window.aiconvoPersonId(p.id) : p.id;
+    const id = typeof window !== 'undefined' && window.chatteringPersonId ? window.chatteringPersonId(p.id) : p.id;
     if (id && seen.has(id)) return false;
     if (id) seen.add(id);
     return true;
@@ -29,7 +29,7 @@ function collabOtherPeople(people) {
 }
 // Identity can arrive after an editor opens, or change after a user merge.
 // Refresh decorations without removing anyone from the shared document.
-if (typeof window !== 'undefined') window.addEventListener('aiconvo:identity', () => {
+if (typeof window !== 'undefined') window.addEventListener('chattering:identity', () => {
   for (const s of collabSessions.values()) {
     const user = collabMe();
     if (JSON.stringify(s.awareness.getLocalState()?.user) !== JSON.stringify(user)) s.awareness.setLocalStateField('user', user);
@@ -41,7 +41,7 @@ function collabWsUrl(name) {
   return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/api/collab' + (name ? '/' + encodeURIComponent(name) : '');
 }
 function collabMe() {
-  const me = window.aiconvoMe || null;
+  const me = window.chatteringMe || null;
   return me ? { id: me.id, name: me.name, glyph: me.glyph, color: me.color, colorLight: me.color + '55' } : { id: 'anon', name: 'someone', glyph: '?', color: '#888888', colorLight: '#88888855' };
 }
 

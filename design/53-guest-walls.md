@@ -3,7 +3,7 @@
 *2026-09-21. Builds on design/52 (invites, guests, sync). Modules:
 `sandbox.js`, `keyproxy.js`, `keyproxy-worker.js`; changes in `users.js`
 (`identify`), `pisdk.js` (sandboxed workers), `pisdk-runtime.js`,
-`server.js`, `people.js`, the `aiconvo` CLI, `extensions/records.ts`,
+`server.js`, `people.js`, the `chattering` CLI, `extensions/records.ts`,
 `open.sh`. Tests: `sandbox` (arguments, and for real with bubblewrap),
 `guest-walls` (a real server, a real guest, real walls), `users`,
 `lan-switch`.*
@@ -11,7 +11,7 @@
 ## The demo, precisely
 
 A link is pasted into a video call. The person opens it, types their
-name, and is inside the owner's aiconvo — and the only thing that exists
+name, and is inside the owner's Chattering — and the only thing that exists
 for them is one project. They read its conversations, start new ones, run
 code, edit files, commit; the agents they drive have the owner's powers
 *in that folder* and nothing anywhere else. Not "hidden in the UI":
@@ -33,22 +33,22 @@ block from a reply, a notebook cell — starts through **bubblewrap**:
 - an **empty home on tmpfs** with only three things bound into it: the
   guest's own Pi directory at `~/.pi/agent`, the project's session folders
   (read-write, so what their agent writes is what this server indexes),
-  and, read-only, the aiconvo checkout, the Pi package and the node
+  and, read-only, the Chattering checkout, the Pi package and the node
   prefix when those live under the home;
-- a private `/tmp`, its own PID namespace, a hostname of `aiconvo-guest`,
+- a private `/tmp`, its own PID namespace, a hostname of `chattering-guest`,
   `--die-with-parent`; the network stays on.
 
 Files they write are owned by the account, so git, tests and every tool
 behave exactly as for the owner; `~/.ssh`, `~/.pi/agent/auth.json`, the
-other projects and the aiconvo cache do not exist inside. A second Unix
+other projects and the Chattering cache do not exist inside. A second Unix
 user was rejected: it would need ACLs on every folder, a sudoers rule and
 a rewrite of the worker IPC, and would still need a sandbox for `/tmp`
 and the desktop — more work for the weaker property. Flatpak makes the
 same choice for the same reason.
 
 The environment is deny-by-default (`sandbox.sandboxEnv`): PATH and
-locale, `PI_*` and `AICONVO_*`, the guest's git identity
-(`GIT_AUTHOR_NAME`, `<id>@aiconvo`), nothing else — no `DISPLAY`, no
+locale, `PI_*` and `CHATTERING_*`, the guest's git identity
+(`GIT_AUTHOR_NAME`, `<id>@chattering`), nothing else — no `DISPLAY`, no
 `SSH_AUTH_SOCK`, no API keys. It is the environment bwrap is *spawned
 with*, not `--clearenv` inside: node hands the IPC channel to a forked
 worker through environment variables added at spawn time, and clearing
@@ -77,14 +77,14 @@ Before: any process on this machine got `127.0.0.1:7433` as the owner.
 Inside a sandbox with network, that was a shell as the owner. Now **being
 on this machine is not a credential**: with a LAN token, local requests
 need it too; the console is *this machine plus the install token*. A
-sandboxed agent asking the API is the guest (its `AICONVO_TOKEN` names it),
+sandboxed agent asking the API is the guest (its `CHATTERING_TOKEN` names it),
 never the console — and the local-only file powers (`isConsoleRequest`)
 follow the tier, not the address.
 
 Costs, paid: the local browser signs in once (`open.sh` opens with the
 token; the response that flips the network switch on sets the cookie so
-nobody locks themselves out); the `aiconvo` CLI and the Pi records tools
-read the token file when no `AICONVO_TOKEN` is set. With no LAN token at
+nobody locks themselves out); the `chattering` CLI and the Pi records tools
+read the token file when no `CHATTERING_TOKEN` is set. With no LAN token at
 all (the machine answers only itself) nothing changes.
 
 ## Keys never enter the sandbox
@@ -144,7 +144,7 @@ is 403; the kill switch stops a running command; context outside the
 project never reaches a prompt.
 
 Live rehearsal (2026-09-20 22:00, lambda): a guest claimed an invite to
-`aiconvo`, started a conversation from the browser route, and the run
+`chattering`, started a conversation from the browser route, and the run
 inside the walls — Fable 5.1 through the Claude Code subscription via the
 proxy — ran `whoami; ls ~; test -d ~/.ssh` and answered `maxime |
 Projects | ~/.ssh does not exist`. The transcript names the guest.

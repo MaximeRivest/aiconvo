@@ -12,7 +12,7 @@ A document is one node of a linked set of files, and the screen reads that set: 
 
 ### Diagrams (2026-09-21)
 
-A ```` ```mermaid ```` fence in the open document draws as a figure while the cursor is outside it and shows its source inside, the rule display math follows. The bundle ships no diagram library; aiconvo lends it the mermaid it already carries for transcripts and notes (`mermaidDiagramNode`), so the diagram in a document is the same drawing, in the same theme, as in the conversation that produced it, and a theme switch redraws it. A drawing that fails shows mermaid's message over the source; a library that fails to load says so too, in the editor and in every transcript box, rather than leaving unexplained code.
+A ```` ```mermaid ```` fence in the open document draws as a figure while the cursor is outside it and shows its source inside, the rule display math follows. The bundle ships no diagram library; Chattering lends it the mermaid it already carries for transcripts and notes (`mermaidDiagramNode`), so the diagram in a document is the same drawing, in the same theme, as in the conversation that produced it, and a theme switch redraws it. A drawing that fails shows mermaid's message over the source; a library that fails to load says so too, in the editor and in every transcript box, rather than leaving unexplained code.
 
 ## Editing engine
 

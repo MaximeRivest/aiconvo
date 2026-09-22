@@ -623,7 +623,7 @@ test('reply speed is measured at the source and stored once per run with the rep
   } });
   await proxy.piHeadlessRun(target('speed'), { message: 'go', author: { id: 'u_max', name: 'Max' } }).done;
   const entries = workers[0].sdk.sessions[0].sessionManager.entries;
-  const speed = entries.filter(e => e.type === 'custom' && e.customType === 'aiconvo-speed');
+  const speed = entries.filter(e => e.type === 'custom' && e.customType === 'chattering-speed');
   assert.equal(speed.length, 1, 'one entry per run, appended after the replies');
   assert.equal(entries.indexOf(speed[0]), entries.length - 1);
   const { samples } = speed[0].data;
@@ -641,7 +641,7 @@ test('reply speed is measured at the source and stored once per run with the rep
     assert.deepEqual(sample.usage, { output: 50, reasoning: 0 });
   }
   // The author entry still sits right before the prompt.
-  assert.equal(entries[0].customType, 'aiconvo-author');
+  assert.equal(entries[0].customType, 'chattering-author');
 });
 
 test('warm startup keeps extension flags, name, system prompt, and per-child environment', async t => {

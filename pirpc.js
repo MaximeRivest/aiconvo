@@ -2,7 +2,7 @@
 // Session operations for pi run through pi's OWN runtime, not through hand
 // surgery on JSONL: a short-lived `pi --mode rpc` process bound to the target
 // file. `--no-extensions` keeps global extensions (modes.ts) from appending
-// entries to the session; `-e` loads only the aiconvo bridge.
+// entries to the session; `-e` loads only the Chattering bridge.
 'use strict';
 
 const fs = require('fs');
@@ -10,16 +10,16 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 
-const PI_BRIDGE_PATH = path.join(__dirname, 'aiconvo-bridge.ts');
+const PI_BRIDGE_PATH = path.join(__dirname, 'chattering-bridge.ts');
 
 // ---- protocol handshake -------------------------------------------------
-// aiconvo depends on pi RPC details that have changed across pi versions
+// Chattering depends on pi RPC details that have changed across pi versions
 // (the settle event was `agent_end` before ~0.75, `agent_settled` after).
 // pi updates through npm, silently. Without a version gate a rename would
 // make the settle waiter hang forever and every run would die on timeout
 // with no explanation. The gate fails fast and names the version instead.
 const PI_MIN_VERSION = '0.75.0';    // first protocol with agent_settled
-const PI_TESTED_VERSION = '0.84.1'; // last version aiconvo was verified on
+const PI_TESTED_VERSION = '0.84.1'; // last version Chattering was verified on
 let piProtocolPromise = null;
 let piProtocol = { version: null, tested: PI_TESTED_VERSION, ok: false, newer: false };
 
@@ -39,7 +39,7 @@ function ensurePiProtocol(env) {
         if (!/^\d+\.\d+\.\d+/.test(version)) return reject(new Error('Unexpected `pi --version` output: ' + version.slice(0, 80)));
         piProtocol = { version, tested: PI_TESTED_VERSION, ok: !semverLt(version, PI_MIN_VERSION), newer: semverLt(PI_TESTED_VERSION, version) };
         if (!piProtocol.ok) {
-          return reject(new Error('pi v' + version + ' is older than v' + PI_MIN_VERSION + '; its RPC protocol lacks agent_settled. Upgrade pi or downgrade aiconvo.'));
+          return reject(new Error('pi v' + version + ' is older than v' + PI_MIN_VERSION + '; its RPC protocol lacks agent_settled. Upgrade pi or downgrade Chattering.'));
         }
         if (piProtocol.newer) console.error('[pirpc] pi v' + version + ' is newer than the tested v' + PI_TESTED_VERSION + '. The RPC bridge still assumes the tested protocol; re-verify after pi upgrades.');
         resolve(piProtocol);
@@ -111,7 +111,7 @@ function spawnPiRpc(target) {
       if (!line.trim()) continue;
       let event; try { event = JSON.parse(line); } catch { continue; }
       if (event.type === 'extension_error' && !target.discoverExtensions) {
-        // Bridge-only mode loads exactly one extension — the aiconvo bridge —
+        // Bridge-only mode loads exactly one extension — the Chattering bridge —
         // and the whole operation depends on it, so its failure is fatal.
         const err = new Error('pi bridge error: ' + (event.error || 'unknown'));
         failWaiters(err);
@@ -269,8 +269,8 @@ async function piListCommands(target) {
 async function piBridgeHandshake(request) {
   const commands = await request({ type: 'get_commands' });
   const names = ((commands.data || {}).commands || []).map(c => String(c.name || '').replace(/^\//, ''));
-  if (!names.includes('aiconvo-fork-at')) {
-    throw new Error('The aiconvo bridge extension did not load; refusing to send bridge commands.');
+  if (!names.includes('chattering-fork-at')) {
+    throw new Error('The Chattering bridge extension did not load; refusing to send bridge commands.');
   }
 }
 
@@ -288,7 +288,7 @@ async function piForkAt(target, nodeId) {
   return piRpcOperation(target, async request => {
     await piBridgeHandshake(request);
     const before = await piSessionFileOf(request);
-    await request({ type: 'prompt', message: '/aiconvo-fork-at ' + nodeId });
+    await request({ type: 'prompt', message: '/chattering-fork-at ' + nodeId });
     // The prompt response only means "accepted". Completion is observed as
     // pi's runtime replacing the active session with the new fork file.
     const deadline = Date.now() + 30000;
@@ -408,7 +408,7 @@ function piHeadlessRun(target, opts) {
       if (event.type === 'extension_ui_request' && event.id && DIALOG_METHODS.includes(event.method)) {
         // Dialogs with their own timeout are auto-resolved by pi; just track
         // them until expiry so a late answer is ignored. Dialogs without one
-        // would block forever, so aiconvo cancels them after DIALOG_MAX_MS.
+        // would block forever, so Chattering cancels them after DIALOG_MAX_MS.
         const timer = event.timeout
           ? setTimeout(() => dropDialog(event.id), event.timeout + 2000)
           : setTimeout(() => cancelDialog(event.id), DIALOG_MAX_MS);

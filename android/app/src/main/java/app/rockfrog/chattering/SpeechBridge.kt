@@ -1,4 +1,4 @@
-package app.aiconvo
+package app.rockfrog.chattering
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -21,7 +21,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-/** Direct dictation for the aiconvo compose box.
+/** Direct dictation for the Chattering compose box.
  *
  * Android captures raw speech without opening the keyboard. A WebSocket sends
  * live previews after pauses. On stop, one whole-recording HTTP request creates
@@ -37,7 +37,7 @@ class SpeechBridge(
     }
 
     private val audioExecutor = Executors.newSingleThreadExecutor()
-    // Speech goes through the aiconvo server's own relay (/api/speech/*),
+    // Speech goes through the chattering server's own relay (/api/speech/*),
     // so it reaches the GPU stage from wherever the page itself is reachable
     // instead of needing a second, LAN-only address.
     private var clientBase = ""

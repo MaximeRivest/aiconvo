@@ -17,7 +17,7 @@ const { PROMPT, CUSTOM_TYPE } = require('../../pisdk-rewrite');
   const entries = (await fs.readFile(begun.file, 'utf8')).trim().split('\n').map(JSON.parse);
   const assistants = entries.filter(e => e.type === 'message' && e.message.role === 'assistant');
   assert.equal(assistants.length, 2);
-  assert.equal(assistants[1].message.aiconvoRewrite.sourceEntryId, assistants[0].id);
+  assert.equal(assistants[1].message.chatteringRewrite.sourceEntryId, assistants[0].id);
   const hidden = entries.find(e => e.customType === CUSTOM_TYPE);
   assert.equal(hidden.type, 'custom_message'); assert.equal(hidden.display, false); assert.equal(hidden.content, PROMPT);
   assert.equal(assistants[1].message.content[0].text, 'The full explanation in everyday words.');

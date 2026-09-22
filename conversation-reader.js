@@ -18,7 +18,7 @@ let readerRenderSerial = 0;
 function readerState(key) {
   if (!readerStates.has(key)) {
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem('aiconvo.reader.v1:' + key) || '{}') || {}; } catch {}
+    try { saved = JSON.parse(localStorage.getItem('chattering.reader.v1:' + key) || '{}') || {}; } catch {}
     const state = { leaf: typeof saved.leaf === 'string' ? saved.leaf : null, revision: saved.revision };
     for (const name of ['routes', 'groups', 'accepted', 'positions', 'work']) state[name] = Object.assign(Object.create(null), saved[name] && typeof saved[name] === 'object' && !Array.isArray(saved[name]) ? saved[name] : {});
     readerStates.set(key, state);
@@ -26,7 +26,7 @@ function readerState(key) {
   return readerStates.get(key);
 }
 function saveReaderState(key) {
-  try { localStorage.setItem('aiconvo.reader.v1:' + key, JSON.stringify(readerState(key))); } catch {}
+  try { localStorage.setItem('chattering.reader.v1:' + key, JSON.stringify(readerState(key))); } catch {}
 }
 function readerGroup(key, node) {
   const state = readerState(key);
@@ -361,7 +361,7 @@ function includedAnswersHtml(d, group) {
   });
   // The saved bridge is the context snapshot. If source files were edited
   // outside the app, never substitute their changed text for what was included.
-  const matchesSnapshot = bridge && quoted.join('\n\n') === bridge.text.replace(/\s*<!--\s*aiconvo:both\s*-->\s*$/, '').trim();
+  const matchesSnapshot = bridge && quoted.join('\n\n') === bridge.text.replace(/\s*<!--\s*(?:chattering|aiconvo):both\s*-->\s*$/, '').trim();
   return `<div class="flow-included"><div class="flow-origin">Included answer text · tool histories and images are not combined</div>${pieces.length && pieces.every(Boolean) && matchesSnapshot ? pieces.join('') : quote()}</div>`;
 }
 function answerDetailsHtml(answer) {

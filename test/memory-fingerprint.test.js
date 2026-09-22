@@ -61,7 +61,7 @@ test('repair command is dry-run by default, backs up, and is idempotent', () => 
     fs.writeFileSync(path.join(cache, 'index.json'), JSON.stringify({[f.leaf.key]:f.entry}));
     const run = (...args) => JSON.parse(execFileSync(process.execPath,
       [path.resolve(__dirname, '../scripts/repair-memory-fingerprints.js'), ...args],
-      {env:{...process.env, HOME:home, AICONVO_CACHE_DIR:cache}, encoding:'utf8'}));
+      {env:{...process.env, HOME:home, CHATTERING_CACHE_DIR:cache}, encoding:'utf8'}));
     assert.equal(run().eligible, 1);
     assert.equal(fs.readFileSync(leafPath, 'utf8'), original);
     const result = run('--apply');

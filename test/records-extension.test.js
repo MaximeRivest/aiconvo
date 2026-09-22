@@ -27,8 +27,8 @@ async function setup(t) {
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
-  const savedPort = process.env.AICONVO_PORT, savedJiti = process.env.JITI_FS_CACHE;
-  process.env.AICONVO_PORT = String(port);
+  const savedPort = process.env.CHATTERING_PORT, savedJiti = process.env.JITI_FS_CACHE;
+  process.env.CHATTERING_PORT = String(port);
   process.env.JITI_FS_CACHE = 'false';
   const { loadExtensions } = await import(pathToFileURL(loaderPath).href);
   const loaded = await loadExtensions([path.resolve(__dirname, '../extensions/records.ts')], process.cwd());
@@ -38,7 +38,7 @@ async function setup(t) {
   const call = (name, params) => ext.tools.get(name).definition.execute('tool-call', params, new AbortController().signal, undefined, ctx);
   t.after(() => {
     server.close();
-    if (savedPort === undefined) delete process.env.AICONVO_PORT; else process.env.AICONVO_PORT = savedPort;
+    if (savedPort === undefined) delete process.env.CHATTERING_PORT; else process.env.CHATTERING_PORT = savedPort;
     if (savedJiti === undefined) delete process.env.JITI_FS_CACHE; else process.env.JITI_FS_CACHE = savedJiti;
   });
   return { ext, call, calls };
@@ -46,30 +46,30 @@ async function setup(t) {
 
 test('records tools: five tools, correct ops and parameters', { skip: !available && 'pi-coding-agent package not found' }, async t => {
   const { ext, call, calls } = await setup(t);
-  assert.deepEqual([...ext.tools.keys()].sort(), ['aiconvo_list', 'aiconvo_memory', 'aiconvo_read', 'aiconvo_search', 'aiconvo_show']);
+  assert.deepEqual([...ext.tools.keys()].sort(), ['chattering_list', 'chattering_memory', 'chattering_read', 'chattering_search', 'chattering_show']);
 
-  const s = await call('aiconvo_search', { q: 'flux capacitor', since: '30d', limit: 5 });
+  const s = await call('chattering_search', { q: 'flux capacitor', since: '30d', limit: 5 });
   assert.equal(s.content[0].text, 'ok search flux capacitor');
   assert.equal(s.details.total, 1);
   assert.deepEqual(calls.at(-1), { op: 'search', params: { q: 'flux capacitor', since: '30d', limit: '5', dir: '/home/me/Projects/alpha', excludePath: '/home/me/.pi/agent/sessions/x/self.jsonl' } });
 
-  await call('aiconvo_show', { id: 'abc12345', at: 4, context: 2 });
+  await call('chattering_show', { id: 'abc12345', at: 4, context: 2 });
   assert.deepEqual(calls.at(-1), { op: 'show', params: { id: 'abc12345', at: '4', context: '2' } });
 
-  await call('aiconvo_memory', { kind: 'intent' });
+  await call('chattering_memory', { kind: 'intent' });
   assert.deepEqual(calls.at(-1), { op: 'memory', params: { kind: 'intent', dir: '/home/me/Projects/alpha' } });
 
-  await call('aiconvo_read', { what: 'evidence', id: 'abc12345' });
+  await call('chattering_read', { what: 'evidence', id: 'abc12345' });
   assert.deepEqual(calls.at(-1), { op: 'evidence', params: { id: 'abc12345' } });
-  await call('aiconvo_read', { what: 'note', id: '2026-08-20-x.md' });
+  await call('chattering_read', { what: 'note', id: '2026-08-20-x.md' });
   assert.equal(calls.at(-1).op, 'note');
 
-  await call('aiconvo_list', { what: 'conversations', since: '2w' });
+  await call('chattering_list', { what: 'conversations', since: '2w' });
   assert.deepEqual(calls.at(-1), { op: 'conversations', params: { since: '2w', dir: '/home/me/Projects/alpha' } });
-  await call('aiconvo_list', { what: 'projects', project: 'all' });
+  await call('chattering_list', { what: 'projects', project: 'all' });
   assert.deepEqual(calls.at(-1), { op: 'projects', params: {} });
 
-  await assert.rejects(call('aiconvo_show', { id: 'missing' }), /no conversation matches "missing"/);
+  await assert.rejects(call('chattering_show', { id: 'missing' }), /no conversation matches "missing"/);
 });
 
 test('records tools: a dead server gives a start instruction', { skip: !available && 'pi-coding-agent package not found' }, async t => {
@@ -78,9 +78,9 @@ test('records tools: a dead server gives a start instruction', { skip: !availabl
   await new Promise(r => closed.listen(0, '127.0.0.1', r));
   const port = closed.address().port;
   await new Promise(r => closed.close(r));
-  const saved = process.env.AICONVO_PORT;
-  process.env.AICONVO_PORT = String(port);
+  const saved = process.env.CHATTERING_PORT;
+  process.env.CHATTERING_PORT = String(port);
   try {
-    await assert.rejects(call('aiconvo_search', { q: 'anything' }), /not answering on port \d+ .*systemctl --user start aiconvo/);
-  } finally { process.env.AICONVO_PORT = saved; }
+    await assert.rejects(call('chattering_search', { q: 'anything' }), /not answering on port \d+ .*systemctl --user start chattering/);
+  } finally { process.env.CHATTERING_PORT = saved; }
 });

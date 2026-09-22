@@ -8,7 +8,7 @@ function checkpointExtension(pi, options = {}) {
   let store, run = '', review = '', warned = '', closed = false;
   const pending = new Map();
   const capture = async (ctx, meta) => {
-    if (closed || process.env.AICONVO_NO_CHECKPOINTS === '1') return;
+    if (closed || process.env.CHATTERING_NO_CHECKPOINTS === '1') return;
     const targetOnly = !options.allowLoose && isLooseCwd(ctx.cwd);
     if (targetOnly && !meta.targets?.length) return;
     try {

@@ -1,4 +1,4 @@
-package app.aiconvo
+package app.rockfrog.chattering
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -61,7 +61,7 @@ object ImageIngest {
         val quotedName = JSONObject.quote(name)
         web.post {
             web.evaluateJavascript(
-                "window.aiconvoAcceptImage&&window.aiconvoAcceptImage('image/jpeg','$b64',$quotedName)",
+                "window.chatteringAcceptImage&&window.chatteringAcceptImage('image/jpeg','$b64',$quotedName)",
                 null
             )
         }

@@ -21,7 +21,7 @@ session before a word was typed, freezing the working directory.
   file and no Pi process — the session header fixes the cwd, so a session
   created early would have made the folder unchangeable. The draft keeps
   text, images, folder, mode, models, reasoning, and context in this
-  browser's `localStorage` (`aiconvo.draft.v1:<id>`), routed as
+  browser's `localStorage` (`chattering.draft.v1:<id>`), routed as
   `#new=<id>`; `#new` mints a fresh id. An untouched page leaves no trace.
 - **Same composer.** The draft renders the ordinary composer with a pseudo
   `current` (`{ draft: true, key: 'draft:<id>' }`). The composer controls

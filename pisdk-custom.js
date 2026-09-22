@@ -1,6 +1,6 @@
 'use strict';
 
-const INSTALLED = Symbol('aiconvo.customPromptPreparation');
+const INSTALLED = Symbol('chattering.customPromptPreparation');
 
 // Pi's sendCustomMessage(triggerTurn) starts the agent below prompt preparation.
 // Reuse its public extension runner and command context to prepare an honest

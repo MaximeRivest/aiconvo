@@ -1,9 +1,9 @@
 // Pure session-fork logic for Claude Code JSONL files.
 // Claude has no native arbitrary-node fork API (verified empirically: its CLI
-// always continues at the file end), so aiconvo copies the root→node entry
+// always continues at the file end), so Chattering copies the root→node entry
 // chain into a new session file. This module holds the pure part so tests can
 // cover it without starting the server. pi forks do NOT go through here: they
-// run through pi's own runtime via the aiconvo-bridge extension.
+// run through pi's own runtime via the chattering-bridge extension.
 'use strict';
 
 // Walk parent pointers from nodeId to the root. Returns the Set of entry ids

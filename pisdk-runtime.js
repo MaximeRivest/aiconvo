@@ -38,7 +38,7 @@ function piPackageDir() {
   const home = require('os').homedir();
   const candidates = [];
   // Inside a sandbox the home is empty; the server says where the package is.
-  if (process.env.AICONVO_PI_PACKAGE_DIR) candidates.push(path.join(process.env.AICONVO_PI_PACKAGE_DIR, 'dist', 'index.js'));
+  if (process.env.CHATTERING_PI_PACKAGE_DIR) candidates.push(path.join(process.env.CHATTERING_PI_PACKAGE_DIR, 'dist', 'index.js'));
   try { candidates.push(execFileSync('which', ['pi'], { encoding: 'utf8' }).trim()); } catch {}
   // Every nvm node, newest first: the service node and the interactive node
   // may differ, and a node upgrade moves the global install directory.
@@ -76,12 +76,12 @@ function loadSdk() {
         const themeMod = await import(pathToFileURL(path.join(dir, 'dist', 'modes', 'interactive', 'theme', 'theme.js')).href);
         // Extensions read ctx.ui.theme and some (prompt modes) fail hard
         // without an initialized theme. Custom views render into the light
-        // aiconvo page, so default to pi's light theme — dark-terminal
+        // Chattering page, so default to pi's light theme — dark-terminal
         // colors painted navy stripes on paper. settings.json piTheme
         // overrides. No watcher: this is a server.
         let themeName = 'light';
         try {
-          const s = JSON.parse(fs.readFileSync(path.join(require('os').homedir(), '.config', 'aiconvo', 'settings.json'), 'utf8'));
+          const s = JSON.parse(fs.readFileSync(path.join(require('os').homedir(), '.config', 'chattering', 'settings.json'), 'utf8'));
           if (s && typeof s.piTheme === 'string' && s.piTheme) themeName = s.piTheme;
         } catch {}
         try { themeMod.initTheme(themeName, false); }
@@ -189,7 +189,7 @@ function textOfContent(content) {
   return '';
 }
 
-// The extension UI context: aiconvo's web face. Dialogs park in S.pendingUi
+// The extension UI context: Chattering's web face. Dialogs park in S.pendingUi
 // until /api/run/ui-response answers them; everything else is forwarded as
 // RPC-shaped extension_ui_request events, which server.js already renders.
 function makeUiContext(S, loaded) {
@@ -335,7 +335,7 @@ function makeUiContext(S, loaded) {
 }
 
 // Reply speed, measured where the events are born and stored in the session
-// as one `aiconvo-speed` custom entry per agent run, so it travels with the
+// as one `chattering-speed` custom entry per agent run, so it travels with the
 // file (forks, copies) and the usage index reads it back. The samples name
 // their assistant message's entry id: forks copy entries verbatim, so the
 // same reply counts once however many files hold it.
@@ -371,7 +371,7 @@ function persistSpeedSamples(S) {
     const sm = S.session.sessionManager;
     if (typeof sm.appendCustomEntry !== 'function') throw new Error('session manager cannot append entries');
     const ids = assistantEntryIds(sm, speed.turnLeafId);
-    sm.appendCustomEntry('aiconvo-speed', {
+    sm.appendCustomEntry('chattering-speed', {
       v: 1, at: new Date().toISOString(),
       samples: samples.map(({ sample, message }) => ({ entryId: ids.get(message) || null, ...sample })),
       measurementId: crypto.randomUUID(),
@@ -399,7 +399,7 @@ async function bindS(S, loaded) {
     if (ev.type === 'agent_start') S.rewriteController?.abort();
     // Source clock travels with the event: IPC and browser batching must
     // not change the observed rate. Never mutate the SDK's event object.
-    S.emit({ ...ev, aiconvoSpeedAt: at });
+    S.emit({ ...ev, chatteringSpeedAt: at });
     if (ev.type === 'agent_settled') {
       // An extension can start a fresh turn inside agent_settled.
       queueMicrotask(() => {
@@ -569,7 +569,7 @@ function piHeadlessRun(target, opts = {}) {
       // message, so it travels with the file (forks, copies) and the index
       // reads it back. Not for callbacks: nobody typed those.
       if (opts.author && opts.author.id && !opts.customMessage) {
-        try { S.session.sessionManager.appendCustomEntry('aiconvo-author', { v: 1, user: { id: String(opts.author.id), name: String(opts.author.name || '') }, input: String(opts.author.input || 'keyboard'), coauthors: Array.isArray(opts.author.coauthors) ? opts.author.coauthors.slice(0, 20) : undefined, at: new Date().toISOString() }); }
+        try { S.session.sessionManager.appendCustomEntry('chattering-author', { v: 1, user: { id: String(opts.author.id), name: String(opts.author.name || '') }, input: String(opts.author.input || 'keyboard'), coauthors: Array.isArray(opts.author.coauthors) ? opts.author.coauthors.slice(0, 20) : undefined, at: new Date().toISOString() }); }
         catch (error) { S.emit({ type: 'run_note', text: 'could not record the author: ' + String(error.message || error) }); }
       }
       if (opts.customMessage) {
@@ -645,8 +645,8 @@ async function piDeriveAt(target, opts = {}) {
     // gets a response to act on, so no tool can run in this pass.
     agent.streamFunction = async (model, context, options) => {
       if (!captured) captured = { model, context: { ...context, messages: context.messages.slice() }, options: { ...options } };
-      const refusal = new Error('aiconvo derive: context captured');
-      refusal.aiconvoDerive = true;
+      const refusal = new Error('Chattering derive: context captured');
+      refusal.chatteringDerive = true;
       throw refusal;
     };
     try {

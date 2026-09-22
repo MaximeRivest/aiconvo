@@ -30,7 +30,7 @@ graph TD
 ```mermaid
 sequenceDiagram
   participant E as Editor
-  participant H as Host (aiconvo)
+  participant H as Host (chattering)
   E->>H: render("mermaid", source)
   H-->>E: <div class="mmd-fig">svg</div>
 ```

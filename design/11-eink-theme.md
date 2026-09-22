@@ -2,7 +2,7 @@
 
 A fourth theme next to auto, dark, and light. For e-ink displays
 (reMarkable, BOOX, Dasung). Selected in the filters popover, persisted
-in localStorage (`aiconvo.theme`).
+in localStorage (`chattering.theme`).
 
 ## Constraints of the medium
 

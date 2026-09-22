@@ -4,7 +4,7 @@
 // Three records already name the person: a user message carries its author
 // (design/46), a human save in the file ledger carries user_id and an agent
 // edit carries the conversation it came from, and a guest's commit carries
-// `<id>@aiconvo` as its email (sandbox.js). This module folds them into one
+// `<id>@chattering` as its email (sandbox.js). This module folds them into one
 // per-person account for a time window: the conversations they wrote into
 // (with where their last message is), the files that changed by their hand
 // or by an agent they were driving, and the commits they made. Pure: the
@@ -15,10 +15,10 @@ const DEFAULT_CAPS = { conversations: 20, files: 30, commits: 20 };
 
 function tsOf(v) { const t = typeof v === 'number' ? v : Date.parse(v); return Number.isFinite(t) ? t : 0; }
 
-// A commit's author, as a roster id: `<id>@aiconvo` first (what a guest's
+// A commit's author, as a roster id: `<id>@chattering` first (what a guest's
 // sandbox writes), then a person on the roster with that exact name.
 function commitPersonId(commit, { resolveId, idByName }) {
-  const m = /^([^@\s]+)@aiconvo$/.exec(String(commit.email || '').trim());
+  const m = /^([^@\s]+)@chattering$/.exec(String(commit.email || '').trim());
   if (m) return resolveId(m[1]);
   const byName = idByName(String(commit.author || '').trim());
   return byName ? resolveId(byName) : null;

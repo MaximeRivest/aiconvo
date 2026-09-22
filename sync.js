@@ -322,7 +322,7 @@ function createSyncEngine(deps) {
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     try {
       const r = await fetchFn(peer.url + pathname, { method, signal: ctl.signal,
-        headers: { Authorization: 'Bearer ' + peer.credential, ...(body ? { 'Content-Type': 'application/json' } : {}), 'X-Aiconvo-Sync': deps.hostname },
+        headers: { Authorization: 'Bearer ' + peer.credential, ...(body ? { 'Content-Type': 'application/json' } : {}), 'X-Chattering-Sync': deps.hostname },
         body: body ? JSON.stringify(body) : undefined });
       const text = await r.text();
       let data = null;

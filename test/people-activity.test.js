@@ -42,10 +42,10 @@ const fileEvents = [
   { ts: T0 + 240e3, path: '/p/x.js', repo_root: '/p', actor: 'ai', conv_key: 'k3', added: 3, removed: 1, outcome: 'applied' }, // nobody recorded: the owner's, unnamed
 ];
 const commits = [
-  { hash: 'aaaa1111', shortHash: 'aaaa111', ts: iso(T0 + 900e3), author: 'Sam', email: 'u_sam2@aiconvo', subject: 'add a', repoRoot: '/p', files: [{ path: 'a.js' }] },
+  { hash: 'aaaa1111', shortHash: 'aaaa111', ts: iso(T0 + 900e3), author: 'Sam', email: 'u_sam2@chattering', subject: 'add a', repoRoot: '/p', files: [{ path: 'a.js' }] },
   { hash: 'bbbb2222', shortHash: 'bbbb222', ts: iso(T0 + 950e3), author: 'Lilly', email: 'lilly@example.com', subject: 'by name', repoRoot: '/p', files: [] },
   { hash: 'cccc3333', shortHash: 'cccc333', ts: iso(T0 + 960e3), author: 'Stranger', email: 'x@example.com', subject: 'not ours', repoRoot: '/p', files: [] },
-  { hash: 'aaaa1111', shortHash: 'aaaa111', ts: iso(T0 + 900e3), author: 'Sam', email: 'u_sam2@aiconvo', subject: 'add a (second checkout lists it too)', repoRoot: '/p2', files: [] },
+  { hash: 'aaaa1111', shortHash: 'aaaa111', ts: iso(T0 + 900e3), author: 'Sam', email: 'u_sam2@chattering', subject: 'add a (second checkout lists it too)', repoRoot: '/p2', files: [] },
 ];
 
 test('one account per person: conversations with their last message, files by hand and by agent, commits', async () => {
@@ -83,7 +83,7 @@ test('the window bounds everything, and caps trim the lists', async () => {
 
 test('commit attribution: the sandbox email wins, then an exact roster name, else nobody', () => {
   const opts = { resolveId, idByName };
-  assert.equal(commitPersonId({ email: 'u_sam2@aiconvo', author: 'Whoever' }, opts), 'u_sam');
+  assert.equal(commitPersonId({ email: 'u_sam2@chattering', author: 'Whoever' }, opts), 'u_sam');
   assert.equal(commitPersonId({ email: 'lilly@example.com', author: 'Lilly' }, opts), 'u_lil');
   assert.equal(commitPersonId({ email: 'x@example.com', author: 'Nobody' }, opts), null);
 });

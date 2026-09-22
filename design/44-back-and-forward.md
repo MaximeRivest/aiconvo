@@ -6,7 +6,7 @@ You read a conversation, open the file it changed, look at the project's
 overview, follow a link to an epic, and want to be *back where you were* —
 the same conversation, the same place in it — then forward again. A browser
 gives its users this for free: two arrows, a hover that names the page, a
-long press that lists the last few, the scroll position kept. aiconvo runs
+long press that lists the last few, the scroll position kept. chattering runs
 where there is no browser chrome at all: the standalone PWA on the tablet
 and the phone, the Android app, the e-ink reader. This note gives the app
 its own back and forward, as good as the browser's in its best case.

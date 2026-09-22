@@ -1,7 +1,7 @@
 'use strict';
 // projectfolds.js — one project identity across worktrees and renamed dirs.
 //
-// A "project" everywhere in aiconvo is a name computed from a cwd. Two git
+// A "project" everywhere in Chattering is a name computed from a cwd. Two git
 // worktrees of one repo therefore split into two projects. This module folds
 // raw names into one canonical name through two layers:
 //

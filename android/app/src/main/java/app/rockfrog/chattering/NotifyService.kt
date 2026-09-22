@@ -1,4 +1,4 @@
-package app.aiconvo
+package app.rockfrog.chattering
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -41,10 +41,10 @@ class NotifyService : Service() {
         @Volatile var appOnScreen = false
 
         fun isEnabled(ctx: Context): Boolean =
-            ctx.getSharedPreferences("aiconvo", Context.MODE_PRIVATE).getBoolean(PREF_ENABLED, false)
+            ctx.getSharedPreferences("chattering", Context.MODE_PRIVATE).getBoolean(PREF_ENABLED, false)
 
         fun setEnabled(ctx: Context, on: Boolean) {
-            ctx.getSharedPreferences("aiconvo", Context.MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, on).apply()
+            ctx.getSharedPreferences("chattering", Context.MODE_PRIVATE).edit().putBoolean(PREF_ENABLED, on).apply()
             val intent = Intent(ctx, NotifyService::class.java)
             if (on) ctx.startForegroundService(intent) else ctx.stopService(intent)
         }
@@ -72,7 +72,7 @@ class NotifyService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val running = NotificationCompat.Builder(this, CHANNEL_RUNNING)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("aiconvo is listening for replies")
+            .setContentTitle("Chattering is listening for replies")
             .setContentIntent(openAppIntent(null))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
@@ -84,7 +84,7 @@ class NotifyService : Service() {
         }
         if (worker == null) {
             this.running = true
-            worker = thread(name = "aiconvo-events", isDaemon = true) { listenLoop() }
+            worker = thread(name = "chattering-events", isDaemon = true) { listenLoop() }
         }
         return START_STICKY
     }
@@ -96,7 +96,7 @@ class NotifyService : Service() {
         super.onDestroy()
     }
 
-    private fun prefs() = getSharedPreferences("aiconvo", Context.MODE_PRIVATE)
+    private fun prefs() = getSharedPreferences("chattering", Context.MODE_PRIVATE)
 
     /** One long-lived request; on any failure wait and reconnect. Backoff
      *  grows to a minute so a laptop that is off does not drain the battery. */
@@ -194,7 +194,7 @@ class NotifyService : Service() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(NotificationChannel(
             CHANNEL_RUNNING, "Background listener", NotificationManager.IMPORTANCE_MIN,
-        ).apply { description = "Shown while aiconvo waits for replies"; setShowBadge(false) })
+        ).apply { description = "Shown while Chattering waits for replies"; setShowBadge(false) })
         nm.createNotificationChannel(NotificationChannel(
             CHANNEL_REPLIES, "Agent replies", NotificationManager.IMPORTANCE_DEFAULT,
         ).apply { description = "A conversation has a new reply" })

@@ -1,6 +1,6 @@
-/* aiconvo design tokens — runtime source of truth.
+/* Chattering design tokens — runtime source of truth.
    Components in app.html use these properties. Custom themes override only
-   color properties from ~/.config/aiconvo/themes/<id>.css. */
+   color properties from ~/.config/chattering/themes/<id>.css. */
 
 :root {
   --bg: #101412;

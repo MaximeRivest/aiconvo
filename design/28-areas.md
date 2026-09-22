@@ -21,7 +21,7 @@ The request hides two different needs. Keep them separate:
 - **Prospective structure.** Epics are retrospective: the system discovers
   them after the work. An area declares a focus *before* the work, and memory
   accumulates into it.
-- **Place as commitment.** aiconvo is directory-first. A folder is a durable,
+- **Place as commitment.** Chattering is directory-first. A folder is a durable,
   tool-visible, git-visible statement. It survives cache wipes.
 
 An epic is a **story** (time). An area is a **place** (space). The two types
@@ -70,7 +70,7 @@ leaves        ← unchanged: one per conversation, extracted once, shared
 - Zero new extraction cost. Zero new leaf-layer model calls.
 - Area docs are the same four files (`overview.md`, `intent.md`,
   `environment.md`, `status.md`) under
-  `~/notes/aiconvo/projects/<project>-<hash>/areas/<rel-slug>/`.
+  `~/notes/chattering/projects/<project>-<hash>/areas/<rel-slug>/`.
 - The docs-regen debounce refreshes area docs on the same trigger as project
   docs, and only when an area manifest already exists (opt-in, like projects).
 - Neither scope mutates the other. Both regenerate from leaves only.
@@ -80,8 +80,8 @@ leaves        ← unchanged: one per conversation, extracted once, shared
 Registry, next to the fold aliases (user data, survives cache wipes):
 
 ```json
-// ~/notes/aiconvo/projects/areas.json
-{ "aiconvo": { "experiments/vector-search": { "createdAt": 0, "title": "…" } } }
+// ~/notes/chattering/projects/areas.json
+{ "chattering": { "experiments/vector-search": { "createdAt": 0, "title": "…" } } }
 ```
 
 Logic lives in `areas.js` (pure, tested): rel normalization (rejects `..`

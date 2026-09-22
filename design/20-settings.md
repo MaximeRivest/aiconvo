@@ -46,9 +46,9 @@ Every action is a bordered button; no ghost buttons for actions.
   `~/.pi/agent/settings.json`.
 - Thinking stays `off` unless the user changes it. Models without
   thinking cannot select another level.
-- A model change writes `~/.config/aiconvo/settings.json` and applies to
+- A model change writes `~/.config/chattering/settings.json` and applies to
   the next memory call. Live agent sessions are not affected.
 - Context size follows the picked catalog row and sets the 80% split budget.
 - The sound modes are one ordered ladder (`DONE_SOUND_MODES` in
-  settings.js). `AICONVO_SPEAK_DONE=0` and `AICONVO_VOICE_REPLY=0` cap the
+  settings.js). `CHATTERING_SPEAK_DONE=0` and `CHATTERING_VOICE_REPLY=0` cap the
   setting for a whole deployment.

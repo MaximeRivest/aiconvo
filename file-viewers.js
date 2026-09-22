@@ -74,7 +74,7 @@ async function liveFileMountPDF(ws) {
     frame.id = 'filePDF'; frame.className = 'lf-preview-frame'; frame.title = 'PDF reader: ' + ws.path.split('/').pop();
     frame.referrerPolicy = 'no-referrer';
     const onMessage = event => {
-      if (!state.current() || event.origin !== location.origin || event.source !== frame.contentWindow || event.data?.type !== 'aiconvo:pdf') return;
+      if (!state.current() || event.origin !== location.origin || event.source !== frame.contentWindow || event.data?.type !== 'chattering:pdf') return;
       if (event.data.error) return state.fail(event.data.error);
       state.message.hidden = true;
       state.status.textContent = `${event.data.pages} pages · Read-only`;

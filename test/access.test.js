@@ -14,7 +14,7 @@ const admin = { id: 'u_adm', name: 'IT', role: 'admin', groups: [] };
 
 test('the household default: everyone admitted sees and acts, the creator owns, the owner sees all', () => {
   const rules = access.normalizeRules(null);
-  const t = { key: 'pi:a', project: 'aiconvo', creator: 'u_lil' };
+  const t = { key: 'pi:a', project: 'chattering', creator: 'u_lil' };
   assert.equal(access.can(rules, id(lilly), 'see', t), true);
   assert.equal(access.can(rules, id(jacob), 'act', t), true);
   assert.equal(access.can(rules, id(lilly), 'own', t), true);

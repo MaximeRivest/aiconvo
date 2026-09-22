@@ -6,7 +6,7 @@
 // project memory say?". One module answers all of them. It renders compact
 // plain text made for a context window: every hit carries a short id, a
 // date, a trust label, and the exact follow-up command. The same text goes
-// out through the CLI (`aiconvo search …`), the Pi tools
+// out through the CLI (`chattering search …`), the Pi tools
 // (extensions/records.ts) and GET /api/records/<op>, so the three never
 // drift apart.
 //
@@ -29,34 +29,34 @@ const DEFAULT_MAX = { search: 9000, show: 12000, list: 6000, doc: 14000 };
 // the model said is kept nearly whole.
 const CLIP = { user: 4000, assistant: 4000, thinking: 600, tool: 500, toolresult: 900, other: 300 };
 
-const HELP = `aiconvo — query the conversation records (all projects)
+const HELP = `chattering — query the conversation records of Chattering (all projects)
 
-  aiconvo                              where was I? (last session in this folder)
-  aiconvo search "<query>" [opts]      ranked passages across conversations, notes, memory
+  chattering                              where was I? (last session in this folder)
+  chattering search "<query>" [opts]      ranked passages across conversations, notes, memory
       --project NAME   only this project      --since 30d|2w|2026-08-01
       --role user|assistant|tool             --type conversation|note|epic|memory
       --limit N (10)   --offset N             --no-semantic   --no-prefix   --exclude ID
       Query grammar: bare words AND; "quoted phrase"; project: role: after: before: path:
-  aiconvo show <id> [opts]             one conversation (id = short id, full key, or file path)
+  chattering show <id> [opts]             one conversation (id = short id, full key, or file path)
       (no option)      header + outline of every user turn
       --at N [--context K]   messages around #N (default K=3), all roles
       --from A --to B  a range              --last N   last N chat messages
       --roles chat|all (chat = user+assistant)   --max CHARS
-  aiconvo conversations [PROJECT] [--since 30d] [--limit 20]
-  aiconvo projects                     every project with memory state
-  aiconvo memory [PROJECT] [KIND] [--area REL]      project map (overview intent environment status)
-  aiconvo memory --epic ID [KIND]
-  aiconvo notes [PROJECT]              distilled notes, newest first
-  aiconvo note <id|file>               one note (conversation id, or path under the notes tree)
-  aiconvo epics [PROJECT] / aiconvo epic <id>
-  aiconvo evidence <id>                the evidence card or note of one conversation
-  aiconvo here [DIR]
+  chattering conversations [PROJECT] [--since 30d] [--limit 20]
+  chattering projects                     every project with memory state
+  chattering memory [PROJECT] [KIND] [--area REL]      project map (overview intent environment status)
+  chattering memory --epic ID [KIND]
+  chattering notes [PROJECT]              distilled notes, newest first
+  chattering note <id|file>               one note (conversation id, or path under the notes tree)
+  chattering epics [PROJECT] / chattering epic <id>
+  chattering evidence <id>                the evidence card or note of one conversation
+  Chattering here [DIR]
 
-  Working with other people's aiconvos (design/52):
-  aiconvo join <invite link> [--name "You"] [--folder DIR]   join a project someone invited you to, from this machine
-  aiconvo sync [--all]                 pull and push shared projects with every peer now
-  aiconvo peers                        the installs this one shares projects with
-  aiconvo project-id [PROJECT]         the stable id of a project (the one in .aiconvo/project.json)
+  Working with other people's chatterings (design/52):
+  chattering join <invite link> [--name "You"] [--folder DIR]   join a project someone invited you to, from this machine
+  chattering sync [--all]                 pull and push shared projects with every peer now
+  chattering peers                        the installs this one shares projects with
+  chattering project-id [PROJECT]         the stable id of a project (the one in .chattering/project.json)
 
   PROJECT defaults to the project of the current folder. --json prints raw JSON.
   Records are AI transcripts and AI-written notes: a map of what was said, not verified truth.
@@ -154,7 +154,7 @@ function createRecords(deps) {
     now = () => Date.now(),
   } = deps;
 
-  const cli = 'aiconvo';
+  const cli = 'chattering';
   const noteLabel = p => (p ? trustLabel(p) : '');
 
   // Live markers come from a /proc scan: one scan per answer, not per line.

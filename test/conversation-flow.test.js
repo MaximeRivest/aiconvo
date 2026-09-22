@@ -55,12 +55,12 @@ test('corrupt cycles and out-of-order parents terminate without losing the valid
 });
 test('plain Continue is a real prompt; only explicit markers are transport', () => {
   assert.equal(F.transport({ role: 'user', text: 'Continue.' }), false);
-  assert.equal(F.transport({ role: 'user', text: 'Continue.\n<!-- aiconvo:regenerate -->' }), true);
+  assert.equal(F.transport({ role: 'user', text: 'Continue.\n<!-- chattering:regenerate -->' }), true);
 });
 test('quoted markers and assistant explanations are not hidden as transport', () => {
   assert.equal(F.transport({ role: 'assistant', text: '2 models answered my last message in parallel. Their replies: an explanation' }), false);
-  assert.equal(F.transport({ role: 'assistant', text: 'Example:\n```html\n<!-- aiconvo:both -->\n```' }), false);
-  assert.equal(F.transport({ role: 'user', text: 'Example:\n```html\n<!-- aiconvo:regenerate -->\n```' }), false);
+  assert.equal(F.transport({ role: 'assistant', text: 'Example:\n```html\n<!-- chattering:both -->\n```' }), false);
+  assert.equal(F.transport({ role: 'user', text: 'Example:\n```html\n<!-- chattering:regenerate -->\n```' }), false);
 });
 test('different user questions never become a parallel answer group', () => {
   const n = (id, parent, role, bridge) => ({ id, parent, role, bridge });
@@ -91,8 +91,8 @@ test('new parallel and include-all entries preserve typed provenance across rein
   const forks = ['a', 'b'].map(id => root + line(msg('q' + id, 'root', 'user', 'question')) + line(msg(id, 'q' + id, 'assistant', id)));
   const result = computeFanoutMerge(root, forks, { fanoutId: 'run', newId: 'all' });
   const entries = result.content.trim().split('\n').map(JSON.parse);
-  assert.equal(entries.find(d => d.id === 'qa').aiconvo.runId, 'run');
-  assert.deepEqual(entries.find(d => d.id === 'all').aiconvo.sources.map(s => s.id), ['a', 'b']);
-  assert.equal(entries.find(d => d.id === 'all').aiconvo.unresolved, true);
+  assert.equal(entries.find(d => d.id === 'qa').chattering.runId, 'run');
+  assert.deepEqual(entries.find(d => d.id === 'all').chattering.sources.map(s => s.id), ['a', 'b']);
+  assert.equal(entries.find(d => d.id === 'all').chattering.unresolved, true);
   assert.equal(computeFanoutMerge(result.content, forks, { fanoutId: 'run' }).content, result.content);
 });

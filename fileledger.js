@@ -2,15 +2,15 @@
 // fileledger.js — the file edit ledger (design/33-files-mode.md §4).
 //
 // One row per recorded change to one file: an agent's edit / write / shell
-// mutation mined from a transcript, a save or commit made in the aiconvo
+// mutation mined from a transcript, a save or commit made in the Chattering
 // editor, a Git commit, or a write seen by the filesystem watcher. The
-// ledger is a derived cache under ~/.cache/aiconvo (node:sqlite, like the
+// ledger is a derived cache under ~/.cache/chattering (node:sqlite, like the
 // search index): delete it and the next boot rebuilds it from transcripts,
 // Git, and the editor's own provenance log.
 //
 // Truth rules carried here:
 // · attempted / applied / failed stay separate (outcome);
-// · the actor is `human` only when the aiconvo editor made the change,
+// · the actor is `human` only when the Chattering editor made the change,
 //   `ai` when a transcript records it, `git` for commits, and `external`
 //   for anything the watcher saw that nothing explains — never "you";
 // · a watcher event within the dedupe window of an agent or editor event

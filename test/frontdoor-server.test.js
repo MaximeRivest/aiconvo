@@ -24,9 +24,9 @@ test('sign-in guard: lockout after ten distinct wrong tokens, a stale cookie cou
   const port = await freePort(), tlsPort = await freePort();
   registerConsole(port, 'install-tok');
   let log = '';
-  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: String(tlsPort), AICONVO_NO_WATCH: '1', AICONVO_NO_LEDGER: '1', AICONVO_NO_SYNC: '1',
-    AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent,
-    AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_PUBLIC_URL: '', AICONVO_TOKEN: 'install-tok', PATH: '/nonexistent' /* no tailscale: the doors say so */ }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: String(tlsPort), CHATTERING_NO_WATCH: '1', CHATTERING_NO_LEDGER: '1', CHATTERING_NO_SYNC: '1',
+    CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent,
+    CHATTERING_HOST: '', CHATTERING_LAN: '1', CHATTERING_PUBLIC_URL: '', CHATTERING_TOKEN: 'install-tok', PATH: '/nonexistent' /* no tailscale: the doors say so */ }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', b => log += b); child.stderr.on('data', b => log += b);
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const local = 'http://127.0.0.1:' + port, remote = 'http://' + lanIp() + ':' + port;
@@ -50,9 +50,9 @@ test('sign-in guard: lockout after ten distinct wrong tokens, a stale cookie cou
 
   // A stale cookie, sent on every request of a page load: one guess.
   for (let i = 0; i < 12; i++) {
-    const r = await raw(remote + '/api/sessions', { headers: { Cookie: 'aiconvo=stale-value' } });
+    const r = await raw(remote + '/api/sessions', { headers: { Cookie: 'chattering=stale-value' } });
     assert.equal(r.status, 401, 'still 401, not 429: ' + i);
-    if (i === 0) assert.match(r.headers.get('set-cookie') || '', /aiconvo=; .*Max-Age=0/, 'the stale cookie is cleared');
+    if (i === 0) assert.match(r.headers.get('set-cookie') || '', /chattering=; .*Max-Age=0/, 'the stale cookie is cleared');
   }
   // Nine distinct wrong tokens (the stale cookie was the first guess): the tenth is the last allowed.
   for (let i = 0; i < 8; i++) assert.equal((await login('wrong-' + i)).status, 401);
@@ -72,7 +72,7 @@ test('sign-in guard: lockout after ten distinct wrong tokens, a stale cookie cou
   assert.equal(seen.recent[0].door, 'lan');
   assert.equal(seen.recent[0].ip, lanIp());
   assert.ok(seen.recent.some(r => r.via === 'cookie') && seen.recent.some(r => r.via === 'login'));
-  assert.ok(fs.existsSync(path.join(home, '.local', 'share', 'aiconvo', 'sign-ins.jsonl')), 'on disk, outside the cache');
+  assert.ok(fs.existsSync(path.join(home, '.local', 'share', 'chattering', 'sign-ins.jsonl')), 'on disk, outside the cache');
 
   // Doors: readable by the owner, not by a member; without tailscale they say so.
   const doors = await (await fetch(local + '/api/doors')).json();

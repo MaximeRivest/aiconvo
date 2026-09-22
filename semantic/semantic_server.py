@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""aiconvo semantic search — late-interaction (ColBERT) stage.
+"""chattering semantic search — late-interaction (ColBERT) stage.
 
-Runs on the GPU server. Aiconvo pushes text units (messages, titles,
+Runs on the GPU server. Chattering pushes text units (messages, titles,
 note/epic/memory sections); queries return ranked unit ids with scores.
 
 Design: two stages inside the service.
@@ -10,11 +10,11 @@ Design: two stages inside the service.
      token embeddings (loaded per candidate from SQLite).
 
 This stays fully incremental (upsert / remove single units) and avoids
-static-index rebuilds. The store is a derived cache: aiconvo can re-push
+static-index rebuilds. The store is a derived cache: Chattering can re-push
 everything at any time.
 
 Multi-user: every unit lives in a namespace (`ns`). One namespace per
-aiconvo install. Upsert, remove, and search never cross namespaces, so
+Chattering install. Upsert, remove, and search never cross namespaces, so
 several users can share one GPU process and one model without mixing
 their indexes.
 
@@ -36,7 +36,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 MODEL_NAME = os.environ.get("SEMANTIC_MODEL", "lightonai/GTE-ModernColBERT-v1")
-DB_PATH = os.path.expanduser(os.environ.get("SEMANTIC_DB", "~/family-ai/aiconvo-semantic/units.db"))
+DB_PATH = os.path.expanduser(os.environ.get("SEMANTIC_DB", "~/family-ai/chattering-semantic/units.db"))
 DOC_LEN = int(os.environ.get("SEMANTIC_DOC_LEN", "512"))
 RECALL_K = int(os.environ.get("SEMANTIC_RECALL_K", "256"))
 # Rows from a pre-namespace store land in this namespace on first start.

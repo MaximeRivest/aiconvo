@@ -38,11 +38,11 @@ async function boot(t) {
   const sessions = path.join(agent, 'sessions');
   sessionFile(path.join(sessions, '--home-x-Projects-secret--'), '01a0secret000000000000000000000000', '/home/x/Projects/secret', 'the secret plan');
   sessionFile(path.join(sessions, '--home-x-Projects-open--'), '01a0open00000000000000000000000000', '/home/x/Projects/open', 'the open plan',
-    line({ type: 'custom', customType: 'aiconvo-author', id: 'a1', parentId: null, timestamp: '2026-09-19T10:00:00.500Z', data: { v: 1, user: { id: 'u_lilly', name: 'Lilly' }, input: 'keyboard' } }));
+    line({ type: 'custom', customType: 'chattering-author', id: 'a1', parentId: null, timestamp: '2026-09-19T10:00:00.500Z', data: { v: 1, user: { id: 'u_lilly', name: 'Lilly' }, input: 'keyboard' } }));
   const port = await freePort(), tlsPort = await freePort();
   registerConsole(port, 'install-tok');
   let log = '';
-  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), AICONVO_TLS_PORT: String(tlsPort), AICONVO_NO_WATCH: '0', AICONVO_NO_LEDGER: '1', AICONVO_CACHE_DIR: path.join(home, 'cache'), AICONVO_CHECKPOINT_DIR: path.join(home, 'checkpoints'), AICONVO_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent, AICONVO_HOST: '', AICONVO_LAN: '1', AICONVO_PUBLIC_URL: '', AICONVO_TOKEN: 'install-tok' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: String(tlsPort), CHATTERING_NO_WATCH: '0', CHATTERING_NO_LEDGER: '1', CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent, CHATTERING_HOST: '', CHATTERING_LAN: '1', CHATTERING_PUBLIC_URL: '', CHATTERING_TOKEN: 'install-tok' }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', b => log += b); child.stderr.on('data', b => log += b);
   t.after(() => { child.kill('SIGKILL'); fs.rmSync(home, { recursive: true, force: true }); });
   const local = 'http://127.0.0.1:' + port;
@@ -66,7 +66,7 @@ test('people, sharing, presence and handoff on one install', { skip: !lanIp() &&
   const console_ = await (await fetch(local + '/api/users')).json();
   assert.equal(console_.tier, 'console');
   assert.equal(console_.me.role, 'owner');
-  assert.ok(fs.existsSync(path.join(home, '.config', 'aiconvo', 'users.json')), 'the roster is written on first run');
+  assert.ok(fs.existsSync(path.join(home, '.config', 'chattering', 'users.json')), 'the roster is written on first run');
 
   // From the network: nothing without a credential; the install token is the owner's.
   assert.equal((await fetch(remote + '/api/users')).status, 401);
@@ -173,7 +173,7 @@ test('people, sharing, presence and handoff on one install', { skip: !lanIp() &&
   // shown once and hashed on disk.
   const bad = await fetch(remote + '/?handoff=h1.abc.def', { redirect: 'manual' });
   assert.equal(bad.status, 401);
-  const rosterOnDisk = fs.readFileSync(path.join(home, '.config', 'aiconvo', 'users.json'), 'utf8');
+  const rosterOnDisk = fs.readFileSync(path.join(home, '.config', 'chattering', 'users.json'), 'utf8');
   assert.equal(rosterOnDisk.includes(lillySecret), false);
   assert.equal(rosterOnDisk.includes('install-tok'), false);
   // Sign out drops the cookie.
