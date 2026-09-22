@@ -125,7 +125,7 @@ say "8. start Chattering"
 # A portal machine (the laptop: desktop.chattering.autostart = false) has
 # no [Install] section; there the launcher starts the server on demand
 # and the service is left alone.
-if [ "$(systemctl --user is-enabled chattering.service 2>/dev/null)" = static ]; then
+if [ -z "$(systemctl --user show -p WantedBy --value chattering.service 2>/dev/null)" ]; then
   echo "portal machine: chattering.service starts on demand, not now"
 else
   systemctl --user enable --now chattering.service
