@@ -507,6 +507,49 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, sid);
   await until(`docState.editor.listCells()[0].code.endsWith('\\nanswer_fn')`, 'Enter did not take the suggestion (the first, alphabetically)');
   await evaluate(`(() => { const c = docState.editor.listCells()[0]; docState.editor.view.dispatch({ changes: { from: c.to - 4 - '\\nanswer_fn'.length, to: c.to - 4 } }); })()`);
+  // AI commands (the model mocked): Ctrl+J opens the box on the paragraph,
+  // a typed command runs, the suggestion is not document text, Tab
+  // applies it, and the accept notice carries exactly the resulting text.
+  await evaluate(`(() => {
+    window.aiCalls = []; window.aiAccepts = [];
+    window.fetch = (url, opts) => {
+      const u = String(url);
+      if (u.includes('/api/doc/ai-accept')) { aiAccepts.push(JSON.parse(opts.body)); return Promise.resolve(new Response(JSON.stringify({ ok: true }))); }
+      if (u.includes('/api/doc/ai') && opts && opts.method === 'POST') {
+        const body = JSON.parse(opts.body);
+        aiCalls.push(body);
+        const lines = [{ type: 'delta', text: 'A ' }, { type: 'delta', text: 'better note.' }, { type: 'done', text: 'A better note.', model: 'fixture/model' }];
+        return Promise.resolve(new Response(lines.map(l => JSON.stringify(l)).join('\\n') + '\\n', { headers: { 'Content-Type': 'application/x-ndjson' } }));
+      }
+      if (u.includes('/api/doc/ai')) return Promise.resolve(new Response(JSON.stringify({ available: true, model: 'fixture/model' })));
+      return liveOriginalFetch(url, opts);
+    };
+    docState.aiStatus = { available: true, model: 'fixture/model' };
+    const at = docState.editor.getContent().indexOf('A note.') + 2;
+    docState.editor.view.dispatch({ selection: { anchor: at } });
+    docState.editor.view.focus();
+  })()`);
+  const key = async (key, code, vk, modifiers = 0) => {
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk, modifiers }, sid);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, modifiers }, sid);
+  };
+  await key('j', 'KeyJ', 74, 2);
+  await until(`document.activeElement?.classList.contains('mrmd-ai-menu-input')`, 'Ctrl+J did not open the AI command box');
+  assert.match(await evaluate(`document.querySelector('.mrmd-ai-menu-foot').textContent`), /model: fixture\/model/);
+  await send('Input.insertText', { text: 'grammar' }, sid);
+  await key('Enter', 'Enter', 13);
+  await until(`document.querySelector('.mrmd-ai-panel')?.dataset.state === 'ready'`, 'no AI suggestion');
+  const beforeAi = await evaluate(`docState.editor.getContent()`);
+  assert.equal(await evaluate(`aiCalls[0].command`), 'grammar');
+  assert.equal(await evaluate(`aiCalls[0].request.target.text`), 'A note.');
+  assert.ok(beforeAi.includes('A note.') && !beforeAi.includes('A better note.'), 'the suggestion is not document text');
+  fs.writeFileSync(path.join(os.tmpdir(), 'notebook-ai-suggestion.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, sid)).result.data, 'base64'));
+  await key('Tab', 'Tab', 9);
+  await until(`docState.editor.getContent().includes('A better note.')`, 'Tab did not apply the suggestion');
+  await until(`aiAccepts.length === 1`, 'no accept notice');
+  assert.equal(await evaluate(`aiAccepts[0].text === docState.editor.getContent()`), true, 'the notice names exactly the resulting document');
+  assert.deepEqual(await evaluate(`[aiAccepts[0].command, aiAccepts[0].model]`), ['grammar', 'fixture/model']);
+  await evaluate(`(() => { const t = docState.editor.getContent(); const at = t.indexOf('A better note.'); docState.editor.view.dispatch({ changes: { from: at, to: at + 'A better note.'.length, insert: 'A note.' } }); })()`);
   // The kernel: the variables drawer and the kernel menu (rat mocked).
   await evaluate(`(() => {
     window.kernelOps = []; window.confirm = () => true;

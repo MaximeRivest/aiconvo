@@ -11,13 +11,26 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.16.1 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.17.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.17.0: AI commands (`ai`, document-ai.js). A command box at the cursor
+  (Mod-j; the ✦ on a code cell; `openAiMenu()`): typing filters the host's
+  commands, and text that names none becomes the instruction of the host's
+  instruction command. The answer streams in as a suggestion beside the
+  text — ghost text for a short insertion, a panel with a word diff for a
+  replacement — and is not document text until accepted (Tab with the
+  cursor in the range, or the button): one transaction, userEvent
+  `input.ai`, `aiEditAnnotation`, its own undo step, refused if the text
+  changed. Escape discards; Alt-] / Alt-[ step through answers ("Another"
+  asks again). Editing inside the suggested range discards it. The host
+  lends `run(request, {signal, onText})` and may `beforeAccept` (awaited;
+  `event.result()` is the document as it will be), `onAccept`, `notify`,
+  `escalate`. Never on the YAML header or a ```output block.
+  `findFrontmatterRange` is exported from block-decorations.js for it.
 - 0.16.1: host completion shows. `setLanguageServices({complete})` never
   displayed an answer in either editor (a new completion source per
   lookup made CodeMirror drop each answer and ask again). Chattering uses
   it for code cells: completion from the notebook's running kernel.
-  0.16.0 was never served and is removed; the fallback stays 0.15.0 (the
-  newest version the running server knew).
+  0.16.0 was never served and is removed.
 - 0.16.0: one rat adapter. `mrmdDocument.ratNotebook` (src/rat-notebook.js,
   plain functions, also vendored by the VS Code extension) is what a run on
   rat means: output cleaning, plot markers, the result format, which result
@@ -121,14 +134,15 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `b9a61bb` ("document entry 0.16.1").
-- SHA-256: `fc042e455e28ec85329f256d77f7567a7cec3e427ba979cfcef7365dcb507029`
+- Source commit: `1a4d56a` ("document entry 0.17.0").
+- SHA-256: `91d80d2a9333d6eafa3574e7ef31163680f6cf3db29eb2a9586e509a7ef5745e`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.15.0 (documents open, cells run with Run buttons and status through
-  app.html's `legacyRunDocCell`; no plots, no other clients' runs). Keep
-  that artifact, its route and `legacyRunDocCell` while the fallback exists.
+  0.16.1 (documents open and cells run; no AI commands — the ⋯ entry asks
+  for a reload). Keep that artifact and route while the fallback exists.
+  0.15.0 is no longer loaded (app.html's pre-runner path is gone); delete
+  its folder and route once 0.17.0 has run for a few days.
 
 ## Features enabled in chattering
 
@@ -152,6 +166,8 @@ owns the editing surface.
 - `createNotebookRunner` — every cell run (app.html `createDocRunner`: the
   transport over /api/doc/run-cell, run-input, cancel-run, kernel, plot,
   plots; other clients' runs from /api/doc/follow on the tab's event stream)
+- `ai` — AI commands (app.html `docAiOptions`; the catalog and prompts in
+  ai-commands.js; /api/doc/ai, /api/doc/ai-accept in server.js)
 - cell controls (`runnableLanguages`, `onCancelCell`, `run.setStatus`,
   `clearCellStatuses`) — Run/Stop on each cell and its run state
   (app.html `runDocCell`, `runAllDocCells`, `cancelDocCell`)

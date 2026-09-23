@@ -122,6 +122,16 @@ function createModelHealth(options = {}) {
     changed();
   }
 
+  // A call the person stopped: neither a success nor a failure of the
+  // model. A probe's slot is freed — and a manual probe does not spend the
+  // pause's one manual try, since it learned nothing.
+  function release(permit) {
+    if (!permit || !permit.probe) return;
+    probeInFlight = false;
+    if (permit.manual && manualProbeOpenedAt === state.openedAt) manualProbeOpenedAt = 0;
+    changed();
+  }
+
   function setIdentity(value) {
     const identity = String(value || 'default');
     if (state.identity === identity) return false;
@@ -196,7 +206,7 @@ function createModelHealth(options = {}) {
   }
 
   return {
-    begin, success, failure, snapshot, setIdentity,
+    begin, success, failure, release, snapshot, setIdentity,
     isAutomaticPaused, automaticWaitMs,
     canRunLeaf, leafFailure, deferLeaf, leafSuccess, dueLeafKeys,
   };

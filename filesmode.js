@@ -243,8 +243,16 @@ function fileWsSharedStatus(ws, note = '') {
 // Save on a shared file: the disk follows by itself, but a person who
 // presses Ctrl+S means "now". Same text, same save path, no version check
 // (the shared text is the version).
-async function fileWsSharedSave(ws) {
-  if (!ws.collab || !ws.editor || ws.sharedSaving) return;
+// One explicit save of a shared file at a time: a save asked for while one
+// is in flight runs after it (awaitable), instead of being dropped.
+function fileWsSharedSave(ws) {
+  if (!ws || !ws.collab || !ws.editor) return Promise.resolve();
+  ws.sharedSaveQueue = (ws.sharedSaveQueue || Promise.resolve()).then(() => fileWsSharedSaveNow(ws)).catch(e => console.error('shared save', e));
+  return ws.sharedSaveQueue;
+}
+
+async function fileWsSharedSaveNow(ws) {
+  if (!ws.collab || !ws.editor) return;
   ws.sharedSaving = true;
   fileWsSharedStatus(ws, 'Saving…');
   const text = ws.editor.getContent();

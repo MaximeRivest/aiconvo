@@ -34,6 +34,7 @@ const lineDiff = require('./linediff.js');
 const fileMedia = require('./file-media.js');
 const previewAssets = new fileMedia.PreviewAssets();
 const notebookEnv = require('./notebook-env.js');
+const aiCommands = require('./ai-commands.js');
 const notebookDerive = require('./notebook-derive.js');
 const { agentPath } = require('./agentpath.js');
 const themesLib = require('./themes.js');
@@ -4755,8 +4756,10 @@ function listPiModels(force = false) {
   });
   return modelsPending;
 }
-function piArgs() {
-  return settingsLib.buildPiArgs(appSettings, {
+// The flags for Chattering's own model calls. `overrides` adjusts one call
+// (a lower thinking level for a quick edit); settings stay as they are.
+function piArgs(overrides = null) {
+  return settingsLib.buildPiArgs(overrides ? { ...appSettings, ...overrides } : appSettings, {
     claudeCodeExtension: fs.existsSync(CLAUDE_CODE_EXT) ? CLAUDE_CODE_EXT : '',
   });
 }
@@ -5001,7 +5004,18 @@ function splitTextToTokenBudget(text, tokenBudget) {
   return parts;
 }
 
+// One no-session model call: `fileContent` attached, `prompt` sent, the
+// answer's text returned. Options:
+//   automatic / background  the call is not a person's (see backgroundAllowed)
+//   timeoutMs               overall limit (default 30 min)
+//   thinking                this call's thinking level (settings otherwise)
+//   signal                  an AbortSignal: stops the pi process; the call
+//                           then rejects with code 'ABORTED', and the model's
+//                           health is untouched (a person's stop is no failure)
+//   purpose                 the usage record's chatteringPurpose
+//   trim: false             keep the answer's edge whitespace
 async function runPi(fileContent, prompt, onChunk, options = {}) {
+  if (options.signal && options.signal.aborted) throw abortedModelCall();
   const inherited = modelCallContext.getStore();
   const automatic = options.automatic == null ? !!(inherited && inherited.automatic) : !!options.automatic;
   // Background work names its kind; an automatic call that names none is
@@ -5020,8 +5034,8 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
     const result = await execFileWithActivityTimeout(
       execFile,
       'pi',
-      [...piArgs(), '--mode', 'json', '@' + tmp, prompt],
-      { maxBuffer: 64 * 1024 * 1024, timeout: options.timeoutMs || 1800000 },
+      [...piArgs(options.thinking ? { thinking: options.thinking } : null), '--mode', 'json', '@' + tmp, prompt],
+      { maxBuffer: 64 * 1024 * 1024, timeout: options.timeoutMs || 1800000, ...(options.signal ? { signal: options.signal } : {}) },
       {
         activityTimeoutMs: MODEL_ACTIVITY_TIMEOUT_MS,
         onChild: child => child.stdin.end(), // pi -p waits for stdin EOF otherwise
@@ -5052,13 +5066,18 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
         type: 'message', id: crypto.randomUUID(), parentId: null,
         timestamp: new Date(finalMessage.timestamp || Date.now()).toISOString(),
         chatteringCategory: 'internal',
+        ...(options.purpose ? { chatteringPurpose: String(options.purpose) } : {}),
         message: { ...finalMessage, content: [] },
       };
       try { fs.appendFileSync(INTERNAL_USAGE_FILE, JSON.stringify(record) + '\n', { mode: 0o600 }); } catch {}
     }
-    if (!finalMessage) return result.stdout.trim();
-    return textOf(finalMessage.content).trim();
+    const answer = finalMessage ? textOf(finalMessage.content) : result.stdout;
+    return options.trim === false ? answer : answer.trim();
   } catch (error) {
+    if (options.signal && options.signal.aborted) {
+      memoryModelHealth.release(permit);
+      throw abortedModelCall();
+    }
     if (permit) {
       error.modelCallFailure = true;
       memoryModelHealth.failure(permit, error);
@@ -5072,6 +5091,12 @@ async function runPi(fileContent, prompt, onChunk, options = {}) {
   } finally {
     fsp.unlink(tmp).catch(() => {});
   }
+}
+
+function abortedModelCall() {
+  const e = new Error('the model call was stopped');
+  e.code = 'ABORTED';
+  return e;
 }
 
 const TIMELINE_TITLE_PROMPT =
@@ -10606,6 +10631,64 @@ const DOC_EDITS_FILE = path.join(NOTES_DIR, 'doc-edits.jsonl');
 const DOC_ACTORS = new Set(['human', 'ai', 'runtime', 'external-agent']);
 const DOC_INPUTS = new Set(['keyboard', 'voice', 'pen', 'paste', 'ai-edit', 'filesystem']);
 
+// ---- AI commands: attribution of an accepted suggestion ----
+// Just before an accepted suggestion is applied, the page says what the
+// document is about to become (/api/doc/ai-accept). The next save that
+// writes exactly that text — the editor's autosave, or the shared copy's
+// save a moment after typing stops — is recorded as the AI edit it is
+// (actor ai, input ai-edit, with the command, the model and the person who
+// accepted it), whichever path saves first. Typing again before that save
+// changes the text, and the save is then, truthfully, a person's.
+const AI_ACCEPT_TTL_MS = 60 * 1000;
+const pendingAiEdits = new Map(); // abs path → {sha, command, model, instruction, userId, at}
+function registerAiEdit(abs, entry) {
+  const now = Date.now();
+  for (const [key, e] of pendingAiEdits) if (now - e.at > AI_ACCEPT_TTL_MS) pendingAiEdits.delete(key);
+  pendingAiEdits.set(abs, { ...entry, at: now });
+}
+function takeAiEdit(abs, sha) {
+  const e = pendingAiEdits.get(abs);
+  if (!e || e.sha !== sha || Date.now() - e.at > AI_ACCEPT_TTL_MS) return null;
+  pendingAiEdits.delete(abs);
+  return e;
+}
+
+// Whether AI commands are open to this person: the reason when not.
+// Guests: an AI command runs on the owner's account outside the guest's
+// sandbox and limits (runPi is not sandbox-aware yet), so not for them.
+function aiCommandsRefusal(identity) {
+  if (identity && usersLib.isGuest(identity.user)) return 'AI commands are not available to guests yet';
+  return null;
+}
+// At most this many AI commands run at once per person (each is a pi process).
+const AI_CALLS_PER_PERSON = 3;
+const aiCallsRunning = new Map(); // person → running calls
+// A document's text travels whole in these requests; past this, refuse.
+const DOC_TEXT_MAX_BYTES = 16 * 1024 * 1024;
+const AI_REQUEST_MAX_BYTES = DOC_TEXT_MAX_BYTES + 64 * 1024;
+
+// A request body as text, refused (status 413) past maxBytes.
+async function readRequestText(req, maxBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      const e = new Error(`the request is too large (over ${Math.round(maxBytes / 1024 / 1024)} MB)`);
+      e.status = 413;
+      throw e;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+// A path as a person reads it: under home, "~/…".
+function displayPath(abs) {
+  const home = os.homedir();
+  return abs.startsWith(home + path.sep) ? '~' + abs.slice(home.length) : abs;
+}
+
 async function recordDocEdit(entry) {
   try {
     await fsp.mkdir(NOTES_DIR, { recursive: true });
@@ -10646,6 +10729,9 @@ async function docSaveResponse(body, user = null) {
   if (baseSha && sha256Hex(oldText) !== baseSha) throw new Error('the file changed on disk after you loaded it');
   let historyWarning = '';
   if (oldText !== text) {
+    // A save that writes exactly an accepted AI suggestion is that edit.
+    const aiEdit = takeAiEdit(abs, sha256Hex(text));
+    if (aiEdit) body = { ...body, actor: 'ai', input: 'ai-edit' };
     historyWarning = observeFileHistory(abs, { text: oldText, source: 'before Markdown save' });
     const archiveFrom = fileArchive?.latestId(abs);
     await writeFileAtomic(abs, text);
@@ -10657,6 +10743,7 @@ async function docSaveResponse(body, user = null) {
       input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
       added: delta.added, removed: delta.removed, sha: sha256Hex(text),
       user: user && body.actor !== 'ai' ? user.id : undefined,
+      ...(aiEdit ? { ai: { command: aiEdit.command, model: aiEdit.model, instruction: aiEdit.instruction || undefined, acceptedBy: aiEdit.userId || undefined } } : {}),
     });
     // The 24h activity index (code tree badges) hears about editor saves
     // directly — no dependency on a watcher being attached yet.
@@ -13783,6 +13870,7 @@ async function handleRequest(req, res) {
       '/file-completion-ui.js': { file: 'file-completion-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/linediff.js': { file: 'linediff.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/notebook-env.js': { file: 'notebook-env.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/ai-commands.js': { file: 'ai-commands.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/navigation.js': { file: 'navigation.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
@@ -13832,6 +13920,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.15.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.15.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.16.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.16.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.17.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.17.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/chattering.apk': { file: 'chattering.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
@@ -15694,6 +15783,66 @@ async function handleRequest(req, res) {
         if (at) return json(res, 200, { kernel, running: true, at, text: r.out.replace(/\s+$/, '') });
         json(res, 200, { kernel, running: true, ...notebookEnv.parseLookOverview(r.out) });
       } catch (e) { json(res, e.status || 403, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/ai' && req.method === 'GET') {
+      // What the command box needs: which model answers, and whether AI
+      // commands are open to this person.
+      json(res, 200, { available: aiCommandsRefusal(identity) || true, model: currentModelLabel() });
+    } else if (u.pathname === '/api/doc/ai' && req.method === 'POST') {
+      // Run one AI command (ai-commands.js) on a document's text: a
+      // no-session, tool-less call to Chattering's model, streamed back as
+      // NDJSON — {type:'delta', text} while it writes, then {type:'done',
+      // text, model} or {type:'error', message}. Closing the request stops
+      // the call.
+      const refusal = aiCommandsRefusal(identity);
+      if (refusal) return json(res, 403, { error: refusal });
+      let parsed;
+      try { parsed = JSON.parse(await readRequestText(req, AI_REQUEST_MAX_BYTES)); }
+      catch (e) { return json(res, e.status || 400, { error: e.status ? e.message : 'bad json' }); }
+      const abs = notebookPath(parsed.doc);
+      if (!abs || !DOCUMENT_EXT.test(abs)) return json(res, 400, { error: 'doc (a Markdown document path) is required' });
+      try { assertPathAccess(identity, abs, 'act'); } catch (e) { return json(res, e.status || 403, { error: e.message }); }
+      const checked = aiCommands.validateRequest(parsed);
+      if (checked.error) return json(res, 400, { error: checked.error });
+      const who = docRunOwner(identity);
+      if ((aiCallsRunning.get(who) || 0) >= AI_CALLS_PER_PERSON) return json(res, 429, { error: 'three AI commands are already running — wait for one to finish' });
+      aiCallsRunning.set(who, (aiCallsRunning.get(who) || 0) + 1);
+      const { input, prompt } = aiCommands.buildPrompt(checked.command, checked.request, { path: displayPath(abs), nonce: crypto.randomBytes(6).toString('hex') });
+      const stop = new AbortController();
+      let finished = false;
+      res.on('close', () => { if (!finished) stop.abort(); });
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
+      const send = ev => { if (!res.writableEnded && !res.destroyed) res.write(JSON.stringify(ev) + '\n'); };
+      try {
+        const text = await runPi(input, prompt, delta => send({ type: 'delta', text: delta }), {
+          automatic: false, thinking: checked.command.thinking, signal: stop.signal, purpose: 'ai-command', trim: false, timeoutMs: 5 * 60 * 1000,
+        });
+        send({ type: 'done', text, model: currentModelLabel() });
+      } catch (e) {
+        if (e.code !== 'ABORTED') send({ type: 'error', message: e.code === 'MODEL_CALLS_PAUSED' ? 'the model is paused after repeated failures; try again in a moment' : e.message });
+      } finally {
+        finished = true;
+        const left = (aiCallsRunning.get(who) || 1) - 1;
+        if (left) aiCallsRunning.set(who, left); else aiCallsRunning.delete(who);
+        if (!res.writableEnded) res.end();
+      }
+    } else if (u.pathname === '/api/doc/ai-accept' && req.method === 'POST') {
+      // An AI suggestion is about to be applied: remember what the document
+      // will then be, so the save that writes it records the AI edit (see
+      // registerAiEdit). Only a fingerprint of the text is kept.
+      let parsed;
+      try { parsed = JSON.parse(await readRequestText(req, DOC_TEXT_MAX_BYTES)); }
+      catch (e) { return json(res, e.status || 400, { error: e.status ? e.message : 'bad json' }); }
+      const abs = notebookPath(parsed.doc);
+      if (!abs || !DOCUMENT_EXT.test(abs)) return json(res, 400, { error: 'doc (a Markdown document path) is required' });
+      try { assertPathAccess(identity, abs, 'act'); } catch (e) { return json(res, e.status || 403, { error: e.message }); }
+      const command = aiCommands.commandById(parsed.command);
+      if (!command || typeof parsed.text !== 'string') return json(res, 400, { error: 'command and text are required' });
+      registerAiEdit(abs, {
+        sha: sha256Hex(parsed.text), command: command.id,
+        model: String(parsed.model || '').slice(0, 200), instruction: String(parsed.instruction || '').slice(0, aiCommands.LIMITS.instruction),
+        userId: identity && identity.user ? identity.user.id : null,
+      });
+      json(res, 200, { ok: true });
     } else if (u.pathname === '/api/doc/complete' && req.method === 'POST') {
       // Completions for the code before the cursor in one cell, from its
       // running kernel. Empty (with the reason) when the kernel is not

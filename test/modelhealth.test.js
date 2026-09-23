@@ -95,3 +95,19 @@ test('changing the selected model clears the old model pause and leaf delays', (
   assert.equal(health.canRunLeaf('leaf'), true);
   assert.doesNotThrow(() => health.begin({ automatic: true }));
 });
+
+test('a call the person stopped is neither a success nor a failure', () => {
+  const now = clock();
+  const health = createModelHealth({ now, failureThreshold: 2, baseCooldownMs: 10 * MIN });
+  health.failure(health.begin(), new Error('down'));
+  health.release(health.begin({ automatic: false }));
+  assert.equal(health.snapshot().consecutiveFailures, 1, 'a stop is not a failure');
+  health.failure(health.begin(), new Error('down again'));
+  assert.equal(health.snapshot().mode, 'open');
+  // During the pause, a stopped manual probe leaves the manual try unspent.
+  health.release(health.begin({ automatic: false }));
+  const retry = health.begin({ automatic: false });
+  assert.equal(retry.probe, true);
+  health.success(retry);
+  assert.equal(health.snapshot().mode, 'closed');
+});
