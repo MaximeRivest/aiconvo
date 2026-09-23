@@ -13888,6 +13888,17 @@ async function showTree(key, opts = {}) {
   catch { return errToast('could not load the conversation tree'); }
   if (t.error) return errToast(t.error);
   if (activeRel !== key || viewKind !== 'tree') return; // the reader moved on while the tree loaded
+  // The lit path is the head's path (what you read is what continues), not
+  // the file's last entry.
+  let snapshot = current?.key === key ? current : readerSessions.get(key);
+  if (!snapshot) {
+    try { snapshot = await (await fetch('/api/session?id=' + encodeURIComponent(key))).json(); if (snapshot && !snapshot.error) { adoptServerReading(snapshot); readerSessions.set(key, snapshot); } else snapshot = null; } catch { snapshot = null; }
+    if (activeRel !== key || viewKind !== 'tree') return;
+  }
+  if (snapshot && snapshot.entryParents) {
+    const onPath = new Set(ConversationTree.path(treeFor(snapshot), headOf(snapshot)));
+    for (const n of t.nodes || []) n.active = (n.entryRefs || []).some(r => r.key === key && onPath.has(r.id)) || onPath.has(n.messageId) || onPath.has(n.id);
+  }
   const hostNodes = collapseFanoutTree(t.nodes || [], t.fanouts || []);
   const familyKeys = (t.family || [{ key }]).map(f => f.key);
   // Delegated conversations hang from the entry that launched them, and
@@ -13975,11 +13986,20 @@ async function showTree(key, opts = {}) {
   const leaf = readingNode || hereNode || rows[rows.length - 1] || null;
   const keepSel = opts.keepSel && byId.has(opts.keepSel) ? opts.keepSel : null;
   treeNav = { key, byId, children, roots, wrap, hostNodes, source: t.source, familyKeys, sel: keepSel || (leaf ? leaf.id : null) };
-  // Click = select (the status bar shows the verbs) · double click = read.
+  // Click = read from here: the head moves to this box and the lit path
+  // follows (the status bar keeps the verbs) · double click = open it.
   wrap.querySelectorAll('.tnode').forEach(el => {
     el.onclick = e => {
       if (e.target.closest('[data-fan-choice]')) return;
+      const n = byId.get(el.dataset.tn);
       treeSetSel(el.dataset.tn, { scroll: false });
+      if (n && !n.delegated && snapshot && snapshot.entryParents) {
+        const id = n.messageId || n.id, T = treeFor(snapshot);
+        if (T.rows.has(id)) {
+          saveReading(key, ConversationTree.moveHead(T, readingOf(key), id));
+          showTree(key, { keepSel: el.dataset.tn });
+        }
+      }
     };
     el.ondblclick = e => {
       if (e.target.closest('[data-fan-choice]')) return;

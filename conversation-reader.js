@@ -5,7 +5,7 @@
    Moving the head is local and instant (arrows, cards, tree nodes); it is
    saved per person on the server, so every screen of that person agrees.
    Tree structure lives in ConversationTree (conversation-tree.js). */
-const CT = ConversationTree;
+const CT = globalThis.ConversationTree;
 const readerStates = new Map();   // key → this device's reading UI: scroll positions, open work folds
 const readerSessions = new Map(); // key → session snapshot of another conversation shown here
 const readerLiveMessages = new Map();

@@ -89,10 +89,10 @@ test('new parallel and include-all entries preserve typed provenance across rein
   const msg = (id, parentId, role, text) => ({ type: 'message', id, parentId, message: { role, content: text } });
   const root = header + line(msg('root', null, 'user', 'before'));
   const forks = ['a', 'b'].map(id => root + line(msg('q' + id, 'root', 'user', 'question')) + line(msg(id, 'q' + id, 'assistant', id)));
-  const result = computeFanoutMerge(root, forks, { fanoutId: 'run', newId: 'all' });
+  const result = computeFanoutMerge(root, forks, { fanoutId: 'run', newId: 'all', includeAll: true });
   const entries = result.content.trim().split('\n').map(JSON.parse);
   assert.equal(entries.find(d => d.id === 'qa').chattering.runId, 'run');
   assert.deepEqual(entries.find(d => d.id === 'all').chattering.sources.map(s => s.id), ['a', 'b']);
   assert.equal(entries.find(d => d.id === 'all').chattering.unresolved, true);
-  assert.equal(computeFanoutMerge(result.content, forks, { fanoutId: 'run' }).content, result.content);
+  assert.equal(computeFanoutMerge(result.content, forks, { fanoutId: 'run', includeAll: true }).content, result.content);
 });

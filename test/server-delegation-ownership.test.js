@@ -42,7 +42,7 @@ function runSetup(t) {
   Object.assign(b, {
     normalizeContextItems: x => x, conversationContextOf: () => [], contextSig: () => '',
     appliedContextBySession: new Map(), agentRunJobs: new Map(), jobChanged() {},
-    reindexIfChanged: async () => {}, endLiveRunTail() {}, broadcastRunFinal() {}, maybeSettleFanout() {}, speakRunDone() {},
+    reindexIfChanged: async () => {}, endLiveRunTail() {}, broadcastRunFinal() {}, maybeSettleFanout() {}, settlePendingFanouts: async () => {}, speakRunDone() {},
     piProviderExtraArgs: () => [], pirpc: { stopWarmSession() {} }, agentEnv: () => ({}),
     refreshUsageForKey() {}, runEventForwarder: () => () => {}, inspectDeliverySession: async () => ({ deliveries: new Set(), branch: new Set(['launch']) }),
     pisdk: { stopWarmSession() {}, piHeadlessRun(target) { b.targets.push(target); return { done: Promise.resolve() }; } }, targets: [],

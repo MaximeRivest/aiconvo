@@ -26,7 +26,7 @@
 /* One: an answer at reading width; its neighbours peek at the edges. */
 .rd-answers[data-layout="one"] .rd-cards { grid-auto-columns: calc(100% - clamp(24px, 8%, 72px)); }
 .rd-answers[data-layout="one"] .rd-cards:has(> .rd-card:only-child) { grid-auto-columns: 100%; }
-.rd-card { scroll-snap-align: start; min-width: 0; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--bg); cursor: pointer; transition: border-color .12s; }
+.rd-card { scroll-snap-align: start; min-width: 0; border: 1px dashed var(--border-strong); border-radius: var(--r-menu); background: var(--bg); cursor: pointer; transition: border-color .12s; }
 .rd-answers[data-layout="one"] .rd-card { scroll-snap-align: center; }
 .rd-card:hover:not([aria-current="true"]) { border-color: var(--text-dim); }
 .rd-card[aria-current="true"] { border: 2px solid var(--accent); cursor: auto; }
