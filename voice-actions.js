@@ -13,6 +13,14 @@
 // A decision's confidence is its least certain part (the action, or an
 // argument it uses), as TypeSafe recommends: one wrong argument spoils the
 // action.
+//
+// Picking something ("open the third one", "the last file", "the one
+// about air bills", "number seven") is one action, `open`, asked as three
+// small judgments rather than one over every label: which list on screen,
+// which place in it, which name — and the number said, when there is one.
+// The page counts places; Jev never has to. Measured on a screen of 12
+// conversations and 8 files: 13 of 13 right this way, 4 of 12 with one
+// question over "1. Title" labels (design/64).
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.ChatteringVoiceActions = factory();
@@ -38,8 +46,13 @@
     send: { label: 'Send the message in the box', say: 'send, send it, submit' },
     model: { label: 'Change the model that answers', say: 'change the model to…, switch to…, use…', args: { model: { kind: 'list', list: 'models', question: 'Which model does the user want to use?' } } },
     reasoning: { label: 'Change the reasoning (thinking) level', say: 'reasoning off, think harder, set thinking to high', args: { level: { kind: 'fixed', options: Object.fromEntries(THINKING.map(l => [l, null])), question: 'Which reasoning level does the user want (off is no reasoning, max is the most)?' } } },
-    open_conversation: { label: 'Open a conversation from the list on the left', say: 'open the third conversation, go to the one about…', args: { conversation: { kind: 'list', list: 'conversations', question: 'Which conversation of the list does the user mean, by its position (first, third, last) or by what it is about?' } } },
-    open_file: { label: 'Open a file', say: 'open the file called…, go to…', args: { file: { kind: 'list', list: 'files', question: 'Which file does the user name? Speech-to-text may spell a name as words: "dot js" for .js, spaces for dashes or underscores.' } } },
+    open: { label: 'Open or pick something: a conversation, a file, a project, a search result', say: 'open the third one, the last file, the previous one, the one about air bills, open the file called…, number seven', args: {
+      number: { kind: 'numbers', question: 'In `said`, does the user pick a numbered item on screen by its number ("number seven", "open 12")? Which number?' },
+      list: { kind: 'groups', question: 'In `said`, which of these lists does the user mean? A kind of item ("file", "conversation", "project") or a side ("on the right", "on the left") says it.' },
+      place: { kind: 'fixed', options: null, question: 'In `said`, does the user pick the item by its place in its list? Which place?' },
+      name: { kind: 'list', list: 'targets', question: 'Which of these items does the user name in `said`, by words of its title or file name ("dot js" said for .js, spaces for dashes)? Only what `said` names: not the item open now unless it is named.' },
+    } },
+    help: { label: 'Show what the user can say here', say: 'what can I say, show the commands, help' },
     settings: { label: 'Open the settings', say: 'open the settings, show the appearance settings', args: { pane: { kind: 'fixed', options: SETTINGS_PANES, question: 'Which part of the settings does the user want? Without a part named, profile.' } } },
     go_home: { label: 'Go to the home page (all conversations, the timeline)', say: 'go home' },
     go_back: { label: 'Go back to the previous screen', say: 'go back, previous' },
@@ -67,6 +80,17 @@
     clear: { label: 'Clear the message box', say: 'clear it, delete everything, start over' },
   };
 
+  // Places in a list, for `open`: the page turns one into an item.
+  const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
+  const PLACES = {
+    ...Object.fromEntries(ORDINALS.map((o, i) => [o, `the ${o} from the top` + (i === 0 ? ' (the top one)' : '')])),
+    last: 'the last one, at the bottom', second_last: 'the one before the last',
+    above: 'the one just above the one open now (the previous one)', below: 'the one just below the one open now (the next one)',
+    none: 'not by place: by name, by number, or not said',
+  };
+  ACTIONS.open.args.place.options = PLACES;
+  const UNCLEAR = 'unclear';
+
   const SEND_TAIL = /[\s,.;:!?-]*\b(?:and\s+)?(?:send(?:\s+it)?|submit|that(?:'s| is) all[,.\s]*send)[\s.!?]*$/i;
 
   const str = (v, max) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, max);
@@ -75,11 +99,14 @@
     .split(/[^\p{L}\p{N}]+/u).filter(Boolean);
 
   /**
-   * The items most like what was said, best first, at most `keep`: shared
-   * words (whole, or a said word starting a label word), then list order.
+   * The items most like what was said, best first, at most `keep`: those
+   * marked `keep` (on screen) first, then shared words (whole, or a said
+   * word starting a label word), then list order.
    */
   function rankByOverlap(items, said, keep = LIMITS.list) {
     if (items.length <= keep) return items;
+    const kept = items.filter(x => x.keep).slice(0, keep);
+    if (kept.length) return kept.concat(rankByOverlap(items.filter(x => !x.keep), said, keep - kept.length));
     const words = new Set(tokens(said).filter(w => w.length > 1));
     const score = item => {
       let s = 0;
@@ -155,9 +182,17 @@
       for (const [name, arg] of Object.entries(ACTIONS[id].args || {})) {
         let options;
         if (arg.kind === 'fixed') options = arg.options;
+        else if (arg.kind === 'groups') {
+          // The lists on screen, in words ("files in the right panel"): a
+          // model reads the option itself; the key maps it back to the id.
+          const groups = (Array.isArray(lists.groups) ? lists.groups : []).filter(g => g && g.id && g.label).slice(0, 30);
+          if (groups.length < 2) continue;
+          keys[id + '.' + name] = Object.fromEntries(groups.map(g => [str(g.label, LIMITS.label), String(g.id)]));
+          options = Object.fromEntries(groups.map(g => [str(g.label, LIMITS.label), null]).concat([[UNCLEAR, 'no kind of item and no side is said']]));
+        }
         else if (arg.kind === 'list') {
           const items = (Array.isArray(lists[arg.list]) ? lists[arg.list] : [])
-            .filter(x => x && x.id != null && x.label).map(x => ({ id: String(x.id), label: str(x.label, LIMITS.label) }));
+            .filter(x => x && x.id != null && x.label).map(x => ({ id: String(x.id), label: str(x.label, LIMITS.label), keep: x.keep === true }));
           if (!items.length) continue;
           const chosen = rankByOverlap(items, said, LIMITS.list - 1);
           // The label is the option (what the model reads); the key maps it back.
@@ -166,7 +201,9 @@
           keys[id + '.' + name] = map;
           options = Object.fromEntries(Object.keys(map).map(k => [k, null]).concat([[NOT_SAID, 'none of these']]));
         } else if (arg.kind === 'numbers') {
-          const nums = numbersIn(said);
+          // "the r stats one" is no number: a lone "one" counts only as
+          // "number one" (or the digit).
+          const nums = numbersIn(said).filter(n => n !== 1 || /\b1\b|\bnumber\s+one\b|\bline\s+one\b/i.test(said));
           if (!nums.length) continue;
           options = Object.fromEntries(nums.map(n => [String(n), null]).concat([[NOT_SAID, 'no number given']]));
         } else if (arg.kind === 'spans' || arg.kind === 'oldSpans') {
@@ -185,7 +222,53 @@
         if (options) questions[id + '.' + name] = { type: 'choice', instructions: arg.question, criteria: options };
       }
     }
-    return { request: { model, state, questions }, keys, dictating: false };
+    const groups = (Array.isArray(lists.groups) ? lists.groups : []).filter(g => g && g.id && g.label).map(g => ({ id: String(g.id), label: str(g.label, LIMITS.label) }));
+    return { request: { model, state, questions }, keys, dictating: false, defaultGroup: str(lists.defaultGroup, 100) || null, groups };
+  }
+
+  // The list a sentence names by its words, when exactly one list on
+  // screen matches them: a kind ("the last file", "chats") and a side ("on
+  // the right"). An exact lookup, kept in code.
+  const KIND_WORDS = [[/\b(files?|folders?)\b/i, /^files/], [/\b(conversations?|chats?)\b/i, /^conversations/], [/\bprojects?\b/i, /^projects/]];
+  const SIDE_WORDS = [[/\b(right|right-hand)\b/i, /right panel/], [/\b(left|left-hand|sidebar)\b/i, /left panel/]];
+  function listNamed(groups, said) {
+    let hits = groups;
+    for (const [words, label] of KIND_WORDS.concat(SIDE_WORDS)) if (words.test(said)) hits = hits.filter(g => label.test(g.label));
+    return hits.length === 1 && hits.length < groups.length ? hits[0].id : null;
+  }
+
+  // `open`: the number said; else the surer of a place in a list and a
+  // name ("the r stats one" is a name, though "one" may sound like "the
+  // first one"). A place counts in the list the words name, else the list
+  // Jev heard, else the page's default; Jev's doubt about the list counts
+  // only when it moved the count off the default. A name is judged among
+  // the items: the "(not said)" share is what the other questions answer.
+  function readOpen(built, answers, actionConfidence, said) {
+    const get = name => pickOf(answers['open.' + name]);
+    const number = get('number'), list = get('list'), place = get('place'), name = get('name');
+    if (number && number.choice !== NOT_SAID) return { args: { number: Number(number.choice) }, confidence: Math.min(actionConfidence, number.confidence) };
+    let byPlace = null, byName = null;
+    if (place && place.choice !== 'none') {
+      const byWords = listNamed(built.groups || [], said);
+      const heard = !byWords && list && list.choice !== UNCLEAR ? (built.keys['open.list'] || {})[list.choice] || null : null;
+      const doubt = heard && heard !== built.defaultGroup ? list.confidence : 1;
+      byPlace = { args: { place: place.choice, list: byWords || heard || built.defaultGroup }, confidence: Math.min(actionConfidence, place.confidence, doubt) };
+    }
+    if (name) {
+      const map = built.keys['open.name'] || {};
+      const items = Object.entries(name.probabilities).filter(([k]) => k !== NOT_SAID).sort((a, b) => b[1] - a[1]);
+      const total = items.reduce((n, [, p]) => n + p, 0);
+      if (items.length && total > 0) {
+        const [best, p] = items[0];
+        const among = p / total;
+        // Jev leaned to "nothing named": a guess worth asking about, never acting on.
+        if (name.choice !== NOT_SAID) byName = { args: { name: map[best] }, confidence: Math.min(actionConfidence, among) };
+        else if (p >= 0.25) byName = { args: { name: map[best] }, confidence: Math.min(actionConfidence, among, 0.5) };
+      }
+    }
+    if (byPlace && byName) return byName.confidence > byPlace.confidence ? byName : byPlace;
+    if (byPlace || byName) return byPlace || byName;
+    return { args: {}, confidence: Math.min(actionConfidence, 0.3), missing: 'item' };
   }
 
   const pickOf = a => a && typeof a === 'object' ? { choice: a.choice, confidence: Number(a.confidence) || 0, probabilities: a.probabilities || {} } : null;
@@ -204,6 +287,10 @@
       const text = a.choice === 'text_send' ? String(said).replace(SEND_TAIL, '').trim() : a.choice === 'text' ? String(said).trim() : '';
       return { action: a.choice, args: {}, confidence: a.confidence, alternatives, text, dictating: true };
     }
+    if (a.choice === 'open') {
+      const o = readOpen(built, answers, a.confidence, String(said || ''));
+      return { action: 'open', args: o.args, confidence: o.confidence, missing: o.missing || null, alternatives };
+    }
     const args = {};
     let confidence = a.confidence, missing = null;
     for (const [name] of Object.entries((ACTIONS[a.choice] && ACTIONS[a.choice].args) || {})) {
@@ -219,5 +306,5 @@
     return { action: a.choice, args, confidence: missing ? Math.min(confidence, 0.3) : confidence, missing, alternatives };
   }
 
-  return { LIMITS, ACTIONS, DICTATION, THINKING, SETTINGS_PANES, SEND_TAIL, NOT_SAID, buildRequest, readDecision, rankByOverlap, numbersIn, spansOf };
+  return { LIMITS, ACTIONS, DICTATION, THINKING, SETTINGS_PANES, PLACES, ORDINALS, SEND_TAIL, NOT_SAID, buildRequest, readDecision, rankByOverlap, numbersIn, spansOf };
 });

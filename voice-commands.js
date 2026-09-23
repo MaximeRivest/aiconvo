@@ -15,7 +15,13 @@
 
    The overlay shows what is heard (final text faint, settled text, the
    changing tail in italics) and each decision with its timing — the debug
-   view; off, only a small pill says the microphone is on.
+   view; off, only a small pill says the microphone is on. Its "?" (or
+   "what can I say") lists what can be said on this screen.
+
+   What can be picked — conversations, files, projects, files-browser rows,
+   search results — is numbered on screen while listening; "open seven",
+   "the third one", "the last file", "the previous one" or a name pick it,
+   and picking clicks it, as the mouse would.
 
    Toggle: Alt+L anywhere, the pill, Settings → sound. Saved per device.
    Globals from app.html (the composer, navigation, settings) and the file
@@ -23,12 +29,17 @@
 'use strict';
 
 const VOICE_PREFS_KEY = 'chattering.voice.v1';
-const VOICE_ACT_AT = 0.8;        // confidence to act without asking
-const VOICE_RISKY_AT = 0.92;     // … for actions that are hard to take back
+// How sure Jev must be to act without asking, by what a mistake costs.
+const VOICE_ACT_AT = 0.8;        // most actions
+const VOICE_EASY_AT = 0.6;       // going somewhere: "go back" undoes it
+const VOICE_RISKY_AT = 0.92;     // hard to take back
+const VOICE_EASY = new Set(['open', 'help', 'settings', 'go_home', 'go_back', 'go_forward', 'text_size', 'go_to_line', 'ask_box', 'command_box']);
 const VOICE_RISKY = new Set(['send', 'stop_listening', 'replace', 'rewrite', 'reject_change']);
 const VOICE_PENDING_MS = 12000;  // a suggestion waits this long for a yes
 const VOICE_DECISIONS_SHOWN = 8;
 const VOICE_WINDOWS = [30, 60, 90, 120, 180];
+const VOICE_OFFSCREEN_CONVERSATIONS = 300; // recent conversations nameable when not on screen
+const VOICE_HINTS_MAX = 80;
 
 const voice = {
   on: false,          // wanted on (this device)
@@ -41,13 +52,15 @@ const voice = {
   pending: null,      // a suggestion: {decision, id, label, expires, timer}
   decisions: [],      // shown in the overlay, newest last
   queue: Promise.resolve(),
+  numbers: new Map(), // pick key → the number shown beside it
+  helpOpen: false,
 };
 
 function voicePrefs() {
   let raw = null;
   try { raw = JSON.parse(localStorage.getItem(VOICE_PREFS_KEY) || 'null'); } catch {}
   const r = raw && typeof raw === 'object' ? raw : {};
-  return { on: r.on === true, window: VOICE_WINDOWS.includes(r.window) ? r.window : 60, overlay: r.overlay !== false };
+  return { on: r.on === true, window: VOICE_WINDOWS.includes(r.window) ? r.window : 60, overlay: r.overlay !== false, numbers: r.numbers !== false };
 }
 function saveVoicePrefs(patch) {
   const next = { ...voicePrefs(), ...patch };
@@ -176,19 +189,123 @@ const voiceEditor = () => (typeof fileWs !== 'undefined' && fileWs && fileWs.edi
 const voiceAskOpen = () => typeof askBox !== 'undefined' && askBox && askBox.root && askBox.root.isConnected;
 const voiceVisible = el => !!(el && el.offsetParent !== null);
 
-// The conversations listed on screen, in order: the side panel's open
-// conversations and agents (data-key), and lists of conversations in the
-// page — the phone's list, search results (data-rel).
-function voiceConversationRows() {
-  const rows = [...document.querySelectorAll('.ag-row[data-key], .item[data-rel]')]
-    .filter(r => voiceRowKey(r) && voiceVisible(r) && !r.classList.contains('ag-file'));
-  const seen = new Set();
-  return rows.filter(r => !seen.has(voiceRowKey(r)) && seen.add(voiceRowKey(r)));
+// ---- what can be picked on screen ----
+// Each kind: the rows that are it, the key that names one across
+// re-renders, its title, and what to click. Picking clicks it: the list's
+// own handler does what the mouse does.
+const voiceText = el => (el ? el.textContent.replace(/\s+/g, ' ').trim().slice(0, 140) : '');
+const VOICE_PICKABLE = [
+  { sel: '.ag-row[data-key]:not(.ag-file)', kind: 'conversation', key: el => el.dataset.key && 'conv:' + el.dataset.key,
+    title: el => voiceText(el.querySelector('.ag-title span') || el.querySelector('.ag-title')) },
+  { sel: '.ag-row[data-open-project]', kind: 'project', key: el => 'proj:' + el.dataset.openProject,
+    title: el => voiceText(el.querySelector('.ag-title span') || el) },
+  { sel: '.ag-row.ag-file[data-path]', kind: 'file', key: el => 'file:' + el.dataset.path,
+    title: el => el.dataset.path.split('/').slice(-2).join('/'), target: el => el.querySelector('.ag-file-open') || el },
+  { sel: '#view .item[data-rel]', kind: 'conversation', key: el => 'conv:' + el.dataset.rel,
+    title: el => voiceText(el.querySelector('.sr-title, .mobile-work-title, .title, .t') || el) },
+  { sel: '#fbList button[data-fb-entry]:not([disabled])', kind: el => (/^▸/.test(voiceText(el)) ? 'folder' : 'file'),
+    key: el => 'fb:' + voiceText(el).replace(/^[▸·]\s*/, ''), title: el => voiceText(el).replace(/^[▸·]\s*/, '') },
+];
+const VOICE_REGIONS = [['#side', 'left panel'], ['#rightFiles', 'right panel'], ['#agentsPop', 'agents panel'], ['#view', 'main view']];
+const VOICE_PLURAL = { conversation: 'conversations', file: 'files', folder: 'files and folders', project: 'projects' };
+
+/**
+ * What can be picked now: {items: [{key, kind, title, region, group, el,
+ * target}], groups: [{id, label, keys, current}], defaultGroup}. Items in
+ * document order; a group is one kind in one region (files and folders of
+ * the files browser share one), in its on-screen order.
+ */
+function voicePicks() {
+  const items = [], seen = new Set();
+  for (const p of VOICE_PICKABLE) {
+    for (const el of document.querySelectorAll(p.sel)) {
+      if (!voiceVisible(el)) continue;
+      const key = p.key(el);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const kind = typeof p.kind === 'function' ? p.kind(el) : p.kind;
+      const region = (VOICE_REGIONS.find(([sel]) => el.closest(sel)) || [null, 'screen'])[1];
+      const group = region + '/' + (kind === 'folder' ? 'file' : kind);
+      items.push({ key, kind, title: p.title(el) || key, region, group, el, target: p.target ? p.target(el) : el,
+        current: el.classList.contains('current') || el.getAttribute('aria-current') === 'page' });
+    }
+  }
+  items.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  const groups = [];
+  for (const it of items) {
+    let g = groups.find(x => x.id === it.group);
+    if (!g) groups.push(g = { id: it.group, label: VOICE_PLURAL[it.kind === 'folder' ? 'file' : it.kind] + ' in the ' + it.region, keys: [], current: null });
+    if (it.current) g.current = g.keys.length;
+    g.keys.push(it.key);
+  }
+  // Counted in by default: the list with the open item, else the first.
+  const def = groups.find(g => g.current !== null) || groups[0];
+  return { items, groups, defaultGroup: def ? def.id : null };
 }
-const voiceRowKey = row => row.dataset.key || row.dataset.rel || '';
-function voiceRowTitle(row) {
-  const t = row.querySelector('.ag-title span') || row.querySelector('.ag-title') || row.querySelector('.sr-title, .mobile-work-title') || row;
-  return t.textContent.replace(/\s+/g, ' ').trim().slice(0, 140);
+
+// Numbers stay with their item while it is on screen; a new item gets the
+// smallest free number. Only items in view are numbered.
+function voiceNumber(picks) {
+  const inView = picks.items.filter(it => { const r = it.el.getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight && r.height > 0; }).slice(0, VOICE_HINTS_MAX);
+  const keep = new Set(inView.map(it => it.key));
+  for (const k of [...voice.numbers.keys()]) if (!keep.has(k)) voice.numbers.delete(k);
+  const used = new Set(voice.numbers.values());
+  let next = 1;
+  for (const it of inView) {
+    if (voice.numbers.has(it.key)) continue;
+    while (used.has(next)) next++;
+    voice.numbers.set(it.key, next);
+    used.add(next);
+  }
+  return inView;
+}
+
+// The pick an `open` decision means: {item} on screen, or {key} to open by name.
+function voiceResolvePick({ number, place, list, name }) {
+  const picks = voicePicks();
+  const onScreen = key => picks.items.find(it => it.key === key);
+  if (number) {
+    const key = [...voice.numbers].find(([, n]) => n === number)?.[0];
+    if (!key || !onScreen(key)) throw new Error('nothing on screen is numbered ' + number);
+    return { item: onScreen(key) };
+  }
+  if (place) {
+    const g = picks.groups.find(x => x.id === list) || picks.groups.find(x => x.id === picks.defaultGroup);
+    if (!g) throw new Error('there is no list on screen');
+    const ord = ChatteringVoiceActions.ORDINALS.indexOf(place);
+    let i = ord >= 0 ? ord : place === 'last' ? g.keys.length - 1 : place === 'second_last' ? g.keys.length - 2 : -1;
+    if (place === 'above' || place === 'below') {
+      if (g.current === null) throw new Error('nothing is open in the ' + g.label + ', so there is no previous or next one');
+      i = g.current + (place === 'above' ? -1 : 1);
+    }
+    if (i < 0 || i >= g.keys.length) throw new Error('the ' + g.label + ' ' + (g.keys.length === 1 ? 'has one item' : 'have ' + g.keys.length));
+    return { item: onScreen(g.keys[i]) };
+  }
+  if (name) return onScreen(name) ? { item: onScreen(name) } : { key: name };
+  throw new Error('which one?');
+}
+
+// Open by key when the item is not on screen: a conversation, a file.
+async function voiceOpenKey(key) {
+  const [kind, ...rest] = key.split(':'), id = rest.join(':');
+  if (kind === 'conv') { await open(id, 'bottom'); return 'opened ' + ((sessions.find(x => x.key === id) || {}).title || 'the conversation'); }
+  if (kind === 'file') { await openLiveFile(id, { project: voiceProject() || null, back: currentHash }); return 'opened ' + id.split('/').pop(); }
+  if (kind === 'proj') { await showProjectOverview(id); return 'opened the project ' + id; }
+  throw new Error('that is no longer on screen');
+}
+
+// What `open` offers Jev: the lists on screen, and every name — on screen
+// first (kept), then the recent conversations that are not.
+function voiceOpenLists() {
+  const picks = voicePicks();
+  // A name is the kind and the title: the place and the number have their
+  // own questions, and extra words here only blur the match.
+  const targets = picks.items.map(it => ({ id: it.key, keep: true, label: it.kind + ' · ' + it.title }));
+  const shown = new Set(picks.items.map(it => it.key));
+  const recent = (typeof sessions !== 'undefined' ? sessions : []).filter(x => x && x.key && !shown.has('conv:' + x.key))
+    .slice().sort((a, b) => String(b.lastTs || '').localeCompare(String(a.lastTs || ''))).slice(0, VOICE_OFFSCREEN_CONVERSATIONS);
+  for (const x of recent) targets.push({ id: 'conv:' + x.key, label: 'conversation · ' + (x.timelineTitle || x.title || x.key) });
+  return { targets, groups: picks.groups.map(g => ({ id: g.id, label: g.label })), defaultGroup: picks.defaultGroup };
 }
 
 // Where the text for dictation goes: the ask box, else the composer.
@@ -232,20 +349,19 @@ const VOICE_ACTIONS = {
       return 'reasoning: ' + level;
     },
   },
-  open_conversation: {
-    available: () => voiceConversationRows().length > 0,
-    lists: () => ({ conversations: voiceConversationRows().slice(0, 60).map((r, i) => ({ id: voiceRowKey(r), label: (i + 1) + '. ' + voiceRowTitle(r) })) }),
-    run: async ({ conversation }) => { await open(conversation, 'bottom'); return 'opened ' + ((sessions.find(s => s.key === conversation) || {}).title || 'the conversation'); },
-  },
-  open_file: {
+  open: {
     available: () => true,
-    lists: () => {
-      const files = [...document.querySelectorAll('[data-path]')].filter(voiceVisible)
-        .map(el => el.dataset.path).filter(p => p && p.startsWith('/'));
-      return { files: [...new Set(files)].slice(0, 150).map(p => ({ id: p, label: p.split('/').slice(-2).join('/') })) };
+    lists: () => voiceOpenLists(),
+    run: async args => {
+      const pick = voiceResolvePick(args);
+      if (!pick.item) return voiceOpenKey(pick.key);
+      const it = pick.item;
+      it.target.scrollIntoView({ block: 'nearest' });
+      it.target.click();
+      return 'opened ' + it.title;
     },
-    run: async ({ file }) => { await openLiveFile(file, { project: voiceProject() || null, back: currentHash }); return 'opened ' + file.split('/').pop(); },
   },
+  help: { available: () => true, run: () => { voiceShowHelp(true); return 'here is what you can say'; } },
   settings: { available: () => true, run: async ({ pane }) => { await showSettings(pane || 'profile'); return 'settings: ' + (pane || 'profile'); } },
   go_home: { available: () => viewKind !== 'home', run: () => { goHome(); return 'home'; } },
   go_back: { available: () => true, run: () => { nav.back(); return 'back'; } },
@@ -360,6 +476,7 @@ async function voiceContext(said) {
   if (voice.mode === 'dictation') return context;
   context.actions = Object.entries(VOICE_ACTIONS).filter(([, a]) => { try { return a.available(); } catch { return false; } }).map(([id]) => id);
   for (const id of context.actions) if (VOICE_ACTIONS[id].lists) Object.assign(context.lists, await VOICE_ACTIONS[id].lists());
+  if (context.actions.includes('open') && voicePrefs().numbers) voicePaintHints(); // the numbers Jev sees are the ones shown
   const ed = voiceEditor();
   if (ed) {
     const st = ed.view.state, sel = st.selection.main;
@@ -367,7 +484,7 @@ async function voiceContext(said) {
   }
   if (voice.pending) context.pending = voice.pending.label;
   const project = voiceProject();
-  if (project && context.actions.includes('open_file')) context.project = project;
+  if (project && context.actions.includes('open')) context.project = project;
   return context;
 }
 
@@ -389,7 +506,7 @@ async function voiceUnderstand(said, asrMs) {
   if (d.dictating) return voiceDictation(entry, d);
   if (d.action === 'none') { Object.assign(entry, { status: 'ignored' }); return voicePaintDecisions(); }
   if (d.action === 'confirm' || d.action === 'cancel') return voiceAnswerPending(entry, d.action === 'confirm');
-  const needs = VOICE_RISKY.has(d.action) ? VOICE_RISKY_AT : VOICE_ACT_AT;
+  const needs = VOICE_RISKY.has(d.action) ? VOICE_RISKY_AT : VOICE_EASY.has(d.action) ? VOICE_EASY_AT : VOICE_ACT_AT;
   if (d.missing || d.confidence < needs) return voiceSuggest(entry, d);
   await voiceRun(entry, d);
 }
@@ -459,6 +576,14 @@ function voiceDropPending(why) {
 }
 
 function voiceDescribe(d) {
+  if (d.action === 'open') {
+    const { number, place, list, name } = d.args || {};
+    const where = list ? (voicePicks().groups.find(g => g.id === list) || {}).label : '';
+    const what = number ? 'number ' + number
+      : place ? (ChatteringVoiceActions.PLACES[place] || place).replace(/ \(.*\)$/, '') + (where ? ' in the ' + where : '')
+      : name ? name.replace(/^[a-z]+:/, '').split('/').pop() : '';
+    return 'open' + (what ? ': ' + what : '');
+  }
   const a = ChatteringVoiceActions.ACTIONS[d.action];
   const args = Object.entries(d.args || {}).map(([k, v]) => (v && typeof v === 'object' ? 'the selection' : String(v).split('/').pop())).filter(Boolean);
   return (a ? a.label : d.action) + (args.length ? ': ' + args.join(' → ') : '');
@@ -520,10 +645,11 @@ function voicePill() {
 function voicePaint() {
   const shown = voice.on || voice.status === 'error';
   const pill = $('voiceListenPill');
-  if (!shown) { if (pill) pill.remove(); voiceShowOverlay(false); voicePaintSettings(); clearInterval(voice.placeTimer); voice.placeTimer = 0; return; }
+  if (!shown) { if (pill) pill.remove(); voiceShowOverlay(false); voicePaintSettings(); clearInterval(voice.placeTimer); voice.placeTimer = 0; voicePaintHints(); return; }
   // The bars below move with the view (a conversation opens, a run strip appears).
-  if (!voice.placeTimer) voice.placeTimer = setInterval(voicePlaceDock, 700);
+  if (!voice.placeTimer) voice.placeTimer = setInterval(() => { voicePlaceDock(); voicePaintHints(); }, 700);
   voicePlaceDock();
+  voicePaintHints();
   const p = voicePill();
   p.dataset.state = voice.status;
   p.dataset.mode = voice.mode;
@@ -545,11 +671,13 @@ function voiceShowOverlay(show) {
   const o = document.createElement('section');
   o.id = 'voiceOverlay';
   o.setAttribute('aria-label', 'Voice: what is heard and decided');
-  o.innerHTML = `<header><b>✦ Voice</b><span class="vo-meta"></span><button type="button" class="vo-close" title="Hide (the pill shows it again)" aria-label="Hide">✕</button></header>
+  o.innerHTML = `<header><b>✦ Voice</b><span class="vo-meta"></span><button type="button" class="vo-help-btn" aria-pressed="false" title="What can I say here? (or say it)">?</button><button type="button" class="vo-close" title="Hide (the pill shows it again)" aria-label="Hide">✕</button></header>
     <div class="vo-error" hidden></div>
+    <div class="vo-help" hidden></div>
     <div class="vo-heard" aria-live="off"></div>
     <ol class="vo-decisions" aria-live="polite"></ol>`;
   o.querySelector('.vo-close').onclick = () => voiceShowOverlay(false);
+  o.querySelector('.vo-help-btn').onclick = () => voiceShowHelp(!voice.helpOpen);
   o.addEventListener('click', e => {
     const b = e.target.closest('[data-vo]');
     if (!b || !voice.pending) return;
@@ -559,6 +687,7 @@ function voiceShowOverlay(show) {
   voiceDock().prepend(o);
   voicePlaceDock();
   voicePaintOverlayHead();
+  voicePaintHelp();
   voicePaintHeard();
   voicePaintDecisions();
 }
@@ -606,6 +735,68 @@ function voicePaintDecisions() {
   voicePaintOverlayHead();
 }
 
+// ---- what can I say ----
+// The actions that apply on this screen now, from the same list Jev picks
+// from, with example phrasings; while dictating, what steers dictation.
+
+// The catalog's labels are written for the model ("the user"); the help speaks to you.
+const voiceSpeakToYou = label => label.replace(/\bthe user's\b/g, 'your').replace(/\bthe user\b/g, 'you').replace(/\bthe user\b/gi, 'You');
+
+function voiceShowHelp(open) {
+  voice.helpOpen = !!open;
+  if (open && !voiceOverlayShown()) voiceShowOverlay(true);
+  voicePaintHelp();
+}
+
+function voiceHelpHtml() {
+  const A = ChatteringVoiceActions;
+  if (voice.mode === 'dictation') {
+    return `<p class="vo-help-lead">Dictating into ${esc(voice.target.label)}: what you say is written there, except</p><ul>` +
+      Object.entries(A.DICTATION).filter(([id]) => id !== 'text').map(([, a]) => `<li><b>${esc(a.say)}</b> — ${esc(voiceSpeakToYou(a.label))}</li>`).join('') + '</ul>';
+  }
+  const ids = Object.entries(VOICE_ACTIONS).filter(([, a]) => { try { return a.available(); } catch { return false; } }).map(([id]) => id);
+  const rows = ids.filter(id => A.ACTIONS[id]).map(id => `<li><b>${esc(A.ACTIONS[id].say)}</b> — ${esc(voiceSpeakToYou(A.ACTIONS[id].label))}</li>`).join('');
+  const picks = voicePicks();
+  const numbers = voicePrefs().numbers && voice.numbers.size;
+  return `<p class="vo-help-lead">Here, now — say it your way, Jev goes by meaning:</p><ul>${rows}</ul>` +
+    (picks.items.length ? `<p class="vo-help-lead">To pick something: ${numbers ? 'its <b>number</b> on screen, ' : ''}its <b>place</b> (the third one, the last file, the previous one, the one before the last) or <b>words of its name</b>. Lists here: ${esc(picks.groups.map(g => g.label).join('; '))}.</p>` : '') +
+    '<p class="vo-help-lead">When it is not sure it asks: say yes or no.</p>';
+}
+
+function voicePaintHelp() {
+  const o = $('voiceOverlay');
+  if (!o) return;
+  const box = o.querySelector('.vo-help');
+  box.hidden = !voice.helpOpen;
+  o.querySelector('.vo-help-btn').setAttribute('aria-pressed', String(voice.helpOpen));
+  if (voice.helpOpen) box.innerHTML = voiceHelpHtml();
+}
+
+// ---- numbers beside what can be picked ----
+
+function voicePaintHints() {
+  const want = voice.on && voice.status !== 'off' && voicePrefs().numbers;
+  let layer = $('voiceHints');
+  if (!want) { if (layer) layer.remove(); voice.numbers.clear(); return; }
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'voiceHints';
+    layer.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(layer);
+    // Scrolling moves the items: follow at the next frame.
+    let frame = 0;
+    document.addEventListener('scroll', () => { if (!frame && $('voiceHints')) frame = requestAnimationFrame(() => { frame = 0; voicePaintHints(); }); }, true);
+  }
+  const inView = voiceNumber(voicePicks());
+  const html = inView.map(it => {
+    const r = it.el.getBoundingClientRect();
+    // In the row's left margin, beside its first line: the title stays readable.
+    return `<span class="vh" style="left:${Math.max(0, Math.round(r.left - 7))}px;top:${Math.max(0, Math.round(r.top + Math.min(r.height, 24) / 2 - 7))}px">${voice.numbers.get(it.key)}</span>`;
+  }).join('');
+  if (layer._html !== html) { layer._html = html; layer.innerHTML = html; }
+  if (voice.helpOpen) voicePaintHelp();
+}
+
 // ---- settings (Settings → sound) ----
 
 function voiceSettingsHtml() {
@@ -613,9 +804,11 @@ function voiceSettingsHtml() {
   return `<div class="set-group" id="voiceSettings">
     <h3>voice commands</h3>
     <label class="set-check"><input type="checkbox" data-voice="on"${voice.on ? ' checked' : ''}> Always listening on this device <kbd>Alt+L</kbd></label>
-    <div class="set-help">Say what you want: “change the model to sonnet”, “reasoning off”, “open the third conversation”, “open the file called…”, “open the settings”, “start the microphone” (then talk, then “send”), in a file “go to line 40”, “change X to Y”, “fix the grammar”, “accept”. The speech goes to this machine’s speech-to-text; each sentence goes to TypeSafe’s Jev to pick the action. Silence is not sent to either.</div>
+    <div class="set-help">Say what you want — “what can I say” lists it for the screen you are on: “change the model to sonnet”, “reasoning off”, “open the third one”, “the last file”, “the previous one”, “open seven”, “open the file called…”, “open the settings”, “start the microphone” (then talk, then “send”), in a file “go to line 40”, “change X to Y”, “fix the grammar”, “accept”. The speech goes to this machine’s speech-to-text; each sentence goes to TypeSafe’s Jev to pick the action. Silence is not sent to either.</div>
     <label class="set-field"><span>context window</span> <select data-voice="window">${VOICE_WINDOWS.map(s => `<option value="${s}"${s === p.window ? ' selected' : ''}>${s < 60 ? s + ' s' : s / 60 + ' min'}</option>`).join('')}</select></label>
     <div class="set-help">How much of what you said recently the speech-to-text rereads, for better words. Longer is more accurate and slower: about 4 ms per second of window on this GPU (1 min ≈ 0.23 s, 2 min ≈ 0.48 s after each pause).</div>
+    <label class="set-check"><input type="checkbox" data-voice="numbers"${p.numbers ? ' checked' : ''}> Number what I can pick (conversations, files, projects) while listening</label>
+    <div class="set-help">Say “open seven”. Without numbers, a place (“the third one”, “the last file”, “the previous one”) or words of the name still pick.</div>
     <label class="set-check"><input type="checkbox" data-voice="overlay"${p.overlay ? ' checked' : ''}> Show what is heard and decided (debug view)</label>
     <div class="set-help">Also keeps the words of sentences that were not commands in the record, to tune it (~/.local/share/chattering/voice-commands.jsonl). Off: only commands are kept, and a small note says what was done.</div>
     <div class="set-field" id="voiceKeyField"><span class="hint">checking the TypeSafe key…</span></div>
@@ -633,6 +826,7 @@ async function voiceBindSettings(root) {
       if (voice.ws && voice.ws.readyState === WebSocket.OPEN) voice.ws.send(JSON.stringify({ type: 'window', seconds: Number(e.target.value) }));
       voicePaintOverlayHead();
     } else if (f === 'overlay') { saveVoicePrefs({ overlay: e.target.checked }); voiceShowOverlay(e.target.checked && voice.on); }
+    else if (f === 'numbers') { saveVoicePrefs({ numbers: e.target.checked }); voicePaintHints(); }
   });
   let st = {};
   try { st = await (await fetch('/api/voice/status')).json(); } catch {}

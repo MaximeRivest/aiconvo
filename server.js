@@ -13808,14 +13808,15 @@ function voiceRefusal(identity) {
 async function voiceDecide(context, identity) {
   const key = typesafeKey();
   if (!key) throw Object.assign(new Error('No TypeSafe key yet: add it in Settings → sound → voice commands.'), { status: 503 });
-  // "Open the file called…": the page knows the files on screen; the
-  // project's own files come from here (the request keeps the ones that
-  // share words with what was said).
-  if (context.project && Array.isArray(context.actions) && context.actions.includes('open_file')) {
+  // "Open the file called…": the page names what is on screen and the
+  // recent conversations; the project's own files come from here (the
+  // request keeps those that share words with what was said).
+  if (context.project && Array.isArray(context.actions) && context.actions.includes('open')) {
     const files = await voiceProjectFiles(String(context.project), identity).catch(() => []);
     const lists = context.lists && typeof context.lists === 'object' ? context.lists : {};
-    const known = new Set((lists.files || []).map(f => f && f.id));
-    context.lists = { ...lists, files: (lists.files || []).concat(files.filter(f => !known.has(f.id))) };
+    const targets = Array.isArray(lists.targets) ? lists.targets : [];
+    const known = new Set(targets.map(t => t && t.id));
+    context.lists = { ...lists, targets: targets.concat(files.map(f => ({ id: 'file:' + f.id, label: 'file · ' + f.label })).filter(f => !known.has(f.id))) };
   }
   const built = voiceActions.buildRequest(context, { model: VOICE_JEV_MODEL });
   const t0 = Date.now();

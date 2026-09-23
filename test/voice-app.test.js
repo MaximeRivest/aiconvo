@@ -29,10 +29,17 @@ test('always listening: heard, decided, done, asked, dictated, stopped', { timeo
       const answers = {};
       if (opts('action').includes('text')) answers.action = answer(/^stop/.test(said) ? 'stop' : /^send$/.test(said) ? 'send' : 'text');
       else {
-        const action = /yes/.test(said) ? 'confirm' : /settings/.test(said) ? 'settings' : /conversation/.test(said) ? 'open_conversation' : /microphone/.test(said) ? 'dictate' : 'none';
+        const action = /yes/.test(said) ? 'confirm' : /settings/.test(said) ? 'settings' : /what can i say/i.test(said) ? 'help' : /^open/.test(said) ? 'open' : /microphone/.test(said) ? 'dictate' : 'none';
         answers.action = answer(opts('action').includes(action) ? action : 'none', /maybe/.test(said) ? 0.55 : 0.97);
         if (q['settings.pane']) answers['settings.pane'] = answer(/appearance/.test(said) ? 'appearance' : 'profile');
-        if (q['open_conversation.conversation']) answers['open_conversation.conversation'] = answer(opts('open_conversation.conversation')[0]);
+        // open: a number said, a place ("top", "last"), or a name (a said word in a label).
+        if (q['open.number']) answers['open.number'] = answer(/number/.test(said) ? opts('open.number')[0] : '(not said)');
+        if (q['open.place']) answers['open.place'] = answer(/\btop\b/.test(said) ? 'first' : /\blast\b/.test(said) ? 'last' : 'none');
+        if (q['open.list']) answers['open.list'] = answer('unclear', 0.6);
+        if (q['open.name']) {
+          const hit = opts('open.name').find(label => said.split(' ').some(w => w.length > 3 && label.toLowerCase().includes(w)));
+          answers['open.name'] = answer(hit || '(not said)', 0.9, hit ? { '(not said)': 0.1 } : {});
+        }
       }
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ answers }));
     });
@@ -108,13 +115,33 @@ test('always listening: heard, decided, done, asked, dictated, stopped', { timeo
   await ev(`closeSettings(); open('pi:fixture/media.jsonl')`);
   await until(`viewKind === 'conversation'`, 'the conversation did not open');
   await ev(`goHome()`);
-  // The left list rebuilds after going home: wait until it is settled.
-  const listed = `voiceConversationRows().length > 0`;
+  // The left list rebuilds after going home: wait until it is settled. It
+  // is numbered on screen while listening.
+  const listed = `voicePicks().items.some(it => it.kind === 'conversation' && it.region === 'left panel')`;
   await until(listed, 'no conversation listed');
   await new Promise(r => setTimeout(r, 500));
   await until(listed, 'the conversation list emptied');
-  await hear('open the first conversation');
+  await until(`document.querySelectorAll('#voiceHints .vh').length > 0`, 'nothing is numbered on screen');
+  const n = await ev(`voice.numbers.get('conv:pi:fixture/media.jsonl')`);
+  assert.ok(n >= 1, 'the conversation has a number');
+  // What can I say: the actions here, and the lists to pick from.
+  await hear('what can I say');
+  await until(`!document.querySelector('#voiceOverlay .vo-help').hidden`, 'the help did not open');
+  const help = await ev(`document.querySelector('#voiceOverlay .vo-help').textContent`);
+  assert.match(help, /change the model to/);
+  assert.match(help, /conversations in the left panel/);
+  assert.match(help, /its number on screen/);
+  // By number…
+  await hear('open number ' + n);
+  await until(`viewKind === 'conversation'`, 'the number did not open the conversation');
+  assert.deepEqual(await ev(`voice.decisions.at(-1).decision.args`), { number: n });
+  await ev(`goHome()`);
+  await until(listed, 'the list did not come back');
+  await new Promise(r => setTimeout(r, 500));
+  // … and by place: the one at the top of the left list.
+  await hear('open the top one');
   await until(`viewKind === 'conversation' && $('agentText')`, 'the voice did not open the conversation').catch(async e => { console.log('VOICEDEC', await ev(`JSON.stringify(voice.decisions.map(d => [d.said, d.status, d.decision && d.decision.action, d.summary, d.note]))`)); throw e; });
+  assert.deepEqual(await ev(`voice.decisions.at(-1).decision.args`), { place: 'first', list: 'left panel/conversation' });
   await hear('start the microphone');
   await until(`voice.mode === 'dictation'`, 'dictation did not start');
   assert.match(await ev(`document.querySelector('#voiceListenPill .vl-state').textContent`), /dictating into the message box/);
@@ -124,11 +151,30 @@ test('always listening: heard, decided, done, asked, dictated, stopped', { timeo
   await until(`voice.mode === 'command'`, 'dictation did not stop');
   await b.screenshot('voice-overlay.png');
 
+  // Files in the right panel, by place: the last of the recent files is the
+  // one opened first (newest on top). Picking clicks its row, as the mouse does.
+  fs.writeFileSync(path.join(b.work, 'first.md'), '# First\n');
+  fs.writeFileSync(path.join(b.work, 'second.md'), '# Second\n');
+  await b.open('first.md', { project: null });
+  await until(`fileWs && fileWs.path.endsWith('first.md') && fileWs.editor`, 'first.md did not open');
+  await b.open('second.md', { project: null });
+  await until(`fileWs && fileWs.path.endsWith('second.md') && fileWs.editor`, 'second.md did not open');
+  await ev(`setRightFiles('recent-files', true)`);
+  const rightFiles = `voicePicks().items.filter(it => it.region === 'right panel' && it.kind === 'file').map(it => it.title)`;
+  await until(`${rightFiles}.length >= 2`, 'the right panel files are not pickable: ' + await ev(`JSON.stringify(voicePicks().items.map(i => i.region + ' ' + i.key))`).catch(() => ''));
+  await until(`document.querySelectorAll('#voiceHints .vh').length >= 3`, 'the right panel is not numbered');
+  await b.screenshot('voice-numbers.png');
+  const order = await ev(rightFiles);
+  assert.equal(order.at(-1), 'work/first.md', 'the last one is the one opened first: ' + order.join(', '));
+  await hear('open the last file');
+  await until(`fileWs && fileWs.path.endsWith('first.md')`, 'the last file on the right did not open');
+  assert.deepEqual(await ev(`voice.decisions.at(-1).decision.args`), { place: 'last', list: 'right panel/file' });
+
   // The record has every decision; Alt+L stops the microphone.
   const records = fs.readFileSync(path.join(b.home, '.local', 'share', 'chattering', 'voice-commands.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
   assert.ok(records.some(r => r.action === 'settings') && records.some(r => r.outcome === 'confirmed'), JSON.stringify(records.map(r => r.action || r.outcome)));
   await key('l', 'KeyL', 76, 1);
-  await until(`voice.status === 'off' && !document.querySelector('#voiceListenPill') && !document.querySelector('#voiceOverlay')`, 'Alt+L did not stop');
+  await until(`voice.status === 'off' && !document.querySelector('#voiceListenPill') && !document.querySelector('#voiceOverlay') && !document.querySelector('#voiceHints')`, 'Alt+L did not stop');
   assert.equal(await ev(`voice.audio`), null, 'the microphone is released');
   assert.deepEqual(b.exceptions, []);
 });

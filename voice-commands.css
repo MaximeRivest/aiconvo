@@ -44,3 +44,18 @@
 :root[data-theme-mode="binary"] #voiceListenPill, :root[data-theme-mode="binary"] #voiceOverlay { box-shadow: none; border: 2px solid var(--text); background: var(--bg); }
 :root[data-theme-mode="binary"] #voiceListenPill .vl-dot { background: var(--text); animation: none; }
 :root[data-theme-mode="binary"] #voiceOverlay li[data-status="asked"] { background: transparent; outline: 1px solid var(--text); }
+
+/* Numbers beside what can be picked, while listening ("open seven"). */
+#voiceHints { position: fixed; inset: 0; z-index: 74; pointer-events: none; }
+#voiceHints .vh { position: absolute; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-ink, var(--bg)); font: 600 9px/14px var(--font); text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 1px 3px var(--shadow-soft); }
+:root[data-theme-mode="binary"] #voiceHints .vh { background: var(--text); color: var(--bg); box-shadow: none; }
+
+/* What can I say: the overlay's "?" panel. */
+#voiceOverlay .vo-help-btn { border: 1px solid var(--border); background: transparent; height: 22px; min-height: 22px; min-width: 22px; padding: 0 6px; color: var(--text-dim); font-weight: 600; }
+#voiceOverlay .vo-help-btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+#voiceOverlay .vo-help { padding: 6px 10px; border-bottom: 1px solid var(--border); max-height: 40vh; overflow-y: auto; line-height: 1.45; }
+#voiceOverlay .vo-help[hidden] { display: none; }
+#voiceOverlay .vo-help ul { margin: 2px 0 6px; padding-left: 16px; }
+#voiceOverlay .vo-help li { margin: 1px 0; color: var(--text-dim); }
+#voiceOverlay .vo-help li b { color: var(--text); font-weight: 500; }
+#voiceOverlay .vo-help-lead { margin: 4px 0 2px; color: var(--text-dim); }

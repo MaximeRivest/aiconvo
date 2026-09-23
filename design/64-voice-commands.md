@@ -67,13 +67,53 @@ going" 0.98); "change this to a shorter sentence" → rewrite 1.00.
 Default window: 60 s (≈ 0.23 s + Jev ≈ 0.45 s after a pause). 30 s–3 min
 in Settings.
 
+## Picking what is on screen (2026-09-23, second pass)
+
+"The top one", "the last file", "the previous one", "the one about air
+bills", the files on the right: the first version gave Jev one question over
+"1. Title" labels of the left list only, and file names without places.
+Measured on a screen of 12 conversations and 8 files, 12 sentences: 4 right.
+
+Now one action, `open`, for everything pickable (voice-commands.js
+`voicePicks`: side-panel conversations and projects, right-panel files,
+files-browser rows, conversation lists in the main view; plus conversations
+and project files that are not on screen, by name). Picking clicks the item,
+as the mouse does. Three small judgments instead of one (TypeSafe's advice:
+one narrow judgment per question), read by code (voice-actions.js
+`readOpen`):
+
+- **number** — while listening, items in view carry a number (stable while
+  on screen); "open seven". A lone "one" is not a number ("the r stats one").
+- **place** — first…tenth, last, the one before the last, just above / below
+  the open one; in the list the words name ("file", "conversation",
+  "project", "on the right": an exact lookup, in code), else the list Jev
+  heard, else the list with the open item. The page counts.
+- **name** — kind and title only (the place and the number have their own
+  questions; extra words in labels blurred the match). Its confidence is
+  among the items: the "(not said)" share is what the other questions answer.
+- A doubtful place loses to a sure name ("the r stats one" sounds like "the
+  first one").
+
+The questions point at `said` (without it, the screen description — which
+names the open conversation — pulled names toward it).
+
+Result on 18 sentences (the 12 above, "open the conversation about garden
+planning" off screen, "open voice window js", "what can I say", "go back",
+one aside): 18 right, twice; 15 at ≥ 0.8. Going somewhere now acts from 0.6
+("go back" undoes it); sending, replacing and rejecting still need 0.92.
+
+"What can I say" (the overlay's "?", or said) lists the actions that apply on
+this screen with example phrasings — the same catalog Jev picks from — and
+the lists that can be picked from; while dictating, what steers dictation.
+
 ## Limits and next steps
 
 - Parakeet and the always-on Qwen service share the GPUs; when the Qwen
   service holds both, speech-to-text is off and the overlay says so.
 - The page has one listener per tab; two devices listening at once both act.
-- Candidates are what the page shows: "the third conversation" is the third
-  row on screen; a file far from the project folder must be on screen.
+- Places count rows on screen, in the list's own order; a file far from the
+  project folder must be on screen to be picked. The home timeline's marks
+  and the conversation tree are not pickable yet.
 - Not yet: a Qwen fallback when TypeSafe is unreachable, spoken feedback,
   "undo that", voice in the conversation tree and the home timeline marks,
   calibrating the thresholds from the record.
