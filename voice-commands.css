@@ -71,3 +71,11 @@
 .voice-history .vhist-screen { color: var(--text-faint); }
 .voice-history .vhist-note { width: 100%; box-sizing: border-box; height: 24px; font: var(--fs-micro) var(--font); margin: 0; }
 .voice-history .vhist-note.saved { border-color: var(--accent); }
+
+/* The voice cursor: the message, steps or thinking that "it" means now.
+   An outline, not a tint: it reads on e-ink and over any theme. */
+.voice-focus { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: var(--r-sm, 4px); scroll-margin: 24px; }
+:root[data-theme-mode="binary"] .voice-focus { outline: 3px solid var(--text); }
+/* What voice just pressed or picked, for a moment. */
+.voice-pressed { outline: 2px dashed var(--accent) !important; outline-offset: 2px; }
+:root[data-theme-mode="binary"] .voice-pressed { outline: 3px dashed var(--text) !important; }

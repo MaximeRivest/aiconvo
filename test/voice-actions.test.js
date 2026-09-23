@@ -94,3 +94,47 @@ test('dictation: words for the box, or steering it; send words come off the text
   const d = V.readDecision(built, { action: { choice: 'text_send', confidence: 0.9 } }, 'fix the flaky test, send it');
   assert.deepEqual([d.action, d.text], ['text_send', 'fix the flaky test']);
 });
+
+test('optional arguments: a default when not asked, and their doubt does not hold the action back', () => {
+  const answer = (choice, confidence) => ({ choice, confidence, probabilities: { [choice]: confidence } });
+  const built = V.buildRequest({ said: 'start scrolling', actions: ['autoscroll', 'point', 'press'], lists: { controls: [{ id: 'c0', label: 'copy · on the highlighted message' }] } });
+  assert.ok(built.request.questions['autoscroll.speed'], 'asked');
+  // A doubtful speed: still sure enough to scroll.
+  let d = V.readDecision(built, { action: answer('autoscroll', 0.95), 'autoscroll.direction': answer('down', 0.9), 'autoscroll.speed': answer('normal', 0.4) });
+  assert.deepEqual([d.action, d.args, d.confidence, d.missing], ['autoscroll', { direction: 'down', speed: 'normal' }, 0.95, null]);
+  // A required argument not said: a question, as before.
+  d = V.readDecision(built, { action: answer('press', 0.9), 'press.control': answer('(not said)', 0.7) });
+  assert.equal(d.missing, 'control');
+  assert.ok(d.confidence <= 0.3);
+  // A required argument's doubt counts.
+  d = V.readDecision(built, { action: answer('press', 0.95), 'press.control': answer('copy · on the highlighted message', 0.55) });
+  assert.deepEqual([d.args, d.confidence], [{ control: 'c0' }, 0.55]);
+  // Point: the kind is optional (a message), the place is not.
+  d = V.readDecision(built, { action: answer('point', 0.9), 'point.place': answer('last', 0.9) });
+  assert.deepEqual([d.args, d.missing], [{ place: 'last' }, null]);
+});
+
+test('the line the coding agent ends with: what to show', () => {
+  assert.deepEqual(V.parseShowLine('It is in voice-window.js.\nSHOW: file /home/x/voice-window.js:69'), { kind: 'file', target: '/home/x/voice-window.js', line: 69 });
+  assert.deepEqual(V.parseShowLine('**SHOW:** `file ~/a b/c.md`'), { kind: 'file', target: '~/a b/c.md', line: null });
+  assert.deepEqual(V.parseShowLine('SHOW: file /x.js:12:4'), { kind: 'file', target: '/x.js', line: 12 });
+  assert.deepEqual(V.parseShowLine('found it\nSHOW: conversation 01a0ce26 (Inline AI)'), { kind: 'conversation', target: '01a0ce26' });
+  assert.deepEqual(V.parseShowLine('show: project chattering'), { kind: 'project', target: 'chattering' });
+  assert.deepEqual(V.parseShowLine('SHOW: nothing no such file'), { kind: 'nothing', target: null, why: 'no such file' });
+  assert.deepEqual(V.parseShowLine('SHOW: file /a\nthen\nSHOW: file /b'), { kind: 'file', target: '/b', line: null }, 'the last one');
+  assert.equal(V.parseShowLine('no line at all'), null);
+  assert.equal(V.parseShowLine('SHOW: somewhere nice'), null);
+  assert.equal(V.parseShowLine('SHOW: file'), null);
+});
+
+test('the new commands are in the catalog, each with its example phrasings', () => {
+  for (const id of ['autoscroll', 'autoscroll_adjust', 'point', 'press', 'fold', 'zen', 'unread', 'tree_move', 'delegate', 'find', 'find_again', 'select', 'chunk', 'chunk_run']) {
+    assert.ok(V.ACTIONS[id] && V.ACTIONS[id].label && V.ACTIONS[id].say, id);
+  }
+  assert.equal(V.ACTIONS.expand, undefined, '"expand" became fold');
+  // "the third mark" counts in the marks, not the conversations.
+  const built = V.buildRequest({ said: 'open the third mark', actions: ['open'], lists: { targets: [{ id: 'mark:a', label: 'mark · a' }], groups: [{ id: 'timeline/mark', label: 'marks in the timeline' }, { id: 'left panel/conversation', label: 'conversations in the left panel' }], defaultGroup: 'left panel/conversation' } });
+  const answer = (choice, confidence) => ({ choice, confidence, probabilities: { [choice]: confidence } });
+  const d = V.readDecision(built, { action: answer('open', 0.9), 'open.place': answer('third', 0.9), 'open.list': answer('unclear', 0.6), 'open.name': answer('(not said)', 0.9) }, 'open the third mark');
+  assert.deepEqual(d.args, { place: 'third', list: 'timeline/mark' });
+});

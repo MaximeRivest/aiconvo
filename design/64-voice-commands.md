@@ -170,14 +170,117 @@ in the 99 real sentences) can take the place of the next word. Word
 timestamps from Parakeet would settle it and the realign pass with it;
 they need its server and the bridge changed (shared with the tablet).
 
+## Acting on what is on screen (2026-09-23, third pass)
+
+Asked for: smooth scrolling that starts and stops, highlighting ("the last
+answer"), the message buttons (copy, read, notebook, more…), "review the
+turn", moving through the steps, opening the thinking as it streams, the +
+menu, moving in the conversation tree, timeline marks by number or name,
+the project memory button, find / select / code chunks in a file, opening
+a file of any project, handing requests to the coding agent, zen, and "the
+latest unread".
+
+Two general pieces carry most of it, so the catalog stays small (43
+actions) and new buttons need no code:
+
+- **The voice cursor** (`point`): one highlighted message, group of steps
+  or thinking block, by kind (message, answer, mine, steps, thinking) and
+  place (last, first, next, previous, the one in view). An outline, not a
+  tint (e-ink). It survives a re-render by the entry id or the step
+  group's key. Next and previous go from it in page order, else from the
+  middle of the view. Steps and thinking open when pointed at; folds above
+  a pointed item open too.
+- **Buttons by name** (`press`): every control in the window (buttons, menu
+  headings, links) with its text, else its title ("−" is "− (Zoom out)"),
+  where it is ("in the message box", "in the tree bar"), and the items of
+  closed menus as "menu › item" (the + menu, a message's "more…"). A
+  transcript item's own buttons come only from the highlighted item, else
+  the last answer: forty "copy" buttons would name none. Review buttons in
+  view, and the last turn's "Review whole turn" even scrolled away, are
+  offered. A menu heading says it opens a menu and what is in it ("open the
+  menu: Attachments and conversation options (Context, Snippets,
+  Conversation tree, Attach image)"). A timeline mark's open card is
+  "open the selected mark". A button whose words are risky (delete,
+  abort, send, stop, discard, merge…) needs 92%. Pressing is a click, so
+  the app's own handler does what the mouse does; the pressed control
+  blinks (a dashed outline).
+
+The rest:
+
+- `fold`: open/close the highlighted item (or the last message's "show
+  more"), every group of steps, every thinking block (their groups open
+  with them), the live stream of the reply being written (its line in the
+  run strip), or everything (close = the `x` key's fold-all).
+- `autoscroll` (down/up, slow/normal/fast) and `autoscroll_adjust` (stop,
+  faster, slower, reverse; offered only while scrolling). Smooth on a
+  screen, **a page every few seconds on a theme without motion (e-ink)**. A
+  wheel, touch or key takes the page back. **"Stop" is caught in the live
+  words** at the first 300 ms pause, before the sentence ends and before
+  Jev: about half a second after the word instead of 1–2 s. The sentence
+  "stop" that follows is then marked done locally, without Jev and
+  without a question. Stopping never needs confidence.
+- `zen` (on, off, toggle), `unread` (the newest unread reply; says how
+  many remain), `tree_move` (parent, child, sibling left/right, open: the
+  tree's own arrow keys and Enter). "Open it" with nothing named opens
+  what is selected: the tree's box, the mark whose card shows.
+- Pickable by number, place or name, besides the earlier lists: **timeline
+  marks** (home and project; named with both titles and their project, so
+  "the parser mark in chattering" finds it; a click shows the card) and
+  **the tree's boxes**.
+- In a file: `find` (the words said that are in the file, longest first;
+  "parse config" finds parse_config, parseConfig, parse-config; next /
+  previous with `find_again`), `select` (line, paragraph, sentence, word,
+  code chunk, all, lines N to M, from words to words, none; counted from
+  where the selection starts, so "find X" then "select the sentence"
+  selects X's sentence), `chunk` (next, previous, first, last) and
+  `chunk_run` (this, this then the next, all, stop; "all" needs 92%). On a
+  touch screen the editor is not focused, so no keyboard rises; the
+  selection shows anyway.
+- **Anywhere** (`open`): every project by name, and the files of any
+  project the sentence names ("the notes file in alpha beta"), not only
+  the open project's. A file opens in its own project.
+- **The coding agent** (`delegate`): what no command does ("find the
+  conversation where we fixed the login", "show me where the parser is
+  defined") goes to a quiet agent conversation, as a Ctrl+K ask does (the
+  ask box's model, else the project's), with all its tools, told to change
+  nothing and to end with one line: `SHOW: file PATH[:LINE]`,
+  `conversation ID`, `project NAME` or `nothing WHY`. The server checks the
+  target against what this person may see; the page opens it if you are
+  still where you asked, else offers it. **The agent never drives the page
+  itself**: it finds, the page shows. Its conversation stays, to see how
+  it searched.
+- Optional arguments (a speed, a direction, where a selection starts…)
+  default when not said and their doubt does not hold the action back.
+- The history shows what a list argument was called on screen ("copy · on
+  the highlighted message"), not its id, and what the agent found.
+
+Measured against the real Jev, on the real app's screens (a conversation
+with thinking, two groups of steps and two turns; the tree; a notebook; the
+home timeline), 50 sentences: **49 right; 44 sure enough to act at once**.
+The miss: "open the attachments" chose the "Open files" button at 53%, so
+it asks. "Open the attachments menu", "the conversation options", "the
+plus menu" all find the + menu. Unchanged sentences from before (scroll,
+settings, go to line, rewrite, not-a-command) stayed right. Along the way
+the first run (37 of 42) showed what the labels needed: "step" in the
+singular, the menu's contents in its label, the last turn's review off
+screen, both titles on marks, "open it" as what is selected.
+
+TypeSafe answered in 0.8–1.5 s during this run, even for the smallest
+request, against 0.14–0.33 s in the morning: their load, not the requests.
+
+The hand-off to the agent was run end to end (a quiet conversation starts,
+the agent runs, the server waits and reads its answer) with a local model,
+which answered nothing; the SHOW line's reading is unit-tested; a real
+model's answer turned into a screen is not yet tested.
+
 ## Limits and next steps
 
 - Parakeet and the always-on Qwen service share the GPUs; when the Qwen
   service holds both, speech-to-text is off and the overlay says so.
 - The page has one listener per tab; two devices listening at once both act.
-- Places count rows on screen, in the list's own order; a file far from the
-  project folder must be on screen to be picked. The home timeline's marks
-  and the conversation tree are not pickable yet.
+- Places count rows on screen, in the list's own order. Files of another
+  project are offered when the sentence names the project.
 - Not yet: a Qwen fallback when TypeSafe is unreachable, spoken feedback,
-  "undo that", voice in the conversation tree and the home timeline marks,
-  calibrating the thresholds from the record.
+  "undo that", calibrating the thresholds from the record, selecting text
+  inside a message (the cursor highlights whole messages), an agent that
+  may change the screen beyond opening one thing.

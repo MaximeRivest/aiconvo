@@ -51,18 +51,35 @@
     send: { label: 'Send the message in the box', say: 'send, send it, submit' },
     new_conversation: { label: 'Start a new conversation', say: 'start a new conversation, new chat, new conversation' },
     regenerate: { label: 'Regenerate the last answer: ask the model again', say: 'regenerate, regenerate the last answer, ask again, try that again' },
-    expand: { label: 'Show the whole of a folded message (its "more")', say: 'show more, expand the last message, click more on the last message' },
-    scroll: { label: 'Scroll the conversation or the file', say: 'scroll up, scroll down, page down, one page up, go to the top, go to the bottom', args: { direction: { kind: 'fixed', options: { up: 'up a little', down: 'down a little', page_up: 'one page up', page_down: 'one page down', top: 'to the very top', bottom: 'to the very bottom, the latest' }, question: 'In `said`, which way, and how far, does the user want to scroll?' } } },
+    scroll: { label: 'Scroll the conversation or the file once, by a step', say: 'scroll up, scroll down, page down, one page up, go to the top, go to the bottom', args: { direction: { kind: 'fixed', options: { up: 'up a little', down: 'down a little', page_up: 'one page up', page_down: 'one page down', top: 'to the very top', bottom: 'to the very bottom, the latest' }, question: 'In `said`, which way, and how far, does the user want to scroll?' } } },
+    autoscroll: { label: 'Start scrolling continuously, slowly, until told to stop', say: 'start scrolling down, keep scrolling up, scroll slowly, read down', args: {
+      direction: { kind: 'fixed', optional: true, options: { down: 'down, towards the end', up: 'up, towards the start' }, question: 'Which way does the user want the page to keep scrolling? Without a way said, down.' },
+      speed: { kind: 'fixed', optional: true, options: { slow: 'slowly, reading speed', normal: 'not said', fast: 'fast, quickly' }, question: 'How fast does the user want it to scroll?' },
+    } },
+    autoscroll_adjust: { label: 'Stop or change the continuous scrolling going on now', say: 'stop, stop scrolling, faster, slower, the other way, go back up', args: { how: { kind: 'fixed', options: { stop: 'stop, halt, enough, there', faster: 'faster', slower: 'slower', reverse: 'the other way, reverse' }, question: 'What does the user want the scrolling to do?' } } },
+    point: { label: 'Go to and highlight a message, a step or the thinking in the conversation, to act on it (copy, read, fork, fold…)', say: 'highlight the last answer, go to the previous message, the next message, the first message, go to my last message, next step, previous step, the thinking', args: {
+      thing: { kind: 'fixed', optional: true, options: { message: 'a message, no kind named', answer: 'an answer, a reply from the assistant, the model, the AI', mine: 'a message the user wrote: their question, their prompt', steps: 'a step, steps, a group of steps, tool calls, the work', thinking: 'the thinking, the reasoning' }, question: 'Which kind of item does `said` name? "step" or "steps" is steps; "answer" or "reply" is answer; none named: message.' },
+      place: { kind: 'fixed', options: { last: 'the last one, the latest', second_last: 'the one before the last', first: 'the first one', next: 'the next one, the one after, below', previous: 'the previous one, the one before, above', here: 'this one, the one on screen now' }, question: 'In `said`, which one of them?' },
+    } },
+    press: { label: 'Press a button or a menu item on screen by its name (on the highlighted message when it has it)', say: 'copy it, read it, make a notebook, fork, edit, continue here, review the turn, review changes, open the attachments, context, the conversation tree, zoom in, fit, project memory, open it', args: { control: { kind: 'list', list: 'controls', question: 'Which of these buttons or menu items does the user want to press? Only one `said` names by its words or its meaning ("copy it" is copy; "read it aloud" is read).' } } },
+    fold: { label: 'Unfold (open, expand, show) or fold (close, collapse, hide) something: the highlighted item, all the steps, the thinking, the live stream of the reply being written', say: 'expand it, show more, collapse the steps, open the thinking, show the live thinking, hide the thinking, fold everything', args: {
+      how: { kind: 'fixed', options: { open: 'open, expand, unfold, show', close: 'close, collapse, fold, hide' }, question: 'Does the user want it opened or closed?' },
+      what: { kind: 'fixed', options: { this: 'the highlighted item, or the last message ("it", "this", "the last message", "more")', steps: 'every group of steps', thinking: 'every thinking block', live: 'the live stream of the reply being written, with its thinking as it comes', everything: 'everything' }, question: 'What does the user want opened or closed?' },
+    } },
+    zen: { label: 'Zen mode: show only the conversation or file, nothing around it (on, off)', say: 'zen mode, turn on zen, leave zen, zen off', args: { how: { kind: 'fixed', optional: true, options: { on: 'on, enter', off: 'off, leave, exit', toggle: 'not said' }, question: 'On or off?' } } },
+    unread: { label: 'Open the newest conversation with a reply not read yet', say: 'the latest unread, next unread, what is new, open the new reply' },
+    tree_move: { label: 'Move the selection in the conversation tree, or open the selected box', say: 'up, down, go to the parent, the child, left, right, next branch, open it, open this box, read it', args: { move: { kind: 'fixed', options: { up: 'up, to the parent, earlier', down: 'down, to the child, later', left: 'left, the previous branch', right: 'right, the next branch', open: 'open it, read it, go there' }, question: 'Where does the user want to move in the tree?' } } },
+    delegate: { label: 'Ask the coding agent to find something and bring it on screen, when no other request here does it (it searches files, conversations and projects)', say: 'find the conversation where we fixed the login, show me where the parser is defined, ask the agent to find…' },
     model: { label: 'Change the model that answers', say: 'change the model to…, switch to…, use…', args: { model: { kind: 'list', list: 'models', question: 'Which model does the user want to use?' } } },
     reasoning: { label: 'Change the reasoning (thinking) level', say: 'reasoning off, think harder, set thinking to high', args: { level: { kind: 'fixed', options: Object.fromEntries(THINKING.map(l => [l, null])), question: 'Which reasoning level does the user want (off is no reasoning, max is the most)?' } } },
-    open: { label: 'Open or pick something: a conversation, a file, a project, a search result', say: 'open the third one, the last file, the previous one, the one about air bills, open the file called…, number seven', args: {
+    open: { label: 'Open or pick something by its number, place or name: a conversation, a file (of any project), a project, a timeline mark, a box of the tree, a search result', say: 'open the third one, the last file, the previous one, the one about air bills, open the file called… in the … project, the chattering project, select the third mark, number seven', args: {
       number: { kind: 'numbers', question: 'In `said`, does the user pick a numbered item on screen by its number ("number seven", "open 12")? Which number?' },
       list: { kind: 'groups', question: 'In `said`, which of these lists does the user mean? A kind of item ("file", "conversation", "project") or a side ("on the right", "on the left") says it.' },
       place: { kind: 'fixed', options: null, question: 'In `said`, does the user pick the item by its place in its list? Which place?' },
       name: { kind: 'list', list: 'targets', question: 'Which of these items does the user name in `said`, by words of its title or file name ("dot js" said for .js, spaces for dashes)? Only what `said` names: not the item open now unless it is named.' },
     } },
     help: { label: 'Show what the user can say here: the list of voice commands', say: 'what can I say, show the commands, open the command panel, list the commands, help' },
-    settings: { label: 'Open the settings', say: 'open the settings, show the appearance settings', args: { pane: { kind: 'fixed', options: SETTINGS_PANES, question: 'Which part of the settings does the user want? Without a part named, profile.' } } },
+    settings: { label: 'Open the settings', say: 'open the settings, show the appearance settings', args: { pane: { kind: 'fixed', optional: true, options: SETTINGS_PANES, question: 'Which part of the settings does the user want? Without a part named, profile.' } } },
     go_home: { label: 'Go to the home page (all conversations, the timeline)', say: 'go home' },
     go_back: { label: 'Go back to the previous screen', say: 'go back, previous' },
     go_forward: { label: 'Go forward to the next screen', say: 'go forward' },
@@ -75,8 +92,19 @@
       new: { kind: 'spans', question: 'In a request like "change OLD to NEW" or "replace OLD with NEW", which words are NEW: the exact words to write in place of OLD?' },
     } },
     rewrite: { label: 'Rewrite the text here as the user describes, not with exact words', say: 'make this shorter, make it more formal, change this to a friendlier tone, turn this into a list' },
-    accept_change: { label: 'Accept the change under review here', say: 'accept, keep it, accept all' , args: { all: { kind: 'fixed', options: { one: 'the change at the cursor', all: 'every change' }, question: 'Does the user accept one change or all of them?' } } },
-    reject_change: { label: 'Reject the change under review here', say: 'reject, undo that change, reject all', args: { all: { kind: 'fixed', options: { one: 'the change at the cursor', all: 'every change' }, question: 'Does the user reject one change or all of them?' } } },
+    accept_change: { label: 'Accept the change under review here', say: 'accept, keep it, accept all' , args: { all: { kind: 'fixed', optional: true, options: { one: 'the change at the cursor', all: 'every change' }, question: 'Does the user accept one change or all of them?' } } },
+    reject_change: { label: 'Reject the change under review here', say: 'reject, undo that change, reject all', args: { all: { kind: 'fixed', optional: true, options: { one: 'the change at the cursor', all: 'every change' }, question: 'Does the user reject one change or all of them?' } } },
+    find: { label: 'Find words in the file and select them', say: 'find parse config, search for TODO, where is the word total', args: { text: { kind: 'list', list: 'found', question: 'Which words does the user want to find in the file (only words to search, not "find" or "search for")?' } } },
+    find_again: { label: 'Go to the next or previous place of the words last found', say: 'next, the next one, find again, previous match', args: { which: { kind: 'fixed', optional: true, options: { next: 'next, again', previous: 'previous, back' }, question: 'Next or previous?' } } },
+    select: { label: 'Select text in the file: a line, a paragraph, a sentence, the code chunk, everything, lines N to M, or from some words to other words', say: 'select this line, select the paragraph, select all, select lines 3 to 10, select from dear to regards, unselect', args: {
+      what: { kind: 'fixed', options: { line: 'the line', paragraph: 'the paragraph', sentence: 'the sentence', word: 'the word', chunk: 'the code chunk, the cell', all: 'everything, all', lines: 'lines by their numbers', between: 'from some words to other words', none: 'nothing: unselect' }, question: 'What does the user want to select?' },
+      from_line: { kind: 'numbers', optional: true, question: 'The first line number to select?' },
+      to_line: { kind: 'numbers', optional: true, question: 'The last line number to select?' },
+      from: { kind: 'list', optional: true, list: 'found', question: 'The words where the selection starts (after "from")?' },
+      to: { kind: 'list', optional: true, list: 'found', question: 'The words where the selection ends (after "to" or "until")?' },
+    } },
+    chunk: { label: 'Go to a code chunk (a cell) of the notebook', say: 'next chunk, previous cell, the first chunk, the last cell', args: { place: { kind: 'fixed', optional: true, options: { next: 'the next one', previous: 'the previous one', first: 'the first', last: 'the last', here: 'this one' }, question: 'Which chunk?' } } },
+    chunk_run: { label: 'Run code of the notebook: this chunk, this one then the next, every chunk, or stop the run', say: 'run this chunk, run it, run and go to the next, run all, stop the run', args: { which: { kind: 'fixed', optional: true, options: { this: 'this chunk', advance: 'this chunk, then move to the next', all: 'every chunk, run all', stop: 'stop, cancel, interrupt the run' }, question: 'What does the user want to run?' } } },
     text_size: { label: 'Make the text of the file larger or smaller', say: 'bigger text, zoom in, smaller, reset the text size', args: { direction: { kind: 'fixed', options: { larger: 'larger, bigger, zoom in', smaller: 'smaller, zoom out', reset: 'back to normal, 100%' }, question: 'Larger, smaller, or back to normal?' } } },
   };
 
@@ -238,7 +266,7 @@
   // The list a sentence names by its words, when exactly one list on
   // screen matches them: a kind ("the last file", "chats") and a side ("on
   // the right"). An exact lookup, kept in code.
-  const KIND_WORDS = [[/\b(files?|folders?)\b/i, /^files/], [/\b(conversations?|chats?)\b/i, /^conversations/], [/\bprojects?\b/i, /^projects/]];
+  const KIND_WORDS = [[/\b(files?|folders?)\b/i, /^files/], [/\b(conversations?|chats?)\b/i, /^conversations/], [/\bprojects?\b/i, /^projects/], [/\bmarks?\b/i, /^marks/], [/\bbox(es)?\b/i, /^boxes/]];
   const SIDE_WORDS = [[/\b(right|right-hand)\b/i, /right panel/], [/\b(left|left-hand|sidebar)\b/i, /left panel/]];
   function listNamed(groups, said) {
     let hits = groups;
@@ -302,18 +330,41 @@
     }
     const args = {};
     let confidence = a.confidence, missing = null;
-    for (const [name] of Object.entries((ACTIONS[a.choice] && ACTIONS[a.choice].args) || {})) {
+    // An optional argument (the settings pane, a speed, where a selection
+    // starts…) has a default when not asked or not said, and its doubt does
+    // not hold the action back: a wrong one costs little and shows at once.
+    for (const [name, arg] of Object.entries((ACTIONS[a.choice] && ACTIONS[a.choice].args) || {})) {
       const q = pickOf(answers[a.choice + '.' + name]);
-      if (!q) { missing = missing || name; continue; }
-      confidence = Math.min(confidence, q.confidence);
-      if (q.choice === NOT_SAID) { missing = missing || name; continue; }
+      if (!q) { if (!arg.optional) missing = missing || name; continue; }
+      if (!arg.optional) confidence = Math.min(confidence, q.confidence);
+      if (q.choice === NOT_SAID) { if (!arg.optional) missing = missing || name; continue; }
       const map = built.keys[a.choice + '.' + name];
       args[name] = map ? map[q.choice] : q.choice === THE_SELECTION ? { selection: true } : q.choice === DELETE_IT ? '' : q.choice;
     }
-    // Optional arguments: the settings pane, one-or-all of a review.
-    if (missing === 'pane' || missing === 'all') missing = null;
     return { action: a.choice, args, confidence: missing ? Math.min(confidence, 0.3) : confidence, missing, alternatives };
   }
 
-  return { LIMITS, ACTIONS, DICTATION, THINKING, SETTINGS_PANES, PLACES, ORDINALS, SEND_TAIL, NOT_SAID, buildRequest, readDecision, rankByOverlap, numbersIn, spansOf };
+  /**
+   * The coding agent's answer to a handed-on request ends with one line
+   * naming what to show (server.js voiceDelegatePrompt). → {kind: file |
+   * conversation | project | nothing, target, line} from the last such
+   * line, or null. Markdown around it (bold, backticks) is tolerated.
+   */
+  function parseShowLine(text) {
+    const lines = String(text || '').split('\n').map(l => l.trim().replace(/^[>*_`\s-]+|[*_`\s]+$/g, '')).filter(l => /^SHOW\s*:/i.test(l));
+    const line = lines.pop();
+    if (!line) return null;
+    const m = line.replace(/^SHOW\s*:[*_\s]*/i, '').replace(/`/g, '').match(/^(file|conversation|project|nothing)\b\s*(.*)$/i);
+    if (!m) return null;
+    const kind = m[1].toLowerCase(), rest = m[2].trim();
+    if (kind === 'nothing') return { kind, target: null, why: rest.slice(0, 200) };
+    if (!rest) return null;
+    if (kind === 'file') {
+      const f = rest.match(/^(.+?)(?::(\d+)(?::\d+)?)?$/);
+      return { kind, target: f[1].trim(), line: f[2] ? Number(f[2]) : null };
+    }
+    return { kind, target: rest.split(/\s+/)[0] };
+  }
+
+  return { parseShowLine, LIMITS, ACTIONS, DICTATION, THINKING, SETTINGS_PANES, PLACES, ORDINALS, SEND_TAIL, NOT_SAID, buildRequest, readDecision, rankByOverlap, numbersIn, spansOf };
 });

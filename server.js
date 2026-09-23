@@ -13814,12 +13814,25 @@ async function voiceDecide(context, identity) {
   // "Open the file called…": the page names what is on screen and the
   // recent conversations; the project's own files come from here (the
   // request keeps those that share words with what was said).
-  if (context.project && Array.isArray(context.actions) && context.actions.includes('open')) {
-    const files = await voiceProjectFiles(String(context.project), identity).catch(() => []);
+  if (Array.isArray(context.actions) && context.actions.includes('open')) {
     const lists = context.lists && typeof context.lists === 'object' ? context.lists : {};
     const targets = Array.isArray(lists.targets) ? lists.targets : [];
     const known = new Set(targets.map(t => t && t.id));
-    context.lists = { ...lists, targets: targets.concat(files.map(f => ({ id: 'file:' + f.id, label: 'file · ' + f.label })).filter(f => !known.has(f.id))) };
+    const more = [];
+    if (context.project) {
+      const files = await voiceProjectFiles(String(context.project), identity).catch(() => []);
+      more.push(...files.map(f => ({ id: 'file:' + f.id, label: 'file · ' + f.label })));
+    }
+    // Anywhere, not only what is on screen ("open the voice window file in
+    // chattering"): every project by name, and the files of the projects
+    // the sentence names. The request keeps what shares words with it.
+    const projects = allProjectNames().filter(p => projectVisible(identity, p));
+    more.push(...projects.map(p => ({ id: 'proj:' + p, label: 'project · ' + p })));
+    for (const p of voiceProjectsNamed(projects, context.said).filter(p => p !== context.project).slice(0, 3)) {
+      const files = await voiceProjectFiles(p, identity).catch(() => []);
+      more.push(...files.map(f => ({ id: 'pfile:' + encodeURIComponent(p) + ':' + f.id, label: 'file · ' + p + '/' + f.label })));
+    }
+    context.lists = { ...lists, targets: targets.concat(more.filter(f => !known.has(f.id))) };
   }
   const built = voiceActions.buildRequest(context, { model: VOICE_JEV_MODEL });
   const id = crypto.randomUUID();
@@ -13851,9 +13864,18 @@ async function voiceDecide(context, identity) {
     throw failed('TypeSafe: ' + (typeof why === 'string' ? why : JSON.stringify(why)).slice(0, 300));
   }
   const decision = voiceActions.readDecision(built, body.answers, context.said);
+  // Arguments picked from a list are ids ("c12", a path): the history shows
+  // what they were called on screen.
+  const argLabels = {};
+  for (const [name, value] of Object.entries(decision.args || {})) {
+    const map = built.keys[decision.action + '.' + name];
+    const label = map && Object.keys(map).find(k => map[k] === value);
+    if (label) argLabels[name] = label;
+  }
   const record = {
     ...heardAs, ms,
-    action: decision.action, args: decision.args, confidence: decision.confidence, missing: decision.missing || null,
+    action: decision.action, args: decision.args, argLabels: Object.keys(argLabels).length ? argLabels : undefined,
+    confidence: decision.confidence, missing: decision.missing || null,
     alternatives: decision.alternatives,
     // Jev's answer to every question: the action's whole distribution, the
     // five likeliest options of each argument — what was near.
@@ -13893,6 +13915,109 @@ async function voiceProjectFiles(project, identity) {
   return files;
 }
 
+// The projects a sentence names: every word of the name said, in any
+// spelling ("parakeet stream", "chattering").
+function voiceProjectsNamed(projects, said) {
+  const words = new Set(String(said || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+  const joined = [...words].join('');
+  return projects.filter(p => {
+    const parts = p.toLowerCase().replace(/([a-z])([A-Z])/g, '$1 $2').split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 1);
+    return parts.length && (parts.every(w => words.has(w)) || joined.includes(parts.join('')));
+  });
+}
+
+// ---- voice: a request handed to the coding agent ----
+// "Find the conversation where we fixed the login", "show me where the
+// parser is defined": no command does it, the agent can. It runs as the
+// Ctrl+K ask does (a quiet conversation, the ask box's model or the
+// project's), with every tool it has, and ends with one line naming what
+// to show. The page only ever navigates to it: an agent never drives the
+// page itself. The conversation stays, to see how it searched.
+const VOICE_DELEGATE_MAX_MS = 10 * 60 * 1000;
+const voiceDelegations = new Map(); // id → state (kept an hour)
+function voiceDelegatePrompt({ said, screen, project }) {
+  return [
+    'Someone using the Chattering app by voice said:',
+    '"' + said + '"',
+    'They are looking at: ' + (screen || 'the app') + '. Their project: ' + (project || 'none') + '.',
+    '',
+    'Find what they want to see. Use the shell as much as you need: files under ~/Projects (rg, fd, git), past conversations with `chattering search "<words>"` and `chattering conversations <project>` (the ids it prints are conversation ids), project memory with `chattering memory`. Read, search and run what you need; do not change any file.',
+    '',
+    'Answer in one or two short sentences for them, then end with exactly one line saying what to open:',
+    'SHOW: file /absolute/path/to/file[:line]',
+    'SHOW: conversation <conversation id>',
+    'SHOW: project <project name>',
+    'SHOW: nothing <why, in a few words>',
+  ].join('\n');
+}
+
+// The SHOW line → something the page opens, checked against what this
+// person may see. Null when there is none; throws when it is not allowed.
+function voiceDelegateTarget(text, identity) {
+  const show = voiceActions.parseShowLine(text);
+  if (!show) return null;
+  if (show.kind === 'nothing') return { kind: 'nothing', why: show.why };
+  if (show.kind === 'file') {
+    const abs = path.resolve(expandHomePath(show.target));
+    assertPathAccess(identity, abs, 'see');
+    if (!fs.existsSync(abs)) throw new Error('the agent named a file that does not exist: ' + abs);
+    return { kind: 'file', path: abs, line: show.line, project: projectNameOf(path.dirname(abs)) || null };
+  }
+  if (show.kind === 'conversation') {
+    const key = recordsApi().resolveKey(show.target);
+    if (!keyVisible(identity, key)) throw new Error('that conversation is not shared with you');
+    const e = index[key] || {};
+    return { kind: 'conversation', key, title: e.timelineTitle || e.title || null };
+  }
+  if (!projectMetaFor(show.target) || !projectVisible(identity, show.target)) throw new Error('the agent named a project that is not here: ' + show.target);
+  return { kind: 'project', project: show.target };
+}
+
+const voiceDelegateView = d => ({ id: d.id, key: d.key, status: d.status, show: d.show || null, reply: d.reply || null, error: d.error || null, startedAt: d.startedAt, ms: d.finishedAt ? d.finishedAt - d.startedAt : null });
+
+async function voiceDelegateStart(body, identity) {
+  const said = String(body.said || '').replace(/\s+/g, ' ').trim().slice(0, 600);
+  if (!said) throw Object.assign(new Error('nothing was said'), { status: 400 });
+  const principal = principalFor(identity);
+  const named = typeof body.project === 'string' ? body.project : '';
+  const project = named && projectMetaFor(named) && projectVisible(identity, named) ? named : null;
+  if (project) assertCan(identity, 'act', { project, creator: projectCreatorOf(project) }, 'this project');
+  const models = normalizePickedModels(body.models).slice(0, 1);
+  const started = await startProjectConversation(project
+    ? { project, agent: 'pi', surface: 'rpc', silent: true, models, include: { map: false }, name: '', principal }
+    : { project: LOOSE_PROJECT, projectless: true, agent: 'pi', surface: 'rpc', silent: true, models, include: { map: false }, principal });
+  const key = started.key;
+  if (!key) throw new Error('the agent\u2019s conversation did not start');
+  const lead = models[0] || (project ? resolvedProjectDefaultModel(project) : null);
+  const out = await startAgentRun(key, {
+    node: null, provider: lead ? lead.provider : undefined, modelId: lead ? lead.modelId : undefined,
+    message: voiceDelegatePrompt({ said, screen: String(body.screen || '').slice(0, 200), project }), force: false, allowQueue: false, principal,
+  });
+  const job = out && out.job ? out.job : out;
+  const d = { id: crypto.randomUUID(), user: principal.user.id, key, said, status: 'running', startedAt: Date.now() };
+  voiceDelegations.set(d.id, d);
+  for (const [id, old] of voiceDelegations) if (Date.now() - old.startedAt > 3600 * 1000) voiceDelegations.delete(id);
+  const finish = (status, fields) => {
+    Object.assign(d, fields, { status, finishedAt: Date.now() });
+    voiceLog({ v: 2, ts: new Date().toISOString(), delegateOf: String(body.decision || '') || undefined, user: d.user, said, key, status, show: d.show || undefined, error: d.error || undefined, ms: d.finishedAt - d.startedAt });
+  };
+  (async () => {
+    while (job && !job.finishedAt && job.status === 'running' && Date.now() - d.startedAt < VOICE_DELEGATE_MAX_MS) await new Promise(r => setTimeout(r, 500));
+    if (!job || job.status !== 'done') return finish('failed', { error: job && job.error ? String(job.error).slice(0, 300) : job && job.status === 'running' ? 'the agent took more than ten minutes' : 'the agent stopped' });
+    const reply = String(job.lastAssistantText || '');
+    let show = null;
+    try { show = voiceDelegateTarget(reply, identity); } catch (e) { return finish('failed', { reply: reply.slice(-600), error: e.message }); }
+    finish(show ? 'done' : 'failed', { reply: reply.replace(/^\s*\**SHOW:.*$/gim, '').trim().slice(-600), show, error: show ? null : 'the agent gave nothing to show' });
+  })().catch(e => finish('failed', { error: e.message }));
+  return voiceDelegateView(d);
+}
+
+function voiceDelegateState(id, identity) {
+  const d = voiceDelegations.get(String(id || ''));
+  if (!d || d.user !== principalFor(identity).user.id) throw Object.assign(new Error('unknown request'), { status: 404 });
+  return voiceDelegateView(d);
+}
+
 function voiceAnswerSummary(answers) {
   const out = {};
   for (const [q, a] of Object.entries(answers || {})) {
@@ -13914,15 +14039,16 @@ function voiceHistory(identity, limit) {
   for (const line of raw.split('\n')) {
     if (!line) continue;
     let r; try { r = JSON.parse(line); } catch { continue; }
-    if (r.outcomeOf || r.noteOf) {
-      const ref = r.outcomeOf || r.noteOf;
+    if (r.outcomeOf || r.noteOf || r.delegateOf) {
+      const ref = r.outcomeOf || r.noteOf || r.delegateOf;
       if (!extra.has(ref)) extra.set(ref, { outcomes: [], note: null });
       if (r.outcomeOf) extra.get(ref).outcomes.push(r.outcome + (r.detail ? ': ' + r.detail : ''));
+      else if (r.delegateOf) extra.get(ref).outcomes.push('agent ' + r.status + (r.show ? ' \u2192 ' + r.show.kind + ' ' + (r.show.path || r.show.title || r.show.project || r.show.why || '') : '') + (r.error ? ': ' + r.error : ''));
       else extra.get(ref).note = r.wanted;
     } else if (r.id && r.user === me) rows.set(r.id, r);
   }
   return [...rows.values()].reverse().slice(0, limit).map(r => ({
-    id: r.id, ts: r.ts, mode: r.mode, screen: r.screen, said: r.said, action: r.action, args: r.args, confidence: r.confidence,
+    id: r.id, ts: r.ts, mode: r.mode, screen: r.screen, said: r.said, action: r.action, args: r.args, argLabels: r.argLabels, confidence: r.confidence,
     missing: r.missing, error: r.error, alternatives: r.alternatives, ms: r.ms,
     outcomes: (extra.get(r.id) || {}).outcomes || [], note: (extra.get(r.id) || {}).note || null,
   }));
@@ -13939,6 +14065,7 @@ function voiceClearHistory(identity) {
     if (!line) continue;
     let r; try { r = JSON.parse(line); } catch { keep.push(line); continue; }
     if (r.user === me && r.id) { mine.add(r.id); continue; }
+    if (r.user === me && r.delegateOf !== undefined) continue;
     if (mine.has(r.outcomeOf || r.noteOf)) continue;
     keep.push(line);
   }
@@ -16489,6 +16616,14 @@ async function handleRequest(req, res) {
       const refusal = voiceRefusal(identity);
       if (refusal) return json(res, 403, { error: refusal });
       try { json(res, 200, await voiceDecide(JSON.parse(await readRequestText(req, 256 * 1024)), identity)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/voice/delegate' && req.method === 'POST') {
+      const refusal = voiceRefusal(identity);
+      if (refusal) return json(res, 403, { error: refusal });
+      try { json(res, 200, await voiceDelegateStart(JSON.parse(await readRequestText(req, 16 * 1024)), identity)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/voice/delegate' && req.method === 'GET') {
+      try { json(res, 200, voiceDelegateState(u.searchParams.get('id'), identity)); }
       catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/voice/history' && req.method === 'GET') {
       const refusal = voiceRefusal(identity);

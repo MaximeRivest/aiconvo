@@ -46,10 +46,11 @@ async function standIns(t) {
       const body = JSON.parse(Buffer.concat(chunks)); jevCalls.push({ body, auth: req.headers.authorization });
       const said = body.state.said;
       const pick = (q, want) => { const keys = Object.keys(body.questions[q].criteria); const choice = keys.find(k => want(k)) || keys.at(-1); return { type: 'choice', choice, confidence: 0.97, probabilities: { [choice]: 0.97 } }; };
-      const action = /settings/.test(said) ? 'settings' : /reasoning/.test(said) ? 'reasoning' : 'none';
+      const action = /settings/.test(said) ? 'settings' : /reasoning/.test(said) ? 'reasoning' : /^open/.test(said) ? 'open' : 'none';
       const answers = { action: pick('action', k => k === action) };
       if (body.questions['settings.pane']) answers['settings.pane'] = pick('settings.pane', k => k === 'profile');
       if (body.questions['reasoning.level']) answers['reasoning.level'] = pick('reasoning.level', k => said.includes(k));
+      if (body.questions['open.name']) answers['open.name'] = pick('open.name', k => /notes\.md$/.test(k));
       res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ answers }));
     });
   });
@@ -58,12 +59,13 @@ async function standIns(t) {
   return { speechUrl: 'http://127.0.0.1:' + speech.address().port, jevUrl: 'http://127.0.0.1:' + jev.address().port + '/v1/systemone', jevCalls, jev };
 }
 
-async function boot(t, { key = 'test-key-0123456789abcdef' } = {}) {
+async function boot(t, { key = 'test-key-0123456789abcdef', setup = null } = {}) {
   const stand = await standIns(t);
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-api-'));
   fs.mkdirSync(path.join(home, '.config', 'chattering'), { recursive: true });
   fs.mkdirSync(path.join(home, '.pi', 'agent', 'sessions'), { recursive: true });
   fs.writeFileSync(path.join(home, '.config', 'chattering', 'settings.json'), JSON.stringify({ speechUrl: stand.speechUrl }));
+  if (setup) setup(home);
   const port = await freePort();
   const env = { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: '0', CHATTERING_HOST: '127.0.0.1', CHATTERING_LAN: '', CHATTERING_TOKEN: '', CHATTERING_NO_WATCH: '1', CHATTERING_NO_SYNC: '1',
     CHATTERING_CACHE_DIR: path.join(home, 'cache'), PI_CODING_AGENT_DIR: path.join(home, '.pi', 'agent'), TYPESAFE_URL: stand.jevUrl };
@@ -162,4 +164,32 @@ test('the key: saved by the owner only to a private file, never sent back; witho
   assert.doesNotMatch(status, /apikey_/, 'the key never goes back to a page');
   await post(s.base, '/api/voice/key', { key: '' });
   assert.equal(fs.existsSync(file), false);
+});
+
+test('open anywhere: every project by name, and the files of a project the sentence names', async t => {
+  // Folders under /tmp are never projects (projectfolds.js): the projects
+  // live in memory-backed /dev/shm.
+  if (!fs.existsSync('/dev/shm')) return t.skip('no /dev/shm');
+  const where = fs.mkdtempSync('/dev/shm/voice-projects-');
+  t.after(() => fs.rmSync(where, { recursive: true, force: true }));
+  const s = await boot(t, { setup: home => {
+    for (const [name, files] of [['alpha-beta', ['notes.md', 'src/main.js']], ['gamma', ['readme.md']], ['delta', ['notes.md']]]) {
+      const dir = path.join(where, 'Projects', name);
+      for (const f of files) { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), 'x'); }
+      const sessions = path.join(home, '.pi', 'agent', 'sessions', '--' + name + '--');
+      fs.mkdirSync(sessions, { recursive: true });
+      fs.writeFileSync(path.join(sessions, 's.jsonl'), [{ type: 'session', version: 3, id: name, cwd: dir }, { type: 'message', id: 'u', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'hi ' + name }] } }].map(JSON.stringify).join('\n') + '\n');
+    }
+  } });
+  // The server reads the conversations after it starts listening.
+  for (let i = 0; i < 100 && (await (await fetch(s.base + '/api/sessions')).json()).length < 3; i++) await sleep(100);
+  const r = await (await post(s.base, '/api/voice/decide', { said: 'open the notes file in alpha beta', screen: 'a file', actions: ['open'], project: 'gamma', lists: { targets: [] } })).json();
+  assert.equal(r.error, undefined, r.error);
+  const names = Object.keys(s.jevCalls.at(-1).body.questions['open.name'].criteria);
+  for (const want of ['project · alpha-beta', 'project · delta', 'file · alpha-beta/notes.md', 'file · alpha-beta/src/main.js', 'file · readme.md']) assert.ok(names.includes(want), want + ' in ' + JSON.stringify(names));
+  assert.ok(!names.some(n => n.startsWith('file · delta/')), 'not the files of a project nobody named');
+  assert.equal(r.decision.args.name, 'pfile:alpha-beta:' + path.join(where, 'Projects', 'alpha-beta', 'notes.md'));
+  // The history says what was picked, not its id.
+  const hist = await (await fetch(s.base + '/api/voice/history')).json();
+  assert.equal(hist.rows[0].argLabels.name, 'file · alpha-beta/notes.md');
 });

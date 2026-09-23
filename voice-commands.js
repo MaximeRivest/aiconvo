@@ -33,7 +33,9 @@ const VOICE_PREFS_KEY = 'chattering.voice.v1';
 const VOICE_ACT_AT = 0.8;        // most actions
 const VOICE_EASY_AT = 0.6;       // going somewhere: "go back" undoes it
 const VOICE_RISKY_AT = 0.92;     // hard to take back
-const VOICE_EASY = new Set(['open', 'help', 'settings', 'go_home', 'go_back', 'go_forward', 'text_size', 'go_to_line', 'ask_box', 'command_box']);
+// Easy: moving, looking, highlighting, folding, selecting — seen at once, undone at once.
+const VOICE_EASY = new Set(['open', 'help', 'settings', 'go_home', 'go_back', 'go_forward', 'text_size', 'go_to_line', 'ask_box', 'command_box',
+  'autoscroll', 'autoscroll_adjust', 'point', 'fold', 'zen', 'unread', 'tree_move', 'find', 'find_again', 'select', 'chunk', 'scroll']);
 const VOICE_RISKY = new Set(['send', 'stop_listening', 'replace', 'rewrite', 'reject_change']);
 const VOICE_PENDING_MS = 12000;  // a suggestion waits this long for a yes
 const VOICE_DECISIONS_SHOWN = 8;
@@ -149,6 +151,8 @@ function voiceStop() {
   }
   voiceEndDictation();
   voiceDropPending('cancelled');
+  voiceAutoscrollStop();
+  voiceSetFocus(null);
   voice.status = 'off';
   voice.error = '';
 }
@@ -162,10 +166,18 @@ function voiceFail(message) {
 // ---- what the server sends ----
 
 let voiceErrorShown = '';
+const VOICE_STOP_WORD = /^(stop|halt|enough|freeze|wait|pause|there)\W*$/i;
 function voiceEvent(e) {
   if (e.type === 'heard') {
     voice.heard = { committed: e.committed, stable: e.stable, volatile: e.volatile, windowSeconds: e.windowSeconds, asrMs: e.asrMs };
     if (voice.status === 'error') { voice.status = 'listening'; voice.error = ''; }
+    // While scrolling, "stop" acts on the live words, at the first short
+    // pause: waiting for the end of the sentence and for Jev would carry
+    // the page a second past where you said it.
+    if (voice.autoscroll && Number.isFinite(e.decided)) {
+      const fresh = [e.committed, e.stable, e.volatile].join(' ').split(/\s+/).filter(Boolean).slice(e.decided);
+      if (fresh.length && fresh.length <= 4 && fresh.some(w => VOICE_STOP_WORD.test(w))) voiceAutoscrollStop('heard \u201c' + fresh.join(' ') + '\u201d');
+    }
     voicePaintHeard();
   } else if (e.type === 'utterance') {
     // One at a time, in order: an action may change what the next one sees.
@@ -188,6 +200,19 @@ function voiceEvent(e) {
 const voiceEditor = () => (typeof fileWs !== 'undefined' && fileWs && fileWs.editor && fileWs.editor.view ? fileWs.editor : null);
 const voiceAskOpen = () => typeof askBox !== 'undefined' && askBox && askBox.root && askBox.root.isConnected;
 const voiceVisible = el => !!(el && el.offsetParent !== null);
+// Drawn and in the window (SVG marks have no offsetParent).
+const voiceInView = el => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth; };
+// A click as the mouse gives it; SVG elements have no click().
+function voiceClick(el) {
+  if (typeof el.click === 'function') el.click();
+  else el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+}
+// What voice just touched blinks, so you see it (and on e-ink too: an outline, no fade).
+function voiceFlash(el) {
+  if (!el || !el.classList) return;
+  el.classList.add('voice-pressed');
+  setTimeout(() => el.classList.remove('voice-pressed'), 900);
+}
 
 // ---- what can be picked on screen ----
 // Each kind: the rows that are it, the key that names one across
@@ -205,9 +230,27 @@ const VOICE_PICKABLE = [
     title: el => voiceText(el.querySelector('.sr-title, .mobile-work-title, .title, .t') || el) },
   { sel: '#fbList button[data-fb-entry]:not([disabled])', kind: el => (/^▸/.test(voiceText(el)) ? 'folder' : 'file'),
     key: el => 'fb:' + voiceText(el).replace(/^[▸·]\s*/, ''), title: el => voiceText(el).replace(/^[▸·]\s*/, '') },
+  // Timeline marks (home and a project's): a click shows the mark's card,
+  // whose buttons (open…) are then pressed by name. Named with the project,
+  // so "the voice mark in chattering" finds it.
+  { sel: '.tmark[data-rel], .tmark[data-mg], .tmark[data-epic], .tmark[data-note]', kind: 'mark', svg: true,
+    key: el => 'mark:' + (el.dataset.rel || el.dataset.mg || 'epic/' + (el.dataset.epic || '') + (el.dataset.note ? 'note/' + el.dataset.note : '')),
+    title: el => voiceMarkTitle(el) },
+  // The conversation tree's boxes: a click selects one; "open it" reads it.
+  { sel: '.tnode[data-tn]', kind: 'box', key: el => 'tn:' + el.dataset.tn, title: el => voiceText(el) },
 ];
-const VOICE_REGIONS = [['#side', 'left panel'], ['#rightFiles', 'right panel'], ['#agentsPop', 'agents panel'], ['#view', 'main view']];
-const VOICE_PLURAL = { conversation: 'conversations', file: 'files', folder: 'files and folders', project: 'projects' };
+const VOICE_REGIONS = [['#side', 'left panel'], ['#rightFiles', 'right panel'], ['#agentsPop', 'agents panel'], ['.mgantt', 'project timeline'], ['#list', 'timeline'], ['#treewrap', 'tree'], ['#treebar', 'tree bar'], ['#view', 'main view']];
+const VOICE_PLURAL = { conversation: 'conversations', file: 'files', folder: 'files and folders', project: 'projects', mark: 'marks', box: 'boxes' };
+
+function voiceMarkTitle(el) {
+  const key = el.dataset.rel || el.dataset.mg;
+  const s = key && typeof sessions !== 'undefined' ? sessions.find(x => x.key === key) : null;
+  const shown = (el.querySelector('title')?.textContent || el.getAttribute('title') || el.textContent || '').split('\n')[0].trim();
+  // Both titles: the full one and the timeline's short one.
+  const title = s ? [...new Set([s.title, s.timelineTitle].filter(Boolean))].join(' \u2014 ') || shown : shown.replace(/^[▸✓]\s*(epic|note)\s*·\s*/, '$1 ');
+  const project = s && typeof projectOf === 'function' ? projectOf(s) : '';
+  return (title || key || 'mark').slice(0, 120) + (project ? ' · project ' + project : '');
+}
 
 /**
  * What can be picked now: {items: [{key, kind, title, region, group, el,
@@ -219,7 +262,7 @@ function voicePicks() {
   const items = [], seen = new Set();
   for (const p of VOICE_PICKABLE) {
     for (const el of document.querySelectorAll(p.sel)) {
-      if (!voiceVisible(el)) continue;
+      if (p.svg ? !voiceInView(el) : !voiceVisible(el)) continue;
       const key = p.key(el);
       if (!key || seen.has(key)) continue;
       seen.add(key);
@@ -290,6 +333,12 @@ async function voiceOpenKey(key) {
   const [kind, ...rest] = key.split(':'), id = rest.join(':');
   if (kind === 'conv') { await open(id, 'bottom'); return 'opened ' + ((sessions.find(x => x.key === id) || {}).title || 'the conversation'); }
   if (kind === 'file') { await openLiveFile(id, { project: voiceProject() || null, back: currentHash }); return 'opened ' + id.split('/').pop(); }
+  // A file of another project (named in the sentence): opened in its project.
+  if (kind === 'pfile') {
+    const at = id.indexOf(':'), project = decodeURIComponent(id.slice(0, at)), file = id.slice(at + 1);
+    await openLiveFile(file, { project, back: currentHash });
+    return 'opened ' + file.split('/').pop() + ' in ' + project;
+  }
   if (kind === 'proj') { await showProjectOverview(id); return 'opened the project ' + id; }
   throw new Error('that is no longer on screen');
 }
@@ -328,6 +377,540 @@ function voiceScroller() {
 }
 const voiceLast = sel => [...document.querySelectorAll(sel)].filter(voiceVisible).pop() || null;
 
+// ---- the voice cursor: one highlighted item of the conversation ----
+// "The last answer", "the next step": a message, a group of steps or a
+// thinking block gets an outline, and what is said next acts on it (its
+// buttons, folding it). It survives a re-render (streaming redraws the
+// transcript) by what names it: the entry id, the step group's key.
+
+const VOICE_POINT = {
+  message: { sel: '.msg.user, .msg.assistant', noun: 'message' },
+  answer: { sel: '.msg.assistant', noun: 'answer' },
+  mine: { sel: '.msg.user', noun: 'message of yours' },
+  steps: { sel: '.toolgroup', noun: 'group of steps' },
+  thinking: { sel: '.msg.thinking', noun: 'thinking block' },
+};
+const voiceTranscript = () => (viewKind === 'conversation' ? $('conversationTranscript') : null);
+const voiceFolded = el => { for (let d = el.parentElement && el.parentElement.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) if (!d.open) return true; return false; };
+
+function voicePointItems(thing) {
+  const root = voiceTranscript();
+  if (!root) return [];
+  const all = [...root.querySelectorAll(VOICE_POINT[thing].sel)];
+  // Messages hidden in a folded group (commentary between steps) are not
+  // "the last message"; steps and thinking open their group when pointed at.
+  return thing === 'steps' || thing === 'thinking' ? all : all.filter(el => !voiceFolded(el));
+}
+
+// Where the eye is: the item nearest the middle of the view.
+function voiceNearestMiddle(items) {
+  const view = $('view'), r = view ? view.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const mid = (r.top + r.bottom) / 2;
+  let best = null, bestD = Infinity;
+  for (const el of items) {
+    const b = el.getBoundingClientRect();
+    if (!b.height) continue;
+    const d = b.top <= mid && b.bottom >= mid ? 0 : Math.min(Math.abs(b.top - mid), Math.abs(b.bottom - mid));
+    if (d < bestD) { best = el; bestD = d; }
+  }
+  return best;
+}
+
+function voiceFocus() {
+  const f = voice.focus;
+  if (!f) return null;
+  if (f.el && f.el.isConnected) return f.el;
+  const root = voiceTranscript();
+  const el = root && f.ref ? root.querySelector(f.ref) : null;
+  if (!el) { voice.focus = null; return null; }
+  f.el = el;
+  el.classList.add('voice-focus');
+  return el;
+}
+
+function voiceSetFocus(el) {
+  const old = voiceFocus();
+  if (old) old.classList.remove('voice-focus');
+  if (!el) { voice.focus = null; return; }
+  // A thinking block or a message inside a folded group: open the group.
+  for (let d = el.parentElement && el.parentElement.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) {
+    if (!d.open) { const s = d.querySelector(':scope > summary'); if (s) s.click(); else d.open = true; }
+  }
+  // Steps and thinking are pointed at to be seen: they open.
+  if (el.matches('details')) voiceSetDetails(el, true);
+  const ref = el.dataset.eid ? `[data-eid="${CSS.escape(el.dataset.eid)}"]${el.classList.contains('thinking') ? '.thinking' : ''}`
+    : el.dataset.gkey ? `.toolgroup[data-gkey="${CSS.escape(el.dataset.gkey)}"]` : el.dataset.ts ? `[data-ts="${CSS.escape(el.dataset.ts)}"]` : null;
+  voice.focus = { el, ref };
+  el.classList.add('voice-focus');
+  const view = $('view');
+  el.scrollIntoView({ block: view && el.offsetHeight > view.clientHeight * 0.7 ? 'start' : 'center' });
+}
+
+function voicePoint({ thing = 'message', place }) {
+  const spec = VOICE_POINT[thing] || VOICE_POINT.message;
+  const items = voicePointItems(thing in VOICE_POINT ? thing : 'message');
+  if (!items.length) throw new Error('there is no ' + spec.noun + ' here');
+  // Next and previous go from the highlighted item (of any kind), else
+  // from the middle of the view, in the order of the page.
+  const every = voicePointItems('message').concat(voicePointItems('steps'), voicePointItems('thinking'));
+  const from = voiceFocus() || voiceNearestMiddle(every);
+  const before = el => from && (el.compareDocumentPosition(from) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const after = el => from && (el.compareDocumentPosition(from) & Node.DOCUMENT_POSITION_PRECEDING);
+  let el;
+  if (place === 'last') el = items[items.length - 1];
+  else if (place === 'second_last') el = items[items.length - 2];
+  else if (place === 'first') el = items[0];
+  else if (place === 'next') el = from ? items.find(after) : items[0];
+  else if (place === 'previous') el = from ? [...items].reverse().find(before) : items[items.length - 1];
+  else el = voiceNearestMiddle(items);
+  if (!el) throw new Error(place === 'next' ? 'that was the last ' + spec.noun : place === 'previous' ? 'that was the first ' + spec.noun : 'there is no such ' + spec.noun);
+  voiceSetFocus(el);
+  const words = voiceText(el.querySelector('.md') || el.querySelector('summary') || el).slice(0, 50);
+  return 'highlighted ' + (place === 'here' ? 'this ' : 'the ' + String(place || '').replace('_', ' ') + ' ') + spec.noun + (words ? ': \u201c' + words + '\u2026\u201d' : '');
+}
+
+// What "it" means with nothing highlighted: the last answer.
+const voiceFocusOrLast = () => voiceFocus() || voicePointItems('answer').pop() || voicePointItems('message').pop() || null;
+
+// ---- buttons by name ----
+// Every control on screen that a click can press: buttons, menu headings,
+// links; the items of closed menus (the + menu, a message's "more…") as
+// "menu › item". A transcript item's own buttons (copy, read, fork, review
+// changes…) come only from the highlighted one (else the last answer): a
+// screen of forty "copy" buttons would name none.
+
+const VOICE_CONTROL_SEL = 'button, summary, [role="button"], a[href]';
+const VOICE_TRANSCRIPT_ITEM = '.msg, .toolgroup, .tg-review, .dg-cards';
+const VOICE_RISKY_CONTROL = /\b(delete|remove|abort|discard|reset|forget|send|merge|archive|stop|cancel|clear|revoke|leave)\b/i;
+const VOICE_CONTROL_REGIONS = [['#voiceDock', null], ['#voiceHints', null], ['#agentCompose', 'the message box'], ['#treebar', 'the tree bar'], ['#markPop', 'the mark card'], ['.mgantt', 'the project timeline'], ['#side', 'the left panel'], ['#rightFiles', 'the right panel'], ['header, #floatHead', 'the top bar'], ['#view', 'the page']];
+
+function voiceControlLabel(el, { plain = false } = {}) {
+  const text = (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim();
+  const title = (el.getAttribute('title') || '').split('\n')[0].trim();
+  // "+", "−", "✕" say little: their title says what they do.
+  const label = (text.length > 3 ? text : title ? (text ? text + ' (' + title + ')' : title) : text).slice(0, 90);
+  // A menu's heading opens or closes it: say so ("open the attachments").
+  const d = !plain && el.matches('summary') && el.parentElement && el.parentElement.matches('details') ? el.parentElement : null;
+  if (!d || !label) return label;
+  // What is in it, so "open the attachments" finds the menu with "Attach image".
+  const items = [...d.querySelectorAll(':scope > :not(summary) button, :scope > button')].slice(0, 6).map(b => (b.textContent || '').replace(/\s+/g, ' ').trim()).filter(t => t && t.length < 30);
+  return (d.open ? 'close the menu: ' : 'open the menu: ') + label + (items.length && !d.closest('.msg, .toolgroup') ? ' (' + items.join(', ') + ')' : '');
+}
+const voiceDrawn = el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+
+function voiceCollectControls() {
+  const found = [];
+  const seen = new Set();
+  const add = (el, where, { keep = false, menu = null } = {}) => {
+    if (seen.has(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') return;
+    const label = voiceControlLabel(el);
+    if (!label) return;
+    seen.add(el);
+    found.push({ el, menu, keep, label: (menu ? voiceControlLabel(menu.querySelector(':scope > summary'), { plain: true }) + ' \u203a ' : '') + label, where });
+  };
+  // The highlighted item's own (hidden until hover, still pressable), and
+  // the review buttons of its turn.
+  const focus = voiceFocusOrLast();
+  if (focus) {
+    const where = voiceFocus() ? 'on the highlighted ' + (focus.classList.contains('toolgroup') ? 'steps' : 'message') : 'on the last answer';
+    // A message: its action row (copy, read, notebook, more… › fork). Steps:
+    // the files they touched. Folding is "fold"; links in the text are not
+    // the item's buttons.
+    const own = focus.classList.contains('toolgroup') ? focus.querySelectorAll('[data-file-diff]') : focus.querySelectorAll(':scope > .msg-actions ' + VOICE_CONTROL_SEL.split(', ').join(', :scope > .msg-actions ') + ', :scope > .unfold');
+    for (const el of own) {
+      const menu = el.closest('details:not([open])');
+      if (menu && el.matches('summary') && el.parentElement === menu) { add(el, where, { keep: true }); continue; }
+      add(el, where, { keep: true, menu: menu && focus.contains(menu) ? menu : null });
+    }
+    // This turn's review buttons: between the user message before and the next one.
+    for (const dir of ['previousElementSibling', 'nextElementSibling']) {
+      for (let s = focus[dir]; s && !s.matches('.msg.user'); s = s[dir]) {
+        if (s.matches('.tg-review')) add(s, s.classList.contains('tg-review-turn') ? 'for the whole turn' : 'for the steps ' + (dir === 'nextElementSibling' ? 'after it' : 'before it'), { keep: true });
+      }
+    }
+  }
+  // Review buttons in view: each names its own steps ("Review whole turn ·
+  // 4 steps"), so they are told apart without a highlight.
+  // The last turn's review is offered even scrolled away: "review the turn".
+  const transcript = voiceTranscript();
+  if (transcript) {
+    for (const el of transcript.querySelectorAll('.tg-review')) if (voiceInView(el)) add(el, el.classList.contains('tg-review-turn') ? 'for a whole turn, on screen' : 'for steps on screen');
+    const lastTurn = [...transcript.querySelectorAll('.tg-review-turn')].pop();
+    if (lastTurn) add(lastTurn, 'for the last turn with steps');
+  }
+  // A timeline mark's card is showing: a tap on it opens its conversation.
+  const pop = $('markPop');
+  if (pop && !pop.hidden && pop.dataset.rel) {
+    const title = voiceText(pop.querySelector('h4'));
+    seen.add(pop);
+    found.push({ el: pop, menu: null, keep: true, label: 'open the selected mark' + (title ? ': ' + title : ''), where: 'its card on the timeline' });
+  }
+  // Everything else pressable in the window, and closed menus' items.
+  for (const el of document.querySelectorAll(VOICE_CONTROL_SEL)) {
+    if (seen.has(el)) continue;
+    const region = VOICE_CONTROL_REGIONS.find(([sel]) => el.closest(sel));
+    if (region && region[1] === null) continue;
+    if (el.closest('#conversationTranscript') && el.closest(VOICE_TRANSCRIPT_ITEM)) continue;
+    const menu = el.closest('details:not([open])');
+    if (menu && !(el.matches('summary') && el.parentElement === menu)) {
+      const head = menu.querySelector(':scope > summary');
+      if (!head || !voiceInView(head) || !voiceDrawn(head)) continue;
+      add(el, region ? 'in ' + region[1] : 'on screen', { menu });
+      continue;
+    }
+    if (!voiceInView(el) || !voiceDrawn(el)) continue;
+    add(el, region ? 'in ' + region[1] : 'on screen');
+  }
+  return found;
+}
+
+// The list Jev picks from; the controls stay for the answer to name one.
+function voiceControlsList() {
+  const found = voiceCollectControls();
+  voice.controls = new Map(found.map((c, i) => ['c' + i, c]));
+  return { controls: found.map((c, i) => ({ id: 'c' + i, keep: c.keep, label: c.label + ' \u00b7 ' + c.where })) };
+}
+
+function voicePress(id) {
+  const c = voice.controls && voice.controls.get(id);
+  if (!c || !c.el.isConnected) throw new Error('that button is no longer on screen');
+  if (c.menu && !c.menu.open) c.menu.open = true;
+  voiceFlash(c.el);
+  voiceClick(c.el);
+  return 'pressed \u201c' + c.label + '\u201d';
+}
+
+// ---- folding ----
+// Folds are opened and closed through their own headings (a click), as
+// by hand: the app remembers a fold where the click handler records it.
+function voiceSetDetails(d, open) {
+  if (d.open === open) return false;
+  const s = d.querySelector(':scope > summary');
+  if (s) s.click(); else d.open = open;
+  if (d.open !== open) d.open = open;
+  return true;
+}
+function voiceFold({ how = 'open', what = 'this' }) {
+  const open = how !== 'close';
+  if (what === 'live') {
+    const b = $('lsLine');
+    if (!b || !voiceVisible(b)) throw new Error('no reply is being written now');
+    if ((b.getAttribute('aria-expanded') === 'true') !== open) b.click();
+    return (open ? 'showing' : 'hid') + ' the live stream';
+  }
+  const root = voiceTranscript() || $('view');
+  if (what === 'everything' && !open && typeof collapseAllFolds === 'function') { collapseAllFolds(); return 'folded everything'; }
+  if (what === 'this') {
+    const el = voiceFocusOrLast();
+    if (!el) throw new Error('nothing is highlighted');
+    if (!voiceFocus()) voiceSetFocus(el);
+    if (el.matches('details')) { voiceSetDetails(el, open); return (open ? 'opened ' : 'closed ') + 'it'; }
+    const unfold = el.querySelector(':scope > .unfold');
+    if (open && unfold) { unfold.click(); return 'showing the whole message'; }
+    if (open) return 'the message is already whole';
+    throw new Error('a message cannot be folded back; steps and thinking can');
+  }
+  const sel = { steps: '.toolgroup', thinking: '.msg.thinking', everything: 'details' }[what] || '.toolgroup';
+  let n = 0;
+  for (const d of root.querySelectorAll(sel)) {
+    if (what === 'thinking' && open) for (let g = d.parentElement && d.parentElement.closest('details'); g; g = g.parentElement && g.parentElement.closest('details')) voiceSetDetails(g, true);
+    if (voiceSetDetails(d, open)) n++;
+  }
+  if (what === 'everything' && open) root.querySelectorAll('.msg > .unfold').forEach(b => { b.click(); n++; });
+  return (open ? 'opened ' : 'closed ') + n + ' ' + (what === 'everything' ? 'folds' : what);
+}
+
+// ---- continuous scrolling ----
+// Smooth on a screen; on e-ink (a theme without motion) a page every few
+// seconds instead: a panel refreshing at 60 frames a second only smears.
+// A wheel, a touch or a key takes the page back. "Stop" is caught in the
+// live words (voiceEvent), before the sentence is even decided.
+const VOICE_SCROLL_SPEEDS = { slow: 45, normal: 90, fast: 220 }; // px per second
+const VOICE_EINK_PAGE_MS = { slow: 7000, normal: 4500, fast: 2500 };
+const voiceEink = () => document.documentElement.dataset.themeMotion === 'none';
+
+function voiceAutoscroll({ direction = 'down', speed = 'normal' }) {
+  const el = voiceScroller();
+  if (!el) throw new Error('nothing scrolls here');
+  voiceAutoscrollStop();
+  if (!VOICE_SCROLL_SPEEDS[speed]) speed = 'normal';
+  const s = { el, dir: direction === 'up' ? -1 : 1, pxs: VOICE_SCROLL_SPEEDS[speed], speed, stalled: 0, abort: new AbortController() };
+  voice.autoscroll = s;
+  const stop = () => voiceAutoscrollStop('you took over');
+  for (const ev of ['wheel', 'touchstart', 'pointerdown']) el.addEventListener(ev, stop, { passive: true, signal: s.abort.signal });
+  document.addEventListener('keydown', stop, { signal: s.abort.signal });
+  if (voiceEink()) {
+    const step = () => {
+      if (voice.autoscroll !== s) return;
+      const before = el.scrollTop;
+      el.scrollTop += s.dir * el.clientHeight * 0.85;
+      if (el.scrollTop === before) return voiceAutoscrollStop('reached the ' + (s.dir > 0 ? 'end' : 'top'));
+      // A page every few seconds; faster / slower change the pace.
+      s.timer = setTimeout(step, VOICE_EINK_PAGE_MS[s.speed] * VOICE_SCROLL_SPEEDS[s.speed] / s.pxs);
+    };
+    s.timer = setTimeout(step, 600);
+  } else {
+    let last = performance.now(), carry = 0;
+    const frame = now => {
+      if (voice.autoscroll !== s) return;
+      carry += s.dir * s.pxs * Math.min(0.1, (now - last) / 1000);
+      last = now;
+      const whole = Math.trunc(carry);
+      if (whole) {
+        const before = el.scrollTop;
+        el.scrollTop += whole;
+        carry -= whole;
+        // Stuck at an end for half a second: done.
+        if (el.scrollTop === before) { if (++s.stalled > 30) return voiceAutoscrollStop('reached the ' + (s.dir > 0 ? 'end' : 'top')); } else s.stalled = 0;
+      }
+      s.raf = requestAnimationFrame(frame);
+    };
+    s.raf = requestAnimationFrame(frame);
+  }
+  voicePaint();
+  return 'scrolling ' + (s.dir > 0 ? 'down' : 'up') + (voiceEink() ? ', a page at a time' : '') + ' \u2014 say \u201cstop\u201d';
+}
+
+function voiceAutoscrollStop(why) {
+  const s = voice.autoscroll;
+  if (!s) return false;
+  voice.autoscroll = null;
+  voice.scrollStoppedAt = Date.now();
+  cancelAnimationFrame(s.raf);
+  clearTimeout(s.timer);
+  s.abort.abort();
+  if (why) voiceNote('scrolling stopped: ' + why);
+  voicePaint();
+  return true;
+}
+
+function voiceAutoscrollAdjust({ how }) {
+  const s = voice.autoscroll;
+  if (how === 'stop' || !s) {
+    // "Stop" heard in the live words already stopped it.
+    if (!voiceAutoscrollStop() && how !== 'stop') throw new Error('nothing is scrolling');
+    return 'stopped scrolling';
+  }
+  if (how === 'reverse') s.dir = -s.dir;
+  else if (how === 'faster') s.pxs = Math.min(900, s.pxs * 1.7);
+  else if (how === 'slower') s.pxs = Math.max(15, s.pxs / 1.7);
+  voicePaint();
+  return how === 'reverse' ? 'scrolling ' + (s.dir > 0 ? 'down' : 'up') : how + ' (' + Math.round(s.pxs) + ' px/s)';
+}
+
+// A short line in the overlay, for what voice did on its own.
+function voiceNote(text) {
+  voiceRecord({ said: '', at: Date.now(), status: 'done', summary: text });
+}
+
+// ---- in a file: find, select, code chunks ----
+
+// Words said as a pattern: "parse config" finds parse config, parse_config,
+// parseConfig, parse-config.
+const voiceWordsPattern = words => new RegExp(String(words).split(/\s+/).filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s_.\\-]*'), 'gi');
+const VOICE_FIND_VERBS = /^(find|search|look|where|select|from|to|until|go|the word|for)\b/i;
+
+// Runs of words said that are in the file (for find and select).
+function voiceFoundList(said) {
+  const ed = voiceEditor();
+  if (!ed) return {};
+  const text = ed.view.state.doc.toString();
+  const found = [];
+  for (const s of ChatteringVoiceActions.spansOf(said)) {
+    if (VOICE_FIND_VERBS.test(s) || s.length < 2) continue;
+    voiceWordsPattern(s).lastIndex = 0;
+    if (voiceWordsPattern(s).test(text)) found.push(s);
+  }
+  // Longest first: "parse config" before "parse".
+  found.sort((a, b) => b.length - a.length);
+  return { found: found.slice(0, 60).map(s => ({ id: s, label: s })) };
+}
+
+function voiceSelect(from, to, { focus = true } = {}) {
+  const ed = voiceEditor();
+  ed.view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true, userEvent: 'select.voice' });
+  // A phone or a tablet would raise its keyboard: the selection shows without focus.
+  if (focus && !matchMedia('(pointer: coarse)').matches) ed.focus();
+}
+
+function voiceFind(words, dir = 1) {
+  const ed = voiceEditor(), state = ed.view.state, text = state.doc.toString();
+  const re = voiceWordsPattern(words), hits = [];
+  for (let m; (m = re.exec(text));) { hits.push([m.index, m.index + m[0].length]); if (!m[0].length) re.lastIndex++; }
+  if (!hits.length) throw new Error('\u201c' + words + '\u201d is not in the file');
+  const sel = state.selection.main;
+  let i = dir > 0 ? hits.findIndex(([a]) => a > sel.from || (a === sel.from && sel.empty)) : hits.map(([a]) => a < sel.from).lastIndexOf(true);
+  if (i < 0) i = dir > 0 ? 0 : hits.length - 1; // around the end
+  voiceSelect(hits[i][0], hits[i][1]);
+  voice.lastFind = words;
+  return 'found \u201c' + words + '\u201d \u00b7 ' + (i + 1) + ' of ' + hits.length + ' \u00b7 line ' + state.doc.lineAt(hits[i][0]).number;
+}
+
+function voiceSelectWhat({ what, from_line, to_line, from, to }) {
+  const ed = voiceEditor(), state = ed.view.state, doc = state.doc, sel = state.selection.main;
+  // "The sentence", "the line": where the cursor is, or where what is
+  // selected starts (after "find", the words found).
+  const at = sel.empty ? sel.head : sel.from;
+  const line = doc.lineAt(at);
+  const paragraph = () => {
+    let a = line.number, b = line.number;
+    while (a > 1 && doc.line(a - 1).text.trim()) a--;
+    while (b < doc.lines && doc.line(b + 1).text.trim()) b++;
+    return [doc.line(a).from, doc.line(b).to];
+  };
+  let range;
+  if (what === 'none') range = [sel.head, sel.head];
+  else if (what === 'all') range = [0, doc.length];
+  else if (what === 'line') range = [line.from, line.to];
+  else if (what === 'paragraph') range = paragraph();
+  else if (what === 'word') { const w = state.wordAt(at); if (!w) throw new Error('the cursor is not on a word'); range = [w.from, w.to]; }
+  else if (what === 'sentence') {
+    const [pa, pb] = paragraph(), t = doc.sliceString(pa, pb), rel = at - pa;
+    let a = 0;
+    for (let m, re = /[.!?]\s+/g; (m = re.exec(t));) { if (m.index + m[0].length <= rel) a = m.index + m[0].length; else break; }
+    const end = t.slice(rel).search(/[.!?](\s|$)/);
+    range = [pa + a, end < 0 ? pb : pa + rel + end + 1];
+  } else if (what === 'chunk') {
+    const c = ed.codeBlockAtCursor && ed.codeBlockAtCursor();
+    if (!c) throw new Error('the cursor is not in a code chunk');
+    range = [c.from, c.to];
+  } else if (what === 'lines') {
+    const a = Number(from_line), b = Number(to_line || from_line);
+    if (!a || a > doc.lines) throw new Error('the file has ' + doc.lines + ' lines');
+    range = [doc.line(Math.min(a, b)).from, doc.line(Math.min(doc.lines, Math.max(a, b))).to];
+  } else if (what === 'between') {
+    if (!from || !to) throw new Error('from which words to which?');
+    const text = doc.toString(), start = [...text.matchAll(voiceWordsPattern(from))];
+    if (!start.length) throw new Error('\u201c' + from + '\u201d is not in the file');
+    // The start nearest the cursor, the end after it.
+    const s = start.reduce((best, m) => (Math.abs(m.index - at) < Math.abs(best.index - at) ? m : best));
+    const endRe = voiceWordsPattern(to);
+    endRe.lastIndex = s.index + s[0].length;
+    const e = endRe.exec(text);
+    if (!e) throw new Error('\u201c' + to + '\u201d does not come after \u201c' + from + '\u201d');
+    range = [s.index, e.index + e[0].length];
+  } else throw new Error('select what?');
+  voiceSelect(range[0], range[1]);
+  const n = doc.lineAt(range[1]).number - doc.lineAt(range[0]).number + 1;
+  return what === 'none' ? 'unselected' : 'selected ' + (what === 'lines' || what === 'between' ? '' : 'the ' + what + ' \u00b7 ') + n + (n === 1 ? ' line' : ' lines') + ' (' + (range[1] - range[0]) + ' characters)';
+}
+
+const voiceCells = () => { const ed = voiceEditor(); return ed && ed.listCells ? ed.listCells() : []; };
+function voiceChunk({ place = 'next' }) {
+  const ed = voiceEditor(), cells = voiceCells(), head = ed.view.state.selection.main.head;
+  if (!cells.length) throw new Error('this file has no code chunks');
+  const here = cells.findIndex(c => c.from <= head && head <= c.to);
+  let i;
+  if (place === 'first') i = 0;
+  else if (place === 'last') i = cells.length - 1;
+  else if (place === 'here') i = here >= 0 ? here : -1;
+  else if (place === 'previous') i = here >= 0 ? here - 1 : cells.map(c => c.to < head).lastIndexOf(true);
+  else i = here >= 0 ? here + 1 : cells.findIndex(c => c.from > head);
+  if (i < 0 || i >= cells.length) throw new Error(place === 'next' ? 'that was the last chunk' : place === 'previous' ? 'that was the first chunk' : 'the cursor is not in a chunk');
+  const c = cells[i], firstLine = ed.view.state.doc.lineAt(c.from);
+  // The cursor on the chunk's first line of code, the chunk in view.
+  const at = Math.min(c.to, firstLine.to + 1);
+  ed.view.dispatch({ selection: { anchor: at }, scrollIntoView: true, userEvent: 'select.voice' });
+  if (!matchMedia('(pointer: coarse)').matches) ed.focus();
+  return 'chunk ' + (i + 1) + ' of ' + cells.length + (c.lang ? ' (' + c.lang + ')' : '');
+}
+async function voiceChunkRun({ which = 'this' }) {
+  const ed = voiceEditor();
+  if (which === 'all') { await runAllDocCells(); return 'running every chunk'; }
+  if (which === 'stop') { if (!docState.runner.running) throw new Error('nothing is running'); docState.runner.cancel(); return 'stopping the run'; }
+  const cell = ed.codeBlockAtCursor();
+  if (!cell) throw new Error('the cursor is not in a code chunk \u2014 say \u201cnext chunk\u201d first');
+  const out = runDocCell(cell, { advance: which === 'advance' });
+  out.catch(() => {});
+  return 'running the chunk' + (which === 'advance' ? ', then the next one' : '');
+}
+
+// ---- handing a request to the coding agent ----
+// The server runs it (the ask box's model, else the project's) and it ends
+// with what to show. The page opens that when it comes back — or, if you
+// have moved on meanwhile, offers it rather than pulling you away.
+const VOICE_DELEGATE_POLL_MS = 1500;
+async function voiceDelegate(said) {
+  const entry = voice.currentEntry;
+  const model = typeof askPrefs === 'function' ? askPrefs().model : null;
+  const at = model ? model.indexOf('/') : -1;
+  const out = await postJson('/api/voice/delegate', {
+    said, screen: voiceScreen(), project: voiceProject(), decision: entry && entry.id,
+    models: at > 0 ? [{ provider: model.slice(0, at), modelId: model.slice(at + 1) }] : [],
+  });
+  if (out.error) throw new Error(out.error);
+  voiceFollowDelegate(out, currentHash, said);
+  return 'handed to the agent \u2014 it will bring it on screen';
+}
+
+function voiceFollowDelegate(d, hash, said) {
+  const note = { said: '', at: Date.now(), status: 'deciding', summary: '' };
+  const paint = text => { note.summary = text; voicePaintDecisions(); };
+  voiceRecord(note);
+  paint('\u2026 the agent is looking for \u201c' + said.slice(0, 60) + '\u201d');
+  const tick = async () => {
+    let st;
+    try { st = await (await fetch('/api/voice/delegate?id=' + encodeURIComponent(d.id))).json(); } catch { st = null; }
+    if (!voice.on) return;
+    if (!st || st.status === 'running') { if (st) paint('\u2026 the agent is looking (' + Math.round((Date.now() - d.startedAt) / 1000) + ' s)'); return setTimeout(tick, VOICE_DELEGATE_POLL_MS); }
+    if (st.status !== 'done' || !st.show || st.show.kind === 'nothing') {
+      note.status = 'failed';
+      paint('the agent found nothing to show' + (st.show && st.show.why ? ': ' + st.show.why : st.error ? ': ' + st.error : ''));
+      if (!voicePrefs().overlay) toast('\u{1F399} the agent found nothing to show', () => open(st.key), 'err');
+      return;
+    }
+    const go = () => voiceShowFound(st.show);
+    const what = voiceFoundLabel(st.show);
+    note.status = 'done';
+    // Still where you asked: go. Elsewhere now: offer it.
+    if (currentHash === hash) { paint('the agent found ' + what + ' \u2014 ' + (st.reply || '').slice(0, 120)); await go(); }
+    else { paint('the agent found ' + what + ' (click to open)'); toast('\u{1F399} the agent found ' + what + ' \u2014 open it', go); }
+  };
+  setTimeout(tick, VOICE_DELEGATE_POLL_MS);
+}
+const voiceFoundLabel = show => show.kind === 'file' ? show.path.split('/').pop() + (show.line ? ':' + show.line : '') : show.kind === 'conversation' ? '\u201c' + (show.title || 'a conversation') + '\u201d' : 'the project ' + show.project;
+async function voiceShowFound(show) {
+  if (show.kind === 'file') return openLiveFile(show.path, { project: show.project || null, line: show.line || null, back: currentHash });
+  if (show.kind === 'conversation') return open(show.key);
+  if (show.kind === 'project') return showProjectOverview(show.project);
+}
+
+// What "open it" means with nothing named: the tree's selected box, the
+// open card of a timeline mark. Null when nothing is selected.
+function voiceOpenSelected() {
+  if (viewKind === 'tree' && typeof treeNav !== 'undefined' && treeNav && treeNav.sel) return { action: 'tree_move', args: { move: 'open' } };
+  // A mark's card opens its conversation when tapped: the same here.
+  const pop = $('markPop');
+  if (pop && !pop.hidden && pop.dataset.rel) return { action: 'open', args: { name: 'conv:' + pop.dataset.rel } };
+  return null;
+}
+
+// ---- unread, zen, the tree ----
+
+function voiceUnread() {
+  const list = typeof finishedUnreadSessions === 'function' ? finishedUnreadSessions() : [];
+  if (!list.length) throw new Error('nothing unread');
+  const s = list[0];
+  open(s.key, 'bottom');
+  return 'opened \u201c' + (s.timelineTitle || s.title || 'the conversation') + '\u201d' + (list.length > 1 ? ' \u00b7 ' + (list.length - 1) + ' more unread' : ' \u00b7 nothing else unread');
+}
+
+function voiceZen({ how = 'toggle' }) {
+  const on = how === 'on' ? true : how === 'off' ? false : !document.body.classList.contains('zen');
+  setZen(on);
+  return on ? 'zen on' + (viewKind === 'home' ? ' (it shows once a conversation or a file is open)' : '') : 'zen off';
+}
+
+const VOICE_TREE_KEYS = { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', open: 'Enter' };
+function voiceTreeMove({ move }) {
+  const key = VOICE_TREE_KEYS[move];
+  if (!key) throw new Error('which way?');
+  const before = treeNav.sel;
+  treeKeydown({ key, preventDefault() {}, target: document.body });
+  if (move !== 'open' && treeNav && treeNav.sel === before) throw new Error('nothing further that way');
+  return move === 'open' ? 'opened the box' : 'moved ' + move;
+}
+
 const VOICE_ACTIONS = {
   stop_listening: { available: () => true, run: async () => { await voiceSetOn(false); return 'stopped listening'; } },
   stop_dictation: { available: () => voice.mode === 'command', run: () => 'you were not dictating — still listening for commands' },
@@ -341,9 +924,27 @@ const VOICE_ACTIONS = {
     available: () => !!voiceLast('#view .msg-regenerate'),
     run: () => { const b = voiceLast('#view .msg-regenerate'); b.scrollIntoView({ block: 'nearest' }); b.click(); return 'asking again'; },
   },
-  expand: {
-    available: () => !!voiceLast('#view .msg .more, #view .msg .unfold'),
-    run: () => { voiceLast('#view .msg .more, #view .msg .unfold').click(); return 'expanded'; },
+  autoscroll: { available: () => !!voiceScroller() && voice.mode === 'command', run: args => voiceAutoscroll(args) },
+  // While scrolling, and a moment after "stop" was caught in the live words
+  // (the sentence then arrives and must not do anything else).
+  autoscroll_adjust: { available: () => !!voice.autoscroll || Date.now() - (voice.scrollStoppedAt || 0) < 8000, run: args => voiceAutoscrollAdjust(args) },
+  point: { available: () => !!voiceTranscript() && voicePointItems('message').length > 0, run: args => voicePoint(args) },
+  press: { available: () => true, lists: () => voiceControlsList(), run: ({ control }) => voicePress(control) },
+  fold: {
+    available: () => !!(voiceTranscript() && voiceTranscript().querySelector('details, .unfold')) || !!($('lsLine') && voiceVisible($('lsLine'))),
+    run: args => voiceFold(args),
+  },
+  zen: { available: () => typeof setZen === 'function', run: args => voiceZen(args) },
+  unread: { available: () => typeof finishedUnreadSessions === 'function' && finishedUnreadSessions().length > 0, run: () => voiceUnread() },
+  tree_move: { available: () => viewKind === 'tree' && typeof treeNav !== 'undefined' && !!treeNav, run: args => voiceTreeMove(args) },
+  delegate: { available: () => true, run: (_, said) => voiceDelegate(said) },
+  find: { available: () => !!voiceEditor(), lists: said => voiceFoundList(said), run: ({ text }) => voiceFind(text) },
+  find_again: { available: () => !!(voiceEditor() && voice.lastFind), run: ({ which = 'next' }) => voiceFind(voice.lastFind, which === 'previous' ? -1 : 1) },
+  select: { available: () => !!voiceEditor(), run: args => voiceSelectWhat(args) },
+  chunk: { available: () => voiceCells().length > 0, run: args => voiceChunk(args) },
+  chunk_run: {
+    available: () => voiceCells().length > 0 && typeof docState !== 'undefined' && !!(docState && docState.runner && docState.editor === voiceEditor()),
+    run: args => voiceChunkRun(args),
   },
   scroll: {
     available: () => !!voiceScroller(),
@@ -394,7 +995,8 @@ const VOICE_ACTIONS = {
       if (!pick.item) return voiceOpenKey(pick.key);
       const it = pick.item;
       it.target.scrollIntoView({ block: 'nearest' });
-      it.target.click();
+      voiceFlash(it.target);
+      voiceClick(it.target);
       return 'opened ' + it.title;
     },
   },
@@ -512,7 +1114,7 @@ async function voiceContext(said) {
   const context = { said, heard: voice.heard.committed.split(' ').slice(-120).join(' '), screen: voiceScreen(), mode: voice.mode, lists: {} };
   if (voice.mode === 'dictation') return context;
   context.actions = Object.entries(VOICE_ACTIONS).filter(([, a]) => { try { return a.available(); } catch { return false; } }).map(([id]) => id);
-  for (const id of context.actions) if (VOICE_ACTIONS[id].lists) Object.assign(context.lists, await VOICE_ACTIONS[id].lists());
+  for (const id of context.actions) if (VOICE_ACTIONS[id].lists) Object.assign(context.lists, await VOICE_ACTIONS[id].lists(said));
   if (context.actions.includes('open') && voicePrefs().numbers) voicePaintHints(); // the numbers Jev sees are the ones shown
   const ed = voiceEditor();
   if (ed) {
@@ -528,6 +1130,13 @@ async function voiceContext(said) {
 async function voiceUnderstand(said, asrMs) {
   const entry = { said, asrMs, at: Date.now(), status: 'deciding' };
   voiceRecord(entry);
+  // The "stop" that the live words already acted on arrives as a sentence:
+  // done already, nothing to ask.
+  const words = String(said).trim().split(/\s+/);
+  if (!voice.autoscroll && Date.now() - (voice.scrollStoppedAt || 0) < 8000 && words.length <= 3 && words.some(w => VOICE_STOP_WORD.test(w))) {
+    Object.assign(entry, { status: 'done', summary: 'scrolling stopped' });
+    return voicePaintDecisions();
+  }
   let out;
   try {
     const context = await voiceContext(said);
@@ -544,7 +1153,19 @@ async function voiceUnderstand(said, asrMs) {
   if (d.dictating) return voiceDictation(entry, d);
   if (d.action === 'none') { Object.assign(entry, { status: 'ignored' }); return voicePaintDecisions(); }
   if (d.action === 'confirm' || d.action === 'cancel') return voiceAnswerPending(entry, d.action === 'confirm');
-  const needs = VOICE_RISKY.has(d.action) ? VOICE_RISKY_AT : VOICE_EASY.has(d.action) ? VOICE_EASY_AT : VOICE_ACT_AT;
+  // "Open it", "open this box" with nothing named: what is selected now —
+  // the tree's box, the mark whose card is showing.
+  if (d.action === 'open' && d.missing === 'item') {
+    const sure = (d.alternatives.find(a => a.action === 'open') || {}).probability || 0;
+    const selected = voiceOpenSelected();
+    if (selected) Object.assign(d, selected, { missing: null, confidence: sure });
+  }
+  // A button is as risky as what it says: "delete", "abort", "send"…
+  const control = d.action === 'press' && voice.controls ? voice.controls.get(d.args && d.args.control) : null;
+  const risky = VOICE_RISKY.has(d.action) || (control && VOICE_RISKY_CONTROL.test(control.label)) || (d.action === 'chunk_run' && d.args && d.args.which === 'all');
+  // Stopping the scrolling is never harmful: the top guess is enough.
+  const harmless = d.action === 'autoscroll_adjust' && d.args && d.args.how === 'stop';
+  const needs = risky ? VOICE_RISKY_AT : harmless ? 0 : VOICE_EASY.has(d.action) ? VOICE_EASY_AT : VOICE_ACT_AT;
   if (d.missing || d.confidence < needs) return voiceSuggest(entry, d);
   await voiceRun(entry, d);
 }
@@ -553,6 +1174,7 @@ async function voiceRun(entry, d) {
   const action = VOICE_ACTIONS[d.action];
   try {
     if (!action || !action.available()) throw new Error('that does not apply here now');
+    voice.currentEntry = entry;
     entry.summary = await action.run(d.args || {}, entry.said);
     entry.status = 'done';
     if (!voicePrefs().overlay) toast('\u{1F399} ' + entry.summary);
@@ -622,6 +1244,10 @@ function voiceDescribe(d) {
       : name ? name.replace(/^[a-z]+:/, '').split('/').pop() : '';
     return 'open' + (what ? ': ' + what : '');
   }
+  if (d.action === 'press') {
+    const c = voice.controls && voice.controls.get(d.args && d.args.control);
+    return 'press' + (c ? ' \u201c' + c.label + '\u201d ' + c.where : '');
+  }
   const a = ChatteringVoiceActions.ACTIONS[d.action];
   const args = Object.entries(d.args || {}).map(([k, v]) => (v && typeof v === 'object' ? 'the selection' : String(v).split('/').pop())).filter(Boolean);
   return (a ? a.label : d.action) + (args.length ? ': ' + args.join(' → ') : '');
@@ -685,13 +1311,14 @@ function voicePaint() {
   const pill = $('voiceListenPill');
   if (!shown) { if (pill) pill.remove(); voiceShowOverlay(false); voicePaintSettings(); clearInterval(voice.placeTimer); voice.placeTimer = 0; voicePaintHints(); return; }
   // The bars below move with the view (a conversation opens, a run strip appears).
-  if (!voice.placeTimer) voice.placeTimer = setInterval(() => { voicePlaceDock(); voicePaintHints(); }, 700);
+  if (!voice.placeTimer) voice.placeTimer = setInterval(() => { voicePlaceDock(); voicePaintHints(); voiceFocus(); }, 700);
   voicePlaceDock();
   voicePaintHints();
   const p = voicePill();
   p.dataset.state = voice.status;
   p.dataset.mode = voice.mode;
   const words = voice.mode === 'dictation' ? 'dictating into ' + voice.target.label
+    : voice.autoscroll ? 'scrolling ' + (voice.autoscroll.dir > 0 ? '\u2193' : '\u2191') + ' \u00b7 say stop'
     : voice.status === 'listening' ? 'listening' : voice.status === 'starting' ? 'starting…' : voice.status === 'paused' ? 'paused' : 'not listening';
   p.querySelector('.vl-state').textContent = words;
   p.querySelector('.vl-main').setAttribute('aria-label', words + (voice.error ? ': ' + voice.error : ''));
@@ -768,7 +1395,7 @@ function voicePaintDecisions() {
       : d.status === 'ignored' ? 'not a command' + (dec ? ' · ' + Math.round(dec.confidence * 100) + '%' : '')
       : (d.summary || (dec ? voiceDescribe(dec) : '')) + (d.note ? ' — ' + d.note : '') + (dec && d.status !== 'failed' ? ' · ' + Math.round(dec.confidence * 100) + '%' : '');
     const ask = voice.pending && voice.pending.entry === d ? '<span class="vo-ask"><button type="button" data-vo="yes">Do it</button><button type="button" data-vo="no">No</button></span>' : '';
-    return `<li data-status="${d.status}"><span class="vo-mark" aria-hidden="true">${VOICE_STATUS[d.status] || ''}</span><span class="vo-said">\u201c${esc(d.said)}\u201d</span><span class="vo-what">${esc(what)}</span>${ask}</li>`;
+    return `<li data-status="${d.status}"><span class="vo-mark" aria-hidden="true">${VOICE_STATUS[d.status] || ''}</span>${d.said ? `<span class="vo-said">\u201c${esc(d.said)}\u201d</span>` : ''}<span class="vo-what">${esc(what)}</span>${ask}</li>`;
   }).join('');
   voicePaintOverlayHead();
 }
@@ -842,7 +1469,7 @@ function voiceSettingsHtml() {
   return `<div class="set-group" id="voiceSettings">
     <h3>voice commands</h3>
     <label class="set-check"><input type="checkbox" data-voice="on"${voice.on ? ' checked' : ''}> Always listening on this device <kbd>Alt+L</kbd></label>
-    <div class="set-help">Say what you want — “what can I say” lists it for the screen you are on: “change the model to sonnet”, “reasoning off”, “open the third one”, “the last file”, “the previous one”, “open seven”, “open the file called…”, “open the settings”, “start the microphone” (then talk, then “send”), in a file “go to line 40”, “change X to Y”, “fix the grammar”, “accept”. The speech goes to this machine’s speech-to-text; each sentence goes to TypeSafe’s Jev to pick the action. Silence is not sent to either.</div>
+    <div class="set-help">Say what you want — “what can I say” lists it for the screen you are on: “change the model to sonnet”, “reasoning off”, “open the third one”, “the last file”, “the previous one”, “open seven”, “open the file called…”, “open the settings”, “start the microphone” (then talk, then “send”), “highlight the last answer” then “copy it”, “fork”, “review the turn”, “open the thinking”, “start scrolling down” then “stop”, “zen mode”, “the latest unread”, in a file “find parse config”, “select the paragraph”, “next chunk”, “run it”, “go to line 40”, “change X to Y”, “fix the grammar”, “accept”; and “find me the conversation where…” hands it to the coding agent. The speech goes to this machine’s speech-to-text; each sentence goes to TypeSafe’s Jev to pick the action. Silence is not sent to either.</div>
     <label class="set-field"><span>context window</span> <select data-voice="window">${VOICE_WINDOWS.map(s => `<option value="${s}"${s === p.window ? ' selected' : ''}>${s < 60 ? s + ' s' : s / 60 + ' min'}</option>`).join('')}</select></label>
     <div class="set-help">How much of what you said recently the speech-to-text rereads, for better words. Longer is more accurate and slower: about 4 ms per second of window on this GPU (1 min ≈ 0.23 s, 2 min ≈ 0.48 s after each pause).</div>
     <label class="set-check"><input type="checkbox" data-voice="numbers"${p.numbers ? ' checked' : ''}> Number what I can pick (conversations, files, projects) while listening</label>
@@ -872,7 +1499,7 @@ async function voiceShowHistory(host, which) {
   if (!rows.length) { host.innerHTML = `<div class="hint">${which === 'missed' ? 'Everything was understood.' : 'Nothing said yet.'}</div>`; return; }
   const decided = r => r.error ? '✗ ' + r.error
     : r.action === 'none' ? 'not a command' + (r.alternatives && r.alternatives[1] ? ' (next: ' + r.alternatives[1].action + ' ' + Math.round(r.alternatives[1].probability * 100) + '%)' : '')
-    : r.action + (r.args && Object.keys(r.args).length ? ' ' + Object.values(r.args).map(v => (v && typeof v === 'object' ? 'selection' : String(v).split('/').pop())).join(' → ') : '') + (r.missing ? ' — which ' + r.missing + '?' : '');
+    : r.action + (r.args && Object.keys(r.args).length ? ' ' + Object.entries(r.args).map(([k, v]) => (r.argLabels && r.argLabels[k]) || (v && typeof v === 'object' ? 'selection' : String(v).split('/').pop())).join(' → ') : '') + (r.missing ? ' — which ' + r.missing + '?' : '');
   host.innerHTML = `<div class="hint">${rows.length} of ${data.rows.length} · newest first · a note says what you meant</div><ol class="voice-history">` + rows.map(r => `<li data-id="${esc(r.id)}">
       <div class="vhist-head"><span class="vhist-time">${esc(new Date(r.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</span>${r.mode === 'dictation' ? '<span class="vhist-mode">dictating</span>' : ''}<span class="vhist-said">\u201c${esc(r.said || '')}\u201d</span></div>
       <div class="vhist-what">→ ${esc(decided(r))}${r.confidence != null && !r.error ? ' · ' + Math.round(r.confidence * 100) + '%' : ''}${r.outcomes.length ? ' · ' + esc(r.outcomes.join(', ')) : ''}<span class="vhist-screen"> · on ${esc(r.screen || '?')}</span></div>
