@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.join(__dirname, '..');
 // The old reading/continuation split and its comparison workspace were replaced
-// by one head (design/41); test/one-tree-app.test.js covers the new reader.
+// by one head (design/66); test/one-tree-app.test.js covers the new reader.
 
 test('turn-level review gathers every tool group of one reply; single groups keep only their own button', () => {
   const vm = require('node:vm');

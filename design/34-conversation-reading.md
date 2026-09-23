@@ -1,5 +1,8 @@
 # Conversation reading: paths, answers, comparison, and merging
 
+> **Superseded by [66 — One tree, one head](66-one-tree-one-head.md)** (2026-09-23):
+> reading and continuing are one head; this document records the earlier design.
+
 The transcript is a readable path, not a dump of file-order entries.
 Alternatives belong at the point of divergence. Reading never writes a
 continuation; only an explicit continue, edit, fork, merge, or send can do that.

@@ -1,4 +1,4 @@
-/* Reading a conversation (design/41): one tree, one head.
+/* Reading a conversation (design/66): one tree, one head.
    The head is the last message of the path a person reads. The transcript is
    the path from the start to the head; the next message continues from the
    head; the tree view, the context meter and the answer cards all follow it.

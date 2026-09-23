@@ -1,4 +1,4 @@
-/* Reading a conversation (design/41): one path to the head; several answers
+/* Reading a conversation (design/66): one path to the head; several answers
    to one question side by side at that point; small steppers where the
    conversation divides. Controls describe the divergence, never contain the prose. */
 .rd-block { display: contents; }

@@ -370,7 +370,7 @@ test('dispatching an entry route again restores the exact launch target without 
   context.dispatchHash('child-conversation');
   context.dispatchHash(decodeURIComponent(hash));
   assert.deepEqual(opened, [[target.key, 'entry:' + target.entryId], ['child-conversation'], [target.key, 'entry:' + target.entryId]]);
-  // Opening a conversation keeps the head its reader left (design/41): the
+  // Opening a conversation keeps the head its reader left (design/66): the
   // route never resets where reading and the next message continue.
   assert.equal(reading.size, 0);
 });

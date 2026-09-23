@@ -1,9 +1,43 @@
-# 41 — One tree, one head (proposal)
+# 66 — One tree, one head
 
-Status: **proposal**, 2026-09-23. Follows `40-open-webui-study.md`. Replaces
-the reading/continuation split of `34-conversation-reading.md` and the fan-out
-machinery of `13-conversation-tree.md` once accepted. Backward compatibility
-is explicitly not a constraint (Maxime, 2026-09-23); readable history is.
+Status (2026-09-23): phase 1 built; phase 2 built except storage (parallel
+answers still run in hidden forks and fold home when they finish). Follows
+`65-open-webui-study.md`. Replaces the reading/continuation split of
+`34-conversation-reading.md`. Backward compatibility is explicitly not a
+constraint (Maxime, 2026-09-23); readable history is.
+
+## What is built
+
+- `conversation-tree.js`: the turn model (questions, answer groups, columns
+  and versions, question wordings, other divergences, legacy markers), pure
+  and shared by server and browser. Tests: `test/conversation-tree.test.js`,
+  on structural copies of real conversations (`test/fixtures/trees`, every
+  word replaced).
+- One head per person, saved on the server (`~/.local/share/chattering/reading.json`,
+  `PUT /api/conversation/reading`, returned with `/api/session`) and pushed to
+  that person's other screens (SSE `reading`). Sends carry `node` = the head;
+  nothing refuses a send for reading another path.
+- The reader (`conversation-reader.js`): blocks patched in place when the
+  head moves (60–75 ms on a 4 MB conversation, no fetch); answer cards side
+  by side with a per-device layout (all · two · one; phones and e-ink always
+  one, swipe or arrows); card click, version arrows, swipe = choose.
+- Regenerate asks the same question again from its parent (no `Continue.`),
+  and streams as a live card beside the answer it re-does. Edited questions
+  are asked at the same point. Merge is a typed `chattering-merge` custom
+  message under the question; its reply streams as a new card and becomes
+  the head. Include-all is on demand only (reintegration no longer writes it).
+- Parallel runs stream as the same cards; the card you click is where the
+  conversation continues when they land.
+- The tree view lights the head's path; clicking a box moves the head.
+- Pi 0.87 custom turns: `pisdk-custom.js` prepares them with the SDK's new
+  structured prompt options (delegation callbacks were failing on 0.87 too).
+
+## Not built yet
+
+- Parallel answers in one file while they run (phase 2 storage): until then a
+  follow-up waits for running parallel answers to finish.
+- Artifacts from the path, Clone, the files-on-disk line, worktrees, ratings
+  and presets (phases 3–5).
 
 ## Why Chattering feels heavier than Open WebUI
 
@@ -219,5 +253,5 @@ reply ledger and its handoff.
    **tree map on the store**, **Clone** next to Fork.
 4. **Files per branch:** the on-disk indicator and restore; worktrees for
    parallel writing runs.
-5. **Ratings and presets** (`40` §7–8) on top: 👍/👎 with sibling context,
+5. **Ratings and presets** (`65` §7–8) on top: 👍/👎 with sibling context,
    an Elo view, modes picked like models.

@@ -1,5 +1,5 @@
 'use strict';
-// design/41 in a real browser against a real server: one head decides the
+// design/66 in a real browser against a real server: one head decides the
 // transcript, answers sit side by side, moving is local and patched, the head
 // is shared by a person's screens, and a send continues from it.
 const test = require('node:test');

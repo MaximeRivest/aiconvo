@@ -740,7 +740,7 @@ async function parseFile(absPath) {
       }
       continue;
     } else if (d.type === 'custom_message' && d.customType === 'chattering-merge') {
-      // A merge request (design/41): the words the model received, typed, so
+      // A merge request (design/66): the words the model received, typed, so
       // the tree shows the merged reply as a version of the question's answers.
       const det = d.details || {};
       messages.push({ role: 'user', text: textOf(d.content), ts: d.timestamp || null, _eid: eid,
@@ -862,7 +862,7 @@ function broadcast(ev) {
   for (const res of sseClients) res.write(line);
 }
 
-// ---- reading: one head per person per conversation (design/41) ----------
+// ---- reading: one head per person per conversation (design/66) ----------
 // The head is the last message of the path a person reads; the next message
 // continues from it. It is shared across that person's devices (laptop,
 // phone, e-ink) and never across people. routes remember, per branch point,
@@ -3216,7 +3216,7 @@ async function compareGroupsResponse(key) {
   return { key, groups, branches, origin };
 }
 
-// Merge (design/41): the chosen answers to one question, quoted with their
+// Merge (design/66): the chosen answers to one question, quoted with their
 // models, and the person's instruction, sent as one typed custom message
 // under the question. The merged reply is then one more answer to it.
 async function startMerge(key, { question, answers, provider, modelId, instruction, force, principal }) {

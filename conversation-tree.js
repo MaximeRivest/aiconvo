@@ -1,4 +1,4 @@
-/* One conversation tree (design/41). Pure: no DOM, storage, or session writes.
+/* One conversation tree (design/66). Pure: no DOM, storage, or session writes.
 
    A saved conversation is a tree of entries. Everything on screen is derived
    from ONE pointer, the head: the transcript is the path from the root to the

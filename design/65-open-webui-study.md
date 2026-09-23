@@ -1,4 +1,4 @@
-# 40 — What Open WebUI gets right (study for Chattering)
+# 65 — What Open WebUI gets right (study for Chattering)
 
 Studied 2026-09-23 against Open WebUI **v0.11.4** (source checkout:
 `~/Projects/_study/open-webui`, trial instance on lambda at port 3000).

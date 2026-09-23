@@ -243,7 +243,7 @@ function computeFanoutMerge(rootRaw, forkRaws, opts = {}) {
     changed = true;
   }
 
-  // Include-all is a choice a person makes (design/41), not a default: the
+  // Include-all is a choice a person makes (design/66), not a default: the
   // reader selects one answer and continues from it. Only callers that ask
   // for it (opts.includeAll) still get the quoting entry here.
   let bothId = null;
