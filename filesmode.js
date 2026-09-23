@@ -214,6 +214,7 @@ function fileWsCloseEditor({ keepDraft = true } = {}) {
 
 function closeFileWorkspace() {
   if (!fileWs) return;
+  if (typeof askBubbleClose === 'function') askBubbleClose({ refocus: false });
   fileWsCloseEditor();
   clearInterval(fileWs.runTick);
   fileWs = null;
@@ -470,106 +471,18 @@ function fileWsAfterMount(ws, opts) {
   if (/\.html?$/i.test(ws.path)) liveFileEnableHTML(ws, opts);
 }
 
-// ---- who touched this file ----
+// ---- an agent working on this file (asked from the ask box, ask-bubble.js) ----
+// The run a workspace started: the editor is read-only until it settles, so
+// nothing typed races the agent's edits; then the file reloads and the
+// agent's lines are marked.
 
-let askTargetCache = null;
-async function fileWsToggleAsk(forceOpen = false) {
-  const ws = fileWs;
-  if (!ws || !ws.path) return;
-  const panel = $('fwAsk');
-  if (!panel) return;
-  if (!panel.hidden && !forceOpen) { panel.hidden = true; panel.innerHTML = ''; return; }
-  if (!panel.hidden && forceOpen) { const ta = panel.querySelector('textarea'); if (ta) ta.focus(); return; }
-  panel.hidden = false;
-  panel.innerHTML = `<div class="fw-ask-head"><b>ask for a change</b><span class="dim" id="fwAskTarget">finding where this goes…</span><button type="button" class="ghost" id="fwAskPreview" title="See exactly what the agent receives with your prompt">what goes along</button><button type="button" class="ghost" id="fwAskClose">✕</button></div>
-    <textarea id="fwAskText" rows="3" placeholder="what should change in this file? — Enter sends · Shift+Enter is a newline · your selection or cursor line goes along" spellcheck="true"></textarea>
-    <div class="fw-ask-foot"><span class="dim" id="fwAskSel"></span><span class="fw-spacer"></span><button type="button" class="primary" id="fwAskSend">send</button></div>
-    <div id="fwAskRun" hidden></div><div id="fwAskPreviewBox" hidden></div>`;
-  const ta = $('fwAskText');
-  ta.focus();
-  ta.onkeydown = e => {
-    e.stopPropagation();
-    if (e.key === 'Escape') { panel.hidden = true; panel.innerHTML = ''; if (ws.editor) ws.editor.focus(); }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fileWsSendAsk(ws); }
-  };
-  $('fwAskClose').onclick = () => { panel.hidden = true; panel.innerHTML = ''; };
-  $('fwAskSend').onclick = () => fileWsSendAsk(ws);
-  $('fwAskPreview').onclick = () => fileWsAskPreview(ws);
-  fileWsAskSelectionLine(ws);
-  if (ws.editor && ws.editor.view && !ws.askSelWired) {
-    ws.askSelWired = true;
-    ws.editor.view.dom.addEventListener('mouseup', () => fileWsAskSelectionLine(ws));
-    ws.editor.view.dom.addEventListener('keyup', () => fileWsAskSelectionLine(ws));
-  }
-  let t;
-  try { t = await (await fetch('/api/files/ask-target?path=' + encodeURIComponent(ws.path) + (ws.project ? '&project=' + encodeURIComponent(ws.project) : ''))).json(); } catch { t = { error: 'network failure' }; }
-  if (fileWs !== ws || !$('fwAskTarget')) return;
-  askTargetCache = t;
-  // The conversation the file was opened from is the natural place for the
-  // request when it is among the recent ones that touched this file.
-  const origin = typeof fbConversationHash === 'function' ? fbConversationHash(ws.back) : null;
-  const choice = origin && (t.candidates || []).some(c => c.key === origin) ? origin : t.continue ? t.continue.key : 'new';
-  fileWsPaintAskTarget(ws, t, choice);
-}
-
-function fileWsAskSelectionLine(ws) {
-  const el = $('fwAskSel');
-  if (!el || !ws.editor || !ws.editor.selection) return;
-  const sel = ws.editor.selection();
-  el.textContent = sel.empty ? `cursor: line ${sel.line}` : `selection: lines ${sel.from}–${sel.to}`;
-}
-
-function fileWsPaintAskTarget(ws, t, choice) {
-  const el = $('fwAskTarget');
-  if (!el) return;
-  ws.askChoice = choice;
-  if (t.error) { el.textContent = '⚠ ' + t.error; return; }
-  const options = [];
-  for (const c of t.candidates || []) options.push(`<option value="${esc(c.key)}"${choice === c.key ? ' selected' : ''}>↳ continues "${esc(c.title)}" · ${esc(ago(Date.now() - c.lastMs))} ago${c.busy ? ' · busy (queues)' : ''}</option>`);
-  options.push(`<option value="new"${choice === 'new' ? ' selected' : ''}>↳ new conversation in ${esc(t.project)}${t.area ? '/' + esc(t.area) : ''}</option>`);
-  el.innerHTML = `<select id="fwAskChoice" title="Where the prompt goes: the newest free conversation that touched this file (last 6 h), or a fresh one rooted at the project">${options.join('')}</select>`;
-  $('fwAskChoice').onchange = e => { ws.askChoice = e.target.value; };
-}
-
-async function fileWsAskPreview(ws) {
-  const box = $('fwAskPreviewBox');
-  if (!box) return;
-  if (!box.hidden) { box.hidden = true; box.innerHTML = ''; return; }
-  box.hidden = false;
-  box.innerHTML = '<div class="dim">assembling…</div>';
-  const sel = ws.editor && ws.editor.selection ? ws.editor.selection() : null;
-  const body = { path: ws.path };
-  if (sel && !sel.empty) body.range = [sel.from, sel.to]; else if (sel) body.line = sel.line;
-  const out = await postJson('/api/files/ask-preview', body);
-  if (!$('fwAskPreviewBox')) return;
-  if (out.error) { box.innerHTML = `<div class="dim">⚠ ${esc(out.error)}</div>`; return; }
-  box.innerHTML = `<div class="dim">${(out.text.length / 1024).toFixed(1)} KB · ~${Math.round(out.text.length / 4).toLocaleString()} tokens · rides in the system prompt as an attached file; the project map is added for a new conversation</div><pre class="fw-preview">${esc(out.text)}</pre>`;
-}
-
-async function fileWsSendAsk(ws) {
-  const ta = $('fwAskText');
-  if (!ta || fileWs !== ws) return;
-  const prompt = ta.value.trim();
-  if (!prompt) return toast('write what should change first');
-  if (ws.run) return toast('an agent is already working on this — wait or stop it');
-  const sel = ws.editor && ws.editor.selection ? ws.editor.selection() : null;
-  const body = { path: ws.path, project: ws.project, prompt, target: ws.askChoice || 'auto' };
-  if (sel && !sel.empty) body.range = [sel.from, sel.to]; else if (sel) body.line = sel.line;
-  // Unsaved code goes to disk first: the agent must read what you see.
-  if (ws.kind === 'code' && ws.dirty) await fileWsSaveCode(ws);
-  if (ws.kind === 'md' && docState && docState.dirty) await autosaveDocument();
-  $('fwAskSend').disabled = true;
-  const out = await postJson('/api/files/ask', body);
-  if (fileWs !== ws) return;
-  $('fwAskSend').disabled = false;
-  if (out.error) return errToast(out.error);
-  ta.value = '';
+// out: the /api/files/ask reply.
+function fileWsBeginRun(ws, out) {
   ws.run = { jobId: out.job ? out.job.id : null, key: out.key, startedAt: Date.now(), preSha: ws.sha, preText: ws.editor ? ws.editor.getContent() : null, title: out.title || (out.created ? 'new conversation' : 'conversation'), created: out.created, queued: out.queued };
   fileWsLockEditor(ws, true);
   fileWsPaintRun(ws, { statusText: out.queued ? 'queued behind the running turn' : 'starting' });
   clearInterval(ws.runTick);
   ws.runTick = setInterval(() => { if (fileWs === ws && ws.run) fileWsPaintRun(ws, ws.runLast || {}); else clearInterval(ws.runTick); }, 1000);
-  toast((out.created ? 'new conversation started · ' : 'sent to ') + (out.title || 'the conversation'));
 }
 
 function fileWsLockEditor(ws, lock) {
@@ -580,15 +493,9 @@ function fileWsLockEditor(ws, lock) {
 }
 
 function fileWsPaintRun(ws, d) {
-  const host = $('fwAskRun');
-  if (!host || !ws.run) return;
-  host.hidden = false;
+  if (!ws.run) return;
   ws.runLast = d;
-  const elapsed = Math.round((Date.now() - ws.run.startedAt) / 1000);
-  const model = d.model || '';
-  host.innerHTML = `<div class="fw-run"><span class="fw-run-dot">●</span><b>${esc(ws.run.title || 'conversation')}</b><span class="dim">${esc(model)}${model ? ' · ' : ''}${elapsed}s</span><span class="fw-run-status">${esc(d.statusText || 'working…')}</span><button type="button" class="ghost" data-run-open>open</button><button type="button" class="ghost" data-run-stop>■ stop</button></div>`;
-  host.querySelector('[data-run-open]').onclick = () => open(ws.run.key, 'bottom');
-  host.querySelector('[data-run-stop]').onclick = () => fileWsAbortRun(ws);
+  if (typeof askBubblePaintRun === 'function') askBubblePaintRun(ws, d);
 }
 
 async function fileWsAbortRun(ws) {
@@ -605,36 +512,36 @@ function fileWsRunEvent(d) {
   if (!ws.run.jobId && d.jobId) ws.run.jobId = d.jobId;
   if (!d.final) { fileWsPaintRun(ws, d); return; }
   clearInterval(ws.runTick);
-  const host = $('fwAskRun');
   const status = d.status === 'done' ? '✓ settled' : '✗ ' + (d.statusText || d.status || 'ended');
   const run = ws.run;
   ws.run = null;
   fileWsLockEditor(ws, false);
   // The agent may have rewritten the file: reload, mark what changed.
-  fileWsReloadAfterRun(ws, run).then(summary => {
-    if (!host || fileWs !== ws) return;
-    host.innerHTML = `<div class="fw-run settled"><span>${esc(status)}</span><b>${esc(run.title || '')}</b><span class="fw-run-status">${esc(summary)}</span><button type="button" class="ghost" data-run-open>open conversation</button>${summary.includes('+') || summary.includes('−') ? '<button type="button" class="ghost" data-run-history>history</button>' : ''}</div>`;
-    host.querySelector('[data-run-open]').onclick = () => open(run.key, 'bottom');
-    const h = host.querySelector('[data-run-history]');
-    if (h) h.onclick = () => liveFileHistory(ws);
+  fileWsReloadAfterRun(ws, run).then(result => {
+    if (fileWs !== ws) return;
+    if (typeof askBubbleSettled === 'function') askBubbleSettled(ws, run, { status, ...result });
   });
 }
 
+// Reload the file after a run. {summary, changed, undoable}: undoable when
+// the reload was one change in this editor (Ctrl+Z takes it back).
 async function fileWsReloadAfterRun(ws, run) {
   let d;
-  try { d = await (await fetch('/api/file/read?path=' + encodeURIComponent(ws.path))).json(); } catch { return 'could not re-read the file'; }
-  if (fileWs !== ws || d.error) return d && d.error ? d.error : '';
-  if (d.sha === run.preSha) return 'the file did not change';
+  try { d = await (await fetch('/api/file/read?path=' + encodeURIComponent(ws.path))).json(); } catch { return { summary: 'could not re-read the file', changed: false }; }
+  if (fileWs !== ws || d.error) return { summary: d && d.error ? d.error : '', changed: false };
+  if (d.sha === run.preSha) return { summary: 'the file did not change', changed: false };
   const before = run.preText || '';
+  let undoable = false;
   if (ws.kind === 'md' && docState && docState.path === ws.path) {
-    if (docState.dirty) return 'the file changed on disk while you had edits — reload from disk to see them';
-    docState.editor.setContent(d.text);
+    if (docState.dirty) return { summary: 'the file changed on disk while you had edits — reload from disk to see them', changed: true };
+    // A shared document already carries the agent's write (it merged in).
+    if (docState.editor.getContent() !== d.text) { docState.editor.setContent(d.text); undoable = !ws.collab; }
     docState.sha = d.sha;
     docState.dirty = false;
     if ($('docReload')) $('docReload').hidden = true;
   } else if (ws.kind === 'code' && ws.editor) {
     const sel = ws.editor.selection();
-    ws.editor.setContent(d.text);
+    if (ws.editor.getContent() !== d.text) { ws.editor.setContent(d.text); undoable = !ws.collab; }
     ws.baseText = d.text; ws.sha = d.sha; ws.dirty = false;
     if ($('fwSave')) $('fwSave').disabled = true;
     try { ws.editor.gotoLine(sel.line); } catch {}
@@ -643,8 +550,10 @@ async function fileWsReloadAfterRun(ws, run) {
   // lines show as changes; the disk baseline moves to what was just read.
   liveFileSaved(ws, d.text, d.sha);
   const stats = typeof LineDiff !== 'undefined' ? LineDiff.scriptStats(LineDiff.diffLines(before, d.text)) : null;
-  return stats ? `agent changed +${stats.added} −${stats.removed} lines` : 'agent changed the file';
+  return { summary: stats ? `agent changed +${stats.added} −${stats.removed} lines` : 'agent changed the file', changed: true, undoable };
 }
+
+// ---- who touched this file ----
 
 let whoStripTimer = null;
 

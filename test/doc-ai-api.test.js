@@ -47,9 +47,12 @@ async function boot(t) {
   // there before the server's first repository scan.
   const repo = path.join(home, 'Projects', 'essays');
   fs.mkdirSync(repo, { recursive: true });
-  spawnSync('git', ['init', '-q'], { cwd: repo });
   const doc = path.join(repo, 'essay.md');
   fs.writeFileSync(doc, '');
+  // The scan lists checkouts that have a HEAD: one commit.
+  for (const args of [['init', '-q'], ['add', '.'], ['-c', 'user.name=T', '-c', 'user.email=t@example.test', 'commit', '-qm', 'essay']]) {
+    assert.equal(spawnSync('git', args, { cwd: repo }).status, 0, 'git ' + args[0]);
+  }
   const s = net.createServer(); await new Promise(r => s.listen(0, '127.0.0.1', r));
   const port = s.address().port; await new Promise(r => s.close(r));
   let log = '';

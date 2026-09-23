@@ -85,3 +85,24 @@ test('random inputs always round-trip', () => {
     check(oldLines, newLines);
   }
 });
+
+test('unified diff: hunks with context, merged when close, line numbers as diff(1) writes them', () => {
+  const before = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'].join('\n');
+  const after = ['a', 'B', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'].join('\n');
+  const d = LD.unifiedDiff(before, after, { context: 1 });
+  assert.equal(d.text, ['@@ -1,3 +1,3 @@', ' a', '-b', '+B', ' c', '@@ -10,1 +10,2 @@', ' j', '+k'].join('\n'));
+  assert.deepEqual([d.added, d.removed, d.hunks, d.omitted], [2, 1, 2, 0]);
+  assert.equal(LD.unifiedDiff(before, after, { context: 4 }).hunks, 1, 'changes within twice the context share a hunk');
+  assert.equal(LD.unifiedDiff('', 'x').text, '@@ -1,1 +1,1 @@\n-\n+x', 'an empty text is one empty line');
+  assert.equal(LD.unifiedDiff('same', 'same').text, '');
+});
+
+test('unified diff: a line budget keeps whole hunks and counts the rest', () => {
+  const before = Array.from({ length: 40 }, (_, i) => 'line ' + i).join('\n');
+  const after = before.replace('line 5', 'LINE 5').replace('line 30', 'LINE 30');
+  const d = LD.unifiedDiff(before, after, { context: 1, maxLines: 5 });
+  assert.equal(d.text.split('\n').filter(l => l.startsWith('@@')).length, 1);
+  assert.equal(d.omitted, 1);
+  const big = LD.unifiedDiff('', Array.from({ length: 10 }, (_, i) => 'n' + i).join('\n'), { maxLines: 3 });
+  assert.match(big.text, /^@@ -1,1 \+1,10 @@\n-\n\+n0\n\+n1\n… 8 more lines in this hunk$/);
+});

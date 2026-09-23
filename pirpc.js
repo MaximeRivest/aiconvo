@@ -424,6 +424,11 @@ function piHeadlessRun(target, opts) {
         await w.sess.request({ type: 'set_model', provider: opts.provider, modelId: opts.modelId });
         w.model = want;
       }
+      // A reasoning level asked for with this prompt (see pisdk-runtime.js).
+      if (opts.thinking) {
+        try { await w.sess.request({ type: 'set_thinking_level', level: opts.thinking }); }
+        catch (e) { onEvent({ type: 'run_note', text: 'could not set the reasoning level: ' + e.message }); }
+      }
       let isSettled = false;
       const settled = w.sess.waitFor(e => e.type === 'agent_settled');
       settled.then(() => { isSettled = true; }, () => {});

@@ -224,5 +224,60 @@
     return { oldLines: oldOut, newLines: newOut, consumedOld: i, consumedNew: j };
   }
 
-  return { SAME, OLD, NEW, diffLines, diffLineArrays, scriptStats, applyScript };
+  // The change between two texts as unified-diff hunks (`@@ -a,b +c,d @@`,
+  // then ` `, `-`, `+` lines), for a reader or a model. `context` unchanged
+  // lines surround each change; hunks closer than twice that merge. About
+  // `maxLines` body lines are written: whole hunks while they fit, and the
+  // rest are counted, not shown. A first hunk longer than the budget is cut
+  // with a `…` line saying how many lines it has left (its header keeps the
+  // true counts). Returns {text, added, removed, hunks, omitted}, where
+  // `omitted` counts the hunks left out entirely.
+  function unifiedDiff(oldText, newText, { context = 2, maxLines = Infinity } = {}) {
+    const oldLines = String(oldText == null ? '' : oldText).split('\n');
+    const newLines = String(newText == null ? '' : newText).split('\n');
+    const script = diffLineArrays(oldLines, newLines);
+    // One row per op, with the line numbers before it (0-based).
+    const rows = [];
+    let i = 0, j = 0;
+    for (let k = 0; k < script.length; k++) {
+      const op = script[k];
+      rows.push({ op, i, j });
+      if (op !== NEW) i++;
+      if (op !== OLD) j++;
+    }
+    // Changed rows, grouped into hunks with their context.
+    const groups = [];
+    for (let k = 0; k < rows.length; k++) {
+      if (rows[k].op === SAME) continue;
+      const from = Math.max(0, k - context), to = Math.min(rows.length, k + context + 1);
+      const last = groups[groups.length - 1];
+      if (last && from <= last.to) last.to = Math.max(last.to, to);
+      else groups.push({ from, to });
+    }
+    const stats = scriptStats(script);
+    const out = [];
+    let written = 0, shown = 0;
+    for (const g of groups) {
+      const body = [];
+      let oldCount = 0, newCount = 0;
+      for (let k = g.from; k < g.to; k++) {
+        const { op, i: a, j: b } = rows[k];
+        if (op === SAME) { body.push(' ' + oldLines[a]); oldCount++; newCount++; }
+        else if (op === OLD) { body.push('-' + oldLines[a]); oldCount++; }
+        else { body.push('+' + newLines[b]); newCount++; }
+      }
+      if (shown > 0 && written + body.length > maxLines) break;
+      const first = rows[g.from];
+      // An empty side starts at the line before it, as diff(1) writes it.
+      const oldStart = oldCount ? first.i + 1 : first.i, newStart = newCount ? first.j + 1 : first.j;
+      out.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
+      if (body.length > maxLines) out.push(...body.slice(0, maxLines), `… ${body.length - maxLines} more lines in this hunk`);
+      else out.push(...body);
+      written += Math.min(body.length, maxLines);
+      shown++;
+    }
+    return { text: out.join('\n'), added: stats.added, removed: stats.removed, hunks: groups.length, omitted: groups.length - shown };
+  }
+
+  return { SAME, OLD, NEW, diffLines, diffLineArrays, scriptStats, applyScript, unifiedDiff };
 });

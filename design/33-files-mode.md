@@ -524,3 +524,39 @@ Each phase ships on its own and is useful alone.
   watch). `GET /api/files/stats` reports rows, watchers, and memory.
 - `CHATTERING_NO_LEDGER=1` disables the ledger and files mode data paths;
   `CHATTERING_CACHE_DIR` relocates every derived cache.
+
+## 12. The ask box (2026-09-23)
+
+The dedicated box under the file became a small composer floating over the
+text (`ask-bubble.js`, `ask-bubble.css`): Ctrl+K, the ✦ Ask button, or a
+brief handed over (the notebook doctor, "Ask an agent" in the AI command
+box) open it just above the cursor's line — below it when there is no room,
+a bottom sheet on a phone. It borrows the composer's classes and controls:
+dictation (`wireAgentSpeech(ta, mic, grow)` now takes its box), images,
+the model picker and the reasoning picker. Model and level are remembered
+for the next ask (`chattering.ask.v1`); "default" keeps the target's own.
+
+- Where it goes: the conversation of the last ask comes first, then the
+  recent conversations that touched the file, then a new one (only when the
+  project has a folder).
+- What goes along, as switchable chips: the file and selection (always; the
+  selected characters too, not only their lines), the recent edits of the
+  file, the earlier asks on it (those of other conversations: the target's
+  own are in its history), and the project memory for a new conversation
+  (off by default — a file edit rarely needs it and it costs seconds).
+  "What goes along" shows the exact text (`/api/files/ask-preview`).
+- `file-ask.js` writes the brief that rides last in the system prompt, per
+  run and never saved with the conversation's context (`startAgentRun`
+  `brief`): the request is about this file; work from the inlined copy;
+  edit in place, minimally; stay in the file; the editor is read-only and
+  reloads; answer in a sentence or two. For a rat notebook: the exact
+  `rat run --doc`, `rat look --doc` and `rat ensure` commands, never hand-
+  write a result block, never `pip install`. Recent edits come as diffs
+  from the saved versions (sessions of the ledger in the last 24 h, three at
+  most); earlier asks from `file-asks.json` with what came of each.
+- `startAgentRun` gained `thinking`: set by pi right before the prompt, in
+  the same process (no second warm start). A new conversation's first
+  process loads the very bundle the run sends.
+- The ask routes check the person: the file must be theirs to see / act
+  on, the continued conversation theirs to act on, and the run is theirs
+  (a guest runs behind the walls). Before, a guest's ask ran as the owner.

@@ -1,0 +1,62 @@
+/* The ask box (ask-bubble.js): the conversation composer in miniature,
+   floating over the file's text. It borrows the composer's classes
+   (.agent-compose, .agent-compose-row, .model-pick, .agent-mic, chips) and
+   only sizes and places them here. Below the model and reasoning pickers
+   (.mpick, 60), above the editor and its banners. */
+.ask-bubble { position: fixed; z-index: 55; width: min(580px, calc(100vw - 16px)); }
+.ask-bubble .ask-compose {
+  padding: 8px 10px 8px; gap: 6px; border: 1px solid var(--border-strong); border-radius: var(--r-composer);
+  background: var(--surface-1); box-shadow: 0 10px 32px var(--shadow-color);
+}
+.ask-bubble .ask-compose:focus-within { border-color: var(--accent); }
+/* A notch toward the line the box points at. */
+.ask-bubble[data-place="above"] .ask-compose::after,
+.ask-bubble[data-place="below"] .ask-compose::before {
+  content: ""; position: absolute; left: 22px; width: 10px; height: 10px; background: var(--surface-1);
+  border: solid var(--border-strong); transform: rotate(45deg);
+}
+.ask-bubble[data-place="above"] .ask-compose::after { bottom: -6px; border-width: 0 1px 1px 0; }
+.ask-bubble[data-place="below"] .ask-compose::before { top: -6px; border-width: 1px 0 0 1px; }
+.ask-bubble .ask-compose { position: relative; }
+
+.ask-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-micro); color: var(--text-dim); }
+.ask-glyph { color: var(--accent); }
+.ask-where { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-head .ask-target { flex: 1 1 auto; min-width: 0; max-width: 60%; height: 22px; margin-left: auto; font: var(--fs-micro) var(--font); }
+.ask-head .ask-close { flex: 0 0 auto; height: 22px; min-height: 22px; padding: 0 6px; }
+
+.ask-history { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-micro); color: var(--text); }
+.ask-history[hidden] { display: none; }
+.ask-history-row { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ask-bubble .ask-compose textarea { min-height: 40px; height: 40px; max-height: 30vh; padding: 6px 4px; font: 14px/1.55 var(--font); }
+
+/* What goes along: chips that switch on and off. */
+.ask-bubble button.agent-ctx-chip { height: 24px; min-height: 24px; padding: 0 8px; gap: 4px; font: var(--fs-micro) var(--font); cursor: pointer; }
+.ask-bubble button.agent-ctx-chip[aria-pressed="false"] { background: transparent; color: var(--text-faint); border-style: dashed; }
+.ask-bubble button.agent-ctx-chip[aria-pressed="false"] b { font-weight: 400; text-decoration: line-through; }
+.ask-bubble .ask-chip-fixed { padding-right: 8px; }
+
+.ask-bubble .agent-compose-row button, .ask-bubble .compose-tools > summary { height: 30px; min-height: 30px; }
+.ask-bubble .compose-tools > summary { width: 30px; font-size: 19px; }
+.ask-bubble .compose-right > .model-pick { max-width: 190px; }
+.ask-bubble .compose-tools.menu-down .compose-tools-menu { bottom: auto; top: calc(100% + 8px); }
+.ask-bubble .compose-tools-menu > button { height: auto; min-height: 32px; }
+
+.ask-run[hidden], .ask-preview[hidden] { display: none; }
+.ask-preview .fw-preview { max-height: 32vh; }
+.ask-bubble .fw-run .ask-glyph-busy { color: var(--accent); animation: ask-pulse .9s ease-in-out infinite alternate; }
+@keyframes ask-pulse { from { opacity: 1; } to { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .ask-bubble .fw-run .ask-glyph-busy { animation: none; } }
+
+/* A phone: a sheet over the bottom, not a box under the thumb. */
+.ask-bubble.sheet { left: 0; right: 0; bottom: 0; top: auto; width: auto; }
+body.phone-shell .ask-bubble.sheet { bottom: var(--phone-bar-h, 0px); }
+.ask-bubble.sheet .ask-compose { border-radius: var(--r-composer) var(--r-composer) 0 0; border-bottom: 0; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+.ask-bubble.sheet .ask-compose::before, .ask-bubble.sheet .ask-compose::after { display: none; }
+
+/* Binary e-ink: no shadow, no half-tones, a solid frame. */
+:root[data-theme-mode="binary"] .ask-bubble .ask-compose { box-shadow: none; border: 2px solid var(--text); background: var(--bg); }
+:root[data-theme-mode="binary"] .ask-bubble .ask-compose::before,
+:root[data-theme-mode="binary"] .ask-bubble .ask-compose::after { border-color: var(--text); background: var(--bg); }
+:root[data-theme-mode="binary"] .ask-bubble button.agent-ctx-chip[aria-pressed="false"] { color: var(--text); }

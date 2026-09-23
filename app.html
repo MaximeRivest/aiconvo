@@ -917,11 +917,6 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .fw-banner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--bg)); font-size: var(--fs-micro); color: var(--text); }
 .fw-banner button { height: 22px; padding: 0 8px; font-size: 11px; }
 :root[data-theme-mode="binary"] .fw-banner { background: var(--bg); border: 2px solid var(--text); }
-.fw-ask { flex: 0 0 auto; border-top: 1px solid var(--border-strong); background: var(--surface-1); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
-.fw-ask-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.fw-ask-head select { max-width: 48vw; font: 11px var(--font); height: 22px; }
-.fw-ask textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 58px; font: var(--fs-body) var(--font); padding: 6px 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); }
-.fw-ask-foot { display: flex; gap: 8px; align-items: center; }
 .fw-run { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--border); background: var(--bg); font-size: var(--fs-micro); }
 .fw-run .fw-run-dot { color: var(--live); animation: none; }
 .fw-run .fw-run-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
@@ -2402,6 +2397,8 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <script src="/files-browser.js"></script>
 <script src="/live-file.js"></script>
 <link rel="stylesheet" href="/live-file.css">
+<script src="/ask-bubble.js"></script>
+<link rel="stylesheet" href="/ask-bubble.css">
 <script src="/collab-client.js"></script>
 <script src="/people.js"></script>
 <link rel="stylesheet" href="/people.css">
@@ -6773,7 +6770,7 @@ function renderDocDoctor(st, strip, report) {
   // Hand the situation to a coding agent: the Ask panel (focused view)
   // receives a brief built from this very report; the person reads and
   // edits it before anything is sent.
-  if (document.getElementById('fwAsk')) buttons += `<button class="doc-setup-agent" title="Open Ask with a brief built from this report: fix the header or environment, then prove it with rat play. You review the text before it is sent.">ask an agent to fix it</button>`;
+  if (typeof askBubbleServes === 'function' && askBubbleServes(st.path)) buttons += `<button class="doc-setup-agent" title="Open the ask box with a brief built from this report: fix the header or environment, then prove it with rat play. You review the text before it is sent.">ask an agent to fix it</button>`;
   line.innerHTML = parts.join(' ') + ' ' + buttons + (hints.length ? `<span class="doc-setup-hint dim">→ ${esc(hints.join(' · '))}</span>` : '');
   const go = line.querySelector('.doc-setup-go');
   if (go) go.onclick = () => ensureDocEnvironment(st, {});
@@ -6783,21 +6780,14 @@ function renderDocDoctor(st, strip, report) {
   if (rec) rec.onclick = () => { if (confirm('Delete ' + (py ? py.venv : 'the environment') + ' and rebuild it? Packages installed there are lost.')) ensureDocEnvironment(st, { recreate: true }); };
 }
 
-// Open the file's Ask panel with a brief from the doctor report (and the
+// Open the file's ask box with a brief from the doctor report (and the
 // last failing cell, when there is one). Nothing is sent here.
 async function askAgentToFixNotebook(st, extra = {}) {
   if (!st || docState !== st) return;
-  if (typeof fileWsToggleAsk !== 'function' || !document.getElementById('fwAsk')) return toast('open the notebook from Files to ask an agent');
+  if (typeof askBubbleAvailable !== 'function' || !askBubbleAvailable()) return toast('open the notebook from Files to ask an agent');
   if (!st.doctor) await refreshDocDoctor();
-  await fileWsToggleAsk(true);
-  const ta = document.getElementById('fwAskText');
-  if (!ta) return;
-  ta.value = NotebookEnv.agentBrief(st.doctor, { path: st.path, lastOutput: extra.lastOutput || null, focus: extra.focus || null });
-  ta.rows = Math.min(18, ta.value.split('\n').length + 1);
-  ta.focus();
-  ta.setSelectionRange(0, 0);
-  ta.scrollTop = 0;
-  toast('brief ready — read it, edit if you like, then send');
+  const brief = NotebookEnv.agentBrief(st.doctor, { path: st.path, lastOutput: extra.lastOutput || null, focus: extra.focus || null });
+  if (await fileWsOpenAsk({ text: brief })) toast('brief ready — read it, edit if you like, then send');
 }
 
 // `rat ensure` for this notebook, with elapsed time while it runs and a
@@ -7083,15 +7073,10 @@ function docAiAccepted(st) {
   else { clearTimeout(st.saveTimer); autosaveDocument(); }
 }
 
-// A request too big for an inline suggestion: to an agent, in the file's Ask panel.
+// A request too big for an inline suggestion: to an agent, in the file's ask box.
 async function docAiEscalate(text) {
-  if (typeof fileWsToggleAsk !== 'function' || !document.getElementById('fwAsk')) return toast('open the document from Files to ask an agent');
-  await fileWsToggleAsk(true);
-  const ta = document.getElementById('fwAskText');
-  if (!ta) return;
-  ta.value = text;
-  ta.dispatchEvent(new Event('input', { bubbles: true }));
-  ta.focus();
+  if (typeof askBubbleAvailable !== 'function' || !askBubbleAvailable()) return toast('open the document from Files to ask an agent');
+  await fileWsOpenAsk({ text });
 }
 
 // Follow this notebook's kernels on the tab's event stream (the one it
@@ -7313,11 +7298,11 @@ async function offerDeclareDependency(strip, r, cell) {
   const moduleName = NotebookEnv.missingModule(r.out);
   if (!moduleName) {
     // Any other failure: the agent gets the report plus this output.
-    if (!document.getElementById('fwAsk')) return;
     const st = docState;
+    if (!st || typeof askBubbleServes !== 'function' || !askBubbleServes(st.path)) return;
     const fix = document.createElement('div');
     fix.className = 'doc-run-fix';
-    fix.innerHTML = `<span class="dim">the cell failed ·</span> <button class="doc-fix-agent" title="Open Ask with a brief: this report, this cell's output, and the rules for a durable fix. You review before sending.">ask an agent to fix it</button>`;
+    fix.innerHTML = `<span class="dim">the cell failed ·</span> <button class="doc-fix-agent" title="Open the ask box with a brief: this report, this cell's output, and the rules for a durable fix. You review before sending.">ask an agent to fix it</button>`;
     const line = (() => { try { return st.editor.view.state.doc.lineAt(cell.from).number; } catch { return null; } })();
     fix.querySelector('.doc-fix-agent').onclick = () => askAgentToFixNotebook(st, { lastOutput: r.out, focus: (line ? 'line ' + line + ', ' : '') + (cell.lang || 'python') + ' cell' });
     (document.querySelector('.doc-run-setup') || strip).insertAdjacentElement('afterend', fix);
@@ -12051,16 +12036,41 @@ function joinAgentSpeech(base, speech) {
   return base + ' ' + speech;
 }
 
+// Dictation writes into one text box at a time: the one whose mic started
+// it (wireAgentSpeech) — the conversation composer, or the file's ask box.
+// Once that box is gone (a re-render), the composer's box takes over, as
+// before there was a choice.
+let speechTarget = null; // { ta, mic, grow }
+function currentSpeechTarget() {
+  if (speechTarget && speechTarget.ta && speechTarget.ta.isConnected) return speechTarget;
+  const ta = $('agentText'), mic = $('agentMic');
+  return ta || mic ? { ta, mic, grow: autoGrowCompose } : null;
+}
+
 function applyAgentSpeechText(text) {
   const value = joinAgentSpeech(window._agentSpeechBase || '', text);
   window._agentSpeechValue = value;
-  const ta = $('agentText');
+  const target = currentSpeechTarget();
+  const ta = target && target.ta;
   if (ta) {
     ta.value = value;
     ta.selectionStart = ta.selectionEnd = value.length;
-    autoGrowCompose();                // dictation grows the box like typing
+    if (target.grow) target.grow();   // dictation grows the box like typing (and it keeps its draft)
     ta.scrollTop = ta.scrollHeight;   // keep the newest words visible while dictating
   }
+}
+
+// The mic button's look and words for a dictation state: '' (idle),
+// 'recording', 'transcribing'.
+function paintSpeechMic(mic, state) {
+  if (!mic) return;
+  mic.classList.toggle('recording', state === 'recording');
+  mic.classList.toggle('transcribing', state === 'transcribing');
+  mic.disabled = state === 'transcribing';
+  const label = state === 'recording' ? 'Stop dictation' : state === 'transcribing' ? 'Transcribing speech' : 'Start dictation';
+  mic.title = label;
+  mic.setAttribute('aria-label', label);
+  mic.setAttribute('aria-pressed', state === 'recording' ? 'true' : 'false');
 }
 
 // One line at rest; the box grows with its content up to 40% of the view.
@@ -12085,51 +12095,25 @@ window.agentSpeechEvent = payload => {
   let event = payload;
   try { if (typeof event === 'string') event = JSON.parse(event); } catch { return; }
   if (!event || !event.type) return;
-  const mic = $('agentMic');
+  const mic = currentSpeechTarget()?.mic || null;
   if (event.type === 'recording') {
     window._agentSpeechState = 'recording';
-    if (mic) {
-      mic.classList.add('recording');
-      mic.classList.remove('transcribing');
-      mic.disabled = false;
-      mic.title = 'Stop dictation';
-      mic.setAttribute('aria-label', 'Stop dictation');
-      mic.setAttribute('aria-pressed', 'true');
-    }
+    paintSpeechMic(mic, 'recording');
   } else if (event.type === 'preview') {
     window._agentSpeechPreview = event.text || '';
     applyAgentSpeechText(window._agentSpeechPreview);
   } else if (event.type === 'transcribing') {
     window._agentSpeechState = 'transcribing';
-    if (mic) {
-      mic.classList.remove('recording');
-      mic.classList.add('transcribing');
-      mic.disabled = true;
-      mic.title = 'Transcribing speech';
-      mic.setAttribute('aria-label', 'Transcribing speech');
-      mic.setAttribute('aria-pressed', 'false');
-    }
+    paintSpeechMic(mic, 'transcribing');
   } else if (event.type === 'final') {
     applyAgentSpeechText(event.text || window._agentSpeechPreview || '');
     window._agentSpeechBase = window._agentSpeechValue || '';
     window._agentSpeechPreview = '';
     window._agentSpeechState = '';
-    if (mic) {
-      mic.classList.remove('recording', 'transcribing');
-      mic.disabled = false;
-      mic.title = 'Start dictation';
-      mic.setAttribute('aria-label', 'Start dictation');
-      mic.setAttribute('aria-pressed', 'false');
-    }
+    paintSpeechMic(mic, '');
   } else if (event.type === 'error') {
     window._agentSpeechState = '';
-    if (mic) {
-      mic.classList.remove('recording', 'transcribing');
-      mic.disabled = false;
-      mic.title = 'Start dictation';
-      mic.setAttribute('aria-label', 'Start dictation');
-      mic.setAttribute('aria-pressed', 'false');
-    }
+    paintSpeechMic(mic, '');
     errToast(event.message || 'Dictation failed.');
   } else if (event.type === 'permission' || event.type === 'notice') {
     if (event.message) toast(event.message);
@@ -12275,8 +12259,9 @@ async function stopBrowserAgentSpeech() {
   }
 }
 
-function wireAgentSpeech(ta) {
-  const mic = $('agentMic');
+// One mic button and the text box it dictates into. The composer's by
+// default; the file's ask box passes its own (and its grow function).
+function wireAgentSpeech(ta, mic = $('agentMic'), grow = autoGrowCompose) {
   const nativeSpeech = window.ChatteringSpeech;
   const nativeAvailable = !!(nativeSpeech && typeof nativeSpeech.toggle === 'function');
   if (!mic || (!nativeAvailable && !browserAgentSpeechAvailable())) return;
@@ -12284,18 +12269,20 @@ function wireAgentSpeech(ta) {
   // speech service: without one, dictation cannot work, so no button.
   if (!capabilityOn('speech') && !window._agentSpeechState) { mic.hidden = true; return; }
   mic.hidden = false;
-  const state = window._agentSpeechState || '';
-  mic.classList.toggle('recording', state === 'recording');
-  mic.classList.toggle('transcribing', state === 'transcribing');
-  mic.disabled = state === 'transcribing';
-  mic.setAttribute('aria-pressed', state === 'recording' ? 'true' : 'false');
+  // A dictation in progress shows on the mic of the box it writes into.
+  const mine = currentSpeechTarget()?.mic === mic;
+  const state = mine ? window._agentSpeechState || '' : '';
+  paintSpeechMic(mic, state);
   if (window._agentSpeechValue != null && ta && state) { ta.value = window._agentSpeechValue; ta.scrollTop = ta.scrollHeight; }
   mic.onclick = () => {
     if (window._agentSpeechState === 'transcribing') return;
     if (window._agentSpeechState !== 'recording') {
+      speechTarget = { ta, mic, grow };
       window._agentSpeechBase = (ta && ta.value) || '';
       window._agentSpeechPreview = '';
       window._agentSpeechValue = window._agentSpeechBase;
+    } else if (currentSpeechTarget()?.mic !== mic) {
+      return errToast('dictation is running in another box — stop it there first');
     }
     try {
       if (nativeAvailable) nativeSpeech.toggle();
@@ -16813,6 +16800,16 @@ function helpNow() {
     ] });
     return sections;
   }
+  // The file's ask box (ask-bubble.js) keeps its keys, like the composer.
+  if (ae?.closest?.('.ask-bubble')) {
+    const keys = fine ? [['enter', 'send'], ['shift+enter', 'new line']] : [['enter', 'new line']];
+    keys.push(['ctrl+enter', 'send'], ['alt+m', 'choose the model'], ['shift+tab', 'choose the reasoning level']);
+    const mic = document.querySelector('.ask-bubble .ask-mic');
+    if (mic && !mic.hidden) keys.push(['ctrl+m', 'start / stop dictation']);
+    keys.push(['esc · ctrl+k', 'back to the text — what you typed stays']);
+    sections.push({ label: 'ask box', keys });
+    return sections;
+  }
   // The file workspace's editor keeps every key it gets (the page's
   // shortcuts stay quiet there): only its own keys act.
   if (fileWs && ae?.closest?.('.live-file-view .cm-editor')) {
@@ -16939,7 +16936,7 @@ function fileEditorHelp({ inEditor }) {
     for (const s of live) sections.push({ label: s.label, keys: s.keys.map(([names, what]) => [spell(names), what]) });
     if (live.some(s => s.exclusive)) return sections;
   }
-  const keys = [['ctrl+s', 'save to disk'], ['ctrl+f', 'find in this file'], ['ctrl+space', 'completion'], ['ctrl+k', 'ask an agent for a change to this file']];
+  const keys = [['ctrl+s', 'save to disk'], ['ctrl+f', 'find in this file'], ['ctrl+space', 'completion'], ['ctrl+k', 'ask an agent for a change here — a box opens over the text']];
   // An editor bundle from before keyHelp() (the loader's fallback): its keys, as they were.
   if (fileWs?.kind === 'md' && !reported) keys.push(['ctrl+enter', 'run this cell'], ['shift+enter', 'run and advance'], ['ctrl+j', 'AI commands']);
   keys.push(['ctrl+?', 'this help — also while typing']);

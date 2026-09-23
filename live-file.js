@@ -48,12 +48,12 @@ function liveFileHead(ws) {
     ${/\.html?$/i.test(ws.path) ? '<div class="lf-html-switch" role="group" aria-label="HTML view"><button id="htmlSource" aria-pressed="true">Source</button><button id="htmlPreview" aria-pressed="false">Preview</button></div>' : ''}
     <button id="docReload" hidden title="Reload the current disk file">Reload</button>
     <button id="liveHistory" class="lf-wide" title="Recorded versions of this file: read one, or compare two">History</button>
-    <button id="liveAsk" class="lf-wide" title="Ask an agent for a change to this file · Ctrl+K">Ask</button>
+    <button id="liveAsk" class="lf-wide" title="Ask an agent for a change here: a box opens over the text · Ctrl+K">✦ Ask</button>
     ${md ? '<button id="docRun" class="lf-wide" title="Run the cell at the cursor · Ctrl+Enter">▶ Run</button>' : ''}
     <button id="${md ? 'docSave' : 'fwSave'}" ${md ? '' : 'disabled'} title="Save to disk · Ctrl+S">Save</button>
     <details class="live-more"><summary aria-label="Editor options">⋯</summary><div>
       <button id="liveHistoryMenu" class="lf-narrow">History</button>
-      <button id="liveAskMenu" class="lf-narrow">Ask for a change</button>
+      <button id="liveAskMenu" class="lf-narrow">✦ Ask for a change (Ctrl+K)</button>
       ${md ? '<button id="docRunMenu" class="lf-narrow">▶ Run this cell</button>' : ''}
       ${ws.project ? '<button id="liveBrowse">Browse this folder</button>' : ''}
       ${md ? '<button id="docRunAll">Run all cells</button><button id="docAi">AI commands (Ctrl+J)</button><button id="docVars">Variables</button><button id="docKernel">Kernel: restart, clear, shut down…</button><button id="docSource">Markdown source</button><button id="docUnwrap" hidden>Unwrap prose</button>' : ''}
@@ -77,7 +77,7 @@ async function openLiveFile(pathValue, opts = {}) {
     reviewRef: opts.reviewRef || null, reviewData: opts.reviewData || null };
   fileWs = ws;
   setRoute('file', fileWsHash(ws), { project: ws.project || (typeof scopeFileProject === 'function' ? scopeFileProject(ws) : undefined) });
-  $('view').innerHTML = '<section class="files-ws live-file-view"><div id="ffCompare" class="live-file-body"></div><div id="fwAsk" class="fw-ask" hidden></div></section>';
+  $('view').innerHTML = '<section class="files-ws live-file-view"><div id="ffCompare" class="live-file-body"></div></section>';
   // A link may name recorded versions (to=, from=): open straight into history.
   if (opts.to || opts.from) return liveFileHistory(ws, { to: opts.to || null, from: opts.from || null });
   await fileWsMountBody(ws, opts);

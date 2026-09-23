@@ -34,6 +34,7 @@ const lineDiff = require('./linediff.js');
 const fileMedia = require('./file-media.js');
 const previewAssets = new fileMedia.PreviewAssets();
 const notebookEnv = require('./notebook-env.js');
+const fileAsk = require('./file-ask.js');
 const aiCommands = require('./ai-commands.js');
 const notebookDerive = require('./notebook-derive.js');
 const { agentPath } = require('./agentpath.js');
@@ -2565,7 +2566,13 @@ function runEventForwarder(job) {
 
 // Start one headless run on a conversation. node (optional): continue from
 // that entry — an in-file pi branch anchor moves the leaf there first.
-async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf, expectedVersion, recoveryAttempts = 0, principal = null, input = 'keyboard', coauthors = null }) {
+// brief: Markdown for this run only, after the attached context in the
+// system prompt (the file ask box's instructions, file-ask.js); never saved
+// with the conversation's context. thinking: the reasoning level to set
+// before this prompt (persisted by pi, like the composer's control). A send
+// queued into a running turn can carry neither: that turn's system prompt
+// and level are already fixed (the reply says so: briefDropped).
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf, expectedVersion, recoveryAttempts = 0, principal = null, input = 'keyboard', coauthors = null, brief = null, thinking = null }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   principal = await principalInProject(principal || principalFor(null), projectNameOf(entry.cwd, key));
   assertPrincipalCanRun(principal, 'an agent');
@@ -2582,6 +2589,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     provider = choice.provider; modelId = choice.modelId;
   }
   if (!customMessage && !String(message || '').trim()) throw new Error('empty prompt');
+  if (thinking && !settingsLib.THINKING_LEVELS.includes(thinking)) throw new Error('bad reasoning level: ' + thinking);
   const delegatedOwner = await assertDelegationLaunch(sessionPath, customMessage);
   // A person now drives a stopped worker's conversation. Record it: the parent
   // sees it, and no worker restarts on this session afterwards.
@@ -2623,12 +2631,12 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
         if (author) recordAuthorship(key, author, { via: 'queued', chars: String(message || '').length, input, coauthors });
         const job = agentRunJobs.get(record.jobId);
         if (job) { job.statusText = 'follow-up queued'; jobChanged(job); }
-        return { queued: true, job };
+        return { queued: true, job, briefDropped: !!brief, thinkingDropped: !!thinking };
       }
     }
     throw new Error('A web run is already active on this conversation. Wait or abort it.');
   }
-  const ctxBundle = contextItems.length ? await writeAttachedContextFile(contextItems) : null;
+  const ctxBundle = contextItems.length || brief ? await writeAttachedContextFile(contextItems, { brief }) : null;
   if (headlessRuns.has(sessionPath)) throw new Error('A web run started while preparing this conversation.');
   const job = {
     id: 'run:' + crypto.randomUUID().slice(0, 8),
@@ -2722,7 +2730,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       const engine = customMessage || principal.sandbox ? pisdk : piEng();
       if (author && engine !== pisdk) recordAuthorship(key, author, { via: 'rpc', chars: String(message || '').length, input, coauthors });
       if (modelNote) { job.statusText = modelNote; jobChanged(job); }
-      const handle = engine.piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(principal), ...agentCallerEnv(principal), ...sessionEnv }, sessionEnv, extraArgs, sandbox: principal.sandbox || undefined }, { provider, modelId, message, images, customMessage, author, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
+      const handle = engine.piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(principal), ...agentCallerEnv(principal), ...sessionEnv }, sessionEnv, extraArgs, sandbox: principal.sandbox || undefined }, { provider, modelId, thinking: customMessage ? undefined : thinking || undefined, message, images, customMessage, author, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
       appliedContextBySession.set(path.resolve(sessionPath), { sig: nextCtxSig, hash: bundleHash });
       record.handle = handle;
       await handle.done;
@@ -9543,16 +9551,33 @@ async function filesCreateReadmeResponse(body) {
   return { ok: true, path: abs };
 }
 
-// ---- ask for a change (design/33 §5.4) ----
+// ---- ask for a change (design/33 §5.4; the ask box, file-ask.js) ----
 // The target of a file prompt: the newest conversation of this project that
 // touched the file in the last six hours and is free (no terminal owner, no
 // delegation worker, pi), else a new conversation rooted at the project (or
-// its declared area). The client shows the pick as a chip and can flip it.
+// its declared area). The ask box shows the pick and can flip it.
 const ASK_CONTINUE_WINDOW_MS = 6 * 60 * 60 * 1000;
+// What rides along with an ask besides the file (file-ask.js): the last
+// few edits of the file, as diffs, and the earlier asks on it.
+const ASK_EDITS_WINDOW_MS = 24 * 60 * 60 * 1000;
+const ASK_EDITS_MAX = 3;
+const ASK_EDIT_DIFF_SPAN_MS = 30 * 60 * 1000; // a longer session is summarized, not diffed
+const ASK_EDIT_DIFF_LINES = 40;
+const ASK_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const ASK_HISTORY_MAX = 3;
+const askLog = new fileAsk.AskLog(path.join(CACHE_DIR, 'file-asks.json'));
 function isDelegatedKey(key) { return /(^|:)--delegated--[\\/]/.test(String(key || '')); }
 
-async function filesAskTargetResponse(pathValue, projectValue) {
+// What the ask box may include; memory (the project map) is off unless asked:
+// it costs a new conversation thousands of tokens a file edit rarely needs.
+function askIncludeOf(raw) {
+  const o = raw && typeof raw === 'object' ? raw : {};
+  return { edits: o.edits !== false, asks: o.asks !== false, memory: o.memory === true };
+}
+
+async function filesAskTargetResponse(pathValue, projectValue, identity) {
   const abs = path.resolve(expandHomePath(pathValue || ''));
+  assertPathAccess(identity, abs, 'see');
   const root = await gitRootForCwd(path.dirname(abs)).catch(() => null);
   const project = projectValue || projectNameOf(root || path.dirname(abs));
   const meta = projectMetaFor(project);
@@ -9564,57 +9589,206 @@ async function filesAskTargetResponse(pathValue, projectValue) {
       const entry = index[sn.convKey];
       if (entry.source !== 'pi' || isDelegatedKey(sn.convKey)) continue;
       if (projectOfEntry(entry, sn.convKey) !== project) continue;
+      if (candidates.some(c => c.key === sn.convKey)) continue;
+      if (identity && !canDo(identity, 'act', targetOf(sn.convKey))) continue;
       const lastMs = Date.parse(entry.lastTs || '') || 0;
       if (Date.now() - lastMs > ASK_CONTINUE_WINDOW_MS) continue;
       if (findRunningConversation(sn.convKey)) continue;
-      candidates.push({ key: sn.convKey, title: entry.timelineTitle || entry.title || sn.convKey, lastMs, busy: headlessRuns.has(absPathForKey(sn.convKey)) });
+      const model = normalizePickedModels(modelPrefs.conversations[sn.convKey])[0] || null;
+      candidates.push({ key: sn.convKey, title: entry.timelineTitle || entry.title || sn.convKey, lastMs, busy: headlessRuns.has(absPathForKey(sn.convKey)), model });
     }
   }
   candidates.sort((a, b) => b.lastMs - a.lastMs);
   const area = meta && meta.cwd ? areaOfCwdIn(project, path.dirname(abs)) : null;
-  return { path: abs, project, area, continue: candidates[0] || null, candidates: candidates.slice(0, 5), newAllowed: !!(meta && meta.cwd) };
+  const now = Date.now();
+  const inherited = resolvedProjectDefaultModel(project);
+  return {
+    path: abs, project, area, continue: candidates[0] || null, candidates: candidates.slice(0, 5), newAllowed: !!(meta && meta.cwd),
+    defaultModel: inherited ? { provider: inherited.provider, modelId: inherited.modelId } : null,
+    // For the box to show where things stand: the recent edits it would
+    // send, and the earlier asks (with their conversation, so the box can
+    // leave out those made in the conversation it continues).
+    edits: fileAskEditSessions(abs, now).length,
+    history: fileAskHistory(abs, { now, limit: 5 }),
+  };
 }
 
-async function filesAskResponse(body) {
-  const abs = path.resolve(expandHomePath(String(body.path || '')));
-  const prompt = String(body.prompt || '').trim();
-  if (!prompt) throw new Error('write what should change first');
-  const pick = await filesAskTargetResponse(abs, body.project || '');
-  const project = pick.project;
+// The file's edit sessions (ledger) in the window, newest first.
+function fileAskEditSessions(abs, now) {
+  if (!fileLedger) return [];
+  return fileLedger.touched(abs, { limit: 12 }).sessions.filter(sn => now - sn.end <= ASK_EDITS_WINDOW_MS).slice(0, ASK_EDITS_MAX);
+}
+
+// The last few edits, for the brief: who, when, how much, and what (a diff
+// from the saved versions, when the session is short and both ends were
+// captured). Edits of the conversation the ask goes to are one line: its
+// own history has them.
+function fileAskRecentEdits(abs, targetKey, now) {
+  const sessions = ledgerSessionTitles(fileAskEditSessions(abs, now));
+  if (!sessions.length) return null;
+  const items = sessions.map(sn => {
+    const ours = !!targetKey && sn.convKey === targetKey;
+    const person = sn.actor === 'human' && sn.userId ? usersLib.findUser(roster, sn.userId) : null;
+    const who = sn.actor === 'ai' ? (ours ? 'an agent, in this conversation' : `an agent, in the conversation \u201c${sn.title || sn.convKey}\u201d`)
+      : sn.actor === 'human' ? (person ? person.name : 'the user') + ', in the editor'
+      : 'a write from outside Chattering';
+    let diff = null, omitted = 0;
+    if (!ours && fileArchive && sn.end - sn.start <= ASK_EDIT_DIFF_SPAN_MS) {
+      try {
+        const ends = fileAskSessionVersions(abs, sn);
+        if (ends) {
+          const before = fileArchive.snapshot(abs, ends.before.id).content;
+          const after = fileArchive.snapshot(abs, ends.after.id).content;
+          if (before !== after) ({ text: diff, omitted } = lineDiff.unifiedDiff(before, after, { context: 2, maxLines: ASK_EDIT_DIFF_LINES }));
+        }
+      } catch {}
+    }
+    return { ago: now - sn.end, who, added: sn.added, removed: sn.removed, diff, omitted };
+  });
+  return { since: 'last 24 h', items };
+}
+
+// The saved versions just before and just after an edit session: the
+// session's first edit is the first version written by an edit (not an
+// "opened" or "before save" baseline) from about its start; the one before
+// it holds the text the session began from. The edit's own observation can
+// land a moment before or after its ledger event.
+const ARCHIVE_BASELINE_SOURCES = new Set(['opened file', 'before editor save', 'before Markdown save']);
+function fileAskSessionVersions(abs, sn) {
+  const versions = fileArchive.versions(abs, 400).filter(v => v.state === 'present');
+  const first = versions.findIndex(v => v.ts >= sn.start - 1000 && !ARCHIVE_BASELINE_SOURCES.has(v.source));
+  if (first < 1) return null;
+  let last = first;
+  while (last + 1 < versions.length && versions[last + 1].ts <= sn.end + 2000) last++;
+  return { before: versions[first - 1], after: versions[last] };
+}
+
+// The earlier asks on a file, oldest first, with what came of each: the
+// agent's recorded edits of the file in that conversation, from the ask to
+// the next ask there.
+function fileAskHistory(abs, { now = Date.now(), limit = ASK_HISTORY_MAX, exceptKey = null } = {}) {
+  const asks = askLog.recent(abs, { since: now - ASK_HISTORY_WINDOW_MS, limit, exceptKey });
+  if (!asks.length) return [];
+  const all = askLog.recent(abs, { since: now - ASK_HISTORY_WINDOW_MS });
+  const events = fileLedger ? fileLedger.recent(abs, asks[0].ts) : [];
+  return asks.map(a => {
+    const next = all.find(b => b.key === a.key && b.ts > a.ts);
+    const mine = events.filter(e => e.actor === 'ai' && e.conv_key === a.key && e.ts >= a.ts && (!next || e.ts < next.ts) && e.outcome !== 'failed');
+    const added = mine.reduce((n, e) => n + (Number(e.added) || 0), 0), removed = mine.reduce((n, e) => n + (Number(e.removed) || 0), 0);
+    const entry = index[a.key];
+    const running = headlessRuns.has(absPathForKey(a.key) || '') && !next;
+    const outcome = mine.length ? `the agent changed +${added} \u2212${removed} lines`
+      : running ? 'still running' : 'no change to this file recorded';
+    return { ts: a.ts, ago: now - a.ts, prompt: a.prompt, key: a.key, model: a.model || null,
+      title: entry ? entry.timelineTitle || entry.title || null : null, outcome,
+      where: entry ? `in \u201c${entry.timelineTitle || entry.title || a.key}\u201d` : 'in a conversation that no longer exists' };
+  });
+}
+
+// The brief for one ask (file-ask.js), from what the ledger, the saved
+// versions and the ask log know now. targetKey: the conversation it goes
+// to, or null for a new one.
+// selectedText: the selected characters, as the editor has them (capped).
+async function fileAskBriefFor(abs, item, targetKey, include, selectedText = '') {
+  const now = Date.now();
+  let text = '';
+  try { text = await fsp.readFile(abs, 'utf8'); } catch {}
+  const notebook = /\.(md|markdown|qmd|rmd)$/i.test(abs) ? fileAsk.notebookFacts(text, notebookEnv.RUN_LANGS) : null;
+  return fileAsk.fileAskBrief({
+    path: abs,
+    selection: { range: item.range || null, line: item.line || null, text: item.range ? selectedText : '' },
+    notebook,
+    edits: include.edits ? fileAskRecentEdits(abs, targetKey, now) : null,
+    asks: include.asks ? fileAskHistory(abs, { now, exceptKey: targetKey }) : null,
+  });
+}
+
+const ASK_SELECTED_MAX = 8000;
+const askSelectedOf = body => typeof body.selected === 'string' ? body.selected.slice(0, ASK_SELECTED_MAX) : '';
+
+// The file item of an ask: the path, and the selection or cursor line.
+function fileAskItem(abs, body) {
   const item = { type: 'file', path: abs };
   if (Array.isArray(body.range) && body.range.length === 2) item.range = body.range;
   else if (Number(body.line) > 0) item.line = Number(body.line);
-  const models = normalizePickedModels(body.models);
-  let key = null;
-  let created = false;
-  const wanted = body.target === 'new' ? null : body.target && body.target !== 'auto' ? String(body.target) : pick.continue && pick.continue.key;
-  if (wanted && index[wanted]) key = wanted;
+  return normalizeContextItems([item])[0];
+}
+
+// Where an ask goes: an existing conversation (its key) or a new one (null).
+function fileAskTargetKey(pick, target) {
+  const wanted = target === 'new' ? null : target && target !== 'auto' ? String(target) : pick.continue && pick.continue.key;
+  return wanted && index[wanted] ? wanted : null;
+}
+
+// The whole system-prompt addition an ask would send, for "what goes along".
+async function filesAskPreviewResponse(body, identity) {
+  const abs = path.resolve(expandHomePath(String(body.path || '')));
+  assertPathAccess(identity, abs, 'see');
+  const pick = await filesAskTargetResponse(abs, body.project || '', identity);
+  const key = fileAskTargetKey(pick, body.target);
+  const include = askIncludeOf(body.include);
+  const item = fileAskItem(abs, body);
+  const brief = await fileAskBriefFor(abs, item, key, include, askSelectedOf(body));
+  const items = key
+    ? conversationContextOf(key).filter(c => !(c.type === 'file' && c.path === abs)).concat([item])
+    : [item, ...(include.memory ? [{ project: pick.project, kind: 'map' }] : [])];
+  const bundle = await writeAttachedContextFile(items, { preview: true, brief });
+  return { text: bundle.text, tokens: bundle.tokens, target: key ? 'continue' : 'new' };
+}
+
+async function filesAskResponse(body, identity) {
+  const abs = path.resolve(expandHomePath(String(body.path || '')));
+  assertPathAccess(identity, abs, 'act');
+  const prompt = String(body.prompt || '').trim();
+  if (!prompt) throw new Error('write what should change first');
+  const principal = principalFor(identity);
+  const pick = await filesAskTargetResponse(abs, body.project || '', identity);
+  const project = pick.project;
+  const item = fileAskItem(abs, body);
+  // One model answers an ask: the box has no parallel set.
+  const models = normalizePickedModels(body.models).slice(0, 1);
+  const thinking = typeof body.thinking === 'string' && settingsLib.THINKING_LEVELS.includes(body.thinking) ? body.thinking : null;
+  const images = rpcImagesOf(body.images);
+  const include = askIncludeOf(body.include);
+  let key = fileAskTargetKey(pick, body.target);
+  if (key) assertCan(identity, 'act', targetOf(key), 'this conversation');
+  const brief = await fileAskBriefFor(abs, item, key, include, askSelectedOf(body));
+  let context, created = false;
   if (!key) {
     if (!pick.newAllowed) throw new Error('no project folder to start a conversation in');
+    // The new conversation's first process loads the very bundle the run
+    // sends (file, brief, and the project map when asked for), so the run
+    // does not restart it to load the same text.
+    context = [item, ...(include.memory ? [{ project, kind: 'map' }] : [])];
+    const bundle = await writeAttachedContextFile(context, { brief });
     const started = await startProjectConversation({
-      project, agent: 'pi', surface: 'rpc', silent: true, models, include: { map: true },
-      area: pick.area || undefined, name: '',
+      project, agent: 'pi', surface: 'rpc', silent: true, models, include: { map: false },
+      area: pick.area || undefined, name: '', context: bundle.text, principal,
     });
     key = started.key;
-    created = true;
     if (!key) throw new Error('the new conversation did not start');
+    created = true;
+    saveConversationContext(key, context);
+    appliedContextBySession.set(path.resolve(sessionPathsFor(key).sessionPath), { sig: contextSig(context), hash: contextBundleHash(bundle.text) });
+  } else {
+    // The file joins the conversation's attached context and stays there,
+    // so later sends from the transcript keep it (the brief does not).
+    context = conversationContextOf(key).filter(c => !(c.type === 'file' && c.path === abs)).concat([item]);
+    if (models.length) saveConversationModels(key, models);
   }
-  // The file joins the conversation's attached context and stays there, so
-  // later sends from the transcript keep it; the project map rides along
-  // for a brand-new conversation that has no memory in its system prompt.
-  const context = conversationContextOf(key).filter(c => !(c.type === 'file' && c.path === abs));
-  context.push(item);
-  if (created && !context.some(c => c.type !== 'file' && c.type !== 'chat' && c.project === project)) context.push({ project, kind: 'map' });
-  const lead = models[0] || (created ? null : null);
-  const inherited = !lead ? resolvedProjectDefaultModel(project) : null;
-  const provider = lead ? lead.provider : inherited && inherited.provider;
-  const modelId = lead ? lead.modelId : inherited && inherited.modelId;
-  const out = await startAgentRun(key, { node: null, provider, modelId, message: prompt, images: [], force: false, allowQueue: true, context });
+  const lead = models[0] || (created ? resolvedProjectDefaultModel(project) : null);
+  const out = await startAgentRun(key, {
+    node: null, provider: lead ? lead.provider : undefined, modelId: lead ? lead.modelId : undefined,
+    message: prompt, images, force: false, allowQueue: true, context, brief, thinking, principal,
+  });
   const job = out && out.job ? out.job : out;
+  askLog.record(abs, { prompt, key, model: job && job.model || (lead ? lead.provider + '/' + lead.modelId : null), user: principal.user.id });
   const entry = index[key];
   const rawTitle = entry ? (entry.timelineTitle || entry.title || '') : '';
   const title = created || !rawTitle || /^\(no user message\)$/.test(rawTitle) ? null : rawTitle;
-  return { ok: true, key, created, queued: !!(out && out.queued), job: job ? jobView(job) : null, title };
+  const notes = [];
+  if (out && out.queued && (out.briefDropped || out.thinkingDropped)) notes.push('queued into the running reply: it keeps its own instructions and reasoning level');
+  return { ok: true, key, created, queued: !!(out && out.queued), job: job ? jobView(job) : null, title, notes };
 }
 
 // Boot: backfill every conversation, ingest Git for every active project's
@@ -12033,7 +12207,7 @@ async function fileContextBlock(item) {
   const root = await gitRootForCwd(path.dirname(abs)).catch(() => null);
   if (root) parts.push(`- repository: ${root} · path: ${path.relative(root, abs)}`);
   parts.push(`- ${lines.length} lines · ${text.length} characters`);
-  if (item.range) parts.push(`- the user selected lines ${item.range[0]}–${item.range[1]}`);
+  if (item.range) parts.push(item.range[0] === item.range[1] ? `- the user selected text on line ${item.range[0]}` : `- the user selected lines ${item.range[0]}–${item.range[1]}`);
   else if (item.line) parts.push(`- the user's cursor is on line ${item.line}`);
   const numbered = (from, to) => lines.slice(from - 1, to).map((l, i) => String(from + i).padStart(5, ' ') + ' │ ' + l).join('\n');
   const fence = '`'.repeat(Math.max(3, ((text.match(/`+/g) || []).reduce((m, x) => Math.max(m, x.length), 0)) + 1));
@@ -12045,7 +12219,7 @@ async function fileContextBlock(item) {
     parts.push('', `#### Lines ${from}–${to} of ${lines.length} (the file is ${Math.round(text.length / 1024)} KB — read the rest with your tools when needed)`, '', fence, numbered(from, to), fence);
   }
   if (item.range) {
-    parts.push('', `#### Selected lines ${item.range[0]}–${item.range[1]}`, '', fence, numbered(item.range[0], Math.min(lines.length, item.range[1])), fence);
+    parts.push('', item.range[0] === item.range[1] ? `#### Selected line ${item.range[0]}` : `#### Selected lines ${item.range[0]}–${item.range[1]}`, '', fence, numbered(item.range[0], Math.min(lines.length, item.range[1])), fence);
   }
   if (fileLedger) {
     const touched = fileLedger.touched(abs, { limit: 5 });
@@ -12069,7 +12243,9 @@ async function fileContextBlock(item) {
   return parts.join('\n');
 }
 
-async function writeAttachedContextFile(items, { preview = false } = {}) {
+// brief: text for one run, appended last (closest to the user message);
+// see startAgentRun.
+async function writeAttachedContextFile(items, { preview = false, brief = null } = {}) {
   const normalized = normalizeContextItems(items);
   const maps = normalized.filter(i => i.type !== 'chat' && i.type !== 'file' && i.type !== 'note');
   const chats = normalized.filter(i => i.type === 'chat');
@@ -12132,7 +12308,8 @@ async function writeAttachedContextFile(items, { preview = false } = {}) {
       'The user is reading or editing these files in Chattering and watches them live. When asked for a change, edit the file in place with your tools; do not rewrite unrelated parts; keep the author\'s formatting.', '',
       blocks.join('\n\n---\n\n'));
   }
-  if (!docCount && !chatCount && !fileCount && !noteCount) throw new Error('none of those context items exist yet');
+  if (brief) parts.push('', String(brief).trim());
+  if (!docCount && !chatCount && !fileCount && !noteCount && !brief) throw new Error('none of those context items exist yet');
   const text = parts.join('\n') + '\n';
   const file = path.join(BRIEFINGS_DIR,
     new Date().toISOString().replace(/[:.]/g, '-') + '-attached-context.md');
@@ -13878,6 +14055,8 @@ async function handleRequest(req, res) {
       '/files-browser.js': { file: 'files-browser.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.js': { file: 'live-file.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.css': { file: 'live-file.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/ask-bubble.js': { file: 'ask-bubble.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/ask-bubble.css': { file: 'ask-bubble.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/collab-client.js': { file: 'collab-client.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/people.js': { file: 'people.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/people.css': { file: 'people.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
@@ -14359,22 +14538,18 @@ async function handleRequest(req, res) {
       try { json(res, 200, await fileHistoryScopeResponse(u.searchParams.get('path') || '', u.searchParams.get('project') || '')); }
       catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/files/ask-target') {
-      try { json(res, 200, await filesAskTargetResponse(u.searchParams.get('path') || '', u.searchParams.get('project') || '')); }
-      catch (e) { json(res, 400, { error: e.message }); }
+      try { json(res, 200, await filesAskTargetResponse(u.searchParams.get('path') || '', u.searchParams.get('project') || '', identity)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/files/ask-preview' && req.method === 'POST') {
       let body = '';
-      for await (const chunk of req) body += chunk;
-      try {
-        const p = JSON.parse(body || '{}');
-        const items = normalizeContextItems([{ type: 'file', path: p.path, range: p.range, line: p.line }]);
-        if (!items.length) throw new Error('missing file path');
-        json(res, 200, { text: await fileContextBlock(items[0]) });
-      } catch (e) { json(res, 400, { error: e.message }); }
+      for await (const chunk of req) { body += chunk; if (body.length > 64000) return json(res, 413, { error: 'request too large' }); }
+      try { json(res, 200, await filesAskPreviewResponse(JSON.parse(body || '{}'), identity)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/files/ask' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
-      try { json(res, 202, await filesAskResponse(JSON.parse(body || '{}'))); }
-      catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message }); }
+      try { json(res, 202, await filesAskResponse(JSON.parse(body || '{}'), identity)); }
+      catch (e) { json(res, e.needsForce ? 409 : e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/files/entry') {
       try { json(res, 200, await filesEntryResponse(u.searchParams)); }
       catch (e) { json(res, 400, { error: e.message }); }

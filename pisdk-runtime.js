@@ -563,6 +563,15 @@ function piHeadlessRun(target, opts = {}) {
         await S.session.setModel(model);
         S.model = want;
       }
+      // A reasoning level asked for with this prompt: set before it, and
+      // persisted by pi (a thinking_level_change entry), like the composer's
+      // control. A model without the level keeps its nearest one (pi clamps).
+      if (opts.thinking) {
+        try {
+          if (S.session.supportsThinking()) S.session.setThinkingLevel(opts.thinking);
+          else S.emit({ type: 'run_note', text: 'this model has no reasoning control; the reasoning level was not changed' });
+        } catch (error) { S.emit({ type: 'run_note', text: 'could not set the reasoning level: ' + String(error.message || error) }); }
+      }
       if (aborted) throw new Error('Pi run aborted before prompt');
       if (opts.simplifyAnswers && !opts.customMessage) rewrite = captureRewriteRequest(S.session, opts.simplifyPrompt);
       // Who is sending: one entry in the session tree right before the user
