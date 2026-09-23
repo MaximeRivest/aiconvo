@@ -34,6 +34,14 @@ Reading and typing own the screen: `chrome-min` (scroll down, or focus in
 the composer) hides the bar with the top bar and drops the composer to the
 bottom edge; scrolling up brings both back. A sheet never hides.
 
+The hidden state holds only while the reader can undo it: while the
+composer has the keyboard, or while the view sits away from its top (a
+scroll up is then possible). Anywhere else the chrome returns on its own —
+when the composer lets go, when the view resizes, when its content grows or
+shrinks. Without this, a conversation short enough to fit the screen hid the
+bar on the first tap in the composer and never showed it again: no scroll,
+no scroll event, no Agents, Gantt, New or Files.
+
 ## The sheets
 
 The Agents sheet is the desktop **inbox**, not the old tray: Interrupted,

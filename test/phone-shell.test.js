@@ -12,6 +12,10 @@ const { viewerBrowser } = require('./helpers/viewer-browser');
 // top bar; a sheet keeps it. The Android back button asks the page first.
 test('phone shell: bottom bar, sheets, one-row head, back hook, desktop untouched', { timeout: 90000 }, async t => {
   const { home, base, work, auth, evaluate: ev, until, size, screenshot, exceptions } = await viewerBrowser(t);
+  // A fresh install first asks about background AI; its modal would hold focus.
+  await until(`document.querySelector('dialog.bg-ask [data-none]')`, 'no first-run question');
+  await ev(`document.querySelector('dialog.bg-ask [data-none]').click()`);
+  await until(`!document.querySelector('dialog.bg-ask')`, 'the first-run question stayed');
   const fixture = path.join(home, '.pi/agent/sessions/fixture');
   const keys = {};
   for (const name of ['alpha', 'beta']) {
@@ -21,8 +25,15 @@ test('phone shell: bottom bar, sheets, one-row head, back hook, desktop untouche
     for (let i = 0; i < 30; i++) lines.push({ type: 'message', id: name + '-a' + i, parentId: i ? name + '-a' + (i - 1) : name + '-p', timestamp: '2026-09-01T12:00:0' + (i % 10) + 'Z', message: { role: 'assistant', content: [{ type: 'text', text: name + ' reply ' + i + '. ' + 'Words that fill a phone screen. '.repeat(20) }] } });
     fs.writeFileSync(path.join(fixture, name + '.jsonl'), lines.map(JSON.stringify).join('\n') + '\n');
   }
+  // A conversation that fits the screen: nothing to scroll.
+  keys.gamma = 'pi:fixture/gamma.jsonl';
+  fs.writeFileSync(path.join(fixture, 'gamma.jsonl'), [
+    { type: 'session', version: 3, id: 'gamma', cwd: work },
+    { type: 'message', id: 'gamma-p', parentId: null, timestamp: '2026-09-01T12:00:00Z', message: { role: 'user', content: [{ type: 'text', text: 'gamma question' }] } },
+    { type: 'message', id: 'gamma-a', parentId: 'gamma-p', timestamp: '2026-09-01T12:00:01Z', message: { role: 'assistant', content: [{ type: 'text', text: 'A short answer.' }] } },
+  ].map(JSON.stringify).join('\n') + '\n');
   await fetch(base + '/api/rescan', { method: 'POST', headers: auth }); await ev(`load()`);
-  await until(`sessions.some(s=>s.key===${JSON.stringify(keys.beta)})`);
+  await until(`${JSON.stringify([keys.beta, keys.gamma])}.every(k=>sessions.some(s=>s.key===k))`);
   const doc = path.join(work, 'notes.md'); fs.writeFileSync(doc, '# Notes\n\nA file to open from the sheet.\n');
   await fetch(base + '/api/recent-files', { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ path: doc, project: 'work' }) });
 
@@ -86,6 +97,25 @@ test('phone shell: bottom bar, sheets, one-row head, back hook, desktop untouche
   await ev(`$('agentText').blur();$('view').scrollTop=560`);
   await until(`!document.body.classList.contains('chrome-min')`, 'a small scroll up brings the chrome back after typing');
 
+  // The chrome hides only while the reader can bring it back. Content that
+  // shrinks under a hidden chrome (a collapsed block, another branch) takes
+  // away the scroll that would ask for it: the chrome returns on its own.
+  await ev(`$('view').scrollTop=600`);
+  await new Promise(r => setTimeout(r, 100));
+  await ev(`$('view').scrollTop=760`);
+  await until(`document.body.classList.contains('chrome-min')`);
+  await ev(`$('conversationTranscript').replaceChildren()`);
+  await until(`!document.body.classList.contains('chrome-min') && $('phoneBar').checkVisibility()`, 'a view that stops scrolling brings the chrome back');
+  // A conversation that fits the screen has no scroll at all: typing hides
+  // the chrome, and letting go of the composer must bring it back.
+  await ev(`open(${JSON.stringify(keys.gamma)}, 'bottom')`);
+  await until(`viewKind==='conversation' && current?.key===${JSON.stringify(keys.gamma)} && !!$('agentText')`);
+  assert.equal(await ev(`$('view').scrollHeight-$('view').clientHeight < 48`), true, 'the short conversation fits');
+  await ev(`$('agentText').focus()`);
+  await until(`document.body.classList.contains('chrome-min')`, 'typing hides the chrome in a short conversation too');
+  await ev(`$('agentText').blur()`);
+  await until(`!document.body.classList.contains('chrome-min') && $('phoneBar').checkVisibility()`, 'with nothing to scroll, the keyboard leaving brings the bar back');
+
   // Files: the same file list as the desktop's right column, as a sheet.
   await ev(`document.querySelector('[data-phone-tab=files]').click()`);
   await until(`rightFilesOpen && document.body.classList.contains('phone-files') && !$('rightFilePanel').hidden`, 'Files opens as a sheet');
@@ -105,14 +135,16 @@ test('phone shell: bottom bar, sheets, one-row head, back hook, desktop untouche
   await ev(`document.querySelector('.ag-file[data-path=${JSON.stringify(doc)}] .ag-file-open').click()`);
   await until(`viewKind==='file' && fileWs?.path===${JSON.stringify(doc)} && !rightFilesOpen`, 'a file opens and the sheet closes');
 
-  // Gantt and New from the bar; a project link inside the sheet closes it.
+  // Gantt and New from the bar; leaving for a page closes the sheet.
   await ev(`document.querySelector('[data-phone-tab=gantt]').click()`);
   await until(`viewKind==='home' && document.querySelector('[data-phone-tab=gantt]').getAttribute('aria-pressed')==='true'`);
   await ev(`document.querySelector('[data-phone-tab=new]').click()`);
   await until(`viewKind==='draft' && document.querySelector('[data-phone-tab=new]').getAttribute('aria-pressed')==='true'`, 'New starts a draft');
   await ev(`document.querySelector('[data-phone-tab=agents]').click()`);
   await until(`!$('agentsPop').hidden`);
-  await ev(`document.querySelector('#agentsUnread .ag-row .ag-project').click()`);
+  // The fixture's conversations are loose, so their rows carry no project
+  // link; follow the address a link would, with the sheet open.
+  await ev(`location.hash='#project=work'`);
   await until(`viewKind==='project' && $('agentsPop').hidden`, 'leaving for a page closes the sheet');
   assert.equal(await ev(`document.documentElement.scrollWidth<=innerWidth`), true);
 

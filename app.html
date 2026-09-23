@@ -9558,19 +9558,66 @@ function setChromeMin(min, compensate) {
   if (compensate) view.scrollTop += min ? -h : h;
   chromeScrollLast = view.scrollTop;
 }
+// Near the top the chrome always shows: there is no room left to scroll up
+// and ask for it.
+const CHROME_TOP = 48;
+const chromeAutoHideOn = () =>
+  (phoneLayout() || sideLayoutOn()) && !isEink() && !document.body.classList.contains('home');
 $('view').addEventListener('scroll', () => {
-  if (!(phoneLayout() || sideLayoutOn()) || isEink() || document.body.classList.contains('home')) return;
+  if (!chromeAutoHideOn()) return;
   const top = $('view').scrollTop;
+  if (top < CHROME_TOP) {
+    setChromeMin(false, false);
+    chromeScrollLast = top;
+    chromeUpAcc = chromeDownAcc = 0;
+    return;
+  }
   if (chromeScrollLast < 0) { chromeScrollLast = top; return; }
   const delta = top - chromeScrollLast;
   chromeScrollLast = top;
   if (Math.abs(delta) > 400) { chromeUpAcc = chromeDownAcc = 0; return; } // programmatic jump
   if (delta > 0) { chromeDownAcc += delta; chromeUpAcc = 0; }
   else if (delta < 0) { chromeUpAcc -= delta; chromeDownAcc = 0; }
-  if (top < 48) setChromeMin(false, false);
-  else if (chromeUpAcc > 32) setChromeMin(false, true);
+  if (chromeUpAcc > 32) setChromeMin(false, true);
   else if (chromeDownAcc > 48 && top > 200) setChromeMin(true, true);
 }, { passive: true });
+
+// The chrome may stay hidden only while the reader can bring it back.
+// Scrolling is the way back, and a page that fits the screen, or one already
+// at its top, delivers no scroll to ask with — the bottom bar and its
+// Agents, Gantt, New and Files would be gone until the next navigation. So
+// the hidden state holds only while the composer has the keyboard (typing
+// owns the screen) or the view sits away from its top; anywhere else the
+// chrome returns. Checked whenever that can change: the composer lets go,
+// the view resizes (keyboard, rotation, the chrome itself), or its content
+// grows or shrinks (a first message, a collapsed block, another branch).
+// It only ever shows the chrome, so it cannot fight the scroll rules above.
+let chromeCheckQueued = false;
+function checkChromeRecoverable() {
+  if (chromeCheckQueued || !document.body.classList.contains('chrome-min')) return;
+  chromeCheckQueued = true;
+  requestAnimationFrame(() => {
+    chromeCheckQueued = false;
+    if (!document.body.classList.contains('chrome-min')) return;
+    const typing = phoneLayout() && document.activeElement === $('agentText');
+    if (chromeAutoHideOn() && (typing || $('view').scrollTop >= CHROME_TOP)) return;
+    setChromeMin(false, false);
+  });
+}
+if (window.ResizeObserver) {
+  const view = $('view');
+  const sizes = new ResizeObserver(checkChromeRecoverable);
+  // The view's own box follows the viewport and its padding; its direct
+  // children carry the content height. Views replace their children
+  // wholesale, so the set is re-observed on every child-list change.
+  const observeView = () => {
+    sizes.disconnect();
+    sizes.observe(view);
+    for (const el of view.children) sizes.observe(el);
+  };
+  observeView();
+  new MutationObserver(observeView).observe(view, { childList: true });
+}
 
 const ttsAudio = new Audio();
 let ttsActiveBtn = null;
@@ -12371,7 +12418,12 @@ function wireComposeMin(ta) {
     if (phoneLayout() && !isEink() && !document.body.classList.contains('home'))
       document.body.classList.add('chrome-min');
   });
-  ta.addEventListener('blur', () => setTimeout(updateComposeMin, 150));
+  ta.addEventListener('blur', () => {
+    setTimeout(updateComposeMin, 150);
+    // The keyboard is going: in a conversation too short to scroll, the
+    // chrome must come back now, or nothing will bring it back.
+    checkChromeRecoverable();
+  });
   ta.addEventListener('input', updateComposeMin);
   const mic = $('agentMic');
   if (mic) mic.addEventListener('click', () => setTimeout(updateComposeMin, 60));
