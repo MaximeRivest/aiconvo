@@ -6305,10 +6305,10 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal chattering startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.15.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
-const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js';
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -6813,19 +6813,33 @@ async function runDocCell(cell, opts = {}) {
     state.textContent = '■ interrupting the kernel…';
     try { await postJson('/api/doc/cancel-run', { runId }); } catch {}
   };
+  st.cancelRun = () => cancelBtn.onclick();
+  // The live panel under the cell (mrmd-document 0.14+): output as it
+  // streams, and a field when the program asks. Not document text: the
+  // result is still written once, below, when the run ends. The run also
+  // draws its state on the cell (0.15+): running with elapsed time,
+  // waiting for input, then the verdict — through the run, which follows
+  // the cell through edits.
+  panel = typeof st.editor.showCellRun === 'function' ? st.editor.showCellRun(cell) : null;
+  const cellStatus = status => { try { panel && panel.setStatus && panel.setStatus(status); } catch {} };
+  const disposePanel = () => { try { panel && panel.dispose(); } catch {} };
+  cellStatus({ state: 'running', startedAt: t0 });
   // A notebook that declares `rat.after` gets its prerequisites run first
   // (each once per kernel lifetime) — the declared chain, never a guess.
   if (st.doctor && (st.doctor.after || []).some(a => !a.played)) {
     const pending = st.doctor.after.filter(a => !a.played).map(a => a.path.split('/').pop());
     state.textContent = '● running prerequisites: ' + pending.join(', ');
+    cellStatus({ state: 'running', startedAt: t0, label: 'running prerequisites' });
     let pr;
     try { pr = await postJson('/api/doc/play-prerequisites', { doc: st.path }); }
     catch { pr = { error: 'network failure' }; }
-    if (docState !== st) return { ok: false };
+    if (docState !== st) { disposePanel(); return { ok: false }; }
     if (pr.error || !pr.ok) {
       clearInterval(tick);
       st.running = null;
       cancelBtn.hidden = true;
+      cellStatus({ state: 'error', ms: Date.now() - t0, label: 'prerequisite failed' });
+      disposePanel();
       const failedRun = (pr.runs || []).find(x => !x.ok && !x.skipped);
       const failedCell = failedRun && failedRun.cells.find(c => !c.ok);
       state.textContent = '✗ prerequisite ' + (failedRun ? failedRun.notebook.split('/').pop() + (failedCell ? ' failed at line ' + failedCell.line : '') : 'failed') + (pr.error ? ' · ' + pr.error : '');
@@ -6834,11 +6848,8 @@ async function runDocCell(cell, opts = {}) {
       return { ok: false, r: pr };
     }
     st.doctor.after = st.doctor.after.map(a => ({ ...a, played: true }));
+    cellStatus({ state: 'running', startedAt: t0 });
   }
-  // The live panel under the cell (mrmd-document 0.14+): output as it
-  // streams, and a field when the program asks. Not document text: the
-  // result is still written once, below, when the run ends.
-  panel = typeof st.editor.showCellRun === 'function' ? st.editor.showCellRun(cell) : null;
   const onLive = ev => {
     if (docState !== st || st.running !== runId) return;
     if (ev.type === 'output') {
@@ -6849,6 +6860,7 @@ async function runDocCell(cell, opts = {}) {
       }
     } else if (ev.type === 'input_request') {
       waiting = true;
+      cellStatus({ state: 'waiting', startedAt: t0 });
       state.textContent = runLabel();
       const asked = panel ? panel.ask({ prompt: ev.prompt, secret: ev.secret }) : docStripAsk(strip, ev);
       asked.then(async reply => {
@@ -6860,6 +6872,7 @@ async function runDocCell(cell, opts = {}) {
       });
     } else if (ev.type === 'input_done') {
       waiting = false;
+      cellStatus({ state: 'running', startedAt: t0 });
       if (panel) panel.dismissInput(); else docStripAskClose();
       state.textContent = runLabel();
     }
@@ -6867,9 +6880,12 @@ async function runDocCell(cell, opts = {}) {
   const r = await docRunRequest({ lang: cell.lang, code: cell.code, doc: st.path, runId }, onLive);
   clearInterval(tick);
   docStripAskClose();
-  // Dispose right before the result is written (no await between): the
-  // live panel and the written result swap in one frame.
-  const disposePanel = () => { try { panel && panel.dispose(); } catch {} };
+  st.cancelRun = null;
+  // The verdict goes on the cell before the panel goes (the run is what
+  // finds the cell); dispose right before the result is written (no await
+  // between): the live panel and the written result swap in one frame.
+  cellStatus(r.error ? { state: 'error', ms: Date.now() - t0, label: 'not run' }
+    : { state: r.code === 0 ? 'ok' : 'error', ms: r.ms, label: r.cancelled ? 'stopped' : undefined });
   if (docState !== st) { disposePanel(); return { ok: false }; }
   st.running = null;
   cancelBtn.hidden = true;
@@ -6957,23 +6973,45 @@ function docStripAskClose() {
 // Run every cell, top to bottom, one kernel, one at a time — state builds
 // like a notebook. Stops at the first error; the remaining cells keep
 // their old outputs (honest: they did not run).
+// Only cells rat can run take part: a ```text or ```json block is prose.
+const runnableDocCells = st => st.editor.listCells().filter(c => Object.hasOwn(NotebookEnv.RUN_LANGS, String(c.lang || '').toLowerCase()));
+
 async function runAllDocCells() {
   const st = docState;
   if (!st) return;
   if (st.running) return toast('a cell is already running — cancel it first');
-  const cells = st.editor.listCells();
-  if (!cells.length) return toast('no code cells in this document');
+  const cells = runnableDocCells(st);
+  if (!cells.length) return toast('no runnable code cells in this document');
+  // Every cell shows it is in line; each turns to running in its turn.
+  st.stopQueue = false;
+  if (typeof st.editor.setCellStatus === 'function') for (const c of cells) st.editor.setCellStatus(c, { state: 'queued' });
+  const endQueue = () => { st.stopQueue = false; try { st.editor.clearCellStatuses && st.editor.clearCellStatuses(['queued']); } catch {} };
   for (let i = 0; i < cells.length; i++) {
     // Re-list before each run: earlier outputs moved the later offsets.
-    const fresh = st.editor.listCells();
-    if (docState !== st || i >= fresh.length) return;
+    const fresh = runnableDocCells(st);
+    if (docState !== st || i >= fresh.length) return endQueue();
+    if (st.stopQueue) { toast('run all stopped before cell ' + (i + 1) + ' of ' + fresh.length); return endQueue(); }
     const { ok } = await runDocCell(fresh[i]);
     if (!ok) {
       if (docState === st) toast('run all stopped at cell ' + (i + 1) + ' of ' + fresh.length);
-      return;
+      return endQueue();
     }
   }
+  endQueue();
   toast('✓ ran all ' + cells.length + ' cells');
+}
+
+// Stop, from a cell's own button: on the running cell it interrupts the
+// kernel (variables survive); on a queued cell it ends run all after the
+// cell now running.
+function cancelDocCell(state) {
+  const st = docState;
+  if (!st) return;
+  if (state === 'queued') {
+    st.stopQueue = true;
+    try { st.editor.clearCellStatuses(['queued']); } catch {}
+    toast('run all will stop after the cell now running');
+  } else if (st.cancelRun) st.cancelRun();
 }
 
 // A failed python cell with ModuleNotFoundError gets a one-click repair
@@ -7172,6 +7210,9 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
     onChange: shared ? () => fileWsSharedStatus(fileWs) : scheduleDocAutosave,
     onSave: shared ? () => fileWsSharedSave(fileWs) : focused ? autosaveDocument : commitDocument,
     onRunCell: (cell, o) => runDocCell(cell, o),
+    // The Run button goes on cells rat can run; Stop on a busy cell.
+    runnableLanguages: Object.keys(NotebookEnv.RUN_LANGS),
+    onCancelCell: (cell, info) => cancelDocCell(info && info.state),
   });
   docState = st;
   if (shared) { fileWs.wasShared = true; fileWs.collabUnsub = collabOnPeople(shared, () => fileWsSharedStatus(fileWs)); $('docSave').disabled = false; $('docSave').title = 'Shared: the disk follows as you type. Save writes it right now · Ctrl+S'; }

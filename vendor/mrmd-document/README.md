@@ -11,7 +11,20 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.14.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.15.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.15.0: cell controls. With `onRunCell`, every runnable cell (the host's
+  `runnableLanguages`; default any named language but output and diagrams)
+  carries a `▶ Run` button at the right of its fence row, and the host
+  draws the cell's run state with `setCellStatus(cell, {state, startedAt,
+  ms, label})` or, better, the run's own `run.setStatus(...)` (the live
+  panel follows its cell through edits): `queued`, `running` (elapsed time
+  in whole seconds, a bar pulsing down the cell's left side and sliding
+  along its top edge), `waiting` (for input — the bar holds still), then
+  `ok`/`error` with the duration, kept until the cell's code is edited.
+  Busy cells show `■ Stop` → `onCancelCell(cell, {state})`.
+  `clearCellStatuses(states)` clears marks (run all's queue). The live
+  panel is hidden while it has nothing to show. Motion stops under
+  prefers-reduced-motion. The bundle grows by about 8 KB.
 - 0.14.0: live cell runs. `showCellRun(cell)` puts a panel under a running
   cell: `append(text)` shows output as it streams (carriage returns redraw
   a progress line in place, ANSI styling dropped, links clickable), and
@@ -88,14 +101,14 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `93da1a6` ("document entry 0.14.0").
-- SHA-256: `b3116e02aa216318872e3ebd4a8add1a6959c894ea36856acce62305367d1533`
+- Source commit: `41fd0fa` ("document entry 0.15.0").
+- SHA-256: `b43ff37a10c8ea8cfe34fbc116157c7266cbf5a181c0831a2d5cb75b6d310b61`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.13.0 (documents open; a running cell's prompt is asked in the run strip
-  and its latest output line shown there, instead of the panel under the
-  cell). Keep that artifact and route while the fallback exists.
+  0.14.0 (documents open and cells stream; cells have no Run button or
+  on-cell state — Mod-Enter and the run strip still work). Keep that
+  artifact and route while the fallback exists.
 
 ## Features enabled in chattering
 
@@ -116,6 +129,9 @@ owns the editing surface.
   `refreshDiagrams()` after a theme change
 - `file-link-navigate` — links inside the document open in the file
   workspace (filesmode.js `fileWsWireDocLinks`)
+- cell controls (`runnableLanguages`, `onCancelCell`, `run.setStatus`,
+  `clearCellStatuses`) — Run/Stop on each cell and its run state
+  (app.html `runDocCell`, `runAllDocCells`, `cancelDocCell`)
 - `showCellRun` — a running notebook cell's live output and input prompts
   (app.html `runDocCell`, fed by `rat run --events` through
   `/api/doc/run-cell` with `stream: true` and `/api/doc/run-input`)

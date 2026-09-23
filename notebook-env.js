@@ -338,5 +338,10 @@
     return { path: null, source: 'none' };
   }
 
-  return { addDependency, dependencies, setProject, setMapping, readScalar, afterList, missingModule, proposeRequirement, agentBrief, findRat, IMPORT_TO_DIST };
+  // Fence languages a notebook cell can run in → rat runtimes. The server
+  // runs cells through it; the page offers a Run button only for these.
+  // rat resolves aliases itself; this map only decides what is runnable.
+  const RUN_LANGS = Object.freeze({ python: 'py', py: 'py', python3: 'py', r: 'r', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', julia: 'jl', jl: 'jl', javascript: 'js', js: 'js', node: 'js' });
+
+  return { addDependency, dependencies, setProject, setMapping, readScalar, afterList, missingModule, proposeRequirement, agentBrief, findRat, IMPORT_TO_DIST, RUN_LANGS };
 });
