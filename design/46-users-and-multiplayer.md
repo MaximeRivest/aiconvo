@@ -352,6 +352,8 @@ Keep it small enough to be enforced in one module.
 
 ## Team scale: thirty people, three departments, one server
 
+> **Update 2026-09-23 (conversation 01a0cb65):** "no to build" is superseded. A company hub serving every employee is now a goal (TODO item 7), to be built after the product is safe for strangers (TODO item 2). The analysis below still holds; the separation of identity from execution principal is the first thing to design.
+
 Asked on the same day: is this the moment to think about admins, managers,
 departments? Yes to think, no to build. The household version and the team
 version differ in one thing that is architectural and in several that are
