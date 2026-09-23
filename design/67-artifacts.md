@@ -40,6 +40,36 @@ Decisions taken while building, with their reasons:
 - On a phone the panel is a full-screen sheet opened from the card; it never
   opens by itself there.
 
+## Finding artifacts later (the library)
+
+No store and no scan. Each conversation's index entry carries its artifacts
+(`artifacts` in `indexFile`: files by absolute path, the newest declaration
+naming them; widgets by call; failed calls excluded), computed whenever the
+watcher re-indexes the conversation, like its title and counts. The entries
+reach the browser with the conversation list and its live updates, already
+filtered by what the person may see, so every list below is a filter over
+data the page holds.
+
+- **Right panel → Artifacts** (beside Files, same All / Project switch):
+  newest first, kind icon, project and conversation, search, all / files /
+  inline. Opening one opens its conversation on the card that made it
+  (moving the head there if it was on another branch) and the artifact in
+  the panel. The artifact replaces the Files list; one right panel at a time.
+- **Project page**: the nine newest, and "all" to the panel scoped to the project.
+- **Files list**: a ◧ on files that belong to an artifact; it opens the artifact.
+
+Details: a file artifact declared in several conversations is one item (the
+newest opens it; the count is shown). Mirrored conversations are left out
+(their files live on another machine). Entries indexed before this existed
+are re-read once at start, only for files changed since the tools shipped
+(`ARTIFACTS_SINCE`). The conversation list's ETag now includes the server's
+boot id and an index revision, so a re-derived entry reaches browsers that
+hold a cached list.
+
+Not done: thumbnails (an icon per kind instead; a real picture would need a
+headless browser per artifact), and a disk check per row (a deleted artifact
+still lists; opening it says the files are gone).
+
 
 ## What the study showed
 

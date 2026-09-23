@@ -2294,7 +2294,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <button id="filesToggle" type="button" aria-label="Open files" title="Open files" aria-expanded="false" aria-controls="rightFilePanel">▤</button>
 <aside id="rightFiles" hidden aria-label="Files">
   <section id="rightFilePanel" hidden aria-labelledby="rightFileTitle">
-    <div class="right-file-head"><span id="rightFileTitle">Files</span><button id="rightFileClose" type="button" title="Close file panel" aria-label="Close file panel">✕</button></div>
+    <div class="right-file-head"><span id="rightFileTitle" class="right-file-views" role="group" aria-label="Show"><button type="button" data-right-view="files" aria-pressed="true" title="Files people and agents opened, wrote or edited">Files</button><button type="button" data-right-view="artifacts" aria-pressed="false" title="Pages, apps, slides and documents agents made">Artifacts</button></span><button id="rightFileClose" type="button" title="Close file panel" aria-label="Close file panel">✕</button></div>
     <div class="file-scope-switch" role="group" aria-label="File scope">
       <button type="button" data-file-scope="recent-files" aria-pressed="true" title="File activity across all projects">All</button>
       <button type="button" data-file-scope="files" aria-pressed="false" title="File activity in the selected project">Project</button>
@@ -3861,6 +3861,7 @@ function renderSidebarProjects() {
 // in the picker; old per-browser panel choices must not resurrect the rail.
 const SIDE_PANELS = ['inbox'];
 let rightFilesMode = agentSecState.filePanel === 'files' ? 'files' : 'recent-files';
+let rightFilesView = agentSecState.fileView === 'artifacts' ? 'artifacts' : 'files';
 let rightFilesOpen = agentSecState.filePanelOpen === true;
 if (['files', 'recent-files'].includes(agentSecState.panel)) {
   rightFilesMode = agentSecState.panel;
@@ -3919,7 +3920,7 @@ function fileActivityHtml(project) {
     return `<div class="ag-row ag-file${fileWs && fileWs.path === f.path ? ' current' : ''}" data-path="${esc(f.path)}" data-project="${esc(attributed === LOOSE_PROJECT ? '' : attributed)}" data-file-conv="${esc(f.key || '')}" title="${esc(f.path + '\n' + actor + ' · ' + verb + ' · ' + new Date(f.at).toLocaleString())}">` +
       `<button type="button" class="ag-main ag-file-open"><span class="ag-title"><span>${esc(name)}</span>${presenceFileSlotHtml(f.path)}${dir ? '' : age}</span>` +
       (dir ? `<span class="ag-sub"><span class="ag-dir">${esc(dir)}</span>${age}</span>` : '') + '</button>' +
-      `<span class="ag-acts"><button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
+      `<span class="ag-acts">${window.Artifacts ? Artifacts.library.ownerMarkHtml(f.path) : ''}<button class="ag-more" data-forget="${esc(f.path)}" title="Remove from recent files">✕</button></span></div>`;
   }).join('');
   return `<div class="ag-files-block"><div class="ag-files-head"><span class="ag-sub-sec">source</span><span class="ag-scope" role="group" aria-label="File activity source">${[['human', 'human'], ['agent', 'agents'], ['both', 'both']].map(([value, label]) => `<button data-files-actor="${value}" class="${fileActor === value ? 'on' : ''}" aria-pressed="${fileActor === value}" title="${value === 'human' ? 'Files opened or saved by a person in the editor' : value === 'agent' ? 'Files read, written or edited by agents, with successful tool results' : 'Human and agent activity, newest first'}">${label}</button>`).join('')}</span></div>${rows || '<div class="ag-empty">No matching file activity yet.</div>'}${panelListMore('files', files.length)}</div>`;
 }
@@ -3942,8 +3943,13 @@ function renderRightFiles() {
       : hasProject ? 'File activity · ' + ProjectScope.label(workspaceScope()) : 'Choose a project using the project button on the left';
   });
   $('rightFileScope').textContent = rightFilesMode === 'recent-files' ? 'All projects' : project ? ProjectScope.label(project) : 'No project selected';
+  // Files or Artifacts (design/67): one panel, one scope switch.
+  const artifactsView = rightFilesView === 'artifacts' && !!window.Artifacts;
+  document.querySelectorAll('[data-right-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.rightView === (artifactsView ? 'artifacts' : 'files'))));
+  $('rightFilePanel').setAttribute('aria-label', artifactsView ? 'Artifacts' : 'Files');
+  if (window.Artifacts) Artifacts.library.wireHost(host, renderRightFiles);
   host.innerHTML = rightFilesMode === 'files' && !hasProject
-    ? '<div class="ag-empty">Choose a project on the left, or switch to All.</div>' : fileActivityHtml(project);
+    ? '<div class="ag-empty">Choose a project on the left, or switch to All.</div>' : artifactsView ? Artifacts.library.panelHtml(project) : fileActivityHtml(project);
   host.scrollTop = scroll;
   const target = actor ? [...host.querySelectorAll('[data-files-actor]')].find(b => b.dataset.filesActor === actor)
     : forget ? [...host.querySelectorAll('[data-forget]')].find(b => b.dataset.forget === forget)
@@ -8179,6 +8185,7 @@ function renderProjectPanel(d) {
         <div class="pa-meta dim">${esc(a.rel)} · ${a.conversations} conversation${a.conversations === 1 ? '' : 's'}${a.lastTs ? ' · ' + fmtDate(a.lastTs) : ''}${a.memory ? (a.memory.stale ? ' · memory ⚠' : ' · memory ✓') : ''}</div>
         <button type="button" class="ghost pa-start" data-area-start="${esc(a.rel)}" title="Start a conversation in this area — area memory briefs first">+ start here</button>
       </div>`).join('')}</div>` : ''}${areaCandidates.length ? `<div class="pareahint dim"><span>conversations also ran in</span>${areaCandidates.map(c => `<button type="button" class="fp-chip" data-area-suggest="${esc(c.rel)}" title="${c.n} conversations ran in ${esc(c.rel)} — declare it as an area?">${esc(c.rel)}<span class="n">${c.n}</span></button>`).join('')}<span>— declare one as an area?</span></div>` : ''}</section>` : ''}
+    ${window.Artifacts ? Artifacts.library.projectSectionHtml(d.project) : ''}
     <div class="ptoolbar">
       ${projectSwitchHtml('overview')}
       <div class="pmemline dim">
@@ -8200,6 +8207,13 @@ function renderProjectPanel(d) {
   </div>`;
   wireMiniGantt($('view'), heroRows, color, 'p:' + d.project);
   wireProjectSwitch(d.project);
+  const pArtifacts = $('pArtifacts');
+  if (pArtifacts) {
+    Artifacts.library.wireHost(pArtifacts, () => {});
+    const all = pArtifacts.querySelector('[data-art-lib-all]');
+    // The whole list: the right panel's Artifacts, scoped to this project.
+    if (all) all.onclick = () => { rightFilesView = 'artifacts'; agentSecState.fileView = 'artifacts'; setRightFiles('files', true); };
+  }
   if (typeof renderProjectPresence === 'function') renderProjectPresence();
   if (typeof loadProjectPeopleActivity === 'function') loadProjectPeopleActivity(d.project);
   $('pPurpose').onclick = () => editProjectPurpose(d.project);
@@ -15960,6 +15974,13 @@ document.querySelectorAll('[data-file-scope]').forEach(button => button.onclick 
   e.stopPropagation();
   setRightFiles(button.dataset.fileScope, true);
 });
+function setRightView(view) {
+  rightFilesView = view === 'artifacts' ? 'artifacts' : 'files';
+  agentSecState.fileView = rightFilesView; saveAgentSecState();
+  $('rightFileList').scrollTop = 0;
+  setRightFiles(rightFilesMode, true);
+}
+document.querySelectorAll('[data-right-view]').forEach(button => button.onclick = e => { e.stopPropagation(); setRightView(button.dataset.rightView); });
 function closeRightFiles() {
   setRightFiles(rightFilesMode, false);
   $('filesToggle').focus({ preventScroll: true });

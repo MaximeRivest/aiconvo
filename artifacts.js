@@ -300,6 +300,9 @@
     ensurePane();
     await loadConfig().catch(() => {});
     state = { ...spec, version: null, resolved: null };
+    // One right-hand panel at a time: the artifact replaces the Files list
+    // (which opens again over it from its own button).
+    if (typeof rightFilesOpen !== 'undefined' && rightFilesOpen && typeof setRightFiles === 'function') setRightFiles(rightFilesMode, false);
     if (spec.kind === 'files' && spec.key) localStorage.setItem(stateKey(spec.key), JSON.stringify({ path: spec.path, title: spec.title, type: spec.type }));
     document.body.classList.remove('file-side-open');
     document.body.classList.add('artifact-open');
@@ -471,4 +474,146 @@
   function onLeaveConversation() { if (state) { const keep = state.key; hidePanel(); if (keep) seenArtifacts.delete(keep); } }
 
   window.Artifacts = { wire, openPanel, closePanel, onConversation, onHeadChange, onLeaveConversation, previewOrigin, hostContext, codePage, state: () => state };
+})();
+
+/* ---- the artifact library (design/67) --------------------------------------
+   Every artifact any visible conversation made, from the conversation list
+   the app already holds: each conversation's index entry carries its
+   artifacts, kept current by the server's watcher, so this list needs no scan
+   and follows live updates like the conversation list does. */
+(function () {
+  'use strict';
+  const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const KINDS = {
+    web: ['◧', 'page'], slides: ['▭', 'slides'], pdf: ['▤', 'PDF'], markdown: ['¶', 'document'], image: ['▣', 'picture'],
+    svg: ['◇', 'drawing'], video: ['▶', 'video'], audio: ['♪', 'audio'], widget: ['◫', 'inline'], folder: ['▦', 'folder'], text: ['≡', 'text'],
+  };
+  function kindOf(a) {
+    if (a.widget) return 'widget';
+    if (a.type && a.type !== 'auto' && KINDS[a.type]) return a.type;
+    const ext = (String(a.path).match(/\.([a-z0-9]+)$/i) || [])[1];
+    if (!ext) return 'web';
+    const e = ext.toLowerCase();
+    if (['html', 'htm'].includes(e)) return 'web';
+    if (e === 'pdf') return 'pdf';
+    if (['md', 'markdown'].includes(e)) return 'markdown';
+    if (e === 'svg') return 'svg';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp'].includes(e)) return 'image';
+    if (['mp4', 'm4v', 'webm', 'ogv', 'mov'].includes(e)) return 'video';
+    if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(e)) return 'audio';
+    return 'text';
+  }
+  const idOf = it => it.widget ? 'w|' + it.key + '|' + it.call : 'f|' + it.path;
+  // Newest first. A file artifact touched by several conversations is one
+  // item: the newest conversation opens it; the others are counted.
+  function items({ project = '', query = '', filter = 'all' } = {}) {
+    const list = typeof sessions !== 'undefined' && Array.isArray(sessions) ? sessions : [];
+    const byPath = new Map(), out = [];
+    const q = String(query || '').trim().toLowerCase();
+    for (const s of list) {
+      if (!s || !Array.isArray(s.artifacts) || s.mirror || s.hiddenFanout) continue;
+      const proj = typeof projectOf === 'function' ? projectOf(s) : s.project || '';
+      if (project && proj !== project) continue;
+      const conv = String(s.title || s.timelineTitle || 'conversation').replace(/\s+/g, ' ').slice(0, 90);
+      for (const a of s.artifacts) {
+        const it = { ...a, key: s.key, project: proj, conversation: conv, kind: kindOf(a) };
+        if (filter === 'files' && it.widget) continue;
+        if (filter === 'inline' && !it.widget) continue;
+        if (q && !`${it.title} ${it.path || ''} ${conv} ${proj}`.toLowerCase().includes(q)) continue;
+        if (it.widget) { out.push(it); continue; }
+        const prev = byPath.get(it.path);
+        if (!prev) { it.conversations = 1; byPath.set(it.path, it); continue; }
+        const newer = String(it.ts || '') > String(prev.ts || '') ? it : prev;
+        newer.conversations = prev.conversations + 1;
+        byPath.set(it.path, newer);
+      }
+    }
+    return [...byPath.values(), ...out].sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
+  }
+  function find(id) {
+    return items().find(it => idOf(it) === id) || null;
+  }
+  // Which artifact a file belongs to (for the ◧ mark in the Files list).
+  function ownerOfPath(file) {
+    let best = null;
+    for (const it of items()) {
+      if (it.widget || !file) continue;
+      if (file === it.path || file.startsWith(it.path.replace(/\/$/, '') + '/')) if (!best || it.path.length > best.path.length) best = it;
+    }
+    return best;
+  }
+  const age = ts => { if (!ts) return ''; const ms = Date.now() - Date.parse(ts); return typeof tinyAge === 'function' ? tinyAge(ms) : new Date(ts).toLocaleDateString(); };
+  function rowHtml(it, { showProject = true } = {}) {
+    const [icon, label] = KINDS[it.kind] || KINDS.text;
+    const where = [showProject && it.project && typeof LOOSE_PROJECT !== 'undefined' && it.project !== LOOSE_PROJECT ? it.project : '', it.conversation].filter(Boolean).join(' · ');
+    const more = it.conversations > 1 ? ` · ${it.conversations} conversations` : it.n > 1 ? ` · opened ${it.n}×` : '';
+    const tip = (it.widget ? 'Inline in ' : 'Made in ') + it.conversation + (it.path ? '\n' + it.path : '') + (it.ts ? '\n' + new Date(it.ts).toLocaleString() : '');
+    return `<div class="ag-row art-lib-row" data-art-lib="${escHtml(idOf(it))}" title="${escHtml(tip)}">` +
+      `<button type="button" class="ag-main art-lib-open"><span class="ag-title"><span class="art-lib-kind" aria-label="${escHtml(label)}">${icon}</span><span>${escHtml(it.title || 'Artifact')}</span><span class="ag-age">${escHtml(age(it.ts))}</span></span>` +
+      `<span class="ag-sub"><span class="ag-dir">${escHtml(label + (where ? ' · ' + where : '') + more)}</span></span></button></div>`;
+  }
+  let listState = { filter: 'all', query: '' };
+  function panelHtml(project) {
+    const all = items({ project, query: listState.query, filter: listState.filter });
+    const rows = (typeof panelListRows === 'function' ? panelListRows('artifacts', all) : all).map(it => rowHtml(it, { showProject: !project })).join('');
+    const chips = [['all', 'all'], ['files', 'files'], ['inline', 'inline']].map(([v, l]) =>
+      `<button type="button" data-art-lib-filter="${v}" class="${listState.filter === v ? 'on' : ''}" aria-pressed="${listState.filter === v}">${l}</button>`).join('');
+    const empty = listState.query || listState.filter !== 'all' ? 'No artifact matches.' : 'No artifacts yet. When an agent makes a page, an app, slides or a document, it appears here.';
+    return `<div class="art-lib"><div class="ag-files-head"><input type="search" class="art-lib-search" placeholder="Find an artifact" aria-label="Find an artifact" value="${escHtml(listState.query)}"><span class="ag-scope" role="group" aria-label="Kind">${chips}</span></div>` +
+      (rows || `<div class="ag-empty">${escHtml(empty)}</div>`) + (typeof panelListMore === 'function' ? panelListMore('artifacts', all.length) : '') + '</div>';
+  }
+  // Open an artifact where it was made: its conversation, read at the
+  // message that made it, and the artifact in the panel.
+  async function openItem(it) {
+    if (!it) return;
+    // Land on the card (or widget) in the answer that made it. If that answer
+    // is on another branch, reading moves there first.
+    const sel = () => it.widget ? `.art-widget[data-art-call="${CSS.escape(it.call || '')}"]` : `.art-card[data-art-node="${CSS.escape(it.eid || '')}"]`;
+    if (typeof open === 'function') await open(it.key, 'bottom');
+    if (typeof current === 'undefined' || !current || current.key !== it.key) return;
+    if (!document.querySelector(sel()) && it.eid && typeof moveReading === 'function') await moveReading(it.key, it.eid, { anchor: null });
+    const mark = document.querySelector(sel());
+    if (mark) { mark.scrollIntoView({ block: 'center' }); mark.classList.add('art-found'); setTimeout(() => mark.classList.remove('art-found'), 1600); }
+    if (it.widget) {
+      const r = await fetch('/api/artifacts/widget?' + new URLSearchParams({ id: it.key, entry: it.eid, call: it.call }));
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || data.error) return typeof errToast === 'function' && errToast(data.error || 'That widget could not be read.');
+      return Artifacts.openPanel({ kind: 'html', key: it.key, title: data.title || it.title, html: data.html, site: 'w' + (it.call || '').replace(/[^a-z0-9]/gi, '').slice(-12).toLowerCase(), source: 'widget' });
+    }
+    return Artifacts.openPanel({ kind: 'files', key: it.key, path: it.path, title: it.title, type: it.type || 'auto' });
+  }
+  // Delegated events for any host that shows library rows.
+  function wireHost(host, rerender) {
+    if (!host || host.dataset.artLibWired) return;
+    host.dataset.artLibWired = '1';
+    host.addEventListener('click', e => {
+      const row = e.target.closest('[data-art-lib]');
+      if (row) { e.stopPropagation(); openItem(find(row.dataset.artLib)); return; }
+      const mark = e.target.closest('[data-art-owner]');
+      if (mark) { e.stopPropagation(); openItem(find(mark.dataset.artOwner)); return; }
+      const f = e.target.closest('[data-art-lib-filter]');
+      if (f) { e.stopPropagation(); listState.filter = f.dataset.artLibFilter; if (typeof panelListLimits !== 'undefined') panelListLimits.delete('artifacts'); rerender(); }
+    }, true);
+    host.addEventListener('input', e => {
+      if (!e.target.classList.contains('art-lib-search')) return;
+      listState.query = e.target.value;
+      const at = e.target.selectionStart;
+      rerender();
+      const box = host.querySelector('.art-lib-search');
+      if (box) { box.focus({ preventScroll: true }); try { box.setSelectionRange(at, at); } catch {} }
+    });
+  }
+  function ownerMarkHtml(file) {
+    const it = ownerOfPath(file);
+    return it ? `<button type="button" class="art-owner" data-art-owner="${escHtml(idOf(it))}" title="Part of the artifact “${escHtml(it.title)}” — open it">◧</button>` : '';
+  }
+  function projectSectionHtml(project) {
+    const all = items({ project });
+    if (!all.length) return '';
+    const shown = all.slice(0, 9);
+    return `<section class="psection part-lib" id="pArtifacts"><h3>artifacts <span class="dim">made by agents in this project</span></h3>` +
+      `<div class="art-lib-grid">${shown.map(it => rowHtml(it, { showProject: false })).join('')}</div>` +
+      (all.length > shown.length ? `<button type="button" class="ghost" data-art-lib-all>all ${all.length} artifacts</button>` : '') + `</section>`;
+  }
+  Object.assign(window.Artifacts, { library: { items, find, openItem, panelHtml, wireHost, ownerMarkHtml, projectSectionHtml, kindOf } });
 })();

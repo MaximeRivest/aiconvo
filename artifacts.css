@@ -73,3 +73,26 @@ body:not(.side-layout).artifact-open > #artifactPane { position: fixed; z-index:
 }
 :root[data-theme-mode="binary"] .art-widget, :root[data-theme-mode="binary"] .art-card { border-color: var(--text); }
 :root[data-theme-mode="binary"] .art-widget .art-frame { transition: none; }
+
+/* ---- the artifact library ---- */
+.right-file-views { display: inline-flex; gap: 2px; }
+.right-file-views button { border: 0; background: transparent; padding: 2px 8px; min-height: 28px; font-weight: 600; color: var(--text-dim); border-radius: var(--r-sm); }
+.right-file-views button[aria-pressed="true"] { color: var(--text); background: var(--surface-2); }
+.art-lib .ag-files-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.art-lib-search { flex: 1 1 120px; min-width: 0; min-height: 28px; padding: 2px 8px; font: inherit; font-size: var(--fs-meta); background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: var(--r-sm); }
+.art-lib-kind { flex: none; width: 1.3em; text-align: center; color: var(--accent); }
+.art-lib-row .ag-title { gap: 6px; }
+.art-owner { border: 0; background: transparent; padding: 0 4px; color: var(--accent); min-height: 24px; }
+.art-lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; }
+.art-lib-grid .art-lib-row { border: 0; background: none; padding: 0; margin: 0; }
+.art-lib-grid .art-lib-open { border: 1px solid var(--border); border-radius: var(--r); background: var(--surface-1); padding: 8px 10px; }
+.art-lib-grid .art-lib-open:hover { border-color: var(--border-strong); }
+@media (pointer: coarse) { .right-file-views button, .art-lib-search, .art-owner { min-height: 40px; } }
+:root[data-theme-mode="binary"] .art-lib-grid .art-lib-open { border-color: var(--text); }
+.art-lib-row .ag-main { width: 100%; min-width: 0; text-align: left; display: flex; flex-direction: column; align-items: stretch; }
+.art-lib-row .ag-title { display: flex; align-items: baseline; min-width: 0; }
+.art-lib-row .ag-title > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-lib-row .ag-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: calc(1.3em + 6px); }
+.art-card.art-found, .art-widget.art-found { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root[data-theme-motion="none"] .art-found { outline-offset: 0; }
+@media (pointer: coarse) { .art-lib [data-art-lib-filter] { min-height: 40px; padding: 0 12px; } }

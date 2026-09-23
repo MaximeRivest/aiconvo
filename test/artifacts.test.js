@@ -84,7 +84,10 @@ test('a real server: versions follow the head, the preview origin serves them, w
     assistant('a1', 'q1', [call('c1', 'write', { path: 'site/index.html', content: '…' })]), result('r1', 'a1', 'c1', 'write'),
     assistant('a2', 'r1', [call('art', 'artifact', { path: 'site', title: 'The page' }), call('w1', 'show', { html: widgetHtml, title: 'A widget' })]),
     result('r2', 'a2', 'art', 'artifact'), result('r3', 'r2', 'w1', 'show'),
-    assistant('a3', 'r3', [{ type: 'text', text: 'Here it is.' }]),
+    // A declaration that failed is not an artifact.
+    assistant('af', 'r3', [call('bad', 'artifact', { path: 'nothing-here' })]),
+    { type: 'message', id: 'rf', parentId: 'af', timestamp: ts(), message: { role: 'toolResult', toolCallId: 'bad', toolName: 'artifact', content: [{ type: 'text', text: 'Nothing at …' }], isError: true } },
+    assistant('a3', 'rf', [{ type: 'text', text: 'Here it is.' }]),
     user('q2', 'a3', 'Change the title'),
     assistant('a4', 'q2', [call('c2', 'edit', { path: 'site/index.html', edits: [] })]), result('r4', 'a4', 'c2', 'edit'),
     assistant('a5', 'r4', [{ type: 'text', text: 'Changed.\n\n```html\n<p>CODE BLOCK PAGE</p>\n```' }]),
@@ -132,7 +135,9 @@ test('a real server: versions follow the head, the preview origin serves them, w
   assert.equal(r.headers.get('content-type'), 'image/png');
   assert.deepEqual(Buffer.from(await r.arrayBuffer()), png);
   assert.match(await (await pv(end.cap, 'live')).text(), /SECOND PAGE/);
-  assert.equal((await pv(end.cap.replace(/.$/, c => (c === 'A' ? 'B' : 'A')), 'live')).status, 404);
+  // Tamper inside the signature (its last character carries padding bits).
+  const at = end.cap.length - 10, forged = end.cap.slice(0, at) + (end.cap[at] === 'A' ? 'B' : 'A') + end.cap.slice(at + 1);
+  assert.equal((await pv(forged, 'live')).status, 404);
   assert.equal((await pv(end.cap, 'live', '..%2F..%2Fetc%2Fpasswd')).status, 400);
 
   // A widget's HTML comes from its tool call; the app side refuses requests
@@ -204,5 +209,23 @@ test('a real server: versions follow the head, the preview origin serves them, w
   // Leaving the conversation hides the panel.
   await evaluate(`goHome(); 1`);
   await until(`!document.body.classList.contains('artifact-open')`, 'the panel closes with its conversation');
+
+  // The library: the conversation list carries each conversation's artifacts
+  // (indexed with it, no scan); the right panel lists them and opens one
+  // where it was made.
+  const listed = (await api('/api/sessions')).body.find(s => s.key === key);
+  assert.deepEqual(listed.artifacts.map(a => a.widget ? 'widget:' + a.title : a.path), [site, 'widget:A widget']);
+  await evaluate(`setRightFiles('recent-files', true); document.querySelector('[data-right-view="artifacts"]').click(); 1`);
+  await until(`document.querySelectorAll('#rightFileList .art-lib-row').length === 2`, 'two artifacts listed');
+  await evaluate(`(() => { const s = document.querySelector('.art-lib-search'); s.value = 'widget'; s.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
+  await until(`document.querySelectorAll('#rightFileList .art-lib-row').length === 1`, 'the search narrows the list');
+  await evaluate(`(() => { const s = document.querySelector('.art-lib-search'); s.value = ''; s.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
+  await until(`document.querySelectorAll('#rightFileList .art-lib-row').length === 2`, 'the whole list again');
+  await evaluate(`[...document.querySelectorAll('#rightFileList .art-lib-row')].find(r => r.textContent.includes('The page')).querySelector('.art-lib-open').click(); 1`);
+  await until(`current && current.key === ${JSON.stringify(key)} && document.body.classList.contains('artifact-open') && document.querySelector('.art-title').textContent === 'The page'`, 'opened from the library');
+  assert.equal(await evaluate(`rightFilesOpen`), false, 'one right panel at a time');
+  // Files the artifact holds carry its mark in the Files list.
+  assert.equal(await evaluate(`Artifacts.library.items().length`), 2);
+  assert.match(await evaluate(`Artifacts.library.ownerMarkHtml(${JSON.stringify(path.join(site, 'index.html'))})`), /data-art-owner="f\|/);
   assert.deepEqual(exceptions.filter(e => !/ResizeObserver/.test(e)), []);
 });
