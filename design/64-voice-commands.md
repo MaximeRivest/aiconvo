@@ -26,8 +26,9 @@ box", "accept" / "reject all", "bigger text", "stop listening".
    pause kept): listening all day costs nothing; the window's length is
    speech. A 300 ms pause transcribes the whole window again (context); an
    800 ms pause ends an utterance — the words since the last one, found by
-   aligning the old and new transcriptions (LCS over the last words), so a
-   revised word never repeats or loses an utterance. Past 1.2 × the target
+   aligning the old and new transcriptions from their shared start (LCS,
+   earliest matches; letter edits for the words after the last shared one),
+   so a revised word never repeats or loses an utterance. Past 1.2 × the target
    the window slides back to ~0.8 × at a pause: the head is transcribed once
    on its own and becomes final. Transcription is the InkType bridge's
    `POST /transcribe` (Parakeet, raw); the bridge itself is unchanged — it is
@@ -134,12 +135,40 @@ The first real session (99 sentences, 20 minutes) showed:
   new transcription with the old by words; a word rewritten at the boundary
   matched nothing. Now an unsure alignment counts from the last shared word,
   and transcribes the decided audio once to count its words (same audio, same
-  context). A word re-heard as two words can still leak one: Parakeet's word
-  timestamps would settle it, but its server does not send them (shared with
-  the tablet keyboard; not changed).
+  context). (A word re-heard as two could still leak one; fixed since, see
+  below.)
 
 Replaying the session's missed sentences and a sample of the rest against
 Jev with the new catalog: 26 of 26 right.
+
+### Real speech through Parakeet (2026-09-23)
+
+A synthetic voice (Kokoro, two voices) with room noise, fed through
+VoiceWindow to the real bridge, twelve commands repeated three times
+(177 words, real time, 60 s window): nothing lost or handed on twice;
+3.4–4.0% word errors, all Parakeet's own ("42" for "forty two", "Zend").
+Transcription: median 160 ms, at most 280 ms for a 72 s window.
+
+That run found two window bugs, both now covered by tests:
+
+- **Repeated phrases re-sent a batch of old words.** The alignment looked
+  only at the last 80 words of each transcription; with commands said
+  again ("scroll up… scroll up") it matched the earliest copy, a whole
+  cycle back, and ~100 words already acted on were handed on again. Both
+  transcriptions start at the same audio, so they are now aligned from the
+  start (≤ 1000 words, ~7 ms).
+- **A merged word swallowed the next sentence's first word** ("Voice
+  Window JS" re-heard as "voice window.js" → "can I say?"). After the last
+  shared word the count is now the number of new words fewest letter edits
+  from the old ones ("window js" = "window.js", "char lie" = "charlie",
+  "Sender" = "Send", not "Send Start"); a word count only when the letters
+  mostly differ (another language), where the realign pass decides.
+
+Still open: a word the recognizer invents at the end of the window and
+drops on the next pass (seen once with synthetic noise at 3× speed, never
+in the 99 real sentences) can take the place of the next word. Word
+timestamps from Parakeet would settle it and the realign pass with it;
+they need its server and the bridge changed (shared with the tablet).
 
 ## Limits and next steps
 

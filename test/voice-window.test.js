@@ -78,6 +78,22 @@ test('past its target the window slides: final text, nothing lost or said twice'
   assert.deepEqual((last.committed + ' ' + last.stable + ' ' + last.volatile).trim().split(/\s+/), spoken, 'final + live text is everything said');
 });
 
+test('the same commands said again and again, in a long window: each handed on once', async () => {
+  // Repeated phrases make many places in the text look alike; the hand-off
+  // mark must stay at its own place, not jump to an earlier repeat.
+  for (const windowSeconds of [60, 180]) {
+    const l = listener({ windowSeconds });
+    const spoken = [];
+    for (let i = 0; i < 260; i++) {
+      const k = 1 + (i % 4);
+      spoken.push('w' + k);
+      await say(l, word(k), pause(i % 2 === 1 ? 900 : 200));
+    }
+    await say(l, pause(1000));
+    assert.deepEqual(l.utterances().join(' ').split(' '), spoken, `every word handed on exactly once (${windowSeconds} s window)`);
+  }
+});
+
 test('a word rewritten at the last hand-off is not handed on again', async () => {
   // Like Parakeet with more context (or another language): words already
   // handed on come back different in the next transcription.
@@ -102,5 +118,13 @@ test('an index follows a word through a revised transcription', () => {
   assert.equal(mapWordIndex(prev, 5, next), 5, 'a revised word keeps its place');
   assert.equal(mapWordIndex('a b c'.split(' '), 3, 'x a b c d'.split(' ')), 4);
   assert.equal(mapWordIndex([], 0, ['a']), 0);
+  // Words merged or split at the boundary: the next sentence keeps its first word.
+  assert.equal(mapWordIndex('the file called Voice Window JS.'.split(' '), 6, 'the file called voice window.js. What can I say?'.split(' ')), 5);
+  assert.equal(mapWordIndex('ask char lie'.split(' '), 3, 'ask charlie to come'.split(' ')), 2);
+  assert.equal(mapWordIndex('ask charlie'.split(' '), 2, 'ask char lie to come'.split(' ')), 3);
+  assert.equal(mapWordIndex('now send Sender.'.split(' '), 3, 'now send Send. Start dictation.'.split(' ')), 3, 'a word heard longer is not stretched over the next one');
+  // Repeats: the mark stays at its own place, not an earlier copy.
+  const rep = 'scroll up send scroll up send scroll up send'.split(' ');
+  assert.equal(mapWordIndex(rep, 6, rep.concat('open it'.split(' '))), 6);
   assert.deepEqual([clampWindowSeconds(5), clampWindowSeconds('90'), clampWindowSeconds(999), clampWindowSeconds('x')], [15, 90, 180, 60]);
 });

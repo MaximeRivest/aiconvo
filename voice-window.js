@@ -57,26 +57,34 @@ function frameRms(buf, offset) {
 const normWord = w => w.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, '');
 
 /**
- * Where word `index` of `prev` is in `next`, when `next` is a later
- * transcription of mostly the same speech (words revised, merged, split).
- * Aligns by the longest common subsequence over normalized words, looking
- * only at the last `span` words of each. Returns the index in `next` right
- * after the last aligned word at or before `index`.
+ * Where word `index` of `prev` is in `next`, when both transcribe audio
+ * that starts at the same moment (the window, before and after more speech
+ * or a fresh pass; words revised, merged, split). Aligns the two from their
+ * start by the longest common subsequence over normalized words, preferring
+ * the earliest matches: anchored at the shared start, that is the true
+ * place even when phrases repeat ("scroll up… scroll up"). Aligning only
+ * the last words instead let a repeat pull the mark one phrase back, and
+ * everything after it was handed on again. Returns the index in `next`
+ * right after the last aligned word at or before `index`.
  */
-function mapWordIndex(prev, index, next, span = 80) {
-  return alignWordIndex(prev, index, next, span).index;
+function mapWordIndex(prev, index, next, max) {
+  return alignWordIndex(prev, index, next, max).index;
 }
 
 /**
  * mapWordIndex, and whether the mapping is sure: the word just before
  * `index` is itself found in `next`. When the recognizer rewrote it (more
  * context, another language), the count is a guess.
+ *
+ * A window is at most 1.2 × 180 s of speech (under ~1000 words), so the
+ * table stays small; past `max` words both sides drop the same number
+ * from their start, which keeps them roughly anchored.
  */
-function alignWordIndex(prev, index, next, span = 80) {
+function alignWordIndex(prev, index, next, max = 1500) {
   if (index <= 0) return { index: 0, sure: true };
-  const a0 = Math.max(0, index - span), b0 = Math.max(0, next.length - span * 2);
-  const a = prev.slice(a0, index).map(normWord), b = next.slice(b0).map(normWord);
-  // LCS table (small: ≤ span × 2·span).
+  const a0 = Math.max(0, index - max), b0 = Math.min(a0, Math.max(0, next.length - 1));
+  const a = prev.slice(a0, index).map(normWord), b = next.slice(b0, b0 + max * 2).map(normWord);
+  // LCS table (small: see above).
   const dp = Array.from({ length: a.length + 1 }, () => new Int32Array(b.length + 1));
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) {
@@ -90,11 +98,43 @@ function alignWordIndex(prev, index, next, span = 80) {
     else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
     else j++;
   }
-  if (lastB < 0) return { index: Math.min(next.length, b0 + Math.max(0, index - a0)), sure: false }; // nothing in common: keep the count
-  // After the last word both share, as many words as `prev` had after it:
-  // a rewritten word is usually replaced by one word.
   if (lastA === a.length - 1) return { index: b0 + lastB + 1, sure: true };
-  return { index: Math.min(next.length, b0 + lastB + 1 + (a.length - 1 - lastA)), sure: false };
+  // After the last word both share, the rest is matched letter by letter:
+  // recognizers split and merge words ("window js" → "window.js", "char
+  // lie" → "charlie") and change a letter or two far more often than they
+  // change everything. A word count here swallowed the first word of the
+  // next sentence. Only when the letters mostly differ (another language)
+  // is the word count the better guess.
+  const from = lastB + 1;
+  const tailWords = a.length - 1 - lastA;
+  const k = letterBoundary(a.slice(lastA + 1), b.slice(from), tailWords);
+  return { index: b0 + from + (k ?? Math.min(b.length - from, tailWords)), sure: false };
+}
+
+// How many of `words` (normalized) are the same speech as `tail`: the count
+// whose letters are fewest edits from the tail's ("sender" → "send", not
+// "send start"; "window js" → "windowjs"). Ties go to the count nearest
+// `tailWords`. Null when even the best is more than half rewritten.
+function letterBoundary(tail, words, tailWords) {
+  const A = tail.join('').slice(-300);
+  if (!A) return 0;
+  const ends = [0];
+  let B = '';
+  for (const w of words) { if (B.length > A.length * 2 + 40) break; B += w; ends.push(B.length); }
+  // Edit distance from A to every prefix of B: one row per letter of A.
+  let row = Int32Array.from({ length: B.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= A.length; i++) {
+    const next = new Int32Array(B.length + 1);
+    next[0] = i;
+    for (let j = 1; j <= B.length; j++) next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (A[i - 1] === B[j - 1] ? 0 : 1));
+    row = next;
+  }
+  let best = null, bestD = Infinity;
+  ends.forEach((e, n) => {
+    const d = row[e];
+    if (d < bestD || (d === bestD && Math.abs(n - tailWords) < Math.abs(best - tailWords))) { best = n; bestD = d; }
+  });
+  return bestD * 2 > A.length ? null : best;
 }
 
 class VoiceWindow {
@@ -218,7 +258,7 @@ class VoiceWindow {
         const head = String(await this.transcribe(this.window.subarray(0, this.decidedBytes)) || '').split(/\s+/).filter(Boolean);
         if (this.closed) return;
         const byHead = alignWordIndex(head, head.length, words);
-        align = { index: byHead.sure ? byHead.index : Math.min(words.length, head.length), sure: true };
+        align = { index: byHead.index, sure: true };
         this.emit({ type: 'realign', words: head.length });
       } catch (e) { this.emit({ type: 'error', message: 'speech-to-text (realign): ' + e.message }); }
     }
