@@ -11,18 +11,8 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 
-// A plain chromium that accepts its own profile. On the desktop here the
-// `chromium` on PATH is a wrapper that owns the everyday profile and
-// refuses --user-data-dir; a raw binary sits beside it or in puppeteer's cache.
-function chromiumBinary() {
-  if (process.env.CHATTERING_TEST_CHROMIUM) return process.env.CHATTERING_TEST_CHROMIUM;
-  const candidates = [];
-  try { for (const d of fs.readdirSync('/nix/store')) if (/^[a-z0-9]{32}-chromium-\d/.test(d) && !/sandbox|unwrapped/.test(d)) candidates.push(path.join('/nix/store', d, 'bin', 'chromium')); } catch {}
-  try { const base = path.join(os.homedir(), '.cache', 'puppeteer', 'chrome'); for (const d of fs.readdirSync(base)) candidates.push(path.join(base, d, 'chrome-linux64', 'chrome')); } catch {}
-  for (const c of candidates.sort().reverse()) if (fs.existsSync(c) && !(spawnSync(c, ['--version']).error)) return c;
-  return 'chromium';
-}
 function lanIp() {
   for (const list of Object.values(os.networkInterfaces())) for (const n of list || []) if (!n.internal && n.family === 'IPv4' && !n.address.startsWith('172.')) return n.address;
   return null;

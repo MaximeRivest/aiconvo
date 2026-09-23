@@ -9,8 +9,9 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 
-const browserBin = process.env.CHROMIUM_BIN || process.env.CHROMIUM || 'chromium';
+const browserBin = chromiumBinary();
 
 test('one head: side-by-side answers, instant moves, versions, shared head, phone swipe, sends from the head', { timeout: 90000 }, async t => {
   if (spawnSync(browserBin, ['--version']).error) return t.skip('chromium is not installed');

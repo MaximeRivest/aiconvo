@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const {spawnSync} = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 const source = fs.readFileSync(path.join(__dirname, '../app.html'), 'utf8');
 const start = source.indexOf('function projectSetupDialog(');
 const end = source.indexOf("$('newProject').onclick", start);
@@ -24,9 +25,9 @@ test('folder preview preserves parent and matches new-name normalization', () =>
 });
 
 test('project setup works in a real browser without starting agents', t => {
-  const binary = process.env.CHROMIUM || 'chromium';
+  const binary = chromiumBinary();
   const probe = spawnSync(binary, ['--version'], {encoding: 'utf8'});
-  if (probe.error) { t.skip('Set CHROMIUM to run browser checks'); return; }
+  if (probe.error) { t.skip('chromium is not installed (or set CHATTERING_TEST_CHROMIUM)'); return; }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-setup-ui-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   const checks = `

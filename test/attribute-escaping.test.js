@@ -22,6 +22,7 @@ const path = require('node:path');
 const http = require('node:http');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 
 const root = path.join(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'app.html'), 'utf8');
@@ -52,11 +53,9 @@ describe('Scenario: JSON tokens survive the HTML round-trip', () => {
   // (conversation-reader.js) and the continue/fork buttons (app.html).
   const token = JSON.stringify({ key: 'pi:--home-tryinget-Documents-Obsidian--/2026-09-09T14-59-18-854Z_x.jsonl', id: '4d63aacb' });
   let parsed = null;
-  // On lambda the `chromium` on PATH is the shared agent browser, which
-  // refuses a headless profile; CHROMIUM names a plain binary (as in
-  // test/navigation-app.test.js). Without one, the round-trip is skipped and
-  // the source-level scenarios above still guard the fix.
-  const chromium = process.env.CHROMIUM || 'chromium';
+  // A plain Chromium (test/helpers/chromium.js). Without one, the round-trip
+  // is skipped and the source-level scenarios above still guard the fix.
+  const chromium = chromiumBinary();
   const haveChromium = !spawnSync(chromium, ['--version']).error;
 
   before(async () => {

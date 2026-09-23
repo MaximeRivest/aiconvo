@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 const root = path.join(__dirname, '..');
 const app = fs.readFileSync(path.join(root, 'app.html'), 'utf8');
 const componentFiles = fs.readdirSync(root).filter(file => file.endsWith('.css')).sort();
@@ -104,7 +105,7 @@ const specimens = [
 ];
 
 test('real app surfaces follow the theme together, including nested painted edges', { timeout: 60000 }, async t => {
-  const chromium = process.env.CHROMIUM || 'chromium';
+  const chromium = chromiumBinary();
   if (spawnSync(chromium, ['--version']).error) return t.skip('chromium unavailable');
   const home = fs.mkdtempSync(path.join(os.homedir(), '.surface-test-'));
   const agent = path.join(home, '.pi/agent'), dir = path.join(agent, 'sessions/fixture');

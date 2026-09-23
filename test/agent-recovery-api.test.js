@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 const pause = ms => new Promise(r => setTimeout(r, ms));
 
 test('real host and panel recover saved failures without duplicate launches or stale writes', { timeout: 60000 }, async t => {
@@ -80,8 +81,8 @@ if (process.argv[1] === ${JSON.stringify(path.join(root, 'server.js'))}) {
   await waitFor(async () => (await get('/api/sessions')).some(s => s.key === key));
   assert.equal((await get('/api/agents/recovery')).interrupted[0].id, record.id, 'restart lost interruption');
 
-  if (!spawnSync('chromium', ['--version']).error) {
-    browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  if (!spawnSync(chromiumBinary(), ['--version']).error) {
+    browser = spawn(chromiumBinary(), ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
     const endpoint = await new Promise((resolve, reject) => {
       let text = ''; const timer = setTimeout(() => reject(Error(text)), 10000);
       browser.stderr.on('data', b => { text += b; const m = text.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } }); browser.on('error', reject);

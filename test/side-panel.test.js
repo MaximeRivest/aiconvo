@@ -9,9 +9,10 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 
 test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, async t => {
-  if (spawnSync('chromium', ['--version']).error) return t.skip('chromium is not installed');
+  if (spawnSync(chromiumBinary(), ['--version']).error) return t.skip('chromium is not installed');
   const root = path.join(__dirname, '..'), home = fs.mkdtempSync(path.join(os.homedir(), '.side-panel-test-'));
   let server, browser, ws;
   const stop = async child => {
@@ -70,7 +71,7 @@ test('side panel layout, inbox marks, and recent files', { timeout: 60000 }, asy
   assert.deepEqual(recentBefore.files, []);
 
   // ---- browser ----
-  browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  browser = spawn(chromiumBinary(), ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const endpoint = await new Promise((resolve, reject) => {
     let log = ''; const timer = setTimeout(() => reject(Error(log)), 10000);
     browser.stderr.on('data', b => { log += b; const m = log.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });

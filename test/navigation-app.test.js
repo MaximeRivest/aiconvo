@@ -9,11 +9,11 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 
 test('back and forward through the screens', { timeout: 90000 }, async t => {
-  // On lambda the `chromium` on PATH is the shared agent browser, which refuses
-  // a headless profile; CHROMIUM names a plain binary.
-  const chromium = process.env.CHROMIUM || 'chromium';
+  // A plain Chromium, not the shared everyday one (test/helpers/chromium.js).
+  const chromium = chromiumBinary();
   if (spawnSync(chromium, ['--version']).error) return t.skip('chromium is not installed');
   const root = path.join(__dirname, '..'), home = fs.mkdtempSync(path.join(os.homedir(), '.navigation-test-'));
   let server, browser, ws;

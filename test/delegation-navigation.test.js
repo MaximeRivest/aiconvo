@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 const html = fs.readFileSync(path.join(__dirname, '../app.html'), 'utf8');
 function extract(start, end) {
   const a = html.indexOf(start), b = html.indexOf(end, a);
@@ -13,7 +14,7 @@ function extract(start, end) {
 }
 
 test('real browser routes reveal raw off-branch entries, grouped tools, and history without session writes', { timeout: 30000 }, async t => {
-  const probe = spawnSync('chromium', ['--version'], { encoding: 'utf8' });
+  const probe = spawnSync(chromiumBinary(), ['--version'], { encoding: 'utf8' });
   if (probe.error?.code === 'ENOENT') return t.skip('chromium is not installed');
   assert.equal(probe.status, 0, probe.stderr);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'delegation-navigation-'));
@@ -114,7 +115,7 @@ test('real browser routes reveal raw off-branch entries, grouped tools, and hist
   setTimeout(() => run().catch(e=>{$('result').textContent='FAIL: '+e.stack+'; hash='+location.hash+'; calls='+calls.length;}), 100);
   </script>`;
   const file = path.join(dir, 'fixture.html'); fs.writeFileSync(file, fixture);
-  const browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
+  const browser = spawn(chromiumBinary(), ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking',
     '--disable-sync', '--disable-extensions', '--host-resolver-rules=MAP * ~NOTFOUND',
     '--no-first-run', '--no-default-browser-check', '--user-data-dir=' + path.join(dir, 'profile'),
     '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });

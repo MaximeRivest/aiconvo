@@ -6,9 +6,10 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
+const { chromiumBinary } = require('./helpers/chromium.js');
 
 test('complete app and server: conversation reading, Files browsing, MRMD, diffs, and mobile layout', { timeout: 60000 }, async t => {
-  if (spawnSync('chromium', ['--version']).error) return t.skip('chromium is not installed');
+  if (spawnSync(chromiumBinary(), ['--version']).error) return t.skip('chromium is not installed');
   const root = path.join(__dirname, '..'), home = fs.mkdtempSync(path.join(os.homedir(), '.conversation-app-test-'));
   let server, browser, ws;
   const stop = async child => {
@@ -68,7 +69,7 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
   }
   assert.ok(indexed, serverLog);
   for (const asset of ['conversation-flow.js', 'conversation-reader.js', 'conversation-reader.css']) assert.equal((await fetch(base + '/' + asset)).status, 200, asset);
-  browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  browser = spawn(chromiumBinary(), ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const endpoint = await new Promise((resolve, reject) => {
     let log = ''; const timer = setTimeout(() => reject(Error(log)), 10000);
     browser.stderr.on('data', b => { log += b; const m = log.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });

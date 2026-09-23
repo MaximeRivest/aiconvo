@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
+const { chromiumBinary } = require('./chromium.js');
 
 // opts: setup(home) before the server starts (settings files…), env for
 // the server, flags for the browser.
@@ -47,7 +48,7 @@ async function viewerBrowser(t, opts = {}) {
     await new Promise(r => setTimeout(r, 100));
   }
   assert.ok(ready, log);
-  browser = spawn(process.env.CHROMIUM_BIN || 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', ...(opts.flags || []), 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  browser = spawn(chromiumBinary(), ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', ...(opts.flags || []), 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const endpoint = await new Promise((resolve, reject) => {
     let output = ''; const timer = setTimeout(() => reject(Error(output)), 10000);
     browser.stderr.on('data', b => { output += b; const m = output.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });
