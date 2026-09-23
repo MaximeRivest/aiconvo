@@ -6,7 +6,9 @@ const path = require('node:path');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 
-async function viewerBrowser(t) {
+// opts: setup(home) before the server starts (settings files…), env for
+// the server, flags for the browser.
+async function viewerBrowser(t, opts = {}) {
   const root = path.join(__dirname, '../..'), home = fs.mkdtempSync(path.join(os.tmpdir(), 'file-viewers-'));
   const work = path.join(home, 'work'); fs.mkdirSync(work);
   const agent = path.join(home, '.pi/agent'), sessions = path.join(agent, 'sessions/fixture'); fs.mkdirSync(sessions, { recursive: true });
@@ -14,6 +16,7 @@ async function viewerBrowser(t) {
     { type: 'session', version: 3, id: 'media', cwd: work },
     { type: 'message', id: 'u1', timestamp: '2026-09-01T12:00:00Z', message: { role: 'user', content: [{ type: 'text', text: 'File viewer fixture' }] } },
   ].map(JSON.stringify).join('\n') + '\n');
+  if (opts.setup) await opts.setup(home);
   let server, browser, ws;
   const stop = async child => {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
@@ -35,7 +38,7 @@ async function viewerBrowser(t) {
   // Since the console needs the token (design/53), the harness signs in
   // like a client: Bearer on its own calls, ?token= for the browser's cookie.
   const token = 'viewer-test-token', auth = { Authorization: 'Bearer ' + token };
-  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: '0', CHATTERING_HOST: '127.0.0.1', CHATTERING_TOKEN: 'viewer-test-token', CHATTERING_NO_WATCH: '1', CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: '0', CHATTERING_HOST: '127.0.0.1', CHATTERING_TOKEN: 'viewer-test-token', CHATTERING_NO_WATCH: '1', CHATTERING_CACHE_DIR: path.join(home, 'cache'), CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent, ...(opts.env || {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', b => log += b); server.stderr.on('data', b => log += b);
   let ready = false;
   for (let i = 0; i < 150; i++) {
@@ -44,7 +47,7 @@ async function viewerBrowser(t) {
     await new Promise(r => setTimeout(r, 100));
   }
   assert.ok(ready, log);
-  browser = spawn(process.env.CHROMIUM_BIN || 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  browser = spawn(process.env.CHROMIUM_BIN || 'chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', ...(opts.flags || []), 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const endpoint = await new Promise((resolve, reject) => {
     let output = ''; const timer = setTimeout(() => reject(Error(output)), 10000);
     browser.stderr.on('data', b => { output += b; const m = output.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });

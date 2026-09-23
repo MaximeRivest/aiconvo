@@ -11,7 +11,9 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.21.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.22.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.22.0: `review.accept(pos)` / `review.reject(pos)` — the change at a place
+  (default: the cursor), for voice commands ("accept", "reject").
 - 0.21.0: `lineWrapping` option and `setLineWrapping(on)` in both editors.
   Chattering: code and text files wrap as the device says (live-file.js
   "how files look": Alt+Z, the ⋯ menu, Settings → appearance); text size
@@ -170,15 +172,15 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `b7abb0d` ("document entry 0.21.0").
-- SHA-256: `0489e265cb28ac617a518891b0d975d8c145cbc6db0dcfb049f2391fbaefba09`
+- Source commit: `ded726d` ("document entry 0.22.0").
+- SHA-256: `e8f66e42fd8ed891bbe7a46b4f09076630bb7a877891c5e6455f7c299ac845b2`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.20.0 (everything but switching wrapping: code files keep wrapping).
-  Keep that artifact and route while the fallback exists. 0.19.0 and older
-  are no longer loaded; delete their folders and routes once 0.21.0 has run
-  for a few days.
+  0.21.0 (everything but accepting or rejecting one change by voice: "all"
+  still works). Keep that artifact and route while the fallback exists.
+  0.20.0 and older are no longer loaded; delete their folders and routes
+  once 0.22.0 has run for a few days.
 
 ## Features enabled in chattering
 

@@ -1,0 +1,142 @@
+'use strict';
+// Voice commands on a real server: the listening socket turns streamed
+// audio into heard text and utterances (through a stand-in speech service),
+// and /api/voice/decide asks a stand-in Jev and records the decision. The
+// stand-ins speak the real protocols: POST /transcribe (PCM in, text out)
+// and TypeSafe's /v1/systemone (questions in, typed answers out).
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const net = require('node:net');
+const http = require('node:http');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+const { FRAME_BYTES } = require('../voice-window.js');
+
+const root = path.join(__dirname, '..');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const freePort = async () => { const s = net.createServer(); await new Promise(r => s.listen(0, '127.0.0.1', r)); const p = s.address().port; await new Promise(r => s.close(r)); return p; };
+
+// Tone words: word k of VOCAB is 400 ms at amplitude 1000·(k+1).
+const VOCAB = ['open', 'the', 'settings', 'reasoning', 'off', 'please'];
+const frame = amp => { const b = Buffer.alloc(FRAME_BYTES); for (let i = 0; i < FRAME_BYTES / 2; i++) b.writeInt16LE(Math.round(amp * Math.sin(i / 3)), i * 2); return b; };
+const speak = words => Buffer.concat(words.flatMap(w => [...Array(4)].map(() => frame(1000 * (VOCAB.indexOf(w) + 1))).concat([frame(0)])));
+const quiet = ms => Buffer.concat(Array.from({ length: ms / 100 }, () => frame(0)));
+function recognize(pcm) {
+  const out = []; let run = null;
+  for (let at = 0; at + FRAME_BYTES <= pcm.length; at += FRAME_BYTES) {
+    let peak = 0; for (let i = 0; i < FRAME_BYTES / 2; i++) peak = Math.max(peak, Math.abs(pcm.readInt16LE(at + i * 2)));
+    const k = Math.round(peak / 1000);
+    if (k >= 1) { if (run !== k) out.push(VOCAB[k - 1]); run = k; } else run = null;
+  }
+  return out.join(' ');
+}
+
+async function standIns(t) {
+  const jevCalls = [];
+  const speech = http.createServer((req, res) => {
+    const chunks = []; req.on('data', c => chunks.push(c));
+    req.on('end', () => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end(recognize(Buffer.concat(chunks))); });
+  });
+  // Jev: the action named by the words said; arguments from their candidates.
+  const jev = http.createServer((req, res) => {
+    const chunks = []; req.on('data', c => chunks.push(c));
+    req.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks)); jevCalls.push({ body, auth: req.headers.authorization });
+      const said = body.state.said;
+      const pick = (q, want) => { const keys = Object.keys(body.questions[q].criteria); const choice = keys.find(k => want(k)) || keys.at(-1); return { type: 'choice', choice, confidence: 0.97, probabilities: { [choice]: 0.97 } }; };
+      const action = /settings/.test(said) ? 'settings' : /reasoning/.test(said) ? 'reasoning' : 'none';
+      const answers = { action: pick('action', k => k === action) };
+      if (body.questions['settings.pane']) answers['settings.pane'] = pick('settings.pane', k => k === 'profile');
+      if (body.questions['reasoning.level']) answers['reasoning.level'] = pick('reasoning.level', k => said.includes(k));
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ answers }));
+    });
+  });
+  await Promise.all([speech, jev].map(s => new Promise(r => s.listen(0, '127.0.0.1', r))));
+  t.after(() => { speech.close(); jev.close(); });
+  return { speechUrl: 'http://127.0.0.1:' + speech.address().port, jevUrl: 'http://127.0.0.1:' + jev.address().port + '/v1/systemone', jevCalls };
+}
+
+async function boot(t, { key = 'test-key-0123456789abcdef' } = {}) {
+  const stand = await standIns(t);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-api-'));
+  fs.mkdirSync(path.join(home, '.config', 'chattering'), { recursive: true });
+  fs.mkdirSync(path.join(home, '.pi', 'agent', 'sessions'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.config', 'chattering', 'settings.json'), JSON.stringify({ speechUrl: stand.speechUrl }));
+  const port = await freePort();
+  const env = { ...process.env, HOME: home, PORT: String(port), CHATTERING_TLS_PORT: '0', CHATTERING_HOST: '127.0.0.1', CHATTERING_LAN: '', CHATTERING_TOKEN: '', CHATTERING_NO_WATCH: '1', CHATTERING_NO_SYNC: '1',
+    CHATTERING_CACHE_DIR: path.join(home, 'cache'), PI_CODING_AGENT_DIR: path.join(home, '.pi', 'agent'), TYPESAFE_URL: stand.jevUrl };
+  delete env.TYPESAFE_API_KEY;
+  if (key) fs.writeFileSync(path.join(home, '.config', 'chattering', 'typesafe-api-key'), key + '\n', { mode: 0o600 });
+  const child = spawn(process.execPath, ['server.js'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = ''; child.stdout.on('data', b => log += b); child.stderr.on('data', b => log += b);
+  // The server may still be writing its caches: wait for it to exit first.
+  t.after(async () => {
+    const exited = child.exitCode !== null || new Promise(r => child.once('exit', r));
+    child.kill('SIGKILL');
+    await exited;
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  });
+  const base = 'http://127.0.0.1:' + port;
+  for (let i = 0; i < 300; i++) { try { if ((await fetch(base + '/api/settings')).ok) break; } catch {} await sleep(50); }
+  return { ...stand, base, port, home, log: () => log };
+}
+const post = (base, p, body) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+test('listening: streamed speech becomes heard text and utterances, with context', async t => {
+  const s = await boot(t);
+  const ws = new WebSocket('ws://127.0.0.1:' + s.port + '/api/voice/listen?window=45');
+  const events = [];
+  ws.onmessage = m => events.push(JSON.parse(m.data));
+  await new Promise((r, j) => { ws.onopen = r; ws.onerror = () => j(new Error('no socket: ' + s.log().slice(-400))); });
+  const send = async buf => { for (let at = 0; at < buf.length; at += FRAME_BYTES * 2) { ws.send(buf.subarray(at, at + FRAME_BYTES * 2)); await sleep(5); } };
+  await send(quiet(2500));
+  await send(speak(['open', 'the', 'settings']));
+  await send(quiet(1200));
+  await send(speak(['reasoning', 'off', 'please']));
+  await send(quiet(1200));
+  for (let i = 0; i < 300 && events.filter(e => e.type === 'utterance').length < 2; i++) await sleep(30);
+  ws.close();
+  assert.equal(events[0].type, 'ready');
+  assert.equal(events[0].windowSeconds, 45);
+  assert.deepEqual(events.filter(e => e.type === 'utterance').map(e => e.text), ['open the settings', 'reasoning off please']);
+  const heard = events.filter(e => e.type === 'heard').at(-1);
+  assert.equal((heard.committed + ' ' + heard.stable + ' ' + heard.volatile).trim(), 'open the settings reasoning off please', 'the second sentence was heard with the first as context');
+  assert.deepEqual(events.filter(e => e.type === 'error'), []);
+});
+
+test('deciding: one request to Jev with the key; a decision and its outcome are recorded', async t => {
+  const s = await boot(t);
+  const status = await (await fetch(s.base + '/api/voice/status')).json();
+  assert.deepEqual([status.key, status.keyFromEnv, status.speech, status.refused], [true, false, true, null]);
+  const r = await (await post(s.base, '/api/voice/decide', { said: 'reasoning off please', screen: 'a conversation', actions: ['reasoning', 'settings', 'bogus'] })).json();
+  assert.equal(r.error, undefined, r.error);
+  assert.deepEqual([r.decision.action, r.decision.args], ['reasoning', { level: 'off' }]);
+  assert.equal(s.jevCalls.at(-1).auth, 'Bearer test-key-0123456789abcdef', 'the key stays on the server');
+  assert.deepEqual(Object.keys(s.jevCalls.at(-1).body.questions).sort(), ['action', 'reasoning.level', 'settings.pane']);
+  assert.equal((await post(s.base, '/api/voice/outcome', { id: r.id, outcome: 'done' })).status, 200);
+  assert.equal((await post(s.base, '/api/voice/outcome', { id: r.id, outcome: 'maybe' })).status, 400);
+  // A sentence that is no command: its words are kept only in debug mode.
+  await post(s.base, '/api/voice/decide', { said: 'pass the salt', actions: ['settings'] });
+  await post(s.base, '/api/voice/decide', { said: 'pass the salt please', actions: ['settings'], debug: true });
+  const log = fs.readFileSync(path.join(s.home, '.local', 'share', 'chattering', 'voice-commands.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(log.map(l => l.action || l.outcome), ['reasoning', 'done', 'none', 'none']);
+  assert.deepEqual(log.filter(l => l.action === 'none').map(l => l.said), [null, 'pass the salt please']);
+  assert.equal(fs.statSync(path.join(s.home, '.local', 'share', 'chattering', 'voice-commands.jsonl')).mode & 0o777, 0o600);
+});
+
+test('the key: saved by the owner only to a private file, never sent back; without it, a clear refusal', async t => {
+  const s = await boot(t, { key: null });
+  const r = await post(s.base, '/api/voice/decide', { said: 'open the settings', actions: ['settings'] });
+  assert.equal(r.status, 503);
+  assert.match((await r.json()).error, /TypeSafe key/);
+  assert.match((await (await post(s.base, '/api/voice/key', { key: 'short' })).json()).error, /does not look like/);
+  assert.equal((await (await post(s.base, '/api/voice/key', { key: 'apikey_0123456789abcdef0123' })).json()).key, true);
+  const file = path.join(s.home, '.config', 'chattering', 'typesafe-api-key');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const status = await (await fetch(s.base + '/api/voice/status')).text();
+  assert.doesNotMatch(status, /apikey_/, 'the key never goes back to a page');
+  await post(s.base, '/api/voice/key', { key: '' });
+  assert.equal(fs.existsSync(file), false);
+});
