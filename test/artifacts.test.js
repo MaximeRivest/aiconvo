@@ -1,0 +1,208 @@
+'use strict';
+// Artifacts (design/67): the preview origin's rules, and a real server with
+// versions from checkpoints, followed by the reader's head, in a real browser.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const net = require('node:net');
+const { spawn, spawnSync } = require('node:child_process');
+const preview = require('../preview.js');
+
+const freePort = async () => { const s = net.createServer(); await new Promise(r => s.listen(0, '127.0.0.1', r)); const p = s.address().port; await new Promise(r => s.close(r)); return p; };
+
+test('capabilities are signed, expire, and survive a restart through their secret file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caps-'));
+  try {
+    const file = path.join(dir, 'secret');
+    const a = new preview.Capabilities(file);
+    assert.equal((fs.statSync(file).mode & 0o777), 0o600);
+    const token = a.sign({ u: 'me', k: 'k', r: '/tmp/x', e: '' });
+    assert.equal(new preview.Capabilities(file).verify(token).r, '/tmp/x', 'the same secret after a restart');
+    const [body, mac] = token.split('.');
+    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body, 'base64url')), r: '/' })).toString('base64url') + '.' + mac;
+    assert.throws(() => a.verify(forged), /Unknown preview/);
+    assert.throws(() => a.verify(a.sign({ r: '/x' }, -1)), /expired/);
+    assert.throws(() => a.verify('nonsense'), /Unknown preview/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('policies: open by default, libraries on request, never plugins, framed only by Chattering', () => {
+  const open = preview.contentPolicy('open', ['http://127.0.0.1:7433']);
+  assert.match(open, /connect-src \*/);
+  assert.match(open, /object-src 'none'/);
+  assert.match(open, /frame-ancestors 'self' http:\/\/127\.0\.0\.1:7433/);
+  const libs = preview.contentPolicy('libraries', []);
+  assert.match(libs, /connect-src 'self' https:\/\/cdn\.jsdelivr\.net/);
+  assert.doesNotMatch(libs, /connect-src \*/);
+  const page = preview.proxyPage('http://127.0.0.1:7433');
+  assert.match(page, /const HOST = "http:\/\/127\.0\.0\.1:7433"/);
+  assert.match(page, /sandbox-proxy-ready/);
+  assert.match(preview.withKit('<html><head><title>x</title></head></html>'), /<head><script src="\/_c\/kit\.js"><\/script><title>/);
+  assert.match(preview.withKit('<p>bare</p>'), /^<script src="\/_c\/kit\.js"><\/script><p>/);
+});
+
+test('a real server: versions follow the head, the preview origin serves them, widgets and hardening', { timeout: 90000 }, async t => {
+  const root = path.join(__dirname, '..'), home = fs.mkdtempSync(path.join(os.tmpdir(), 'artifacts-'));
+  const agent = path.join(home, '.pi/agent'), sessions = path.join(agent, 'sessions/fixture'), work = path.join(home, 'work');
+  const site = path.join(work, 'site');
+  fs.mkdirSync(sessions, { recursive: true }); fs.mkdirSync(site, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: work });
+  let server, browser, ws;
+  const stop = async child => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise(r => child.once('exit', r)); child.kill('SIGTERM');
+    const timer = setTimeout(() => child.kill('SIGKILL'), 3000); await exited; clearTimeout(timer);
+  };
+  t.after(async () => { ws?.close(); await stop(browser); await stop(server); fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
+
+  // Two versions of the page, captured after two tool calls, as the
+  // checkpoint extension does during a run.
+  const { CheckpointStore } = require('../checkpoint-store.js');
+  const store = new CheckpointStore(path.join(home, 'checkpoints'));
+  await store.addArtifactScope(work, site);
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  fs.writeFileSync(path.join(site, 'index.html'), '<!doctype html><html><head><title>v</title></head><body><h1>FIRST PAGE</h1><img src="frog.png"></body></html>');
+  fs.writeFileSync(path.join(site, 'frog.png'), png);
+  const v1 = await store.capture(work, { session: 's', run: 'r', call: 'c1', tool: 'write', phase: 'after' });
+  fs.writeFileSync(path.join(site, 'index.html'), '<!doctype html><html><head><title>v</title></head><body><h1>SECOND PAGE</h1></body></html>');
+  const v2 = await store.capture(work, { session: 's', run: 'r', call: 'c2', tool: 'edit', phase: 'after' });
+  store.close();
+  assert.ok(v1.snapshot && v2.snapshot && v1.snapshot !== v2.snapshot);
+
+  let clock = 0;
+  const ts = () => new Date(Date.UTC(2026, 8, 1, 12, 0, clock++)).toISOString();
+  const call = (id, name, args) => ({ type: 'toolCall', id, name, arguments: args });
+  const assistant = (id, parentId, content) => ({ type: 'message', id, parentId, timestamp: ts(), message: { role: 'assistant', model: 'm', provider: 'p', content } });
+  const result = (id, parentId, callId, name) => ({ type: 'message', id, parentId, timestamp: ts(), message: { role: 'toolResult', toolCallId: callId, toolName: name, content: [{ type: 'text', text: 'ok' }], isError: false } });
+  const user = (id, parentId, text) => ({ type: 'message', id, parentId, timestamp: ts(), message: { role: 'user', content: [{ type: 'text', text }] } });
+  const widgetHtml = '<!doctype html><html><head></head><body style="margin:0"><div id="w" style="height:300px;background:var(--color-background-secondary,#eee)">WIDGET BODY</div></body></html>';
+  fs.writeFileSync(path.join(sessions, 'chat.jsonl'), [
+    { type: 'session', version: 3, id: 'fixture', cwd: work },
+    user('q1', null, 'Make a page'),
+    assistant('a1', 'q1', [call('c1', 'write', { path: 'site/index.html', content: '…' })]), result('r1', 'a1', 'c1', 'write'),
+    assistant('a2', 'r1', [call('art', 'artifact', { path: 'site', title: 'The page' }), call('w1', 'show', { html: widgetHtml, title: 'A widget' })]),
+    result('r2', 'a2', 'art', 'artifact'), result('r3', 'r2', 'w1', 'show'),
+    assistant('a3', 'r3', [{ type: 'text', text: 'Here it is.' }]),
+    user('q2', 'a3', 'Change the title'),
+    assistant('a4', 'q2', [call('c2', 'edit', { path: 'site/index.html', edits: [] })]), result('r4', 'a4', 'c2', 'edit'),
+    assistant('a5', 'r4', [{ type: 'text', text: 'Changed.\n\n```html\n<p>CODE BLOCK PAGE</p>\n```' }]),
+  ].map(JSON.stringify).join('\n') + '\n');
+
+  const port = await freePort(), previewPort = await freePort();
+  const base = 'http://127.0.0.1:' + port, token = 'artifact-test-token', auth = { Authorization: 'Bearer ' + token };
+  let log = '';
+  server = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, HOME: home, PORT: String(port), CHATTERING_PREVIEW_PORT: String(previewPort),
+    CHATTERING_TLS_PORT: '0', CHATTERING_HOST: '127.0.0.1', CHATTERING_TOKEN: token, CHATTERING_NO_SYNC: '1', CHATTERING_CACHE_DIR: path.join(home, 'cache'),
+    CHATTERING_CHECKPOINT_DIR: path.join(home, 'checkpoints'), CHATTERING_DELEGATION_ROOT: path.join(home, 'delegations'), PI_CODING_AGENT_DIR: agent, PI_AGENT_DIR: agent }, stdio: ['ignore', 'pipe', 'pipe'] });
+  server.stdout.on('data', b => log += b); server.stderr.on('data', b => log += b);
+  const key = 'pi:fixture/chat.jsonl';
+  let ready = false;
+  for (let i = 0; i < 150 && !ready; i++) {
+    try { ready = (await (await fetch(base + '/api/sessions', { headers: auth })).json()).some(s => s.key === key); } catch {}
+    if (!ready) await new Promise(r => setTimeout(r, 100));
+  }
+  assert.ok(ready, log);
+  const api = async (p, opts = {}) => { const r = await fetch(base + p, { ...opts, headers: { ...auth, ...(opts.headers || {}) } }); return { status: r.status, body: await r.json().catch(() => null) }; };
+
+  // Versions along the path: at the end both, and the disk equals the last.
+  const q = (extra = {}) => '/api/artifacts/resolve?' + new URLSearchParams({ id: key, path: 'site', ...extra });
+  const end = (await api(q())).body;
+  assert.equal(end.kind, 'web');
+  assert.deepEqual(end.versions.map(v => v.id), [v1.snapshot, v2.snapshot]);
+  assert.equal(end.show, v2.snapshot);
+  assert.equal(end.live.same, true);
+  // At an earlier point of the conversation: only the first version.
+  const early = (await api(q({ head: 'a3' }))).body;
+  assert.deepEqual(early.versions.map(v => v.id), [v1.snapshot]);
+  assert.equal(early.show, v1.snapshot);
+
+  // The preview origin serves each version, with the kit, the policy, and
+  // the picture captured with the first version.
+  const pv = (cap, version, file = '') => fetch(`http://127.0.0.1:${previewPort}/a/${cap}/${version}/${file}`);
+  let r = await pv(end.cap, v1.snapshot);
+  const first = await r.text();
+  assert.match(first, /FIRST PAGE/);
+  assert.match(first, /<script src="\/_c\/kit\.js"><\/script>/);
+  assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'self' http:\/\/localhost:/);
+  assert.equal(r.headers.get('x-chattering-source'), 'version');
+  assert.equal(r.headers.get('set-cookie'), null);
+  r = await pv(end.cap, v1.snapshot, 'frog.png');
+  assert.equal(r.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await r.arrayBuffer()), png);
+  assert.match(await (await pv(end.cap, 'live')).text(), /SECOND PAGE/);
+  assert.equal((await pv(end.cap.replace(/.$/, c => (c === 'A' ? 'B' : 'A')), 'live')).status, 404);
+  assert.equal((await pv(end.cap, 'live', '..%2F..%2Fetc%2Fpasswd')).status, 400);
+
+  // A widget's HTML comes from its tool call; the app side refuses requests
+  // that other pages start.
+  const widget = (await api('/api/artifacts/widget?' + new URLSearchParams({ id: key, entry: 'a2', call: 'w1' }))).body;
+  assert.equal(widget.html, widgetHtml);
+  assert.equal((await fetch(base + '/api/sessions', { headers: { Cookie: 'chattering=' + token, 'Sec-Fetch-Site': 'same-site' } })).status, 403);
+  assert.equal((await fetch(base + '/api/sessions', { headers: { Cookie: 'chattering=' + token, 'Sec-Fetch-Site': 'same-origin' } })).status, 200);
+
+  // The artifact tool's call: the folder becomes versioned; addresses to test.
+  const declared = (await api('/api/artifacts/declare', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session: path.join(sessions, 'chat.jsonl'), path: 'site', title: 'The page' }) })).body;
+  assert.equal(declared.kind, 'web');
+  assert.match(declared.urls[0], new RegExp(`^http://[0-9a-f]{20}\\.localhost:${previewPort}/a/`));
+
+  // ---- the browser --------------------------------------------------------
+  const bin = process.env.CHROMIUM_BIN || process.env.CHROMIUM || 'chromium';
+  if (spawnSync(bin, ['--version']).error) return t.skip('chromium is not installed');
+  browser = spawn(bin, ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  const endpoint = await new Promise((resolve, reject) => {
+    let out = ''; const timer = setTimeout(() => reject(Error(out)), 10000);
+    browser.stderr.on('data', b => { out += b; const m = out.match(/DevTools listening on (ws:\/\/[^\s]+)/); if (m) { clearTimeout(timer); resolve(m[1]); } });
+  });
+  ws = new WebSocket(endpoint); await new Promise(res => ws.onopen = res);
+  let id = 0; const pending = new Map(), exceptions = [];
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.method === 'Runtime.exceptionThrown') exceptions.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } };
+  const send = (method, params = {}, sessionId) => new Promise(res => { pending.set(++id, res); ws.send(JSON.stringify({ id, method, params, sessionId })); });
+  const target = await send('Target.createTarget', { url: 'about:blank' });
+  const sid = (await send('Target.attachToTarget', { targetId: target.result.targetId, flatten: true })).result.sessionId;
+  const evaluate = async expression => {
+    const out = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sid);
+    assert.ok(!out.result?.exceptionDetails, JSON.stringify(out.result?.exceptionDetails));
+    return out.result?.result?.value;
+  };
+  const until = async (expression, label) => {
+    for (let i = 0; i < 400; i++) { if (await evaluate(`(()=>{try{return !!(${expression})}catch{return false}})()`)) return; await new Promise(res => setTimeout(res, 25)); }
+    assert.fail('Timed out: ' + label + '\n' + exceptions.join('\n') + '\n' + log.slice(-2000));
+  };
+  await send('Runtime.enable', {}, sid); await send('Page.enable', {}, sid);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1500, height: 1000, deviceScaleFactor: 1, mobile: false }, sid);
+  // localhost, so previews get their own *.localhost site.
+  await send('Page.navigate', { url: `http://localhost:${port}/?token=${token}#${encodeURIComponent(key)}` }, sid);
+  await until(`current && current.key === ${JSON.stringify(key)} && document.querySelector('.art-card')`, 'the artifact card');
+
+  // The widget: through the sandbox proxy, initialised, sized to its content.
+  await until(`document.querySelector('.art-widget iframe') && parseInt(document.querySelector('.art-widget iframe').style.height) >= 290`, 'the widget sized to 300px');
+  assert.match(await evaluate(`document.querySelector('.art-widget iframe').src`), new RegExp(`^http://w[0-9a-f]{8}\\.localhost:${previewPort}/_c/proxy\\.html\\?host=`));
+
+  // The panel opens beside the conversation at the head's version.
+  await evaluate(`document.querySelector('.art-card .art-open').click(); 1`);
+  await until(`document.body.classList.contains('artifact-open') && document.querySelector('#artifactPane iframe')`, 'the panel');
+  const src = await evaluate(`document.querySelector('#artifactPane iframe').src`);
+  assert.ok(src.includes('/' + v2.snapshot + '/'), src);
+  const box = await evaluate(`JSON.stringify([document.getElementById('artifactPane').getBoundingClientRect().left, document.getElementById('view').getBoundingClientRect().right])`);
+  const [paneLeft, viewRight] = JSON.parse(box);
+  assert.ok(paneLeft >= viewRight - 2, 'beside, not over, the conversation: ' + box);
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('.art-version option')].map(o => o.value)`), [v1.snapshot, v2.snapshot]);
+  // Moving the head to before the change shows the first version.
+  await evaluate(`moveReading(current.key, 'a3', { exact: true })`);
+  await until(`document.querySelector('#artifactPane iframe')?.src.includes(${JSON.stringify('/' + v1.snapshot + '/')})`, 'the earlier version');
+  assert.match(await evaluate(`document.querySelector('.art-banner').textContent`), /different now/);
+  await evaluate(`moveReading(current.key, 'a3', { exact: false })`);
+  await until(`document.querySelector('#artifactPane iframe')?.src.includes(${JSON.stringify('/' + v2.snapshot + '/')})`, 'back to the last version');
+
+  // A code block gets a preview that opens in the panel through the proxy.
+  await until(`document.querySelector('pre.md-code[data-lang="html"] .md-preview')`, 'the code preview button');
+  await evaluate(`document.querySelector('pre.md-code[data-lang="html"] .md-preview').click(); 1`);
+  await until(`document.querySelector('#artifactPane iframe')?.src.includes('/_c/proxy.html')`, 'the code preview in the panel');
+  // Leaving the conversation hides the panel.
+  await evaluate(`goHome(); 1`);
+  await until(`!document.body.classList.contains('artifact-open')`, 'the panel closes with its conversation');
+  assert.deepEqual(exceptions.filter(e => !/ResizeObserver/.test(e)), []);
+});

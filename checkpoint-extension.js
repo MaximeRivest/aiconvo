@@ -7,10 +7,21 @@ const { directTargets } = require('./task-locations');
 function checkpointExtension(pi, options = {}) {
   let store, run = '', review = '', warned = '', closed = false;
   const pending = new Map();
+  // A loose folder (home, temp) is not scanned, except the artifact folders
+  // a conversation declared there (design/67). Checked at most every 10 s.
+  let artifactCheck = { cwd: '', at: 0, any: false };
+  const hasArtifacts = async cwd => {
+    if (artifactCheck.cwd === cwd && Date.now() - artifactCheck.at < 10000) return artifactCheck.any;
+    store ||= options.store || new CheckpointStore();
+    let any = false;
+    try { any = store.artifactScopes(await store.root(cwd)).length > 0; } catch {}
+    artifactCheck = { cwd, at: Date.now(), any };
+    return any;
+  };
   const capture = async (ctx, meta) => {
     if (closed || process.env.CHATTERING_NO_CHECKPOINTS === '1') return;
     const targetOnly = !options.allowLoose && isLooseCwd(ctx.cwd);
-    if (targetOnly && !meta.targets?.length) return;
+    if (targetOnly && !meta.targets?.length && !(await hasArtifacts(ctx.cwd))) return;
     try {
       store ||= options.store || new CheckpointStore();
       const result = await store.capture(ctx.cwd, { session: ctx.sessionManager.getSessionFile() || '', run, review, ...meta, targetOnly });

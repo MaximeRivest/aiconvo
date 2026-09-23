@@ -157,3 +157,27 @@ test('delivery sends the preview exactly once and preserves uncertainty rather t
   await assert.rejects(reviews.deliver(next.token, async () => { sends++; }), /already submitted/);
   assert.equal(sends, 1);
 });
+
+test('artifact folders are versioned with their binary assets, even when ignored or in a loose folder', async t => {
+  const { store, root, meta } = await fixture(t);
+  const site = path.join(root, 'site'); await fs.mkdir(site);
+  await fs.appendFile(path.join(root, '.gitignore'), 'site/\n');
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3, 255]);
+  await fs.writeFile(path.join(site, 'index.html'), '<h1>one</h1>');
+  await fs.writeFile(path.join(site, 'frog.png'), png);
+  const before = await store.capture(root, { ...meta, phase: 'after' });
+  assert.equal(store.snapshot(before.snapshot).manifest.some(f => f.path.startsWith('site/')), false, 'ignored folders stay out until declared');
+  const { scope } = await store.addArtifactScope(root, site);
+  assert.equal(scope, await fs.realpath(site));
+  const a = await store.capture(root, { ...meta, call: 'c1', phase: 'after' });
+  const files = store.snapshot(a.snapshot).manifest.filter(f => f.path.startsWith('site/'));
+  assert.deepEqual(files.map(f => f.path), ['site/frog.png', 'site/index.html']);
+  assert.ok(files.every(f => f.oid), JSON.stringify(files));
+  assert.deepEqual(await store.blob(a.root, files[0].oid), png);
+  assert.deepEqual(store.boundariesByCalls(['c1']).map(b => b.snapshot), [a.snapshot]);
+  // A loose (target-only) capture still scans the declared folders, and only them.
+  await fs.writeFile(path.join(site, 'index.html'), '<h1>two</h1>');
+  const b = await store.capture(root, { ...meta, call: 'c2', phase: 'after', targetOnly: true });
+  assert.deepEqual(store.snapshot(b.snapshot).manifest.map(f => f.path), ['site/frog.png', 'site/index.html']);
+  await assert.rejects(store.addArtifactScope(root, os.tmpdir()), /outside/);
+});

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slides</title>
+<!-- Chattering's slide viewer (design/67). Served at the root of a deck
+     folder on the preview address: deck.json and slides/*.html are read
+     relative to it, from the version the reader's branch is on. -->
+<style>
+  :root { --bg: var(--color-background-secondary, #eceae6); --fg: var(--color-text-primary, #1b1b1b); --dim: var(--color-text-secondary, #666);
+    --line: var(--color-border-primary, #d0cdc6); --accent: var(--color-text-info, #1d5fd1); --panel: var(--color-background-primary, #fff); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.4 var(--font-sans, system-ui, sans-serif); }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header button { font: inherit; padding: 4px 10px; min-height: 32px; border: 1px solid var(--line); border-radius: var(--border-radius-sm, 6px); background: var(--panel); color: var(--fg); cursor: pointer; }
+  header button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  #count { color: var(--dim); font-variant-numeric: tabular-nums; }
+  #stage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; gap: 10px; }
+  .frame { position: relative; overflow: hidden; box-shadow: 0 2px 18px rgba(0,0,0,.18); background: var(--deck-bg, #fff); }
+  .frame > .slide { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .slide { width: var(--w); height: var(--h); overflow: hidden; }
+  .slide > section { width: 100%; height: 100%; box-sizing: border-box; }
+  .slide aside.notes { display: none; }
+  #notes { max-width: 100%; color: var(--dim); white-space: pre-wrap; font-size: 13px; }
+  #notes:empty, body:not(.show-notes) #notes { display: none; }
+  #strip { display: flex; gap: 8px; padding: 8px 12px; overflow-x: auto; border-top: 1px solid var(--line); background: var(--panel); }
+  #strip .thumb { flex: none; cursor: pointer; border: 2px solid transparent; border-radius: 4px; padding: 0; background: none; }
+  #strip .thumb[aria-current="true"] { border-color: var(--accent); }
+  #strip .thumb .frame { box-shadow: none; }
+  #strip .num { display: block; text-align: center; font-size: 11px; color: var(--dim); }
+  #error { padding: 24px; color: var(--color-text-danger, #b00020); white-space: pre-wrap; }
+  #error:empty { display: none; }
+  body.present header, body.present #strip, body.present #notes { display: none; }
+  body.present { background: #000; }
+  body.present #stage { padding: 0; }
+  body.present .frame { box-shadow: none; }
+  #print { display: none; }
+  @media print {
+    html, body { height: auto; background: none; }
+    header, #stage, #strip, #error { display: none !important; }
+    #print { display: block; }
+    #print .slide { position: relative; page-break-after: always; break-after: page; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <b id="title">Slides</b>
+  <span id="count"></span>
+  <button id="prev" aria-label="Previous slide">‹</button>
+  <button id="next" aria-label="Next slide">›</button>
+  <button id="notesBtn" aria-pressed="false" title="Speaker notes">Notes</button>
+  <button id="presentBtn" title="Present full screen (F)">Present</button>
+  <button id="printBtn" title="Print, or save as PDF (one slide per page)">PDF</button>
+</header>
+<div id="error"></div>
+<main id="stage"><div class="frame" id="main"></div><div id="notes"></div></main>
+<nav id="strip" aria-label="Slides"></nav>
+<div id="print"></div>
+<script>
+(async () => {
+  const $ = id => document.getElementById(id);
+  const fail = msg => { $('error').textContent = msg; };
+  let deck;
+  try {
+    const r = await fetch('deck.json', { cache: 'no-cache' });
+    if (!r.ok) throw new Error('deck.json: HTTP ' + r.status);
+    deck = await r.json();
+  } catch (e) { return fail('This deck could not be read. ' + e.message); }
+  const [W, H] = Array.isArray(deck.size) && deck.size.length === 2 ? deck.size.map(Number) : [1920, 1080];
+  const ids = Array.isArray(deck.slides) ? deck.slides.map(String) : Array.isArray(deck.order) ? deck.order.map(String) : [];
+  document.documentElement.style.setProperty('--w', W + 'px');
+  document.documentElement.style.setProperty('--h', H + 'px');
+  // One slide per printed page, at the deck's own size (var() is not allowed in @page).
+  const page = document.createElement('style'); page.textContent = `@page { size: ${W}px ${H}px; margin: 0; }`; document.head.appendChild(page);
+  if (deck.background) document.documentElement.style.setProperty('--deck-bg', deck.background);
+  const title = deck.title || 'Slides';
+  document.title = title; $('title').textContent = title;
+  for (const href of [].concat(deck.fonts || [], Object.values(deck.faces || {}).map(f => f && f.href).filter(Boolean))) {
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l);
+  }
+  if (!ids.length) return fail('deck.json lists no slides ("slides": ["cover", …]).');
+  const bodies = await Promise.all(ids.map(async id => {
+    try { const r = await fetch('slides/' + encodeURIComponent(id) + '.html', { cache: 'no-cache' }); return r.ok ? await r.text() : `<section style="padding:96px;font-size:40px">Missing slide: ${id}</section>`; }
+    catch { return `<section style="padding:96px;font-size:40px">Missing slide: ${id}</section>`; }
+  }));
+  const slide = i => { const d = document.createElement('div'); d.className = 'slide'; d.innerHTML = bodies[i]; return d; };
+  const notesOf = i => { const n = slide(i).querySelector('aside.notes'); return n ? n.textContent.trim() : ''; };
+  const place = (frame, i, width) => {
+    const s = width / W; frame.style.width = width + 'px'; frame.style.height = Math.round(H * s) + 'px';
+    frame.replaceChildren(slide(i)); frame.firstChild.style.transform = `scale(${s})`;
+  };
+  let at = Math.min(Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1), ids.length - 1);
+  const fit = () => {
+    const stage = $('stage'), pad = document.body.classList.contains('present') ? 0 : 32;
+    const noteH = document.body.classList.contains('show-notes') && $('notes').textContent ? $('notes').offsetHeight + 10 : 0;
+    const w = Math.max(80, Math.min(stage.clientWidth - pad, (stage.clientHeight - pad - noteH) * W / H));
+    place($('main'), at, w);
+  };
+  const go = i => {
+    at = Math.min(Math.max(0, i), ids.length - 1);
+    history.replaceState(null, '', '#' + (at + 1));
+    $('count').textContent = (at + 1) + ' / ' + ids.length;
+    $('notes').textContent = notesOf(at);
+    for (const t of $('strip').children) t.setAttribute('aria-current', String(Number(t.dataset.i) === at));
+    $('strip').children[at]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    fit();
+  };
+  ids.forEach((id, i) => {
+    const b = document.createElement('button'); b.className = 'thumb'; b.dataset.i = i; b.title = id;
+    const f = document.createElement('div'); f.className = 'frame'; place(f, i, 144);
+    const n = document.createElement('span'); n.className = 'num'; n.textContent = i + 1;
+    b.append(f, n); b.onclick = () => go(i); $('strip').append(b);
+    const p = slide(i); $('print').append(p);
+  });
+  $('prev').onclick = () => go(at - 1);
+  $('next').onclick = () => go(at + 1);
+  $('notesBtn').onclick = () => { const on = document.body.classList.toggle('show-notes'); $('notesBtn').setAttribute('aria-pressed', String(on)); fit(); };
+  const present = async () => {
+    document.body.classList.add('present');
+    try { await document.documentElement.requestFullscreen(); } catch { if (window.chattering) window.chattering.requestDisplayMode('fullscreen').catch(() => {}); }
+    fit();
+  };
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) { document.body.classList.remove('present'); fit(); } });
+  $('presentBtn').onclick = present;
+  $('printBtn').onclick = () => window.print();
+  $('stage').addEventListener('click', e => { if (document.body.classList.contains('present')) go(at + (e.clientX < innerWidth / 3 ? -1 : 1)); });
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight', 'PageDown', ' ', 'n'].includes(e.key)) { e.preventDefault(); go(at + 1); }
+    else if (['ArrowLeft', 'PageUp', 'p'].includes(e.key)) { e.preventDefault(); go(at - 1); }
+    else if (e.key === 'Home') go(0); else if (e.key === 'End') go(ids.length - 1);
+    else if (e.key === 'f' || e.key === 'F') present();
+  });
+  new ResizeObserver(fit).observe($('stage'));
+  go(at);
+})();
+</script>
+</body>
+</html>

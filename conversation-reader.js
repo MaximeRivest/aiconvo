@@ -300,6 +300,7 @@ async function rerenderReading(anchor) {
   restoreReaderAnchor(keep);
   if (typeof renderRunCards === 'function') renderRunCards();
   if (typeof ctxMeterCache !== 'undefined') { ctxMeterCache.delete(d.key); if (typeof refreshCtxMeter === 'function') refreshCtxMeter(d); }
+  if (window.Artifacts) Artifacts.onHeadChange();
 }
 
 // ---- the composer's line about where the next message goes ---------------
@@ -782,6 +783,10 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
       for (const path of files.keys()) turn.files.add(path);
     }
     if (reviewCalls.length) out.push(`<button class="tg-review" data-step-review="${esc(JSON.stringify({ key: d.key, calls: reviewCalls }))}">${files.size ? `${files.size} ${files.size === 1 ? 'file' : 'files'} touched · ` : ''}Review changes</button>`);
+    // Artifacts (design/67): widgets and artifact cards stand outside the
+    // folded steps, where the answer is read.
+    const artifacts = work.filter(m => m.role === 'tool' && m.artifact);
+    if (artifacts.length && typeof artifactCardsHtml === 'function') out.push(artifactCardsHtml(d.key, artifacts));
     const launches = work.filter(m => m.role === 'tool' && m.name === 'delegate');
     if (launches.length) out.push('<div class="dg-cards">' + launches.map((m, ordinal) => {
       const dg = delegateCallOf(m);

@@ -129,6 +129,12 @@ const isConsoleRequest = req => isLocalRequest(req) && !!req.identity && req.ide
 // machines land on a secure page where copy, microphone and offline mode
 // work, instead of the bare http LAN address.
 const PUBLIC_URL = String(process.env.CHATTERING_PUBLIC_URL || '').trim().replace(/\/+$/, '');
+// The preview origin (design/67): artifacts run here, never on the app's
+// address. Its own port on this machine; a Tailscale Serve port for the
+// tailnet; a TLS port beside the LAN one.
+const PREVIEW_PORT = Number(process.env.CHATTERING_PREVIEW_PORT || 7435);
+const PREVIEW_TLS_PORT = Number(process.env.CHATTERING_PREVIEW_TLS_PORT || 7445);
+const PREVIEW_TAILNET_PORT = Number(process.env.CHATTERING_PREVIEW_TAILNET_PORT || 8443);
 function cookieValue(req, name) {
   const raw = String(req.headers.cookie || '');
   for (const part of raw.split(';')) {
@@ -256,6 +262,10 @@ if (process.env.CHATTERING_NO_FILE_HISTORY !== '1') {
   } catch (e) { fileArchiveError = e.message; console.error('File history unavailable:', e.message); }
 }
 let checkpointStore = null, changeReviews = null;
+function checkpoints() {
+  if (!checkpointStore) checkpointStore = new (require('./checkpoint-store.js').CheckpointStore)();
+  return checkpointStore;
+}
 function reviewServices() {
   if (!checkpointStore) checkpointStore = new (require('./checkpoint-store.js').CheckpointStore)();
   if (!changeReviews) changeReviews = new (require('./change-reviews.js').ChangeReviews)(checkpointStore, { archive: fileArchive, baseURL: 'http://127.0.0.1:' + PORT });
@@ -648,9 +658,14 @@ function toolEventsOf(content, ts, entry, cwd = null) {
     if (b.type === 'tool_use' || b.type === 'toolCall') {
       const input = b.input || b.arguments || {};
       const p = input.file_path || input.notebook_path || input.path || null;
-      const text = toolInputText(b.name, input);
+      // Artifacts (design/67): a widget keeps its HTML in the conversation
+      // file and is fetched when shown; the transcript row carries its title.
+      const isWidget = b.name === 'show' && typeof input.html === 'string';
+      const text = isWidget ? String(input.title || 'widget') : toolInputText(b.name, input);
       const msg = { role: 'tool', name: b.name || '?', text,
-                    path: typeof p === 'string' ? p : null, paths: pathCandidates(text), id: b.id || null, ts };
+                    path: typeof p === 'string' ? p : null, paths: isWidget ? [] : pathCandidates(text), id: b.id || null, ts };
+      if (isWidget) msg.artifact = { kind: 'widget', title: String(input.title || '').slice(0, 120), bytes: input.html.length };
+      else if (b.name === 'artifact' && typeof input.path === 'string') msg.artifact = { kind: 'files', path: input.path, title: String(input.title || '').slice(0, 120), type: typeof input.type === 'string' ? input.type : 'auto' };
       if (/^(bash|shell)$/i.test(b.name || '') && typeof (input.command || input.cmd) === 'string') {
         const located = require('./task-locations').inspectShell(input.command || input.cmd, { host: 'local', cwd });
         const writes = [...new Set(located.locations.filter(l => l.host === 'local' && l.path && l.role !== 'copy-source').map(l => l.path))].slice(0, 6);
@@ -912,6 +927,270 @@ function saveReading(key, identity, body) {
     try { client.res.write(line); } catch {}
   }
   return record;
+}
+
+// ---- artifacts (design/67) -------------------------------------------------
+// An artifact is a view of what a conversation already holds: files the
+// agent wrote (a version per tool call, from the checkpoints), or a widget's
+// HTML inside a tool call. The version on screen follows the reader's head.
+const previewLib = require('./preview.js');
+const previewCaps = new previewLib.Capabilities(path.join(os.homedir(), '.local', 'share', 'chattering', 'preview-secret'));
+const ARTIFACT_SKIP = new Set(['.git', 'node_modules', '.venv', '.direnv', 'target', '__pycache__']);
+const WIDGET_MAX = 512 * 1024;
+const artifactNetwork = () => (appSettings.artifactNetwork === 'libraries' ? 'libraries' : 'open');
+// Only Chattering's own pages may frame a preview: every address this
+// install answers on, the tailnet names, and a public address if set.
+function previewAncestors() {
+  const out = new Set([`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`, `http://[::1]:${PORT}`, 'https://*.ts.net']);
+  for (const ip of lanAddresses()) { out.add(`http://${ip}:${PORT}`); out.add(`https://${ip}:${TLS_PORT}`); }
+  for (const name of new Set([os.hostname(), HOST_NAME].filter(Boolean))) { out.add(`http://${name}:${PORT}`); out.add(`https://${name}:${TLS_PORT}`); }
+  if (PUBLIC_URL) { try { out.add(new URL(PUBLIC_URL).origin); } catch {} }
+  return [...out];
+}
+function identityOfUserId(id) {
+  const user = usersLib.findUser(roster, usersLib.resolveId(roster, id));
+  if (!user || user.disabled) return null;
+  return { user, tier: user.role || 'member', via: 'capability' };
+}
+// A capability names a person; their access is checked again on each use.
+async function authorizePreview(claims, abs) {
+  const who = identityOfUserId(claims.u);
+  if (!who) { const e = new Error('This preview belongs to someone who is no longer here.'); e.status = 403; throw e; }
+  if (claims.k && (!index[claims.k] || !keyVisible(who, claims.k))) { const e = new Error('This conversation is not shared with you.'); e.status = 403; throw e; }
+  try { assertPathAccess(who, abs, 'see'); } catch (e) { e.status = 403; throw e; }
+}
+// Snapshots are immutable: parse each manifest once.
+const snapshotCache = new Map();
+function snapshotCached(id) {
+  if (snapshotCache.has(id)) { const v = snapshotCache.get(id); snapshotCache.delete(id); snapshotCache.set(id, v); return v; }
+  const snap = checkpoints().snapshot(id);
+  snapshotCache.set(id, snap);
+  if (snapshotCache.size > 64) snapshotCache.delete(snapshotCache.keys().next().value);
+  return snap;
+}
+const typeViewers = new Map();
+function artifactTypeViewer(type) {
+  if (!/^[a-z][a-z0-9-]{0,30}$/.test(String(type || ''))) return null;
+  const file = path.join(__dirname, 'artifact-types', type, 'viewer.html');
+  try {
+    const stat = fs.statSync(file), hit = typeViewers.get(file);
+    if (hit && hit.mtimeMs === stat.mtimeMs) return hit.text;
+    const text = fs.readFileSync(file, 'utf8');
+    typeViewers.set(file, { mtimeMs: stat.mtimeMs, text });
+    return text;
+  } catch { return null; }
+}
+const previewHandler = previewLib.createPreviewHandler({
+  caps: previewCaps,
+  store: { snapshot: snapshotCached, blob: (root, oid) => checkpoints().blob(root, oid) },
+  authorize: authorizePreview, network: artifactNetwork, ancestors: previewAncestors,
+  typeViewer: artifactTypeViewer, serveFile: fileMedia.serveFile,
+});
+
+// What kind of artifact a path is, for the panel's viewer.
+function artifactKindOf(abs, isDir) {
+  if (isDir) return fs.existsSync(path.join(abs, 'index.html')) ? 'web' : fs.existsSync(path.join(abs, 'deck.json')) ? 'slides' : 'folder';
+  const ext = path.extname(abs).toLowerCase();
+  if (['.html', '.htm'].includes(ext)) return 'web';
+  if (ext === '.svg') return 'svg';
+  if (ext === '.pdf') return 'pdf';
+  if (['.md', '.markdown'].includes(ext)) return 'markdown';
+  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.bmp'].includes(ext)) return 'image';
+  if (['.mp4', '.m4v', '.webm', '.ogv', '.mov'].includes(ext)) return 'video';
+  if (['.mp3', '.wav', '.ogg', '.m4a', '.flac'].includes(ext)) return 'audio';
+  return 'text';
+}
+function artifactPathFor(key, value) {
+  const entry = index[key];
+  if (!entry) throw Object.assign(new Error('not found'), { status: 404 });
+  const raw = String(value || '').trim();
+  if (!raw) throw new Error('which artifact?');
+  const cwd = entry.cwd || os.homedir();
+  const expanded = raw.startsWith('~/') ? path.join(os.homedir(), raw.slice(2)) : raw;
+  return path.resolve(cwd, expanded);
+}
+// Fingerprint of the artifact in one snapshot: the object ids of its files.
+function snapshotSignature(snap, abs, isDir) {
+  const rel = path.relative(snap.root, abs).split(path.sep).join('/');
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  if (!isDir) {
+    const item = snap.manifest.find(f => f.path === rel);
+    return item ? { sig: item.oid || 'unavailable:' + rel, missing: item.oid ? 0 : 1, files: 1 } : null;
+  }
+  const prefix = rel ? rel + '/' : '';
+  const items = snap.manifest.filter(f => f.path.startsWith(prefix));
+  if (!items.length) return null;
+  return { sig: crypto.createHash('sha1').update(items.map(f => f.path.slice(prefix.length) + ':' + (f.oid || 'x')).join('\n')).digest('hex'),
+    missing: items.filter(f => !f.oid).length, files: items.length };
+}
+// The same fingerprint of the files on disk now (git blob ids), bounded.
+const diskOidCache = new Map();
+async function diskSignature(abs, isDir) {
+  const oidOf = async file => {
+    const stat = await fsp.stat(file);
+    const fp = stat.size + ':' + stat.mtimeMs + ':' + stat.ino;
+    const hit = diskOidCache.get(file);
+    if (hit && hit.fp === fp) return hit.oid;
+    if (stat.size > require('./checkpoint-store.js').ARTIFACT_FILE_MAX) return 'x';
+    const bytes = await fsp.readFile(file);
+    const oid = require('./checkpoint-store.js').blobId(bytes);
+    diskOidCache.set(file, { fp, oid });
+    if (diskOidCache.size > 20000) diskOidCache.delete(diskOidCache.keys().next().value);
+    return oid;
+  };
+  try {
+    if (!isDir) return { sig: await oidOf(abs), files: 1 };
+    const files = [];
+    const walk = async (dir, rel) => {
+      for (const e of await fsp.readdir(dir, { withFileTypes: true })) {
+        if (ARTIFACT_SKIP.has(e.name) || files.length > 3000) continue;
+        const full = path.join(dir, e.name), r = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) await walk(full, r);
+        else if (e.isFile()) files.push([r, full]);
+      }
+    };
+    await walk(abs, '');
+    files.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    const parts = [];
+    for (const [r, full] of files) parts.push(r + ':' + await oidOf(full));
+    return { sig: crypto.createHash('sha1').update(parts.join('\n')).digest('hex'), files: files.length };
+  } catch { return null; }
+}
+
+// Versions of an artifact along the head's path: one per tool call after
+// which its files differed from the version before. Plus the disk now.
+async function artifactResolve(identity, params) {
+  const key = String(params.id || '');
+  if (!index[key]) throw Object.assign(new Error('not found'), { status: 404 });
+  if (!keyVisible(identity, key)) throw Object.assign(new Error('This is not shared with you.'), { status: 403 });
+  const abs = artifactPathFor(key, params.path);
+  assertPathAccess(identity, abs, 'see');
+  let stat = null;
+  try { stat = await fsp.stat(abs); } catch {}
+  const isDir = stat ? stat.isDirectory() : !path.extname(abs);
+  const kind = params.type && /^[a-z]{2,20}$/.test(params.type) && params.type !== 'auto' ? params.type : artifactKindOf(abs, isDir);
+  const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+  const T = conversationTree.build({ ...data, messages: data.messages.map(m => ({ ...m, eid: m.eid || m._eid })) });
+  const reading = readingFor(key, identity) || {};
+  const head = params.head && T.rows.has(params.head) ? params.head : conversationTree.effectiveHead(T, reading);
+  const onPath = conversationTree.path(T, head);
+  const callNode = new Map();
+  const calls = [];
+  for (const node of onPath) for (const m of conversationTree.rowsOf(T, node)) if (m.role === 'tool' && m.id) { calls.push(m.id); callNode.set(m.id, node); }
+  const order = new Map(calls.map((c, i) => [c, i]));
+  const rows = checkpoints().boundariesByCalls(calls)
+    .filter(b => b.snapshot && (b.phase === 'after' || b.phase === 'after-error'))
+    .sort((a, b) => (order.get(a.call) - order.get(b.call)) || (a.id - b.id));
+  const versions = [];
+  for (const b of rows) {
+    let snap;
+    try { snap = snapshotCached(b.snapshot); } catch { continue; }
+    const sig = snapshotSignature(snap, abs, isDir);
+    if (!sig) continue;
+    if (versions.length && versions[versions.length - 1].sig === sig.sig) continue;
+    versions.push({ id: b.snapshot, call: b.call, node: callNode.get(b.call) || null, at: b.finished, sig: sig.sig, missing: sig.missing, files: sig.files });
+  }
+  const disk = stat ? await diskSignature(abs, isDir) : null;
+  const last = versions[versions.length - 1] || null;
+  const liveSame = !!(disk && last && disk.sig === last.sig);
+  // At the conversation's end the disk is the newest state; on an older
+  // branch point, the version captured on that path is.
+  const atEnd = head === T.leafNode;
+  const show = !versions.length || (atEnd && disk && !liveSame) ? 'live' : last.id;
+  const root = isDir ? abs : path.dirname(abs);
+  const cap = previewCaps.sign({ u: identity.user.id, k: key, r: root, e: isDir ? '' : path.basename(abs), t: kind === 'slides' ? 'slides' : undefined });
+  return {
+    path: abs, relPath: path.relative(index[key].cwd || os.homedir(), abs) || path.basename(abs), kind, isDir, exists: !!stat,
+    title: String(params.title || '').slice(0, 120) || path.basename(abs),
+    versions: versions.map(({ sig, ...v }) => v), live: { exists: !!stat, same: liveSame, files: disk ? disk.files : 0 },
+    show, head, cap, site: previewLib.siteId(key, root), entry: isDir ? '' : path.basename(abs),
+  };
+}
+
+// The HTML of a widget: the arguments of its `show` tool call, read from the
+// conversation file (the transcript keeps only a title).
+async function artifactWidget(identity, params) {
+  const key = String(params.id || '');
+  if (!index[key]) throw Object.assign(new Error('not found'), { status: 404 });
+  if (!keyVisible(identity, key)) throw Object.assign(new Error('This is not shared with you.'), { status: 403 });
+  const entryId = String(params.entry || ''), callId = String(params.call || '');
+  const raw = await fsp.readFile(absPathForKey(key), 'utf8');
+  for (const line of raw.split('\n')) {
+    if (!line.includes(entryId) || !line.includes(callId)) continue;
+    let d; try { d = JSON.parse(line); } catch { continue; }
+    if ((d.id || d.uuid) !== entryId) continue;
+    const content = d.message && Array.isArray(d.message.content) ? d.message.content : [];
+    const call = content.find(b => b && (b.type === 'toolCall' || b.type === 'tool_use') && b.id === callId);
+    const args = call && (call.arguments || call.input);
+    if (!args || typeof args.html !== 'string') break;
+    return { html: args.html.slice(0, WIDGET_MAX), title: String(args.title || '').slice(0, 120), truncated: args.html.length > WIDGET_MAX };
+  }
+  throw Object.assign(new Error('That widget is not in this conversation.'), { status: 404 });
+}
+
+// Bytes of an artifact file for viewers on the app's own page (PDF, images,
+// Markdown, video). Never rendered as a page here: sandboxed and inert.
+async function artifactBlob(identity, params, req, res) {
+  const r = await artifactResolve(identity, { id: params.id, path: params.path, head: params.head });
+  const file = r.isDir ? path.join(r.path, String(params.file || 'index.html')) : r.path;
+  if (!(file === r.path || file.startsWith(r.path + path.sep))) throw new Error('Outside the artifact');
+  const version = params.version === 'live' || !params.version ? 'live' : String(params.version);
+  const headers = { 'Content-Security-Policy': "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'", 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-cache' };
+  const mime = previewLib.mimeOf(file);
+  const safeMime = /^(text\/html|image\/svg)/.test(mime) ? 'text/plain; charset=utf-8' : mime;
+  if (version === 'live') {
+    const stat = await fsp.stat(file);
+    return fileMedia.serveFile(req, res, { abs: file, stat }, safeMime, { maxBytes: 64 * 1024 * 1024, headers });
+  }
+  if (!/^[a-f0-9]{64}$/.test(version)) throw new Error('bad version');
+  const snap = snapshotCached(version);
+  const rel = path.relative(snap.root, file).split(path.sep).join('/');
+  const item = snap.manifest.find(f => f.path === rel);
+  if (!item || !item.oid) throw Object.assign(new Error('This file is not in that version.'), { status: 404 });
+  const body = await checkpoints().blob(snap.root, item.oid);
+  res.writeHead(200, { ...headers, 'Content-Type': safeMime, 'Content-Length': body.length, 'Cache-Control': 'private, max-age=31536000, immutable' });
+  res.end(req.method === 'HEAD' ? undefined : body);
+}
+
+// The artifact tool (extensions/artifacts.ts) declares files it made. The
+// folder becomes an artifact scope, so every later capture versions its
+// pictures and fonts too. Returns the addresses an agent can test.
+async function artifactDeclare(identity, body) {
+  const session = path.resolve(String(body.session || ''));
+  const key = keyForSessionPath(session);
+  if (!key || !index[key]) throw Object.assign(new Error('Chattering does not know this conversation yet. The artifact will show once it is indexed.'), { status: 404 });
+  const abs = artifactPathFor(key, body.path);
+  assertPathAccess(identity, abs, 'see');
+  let stat;
+  try { stat = await fsp.stat(abs); } catch { throw new Error('Nothing at ' + abs + '. Write the files first, then call artifact.'); }
+  const isDir = stat.isDirectory();
+  const cwd = index[key].cwd || os.homedir();
+  const folder = isDir ? abs : path.dirname(abs);
+  let scope = null, scopeError = '';
+  try {
+    const root = await checkpoints().root(cwd);
+    if (folder !== root) scope = (await checkpoints().addArtifactScope(cwd, folder)).scope;
+  } catch (e) { scopeError = e.message; }
+  const kind = body.type && body.type !== 'auto' ? body.type : artifactKindOf(abs, isDir);
+  const cap = previewCaps.sign({ u: identity.user.id, k: key, r: folder, e: isDir ? '' : path.basename(abs), t: kind === 'slides' ? 'slides' : undefined });
+  const site = previewLib.siteId(key, folder);
+  const tail = `/a/${cap}/live/`;
+  const urls = [`http://${site}.localhost:${PREVIEW_PORT}${tail}`];
+  const tailnet = tailnetName();
+  if (tailnet) urls.push(`https://${tailnet}:${PREVIEW_TAILNET_PORT}${tail}`);
+  if (appSettings.previewBase) urls.unshift(appSettings.previewBase.replace('{id}', site) + tail);
+  return { key, path: abs, kind, isDir, versioned: !!scope || !scopeError, scopeError, urls };
+}
+let tailnetNameCache = { at: 0, name: '' };
+function tailnetName() {
+  if (Date.now() - tailnetNameCache.at < 600e3) return tailnetNameCache.name;
+  let name = '';
+  try {
+    const out = require('child_process').execFileSync('tailscale', ['status', '--self', '--json'], { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+    name = String(JSON.parse(out.toString()).Self.DNSName || '').replace(/\.$/, '');
+  } catch {}
+  tailnetNameCache = { at: Date.now(), name };
+  return name;
 }
 
 async function indexFile(source, relPath, stat) {
@@ -2323,7 +2602,8 @@ function agentProcsView(running) {
 function piProviderExtraArgs() {
   return [...(fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : []),
     '-e', path.join(__dirname, 'extensions', 'delegation.ts'),
-    '-e', path.join(__dirname, 'extensions', 'records.ts')];
+    '-e', path.join(__dirname, 'extensions', 'records.ts'),
+    '-e', path.join(__dirname, 'extensions', 'artifacts.ts')];
 }
 
 // Abort the headless run on a file and wait for it to let go.
@@ -14573,6 +14853,15 @@ async function handleRequest(req, res) {
     }
     req.identity = identity;
     requestContext.getStore().identity = identity;
+    // A browser request that another site started (a preview page on another
+    // port of this host is "same-site"; any other page is "cross-site") never
+    // acts with this person's cookie or the machine's console trust. Bearer
+    // callers (the CLI, agents' tools, paired installs) send no such header.
+    const fetchSite = req.headers['sec-fetch-site'];
+    if ((fetchSite === 'same-site' || fetchSite === 'cross-site') && identity.via !== 'bearer'
+        && (u.pathname.startsWith('/api/') || !['GET', 'HEAD'].includes(req.method))) {
+      return json(res, 403, { error: 'Requests from other pages are refused.' });
+    }
     if (u.pathname === '/logout' && req.method === 'POST') {
       res.writeHead(302, { Location: '/', 'Set-Cookie': authGuard.cookieHeader('chattering', '', req, { maxAge: 0 }) });
       return res.end();
@@ -14626,6 +14915,8 @@ async function handleRequest(req, res) {
       '/files-browser.css': { file: 'files-browser.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/conversation-flow.js': { file: 'conversation-flow.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-tree.js': { file: 'conversation-tree.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/artifacts.js': { file: 'artifacts.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/artifacts.css': { file: 'artifacts.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/streaming-tool.js': { file: 'streaming-tool.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-reader.js': { file: 'conversation-reader.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-reader.css': { file: 'conversation-reader.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
@@ -15616,6 +15907,23 @@ async function handleRequest(req, res) {
         // The shared box empties for everyone who was writing in it.
         if (p.clearCompose !== false && collab.has('compose:' + p.id)) collab.clear('compose:' + p.id);
       } catch (e) { json(res, e.needsForce ? 409 : e.status || 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/artifacts/config' && req.method === 'GET') {
+      json(res, 200, { port: PREVIEW_PORT, tlsPort: PREVIEW_TLS_PORT, tailnetPort: PREVIEW_TAILNET_PORT, base: appSettings.previewBase || '',
+        network: artifactNetwork(), protocolVersion: previewLib.PROTOCOL_VERSION });
+    } else if (u.pathname === '/api/artifacts/resolve' && req.method === 'GET') {
+      try { json(res, 200, await artifactResolve(identity, Object.fromEntries(u.searchParams))); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/artifacts/widget' && req.method === 'GET') {
+      try { json(res, 200, await artifactWidget(identity, Object.fromEntries(u.searchParams))); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/artifacts/blob' && (req.method === 'GET' || req.method === 'HEAD')) {
+      try { await artifactBlob(identity, Object.fromEntries(u.searchParams), req, res); }
+      catch (e) { if (!res.headersSent) json(res, e.status || 404, { error: e.message }); }
+    } else if (u.pathname === '/api/artifacts/declare' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 16384) return json(res, 413, { error: 'too large' }); }
+      try { json(res, 200, await artifactDeclare(identity, JSON.parse(body || '{}'))); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/reading' && req.method === 'PUT') {
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 256000) return json(res, 413, { error: 'Reading state too large' }); }
@@ -17198,10 +17506,16 @@ function restoreInterruptedRuns() {
 // address in place. Connections already open (this page's event stream,
 // an ongoing run) are untouched; only new connections see the change. The
 // self-signed https listener for tablets exists only while reachable.
-let tlsServer = null;
+let tlsServer = null, previewTlsServer = null;
+// The preview origin listens beside the app, on the same addresses.
+const previewServer = http.createServer((req, res) => { previewHandler(req, res).catch(() => { try { res.end(); } catch {} }); });
+previewServer.on('error', e => console.log('chattering preview listener: ' + e.message));
 function applyLanMode(on, onListening) {
   HOST = ENV_HOST || (on ? '0.0.0.0' : '127.0.0.1');
   LAN_TOKEN = loadLanToken();
+  if (previewServer.listening) previewServer.close();
+  previewServer.listen(PREVIEW_PORT, HOST, () => console.log(`chattering previews → http://<artifact>.localhost:${PREVIEW_PORT}`));
+  if (previewTlsServer) { try { previewTlsServer.close(); } catch {} previewTlsServer = null; }
   if (server.listening) server.close();
   server.listen(PORT, HOST, () => {
     console.log(`chattering → http://localhost:${PORT}`);
@@ -17229,6 +17543,10 @@ function startLanTls() {
       for (const ip of lanAddresses()) console.log(`chattering PWA → https://${ip}:${TLS_PORT}/?token=${LAN_TOKEN}`);
       console.log('Install the tablet icon from the HTTPS URL: browser menu → Add to Home screen.');
     });
+    // An https page may only frame https previews.
+    previewTlsServer = https.createServer(tls, (req, res) => { previewHandler(req, res).catch(() => { try { res.end(); } catch {} }); });
+    previewTlsServer.on('error', e => console.log('chattering preview TLS listener: ' + e.message));
+    previewTlsServer.listen(PREVIEW_TLS_PORT, HOST);
   } catch (error) {
     console.log('chattering TLS skipped: ' + error.message);
   }

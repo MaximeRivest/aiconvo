@@ -2380,10 +2380,12 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
   <div id="readBody" tabindex="0"></div>
 </div>
 <link rel="stylesheet" href="/conversation-reader.css">
+<link rel="stylesheet" href="/artifacts.css">
 <link rel="stylesheet" href="/conversation-draft.css">
 <script src="/conversation-flow.js"></script>
 <script src="/conversation-tree.js"></script>
 <script src="/conversation-reader.js"></script>
+<script src="/artifacts.js"></script>
 <script src="/navigation.js"></script>
 <script src="/timeline-chart.js"></script>
 <script src="/context-panel.js"></script>
@@ -2490,6 +2492,8 @@ function unlockLandscape() {
 }
 
 function setRouteKind(kind) {
+  // The artifact panel belongs to its conversation (design/67).
+  if (kind !== 'conversation' && window.Artifacts) Artifacts.onLeaveConversation();
   // Capture before the route resets scroll or replaces the conversation DOM.
   rememberConversationPosition();
   navRememberScroll();
@@ -12616,6 +12620,7 @@ function wireTranscript() {
   wireTranscriptPathCandidates($('view'), activeRel);
   wireToolGroups($('view'));
   if (typeof delegationUI !== 'undefined') delegationUI.attachCards($('conversationTranscript'));
+  if (window.Artifacts) Artifacts.wire($('conversationTranscript'));
 }
 
 async function renderConv(scroll) {
@@ -12713,6 +12718,7 @@ async function renderConv(scroll) {
   }
   if (keepCompose && newTa && keepCompose.focused) newTa.focus({ preventScroll: true });
   composeShareCheck();
+  if (window.Artifacts) Artifacts.onConversation(d);
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.

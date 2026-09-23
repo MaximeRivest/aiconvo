@@ -10,6 +10,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { sensitive } = require('./task-locations');
 const SKIP = new Set(['.git', 'node_modules', '.venv', '.direnv', 'target', '__pycache__']);
 const READ_ONLY = new Set(['read', 'ls', 'find', 'grep']);
+const ARTIFACT_FILE_MAX = 25 * 1024 * 1024;
 const hash = s => crypto.createHash('sha256').update(s).digest('hex');
 const blobId = b => crypto.createHash('sha1').update(Buffer.from(`blob ${b.length}\0`)).update(b).digest('hex');
 const inside = (root, p) => p === root || p.startsWith(root + path.sep);
@@ -46,7 +47,9 @@ class CheckpointStore {
       CREATE INDEX IF NOT EXISTS checkpoint_target_boundary ON checkpoint_targets(boundary);
       CREATE TABLE IF NOT EXISTS checkpoint_target_links(boundary INTEGER NOT NULL, location TEXT NOT NULL, version INTEGER, error TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS checkpoint_target_link_boundary ON checkpoint_target_links(boundary);
-      CREATE TABLE IF NOT EXISTS checkpoint_scopes(root TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(root,path));`);
+      CREATE TABLE IF NOT EXISTS checkpoint_scopes(root TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(root,path));
+      CREATE TABLE IF NOT EXISTS artifact_scopes(root TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(root,path));
+      CREATE INDEX IF NOT EXISTS checkpoint_call_only ON checkpoint_boundaries(call,id);`);
     this.queues = new Map(); this.cache = new Map(); this.ready = new Map();
   }
   repo(root) { return path.join(this.dir, hash(root), 'objects.git'); }
@@ -69,13 +72,16 @@ class CheckpointStore {
     })();
     this.ready.set(root, work); try { return await work; } catch (e) { this.ready.delete(root); throw e; }
   }
-  async paths(root) {
-    const normal = await git(['rev-parse', '--is-inside-work-tree'], { cwd: root }).then(b => b.toString().trim() === 'true').catch(() => false);
-    const args = normal ? ['ls-files', '-z', '--cached', '--others', '--exclude-standard']
-      : ['--git-dir=' + this.repo(root), '--work-tree=' + root, 'ls-files', '-z', '--others', '--exclude-standard'];
-    // Never fall back to an unfiltered filesystem walk after an enumeration
-    // failure: that could silently capture ignored secrets or build output.
-    const paths = (await git(args, { cwd: root })).toString('utf8').split('\0').filter(Boolean);
+  async paths(root, { artifactsOnly = false } = {}) {
+    let paths = [];
+    if (!artifactsOnly) {
+      const normal = await git(['rev-parse', '--is-inside-work-tree'], { cwd: root }).then(b => b.toString().trim() === 'true').catch(() => false);
+      const args = normal ? ['ls-files', '-z', '--cached', '--others', '--exclude-standard']
+        : ['--git-dir=' + this.repo(root), '--work-tree=' + root, 'ls-files', '-z', '--others', '--exclude-standard'];
+      // Never fall back to an unfiltered filesystem walk after an enumeration
+      // failure: that could silently capture ignored secrets or build output.
+      paths = (await git(args, { cwd: root })).toString('utf8').split('\0').filter(Boolean);
+    }
     const visit = async file => {
       if (paths.length > 20000) throw Error('Approved capture scope exceeds the file limit');
       const stat = await fsp.lstat(file).catch(() => null);
@@ -84,7 +90,9 @@ class CheckpointStore {
         for (const e of await fsp.readdir(file, { withFileTypes: true })) if (!SKIP.has(e.name)) await visit(path.join(file, e.name));
       } else if (stat.isFile()) paths.push(path.relative(root, file).split(path.sep).join('/'));
     };
-    for (const scope of this.scopes(root)) {
+    // Approved scopes and artifact folders are walked explicitly: an artifact
+    // (design/67) is often build output a .gitignore would hide.
+    for (const scope of artifactsOnly ? this.artifactScopes(root) : [...this.scopes(root), ...this.artifactScopes(root)]) {
       const real = await fsp.realpath(scope).catch(() => null);
       if (real === scope && inside(root, real)) await visit(real);
     }
@@ -100,17 +108,20 @@ class CheckpointStore {
     const started = Date.now(); let snapshot = null, error = '';
     const targets = await this.captureTargets(root, meta.targets || []);
     if (meta.run && meta.review) this.db.prepare('INSERT OR IGNORE INTO checkpoint_runs VALUES (?,?,?)').run(meta.run, meta.session || '', meta.review);
-    if (!meta.targetOnly) try { snapshot = await this.scan(root, started); } catch (e) { error = e.message; }
+    const artifactsOnly = !!meta.targetOnly && this.artifactScopes(root).length > 0;
+    if (!meta.targetOnly || artifactsOnly) try { snapshot = await this.scan(root, started, { artifactsOnly }); } catch (e) { error = e.message; }
     const active = this.db.prepare(`SELECT 1 FROM checkpoint_boundaries b WHERE b.root=? AND b.phase='before' AND b.started>? AND NOT (b.session=? AND b.run=? AND b.call=?) AND NOT EXISTS (SELECT 1 FROM checkpoint_boundaries e WHERE e.session=b.session AND e.run=b.run AND e.call=b.call AND e.id>b.id AND e.phase IN ('after','after-error','settled-incomplete')) LIMIT 1`).get(root, started - 86400000, meta.session || '', meta.run || '', meta.call || '');
     const row = this.db.prepare(`INSERT INTO checkpoint_boundaries(root,session,run,call,tool,phase,started,finished,snapshot,error,overlapping) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(root, meta.session || '', meta.run || '', meta.call || '', meta.tool || '', meta.phase || 'observation', started, Date.now(), snapshot?.id || null, error, meta.overlapping || active ? 1 : 0);
     const id = Number(row.lastInsertRowid);
     for (const target of targets) this.db.prepare('INSERT INTO checkpoint_target_links VALUES (?,?,?,?)').run(id, JSON.stringify(target.location), target.version, target.error);
     return { id, root, snapshot: snapshot?.id || null, error, targetErrors: targets.filter(t => t.error).map(t => t.error) };
   }
-  async scan(root, started) {
+  async scan(root, started, { artifactsOnly = false } = {}) {
     if (inside(root, this.dir)) throw Error('Checkpoint storage must be outside the captured workspace');
     const repo = await this.init(root), manifest = [];
-    const paths = [...new Set(await this.paths(root))].sort();
+    const paths = [...new Set(await this.paths(root, { artifactsOnly }))].sort();
+    const artifactDirs = this.artifactScopes(root);
+    const inArtifact = full => artifactDirs.some(dir => inside(dir, full));
     if (paths.length > 20000) throw Error('Checkpoint file limit exceeded (20,000)');
     let total = 0;
     const limit = Number(process.env.CHATTERING_CHECKPOINT_MB || 1024) * 1024 * 1024;
@@ -125,8 +136,13 @@ class CheckpointStore {
       let stat;
       try { stat = await fsp.lstat(full); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
       if (stat.isDirectory()) { manifest.push({ path: rel, unavailable: 'Nested repository/directory entry' }); continue; }
-      if (/\.(?:png|jpe?g|gif|webp|wav|mp3|ogg|mp4|pdf|zip|gz|sqlite|db|pyc|woff2?|ttf|so|dll|exe)$/i.test(rel)) { manifest.push({ path: rel, unavailable: 'Binary artifact; use its current-file preview' }); continue; }
-      if (!stat.isFile() || stat.size > 2 * 1024 * 1024 || !inside(root, await fsp.realpath(full))) { manifest.push({ path: rel, unavailable: 'Symlink, special file, or file over 2 MiB' }); continue; }
+      // Inside an artifact folder, pictures, fonts, sounds and documents are
+      // part of what the person sees, so they are versioned too (up to 25 MiB
+      // each, within the same storage budget).
+      const artifact = inArtifact(full);
+      const maxBytes = artifact ? ARTIFACT_FILE_MAX : 2 * 1024 * 1024;
+      if (!artifact && /\.(?:png|jpe?g|gif|webp|wav|mp3|ogg|mp4|pdf|zip|gz|sqlite|db|pyc|woff2?|ttf|so|dll|exe)$/i.test(rel)) { manifest.push({ path: rel, unavailable: 'Binary artifact; use its current-file preview' }); continue; }
+      if (!stat.isFile() || stat.size > maxBytes || !inside(root, await fsp.realpath(full))) { manifest.push({ path: rel, unavailable: artifact ? 'Symlink, special file, or file over 25 MiB' : 'Symlink, special file, or file over 2 MiB' }); continue; }
       total += stat.size; if (total > 200 * 1024 * 1024) throw Error('Checkpoint workspace exceeds 200 MiB of eligible files');
       const fingerprint = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.mode}`;
       const cached = this.cache.get(full);
@@ -138,9 +154,9 @@ class CheckpointStore {
           const buffer = Buffer.alloc(stat.size + 1); let size = 0;
           while (size < buffer.length) { const r = await handle.read(buffer, size, buffer.length - size, size); if (!r.bytesRead) break; size += r.bytesRead; }
           bytes = buffer.subarray(0, size); const after = await handle.stat();
-          if (bytes.length > 2 * 1024 * 1024 || after.ino !== stat.ino || after.mtimeMs !== stat.mtimeMs || after.size !== stat.size || after.ctimeMs !== stat.ctimeMs) throw Error('File changed during checkpoint scan: ' + rel);
+          if (bytes.length > maxBytes || after.ino !== stat.ino || after.mtimeMs !== stat.mtimeMs || after.size !== stat.size || after.ctimeMs !== stat.ctimeMs) throw Error('File changed during checkpoint scan: ' + rel);
         } finally { await handle.close(); }
-        if (bytes.includes(0) || !Buffer.from(bytes.toString('utf8')).equals(bytes)) { manifest.push({ path: rel, unavailable: 'Binary or non-UTF-8 contents' }); continue; }
+        if (!artifact && (bytes.includes(0) || !Buffer.from(bytes.toString('utf8')).equals(bytes))) { manifest.push({ path: rel, unavailable: 'Binary or non-UTF-8 contents' }); continue; }
         oid = await this.storeBlob(root, bytes);
         this.cache.set(full, { fingerprint, oid });
         if (this.cache.size > 40000) this.cache.delete(this.cache.keys().next().value);
@@ -264,6 +280,31 @@ class CheckpointStore {
       .map(r => ({ ...r, location: JSON.parse(r.location) }));
   }
   scopes(root) { return this.db.prepare('SELECT path FROM checkpoint_scopes WHERE root=? ORDER BY path').all(root).map(r => r.path); }
+  // Artifact folders (design/67): always captured, binary assets included.
+  artifactScopes(root) { return this.db.prepare('SELECT path FROM artifact_scopes WHERE root=? ORDER BY path').all(root).map(r => r.path); }
+  async addArtifactScope(cwd, folder) {
+    const root = await this.root(cwd), scope = await fsp.realpath(folder);
+    if (!inside(root, scope)) throw Error('The artifact is outside this conversation\'s workspace');
+    if (sensitive(scope) || inside(this.dir, scope) || scope.split(path.sep).some(p => SKIP.has(p))) throw Error('This folder cannot be versioned');
+    if (!(await fsp.stat(scope)).isDirectory()) throw Error('An artifact scope must be a folder');
+    this.db.prepare('INSERT OR IGNORE INTO artifact_scopes VALUES (?,?)').run(root, scope);
+    return { root, scope };
+  }
+  // Boundaries by tool call id alone: a parallel answer's calls ran in a fork
+  // file that was later folded into the conversation.
+  boundariesByCalls(calls) {
+    if (!calls.length) return [];
+    const out = [];
+    for (let i = 0; i < calls.length; i += 400) {
+      const part = calls.slice(i, i + 400);
+      out.push(...this.db.prepare(`SELECT * FROM checkpoint_boundaries WHERE call IN (${part.map(() => '?').join(',')}) ORDER BY id`).all(...part));
+    }
+    return out.sort((a, b) => a.id - b.id);
+  }
+  async blob(root, oid) {
+    if (!/^[0-9a-f]{40}$/.test(oid)) throw Error('Invalid object id');
+    return git(['--git-dir=' + this.repo(root), 'cat-file', 'blob', oid], { max: ARTIFACT_FILE_MAX + 1024 });
+  }
   revokeScope(root, scope) { this.db.prepare('DELETE FROM checkpoint_scopes WHERE root=? AND path=?').run(root, path.resolve(scope)); return this.scopes(root); }
   async approveScope(root, scope) {
     root = await fsp.realpath(root); scope = await fsp.realpath(scope);
@@ -274,4 +315,4 @@ class CheckpointStore {
   }
   close() { this._legacyTargets?.close(); this.db.close(); }
 }
-module.exports = { CheckpointStore, READ_ONLY, git, blobId };
+module.exports = { CheckpointStore, READ_ONLY, git, blobId, ARTIFACT_FILE_MAX };

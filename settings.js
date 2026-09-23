@@ -67,6 +67,13 @@ const DEFAULT_SETTINGS = {
   // Engine for web sends: 'sdk' embeds pi in-process (fast forks, full
   // extension UI); 'rpc' spawns pi child processes (isolation fallback).
   piEngine: 'sdk',
+  // Artifacts (design/67). artifactNetwork: 'open' lets artifact pages load
+  // and call anything (trust is the default); 'libraries' limits scripts,
+  // styles, fonts and network calls to the public library sites.
+  // previewBase: a public preview address with {id} for each artifact's own
+  // site (https://{id}.preview.example.com); empty: this machine's ports.
+  artifactNetwork: 'open',
+  previewBase: '',
   // One same-model editing pass after a human-facing SDK reply.
   simplifyAnswers: true,
   simplifyPrompt: DEFAULT_SIMPLIFY_PROMPT,
@@ -337,6 +344,8 @@ function normalizeSettings(input) {
   const backgroundAi = normalizeBackgroundAi(src.backgroundAi);
   const semanticNs = String(src.semanticNs || DEFAULT_SETTINGS.semanticNs).trim().replace(/[^\w.-]+/g, '-') || 'default';
   const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
+  const artifactNetwork = src.artifactNetwork === 'libraries' ? 'libraries' : 'open';
+  const previewBase = /^https:\/\/(?:\{id\}\.)?[a-z0-9.-]+(?::\d+)?$/i.test(String(src.previewBase || '').trim()) ? String(src.previewBase).trim() : '';
   const simplifyAnswers = src.simplifyAnswers !== false;
   const simplifyPrompt = typeof src.simplifyPrompt === 'string' && src.simplifyPrompt.trim() ? src.simplifyPrompt : DEFAULT_SIMPLIFY_PROMPT;
   const autoResumeNetwork = src.autoResumeNetwork === true;
@@ -369,6 +378,8 @@ function normalizeSettings(input) {
     voiceModel,
     backgroundAi,
     piEngine,
+    artifactNetwork,
+    previewBase,
     simplifyAnswers,
     simplifyPrompt,
     autoResumeNetwork,
