@@ -1666,10 +1666,18 @@ function voicePaintOffButton() {
   }
   // With a message box on screen: in its row of buttons, beside the
   // dictation microphone, never over send or abort. Elsewhere: the corner.
+  // Wide screens (the tablet, a laptop): at the top, beside the files
+  // square, away from everything at the bottom. A phone: in the message
+  // box's row, beside the dictation microphone. Else the corner.
+  const files = $('filesToggle');
+  const top = files && getComputedStyle(files).display !== 'none' ? files.getBoundingClientRect() : null;
   const row = document.querySelector('#agentCompose .compose-left');
-  const home = row && voiceVisible(row) ? row : voiceDock();
+  const home = top ? document.body : row && voiceVisible(row) ? row : voiceDock();
   b.classList.toggle('inline', home === row);
+  b.classList.toggle('top', !!top);
   if (b.parentElement !== home) home.appendChild(b);
+  if (top) { b.style.top = Math.round(top.top) + 'px'; b.style.right = Math.round(window.innerWidth - top.left + 8) + 'px'; }
+  else { b.style.top = ''; b.style.right = ''; }
   voicePlaceDock();
 }
 
