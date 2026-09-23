@@ -363,6 +363,7 @@ async function fileWsMountCode(ws, opts) {
   ws.baseText = d.text;
   ws.editor = bundle.createCodeEditor($('codeEditor'), {
     doc: text, filename: ws.path, theme: mrmdHostTheme(),
+    lineWrapping: fileViewPrefs().wrap, // the device's choice (live-file.js)
     extensions: shared ? collabEditorExtension(shared) : [],
     onChange: markDirty,
     onSave: () => shared ? fileWsSharedSave(ws) : fileWsSaveCode(ws),

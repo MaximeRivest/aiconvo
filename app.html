@@ -794,7 +794,10 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .doc-var-detail { margin: 0; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--surface-1); font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto; }
 @media (max-width: 700px) { .doc-body { flex-direction: column; } .doc-vars { flex: 0 0 42%; border-left: 0; border-top: 1px solid var(--border); } }
 /* The page: the same reading column as a conversation (--read-max). */
-.doc-editor-host > div { max-width: var(--read-max); margin: 0 auto; padding: 28px 20px 50vh; min-height: 100%; }
+.doc-editor-host > div { max-width: var(--doc-width, var(--read-max)); margin: 0 auto; padding: 28px 20px 50vh; min-height: 100%; }
+/* A document's text is in the device's document font; code in it stays
+   monospace (live-file.js "how files look"). */
+.doc-editor-host:not(.code-host) { --editor-text-font: var(--doc-font, var(--font-mono)); }
 .doc-editor-host .cm-editor { height: auto; }
 .doc-editor-host .cm-scroller { overflow: visible; }
 /* One voice for markdown: the editor mirrors the conversation .md look.
@@ -815,20 +818,20 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .doc-editor-host .cm-md-h1-line, .doc-editor-host .cm-md-h2-line { border-bottom: 1px solid var(--border); padding-bottom: 3px; }
 /* Code blocks: the same box as .md pre — surface-2 ground, 1px border,
    smaller mono. Per-line paint; the fence rows open and close the box. */
-.doc-editor-host .cm-md-codeblock-line { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--surface-2) 85%, transparent); border-left: 1px solid var(--border); border-right: 1px solid var(--border); padding-left: 12px; padding-right: 12px; font-size: 12.5px; }
+.doc-editor-host .cm-md-codeblock-line { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--surface-2) 85%, transparent); border-left: 1px solid var(--border); border-right: 1px solid var(--border); padding-left: 12px; padding-right: 12px; font-family: var(--font-mono); font-size: 0.834em; }
 .doc-editor-host .cm-md-codeblock-first { border-top: 1px solid var(--border); padding-top: 5px; }
 .doc-editor-host .cm-md-codeblock-last { border-bottom: 1px solid var(--border); padding-bottom: 5px; }
 /* Fence rows are quiet chrome: the info string reads as the small
    language label (like .md pre[data-lang]::before). Constant size —
    the label grows only via the marker span when the caret enters it. */
-.doc-editor-host .cm-md-codeblock-first, .doc-editor-host .cm-md-codeblock-last { color: var(--text-faint); font-size: 10px; line-height: 1.7; min-height: 21px; }
+.doc-editor-host .cm-md-codeblock-first, .doc-editor-host .cm-md-codeblock-last { color: var(--text-faint); font-size: 0.8em; line-height: 1.7; min-height: 1.4em; }
 /* Inline code: the conversation's quieter italic voice (no chip). */
 .doc-editor-host .cm-md-inline-code { font-style: italic; }
 /* A drawn ```mermaid fence: the figure is the same .mmd-fig the transcript
    draws; the bundle only frames it. Its source (while drawing, or under an
    error) reads as the code block it is. */
 .doc-editor-host .cm-diagram { padding: 8px 0; }
-.doc-editor-host .cm-diagram-source { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); background: color-mix(in srgb, var(--surface-2) 85%, transparent); border: 1px solid var(--border); border-radius: 0; }
+.doc-editor-host .cm-diagram-source { font-family: var(--font-mono); font-size: 0.834em; color: var(--text); background: color-mix(in srgb, var(--surface-2) 85%, transparent); border: 1px solid var(--border); border-radius: 0; }
 .doc-editor-host .cm-diagram-error-message { color: var(--danger); font-size: var(--fs-micro); }
 /* Run status strip: kernel chip · state · cancel. Output lives IN the
    document (```output under the cell, MRMD style), never here. */
@@ -6343,10 +6346,10 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal chattering startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.20.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.21.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
-const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js';
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.20.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -6415,8 +6418,11 @@ function mrmdHostTheme() {
     '--editor-line-number': 'var(--text-faint)',
     '--editor-line-number-active': 'var(--text-dim)',
     '--editor-matching-bracket': 'color-mix(in srgb, var(--accent) 25%, var(--bg))',
-    '--editor-font-family': 'var(--font-mono)',
-    '--editor-font-size': 'var(--fs-title)',
+    // The file's text: its font (a document's is the device's choice,
+    // a code file's stays monospace) and size, scaled on this device
+    // (live-file.js "how files look").
+    '--editor-font-family': 'var(--editor-text-font, var(--font-mono))',
+    '--editor-font-size': 'calc(var(--fs-title) * var(--file-text-scale, 1))',
     '--editor-line-height': '1.65',
 
     // widgets (panels, tooltips, fold placeholders)
@@ -15561,6 +15567,9 @@ function paneAppearance() {
       <select id="setAppFont">${Object.entries(window.appFonts).map(([id, font]) => `<option value="${id}"${(document.documentElement.dataset.appFont || 'theme') === id ? ' selected' : ''}>${esc(font.label)}</option>`).join('')}</select>
       <div class="set-help">Try a font instantly. Saved for this browser. Uses installed fonts; code stays monospace. Theme default restores the theme’s choice.</div>
     </div>
+    <h3>files on this device</h3>
+    ${fileViewControlsHtml('all')}
+    <div class="set-help">Text size is for every file editor; the width and the font are for Markdown documents (code and text files stay monospace). The file’s ⋯ menu has the same controls.</div>
     <h3>layout on this device</h3>
     ${setOptionsHtml('setLayout', [
       { value: 'top', name: 'top bar', desc: 'One bar across the top; agents and replies open as a tray (a).' },
@@ -15578,6 +15587,7 @@ function paneAppearance() {
 }
 
 function bindPaneAppearance(root) {
+  wireFileViewControls(root);
   $('setRailCounts').onchange = e => { agentSecState.railCounts = e.target.checked; saveAgentSecState(); paintRailBadges(); };
   $('setAppFont').onchange = e => {
     window.setAppFont(e.target.value);
@@ -16946,6 +16956,8 @@ function fileEditorHelp({ inEditor }) {
   const keys = [['ctrl+s', 'save to disk'], ['ctrl+f', 'find in this file'], ['ctrl+space', 'completion'], ['ctrl+k', 'ask an agent for a change here — a box opens over the text']];
   // An editor bundle from before keyHelp() (the loader's fallback): its keys, as they were.
   if (fileWs?.kind === 'md' && !reported) keys.push(['ctrl+enter', 'run this cell'], ['shift+enter', 'run and advance'], ['ctrl+j', 'AI commands']);
+  keys.push(['alt+= · alt+−', 'larger / smaller text, in the text'], ['alt+0', 'text back to 100%, in the text']);
+  if (fileWs?.kind === 'code') keys.push(['alt+z', 'wrap long lines on / off, in the text']);
   keys.push(['ctrl+?', 'this help — also while typing']);
   if (inEditor) keys.push(['esc, then tab', 'leave the text — then the page’s shortcuts work']);
   sections.push({ label: 'file', keys });

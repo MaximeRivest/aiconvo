@@ -11,6 +11,152 @@ function liveLanguage(path) {
     c: 'c', h: 'cpp', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', java: 'java', xml: 'xml', svg: 'xml', toml: 'toml', lua: 'lua', rb: 'ruby',
     dockerfile: 'dockerfile', containerfile: 'dockerfile', diff: 'diff', patch: 'diff' })[ext] || 'text';
 }
+// ---- how files look, on this device ----
+// Text size (every file editor), long lines wrapping (code and text files;
+// Markdown documents always wrap, at a width: a narrow column of about 70
+// characters that grows with the text, the app's reading column, or the
+// whole window), and the documents' font. Saved in this browser, like the app's
+// font and theme: a phone, a desk and the e-ink tablet can differ.
+//
+// Size and font are CSS custom properties on the root, which the editors'
+// theme reads (app.html mrmdHostTheme, .doc-editor-host rules), so every
+// open editor follows at once. Wrapping is the editor's own switch.
+const FILE_VIEW_KEY = 'chattering.fileView.v1';
+const FILE_TEXT_SCALES = [0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2];
+// The documents' font: the choices of the app's font (app.html appFonts),
+// with monospace — the look documents have always had — first.
+const FILE_DOC_FONTS = {
+  mono: { label: 'Monospace', value: 'var(--font-mono)' },
+  app: { label: 'The app’s font', value: 'var(--font)' },
+  sans: { label: 'System sans', from: 'sans' },
+  humanist: { label: 'Humanist sans', from: 'humanist' },
+  serif: { label: 'Book serif', from: 'serif' },
+};
+
+function fileViewPrefs() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(FILE_VIEW_KEY) || 'null'); } catch {}
+  const r = raw && typeof raw === 'object' ? raw : {};
+  return {
+    scale: FILE_TEXT_SCALES.includes(r.scale) ? r.scale : 1,
+    wrap: r.wrap !== false,
+    width: ['narrow', 'full'].includes(r.width) ? r.width : 'read',
+    font: Object.hasOwn(FILE_DOC_FONTS, r.font) ? r.font : 'mono',
+  };
+}
+
+function fileDocFontValue(id) {
+  const f = FILE_DOC_FONTS[id] || FILE_DOC_FONTS.mono;
+  return f.value || (window.appFonts && window.appFonts[f.from] && window.appFonts[f.from].value) || 'var(--font-mono)';
+}
+
+// The root's custom properties, from the prefs. Applied when this script
+// loads: no file view is on screen before it. (Without a page — this file
+// run in a test sandbox — there is nothing to style.)
+function applyFileViewStyle(prefs = fileViewPrefs()) {
+  const root = typeof document !== 'undefined' && document.documentElement ? document.documentElement.style : null;
+  if (!root) return;
+  root.setProperty('--file-text-scale', String(prefs.scale));
+  root.setProperty('--doc-font', fileDocFontValue(prefs.font));
+  // Narrow: about 70 characters of a proportional font, scaled with the text.
+  if (prefs.width === 'full') root.setProperty('--doc-width', 'none');
+  else if (prefs.width === 'narrow') root.setProperty('--doc-width', 'calc(760px * var(--file-text-scale, 1))');
+  else root.removeProperty('--doc-width');
+}
+applyFileViewStyle();
+
+// Change the prefs and show them in the open file at once.
+function setFileViewPrefs(patch) {
+  const prev = fileViewPrefs();
+  const next = { ...prev, ...patch };
+  try { localStorage.setItem(FILE_VIEW_KEY, JSON.stringify(next)); } catch {}
+  applyFileViewStyle(next);
+  const editor = typeof fileWs !== 'undefined' && fileWs ? fileWs.editor : null;
+  if (editor) {
+    if (next.wrap !== prev.wrap && fileWs.kind === 'code' && typeof editor.setLineWrapping === 'function') editor.setLineWrapping(next.wrap);
+    // A fixed-height editor does not notice its lines changing size.
+    editor.view?.requestMeasure();
+  }
+  for (const el of document.querySelectorAll('.fv-controls')) paintFileViewControls(el);
+  return next;
+}
+
+// One step smaller or larger (dir -1 / +1), or back to 100% (0). `quiet`:
+// the controls show the size themselves (a key press has only the toast).
+function stepFileTextSize(dir, quiet = false) {
+  const { scale } = fileViewPrefs();
+  const i = FILE_TEXT_SCALES.indexOf(scale);
+  const next = dir === 0 ? 1 : FILE_TEXT_SCALES[Math.max(0, Math.min(FILE_TEXT_SCALES.length - 1, i + dir))];
+  if (next === scale) { if (!quiet) toast(dir > 0 ? 'the text is as large as it goes' : dir < 0 ? 'the text is as small as it goes' : 'the text is at 100%'); return; }
+  setFileViewPrefs({ scale: next });
+  if (!quiet) toast('text ' + Math.round(next * 100) + '%');
+}
+
+function toggleFileWrap() {
+  const wrap = !fileViewPrefs().wrap;
+  setFileViewPrefs({ wrap });
+  toast(wrap ? 'long lines wrap' : 'long lines scroll sideways');
+}
+
+/**
+ * The controls, for the file's ⋯ menu and Settings → appearance. `kind`:
+ * 'md' (a document: width and font), 'code' (a code or text file:
+ * wrapping), 'all' (settings).
+ */
+function fileViewControlsHtml(kind = 'all') {
+  const docs = kind !== 'code', code = kind !== 'md';
+  return `<div class="fv-controls" role="group" aria-label="How files look on this device">
+    <div class="fv-row"><span class="fv-label">Text size</span>
+      <button type="button" data-fv="smaller" title="Smaller text (Alt+−, in the text)" aria-label="Smaller text">A−</button>
+      <output data-fv-size aria-live="polite"></output>
+      <button type="button" data-fv="larger" title="Larger text (Alt+=, in the text)" aria-label="Larger text">A+</button>
+      <button type="button" data-fv="reset" title="Back to 100% (Alt+0, in the text)">reset</button></div>
+    ${code ? '<label class="fv-row"><input type="checkbox" data-fv="wrap"> <span>Wrap long lines' + (kind === 'all' ? ' in code and text files' : '') + '</span> <kbd>Alt+Z</kbd></label>' : ''}
+    ${docs ? `<label class="fv-row"><span class="fv-label">${kind === 'all' ? 'Document width' : 'Width'}</span><select data-fv="width"><option value="narrow">narrow column</option><option value="read">reading column</option><option value="full">whole window</option></select></label>` : ''}
+    ${docs ? `<label class="fv-row"><span class="fv-label">${kind === 'all' ? 'Document font' : 'Font'}</span><select data-fv="font">${Object.entries(FILE_DOC_FONTS).map(([id, f]) => `<option value="${id}">${esc(f.label)}</option>`).join('')}</select></label>` : ''}
+  </div>`;
+}
+
+function paintFileViewControls(el) {
+  const p = fileViewPrefs();
+  const size = el.querySelector('[data-fv-size]');
+  if (size) size.textContent = Math.round(p.scale * 100) + '%';
+  const q = sel => el.querySelector(sel);
+  if (q('[data-fv="smaller"]')) q('[data-fv="smaller"]').disabled = p.scale === FILE_TEXT_SCALES[0];
+  if (q('[data-fv="larger"]')) q('[data-fv="larger"]').disabled = p.scale === FILE_TEXT_SCALES[FILE_TEXT_SCALES.length - 1];
+  if (q('[data-fv="reset"]')) q('[data-fv="reset"]').hidden = p.scale === 1;
+  if (q('[data-fv="wrap"]')) q('[data-fv="wrap"]').checked = p.wrap;
+  if (q('[data-fv="width"]')) q('[data-fv="width"]').value = p.width;
+  if (q('[data-fv="font"]')) q('[data-fv="font"]').value = p.font;
+}
+
+function wireFileViewControls(root) {
+  for (const el of root.querySelectorAll('.fv-controls')) {
+    paintFileViewControls(el);
+    el.addEventListener('click', e => {
+      const b = e.target.closest('button[data-fv]');
+      if (!b) return;
+      stepFileTextSize({ smaller: -1, larger: 1, reset: 0 }[b.dataset.fv], true);
+    });
+    el.addEventListener('change', e => {
+      const f = e.target.dataset.fv;
+      if (f === 'wrap') setFileViewPrefs({ wrap: e.target.checked });
+      else if (f === 'width' || f === 'font') setFileViewPrefs({ [f]: e.target.value });
+    });
+  }
+}
+
+// The keys, in the text: Alt+= / Alt+− / Alt+0 size, Alt+Z wrapping (code
+// and text files). By key position, so layouts and Alt characters do not
+// matter. True when the key was one of them.
+function fileViewKey(ws, e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey) return false;
+  const dir = { Equal: 1, NumpadAdd: 1, Minus: -1, NumpadSubtract: -1, Digit0: 0, Numpad0: 0 }[e.code];
+  if (dir !== undefined) { e.preventDefault(); stepFileTextSize(dir); return true; }
+  if (e.code === 'KeyZ' && !e.shiftKey && ws.kind === 'code') { e.preventDefault(); toggleFileWrap(); return true; }
+  return false;
+}
+
 // A future LSP bridge registers a factory returning {name, complete, hover,
 // definition, dispose}. Offsets are CodeMirror/JavaScript UTF-16 positions.
 // The adapter owns server lifecycle and diagnostics; no server starts implicitly.
@@ -59,6 +205,7 @@ function liveFileHead(ws) {
       <button id="liveAi">✦ AI commands (Ctrl+J)</button>
       ${md ? '<button id="docRunAll">Run all cells</button><button id="docVars">Variables</button><button id="docKernel">Kernel: restart, clear, shut down…</button><button id="docSource">Markdown source</button><button id="docUnwrap" hidden>Unwrap prose</button>' : ''}
       <span id="liveAnnotationStatus">Gutter: changes and line attribution</span>
+      ${fileViewControlsHtml(md ? 'md' : 'code')}
       <button id="liveKeys">Keyboard shortcuts (Ctrl+?)</button>
     </div></details>
   </header>`;
@@ -184,9 +331,11 @@ function liveFileAfterMount(ws) {
     if (typeof ws.editor.openAiMenu !== 'function') return toast('this editor version has no AI commands — reload the page');
     ws.editor.openAiMenu();
   };
+  wireFileViewControls($('ffCompare'));
   const editor = ws.editor;
   if (editor.view?.dom) editor.view.dom.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); fileWsToggleAsk(true); }
+    else fileViewKey(ws, e);
   });
   const savedText = ws.kind === 'md' ? docState.baseText : ws.baseText;
   $('docReload').onclick = () => liveFileReload(ws);

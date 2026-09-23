@@ -13,6 +13,16 @@
 .live-more > div { position:absolute; right:0; top:100%; z-index:20; display:flex; flex-direction:column; gap:7px; width:min(300px,85vw); padding:12px; border:1px solid var(--border); background:var(--bg); box-shadow:0 5px 15px #0002; }
 .live-more button { text-align:left; }
 .live-more span { font-size:11px; color:var(--text-dim); }
+/* How files look (live-file.js): one compact row per control. */
+.fv-controls { display:flex; flex-direction:column; gap:6px; padding:6px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+.fv-row { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text); }
+.fv-row .fv-label { min-width:72px; color:var(--text-dim); font-size:12px; }
+.fv-row output { min-width:40px; text-align:center; font-variant-numeric:tabular-nums; }
+.fv-row select { flex:1; min-width:0; height:24px; font:12px var(--font); }
+.fv-row kbd { margin-left:auto; font-size:10px; color:var(--text-dim); }
+.live-more .fv-row button { text-align:center; min-width:30px; border:1px solid var(--border); }
+.live-more .fv-row span { font-size:12px; color:var(--text); }
+.live-more .fv-row .fv-label { color:var(--text-dim); }
 .live-file-view [hidden] { display:none !important; }
 .live-file-view .doc-editor-host.code-host { overflow:hidden; }
 .live-file-view .doc-editor-host.code-host > div { height:100%; width:100%; max-width:none; margin:0; padding:0; }
