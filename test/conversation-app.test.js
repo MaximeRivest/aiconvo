@@ -485,6 +485,28 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
   assert.equal(await evaluate(`docState.editor.getContent()`), beforeAgentEnd, 'another client\u2019s run was written into the document');
   fs.writeFileSync(path.join(os.tmpdir(), 'notebook-other-run.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, sid)).result.data, 'base64'));
   await evaluate(`document.querySelector('.mrmd-cell-run-close').click()`);
+  // Completion in a code cell, from the kernel (mocked): typing after an
+  // identifier asks; Enter takes the suggestion.
+  await evaluate(`(() => {
+    window.completeAsks = [];
+    window.fetch = (url, opts) => {
+      if (String(url).includes('/api/doc/complete')) { completeAsks.push(JSON.parse(opts.body)); return Promise.resolve(new Response(JSON.stringify({ items: [{ label: 'answer_value', kind: 'instance' }, { label: 'answer_fn', kind: 'function' }] }))); }
+      return liveOriginalFetch(url, opts);
+    };
+    const cell = docState.editor.listCells()[0];
+    const end = cell.to - 4; // the end of the code, before the closing fence line
+    docState.editor.view.dispatch({ changes: { from: end, insert: '\\nans' }, selection: { anchor: end + 4 } });
+    docState.editor.view.focus();
+  })()`);
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'w', code: 'KeyW', text: 'w', windowsVirtualKeyCode: 87 }, sid);
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'w', code: 'KeyW', windowsVirtualKeyCode: 87 }, sid);
+  await until(`/answer_value/.test(document.querySelector('.cm-tooltip-autocomplete')?.textContent || '')`, 'no kernel completion appeared: ' + await evaluate(`JSON.stringify({ asks: completeAsks, code: docState.editor.listCells()[0].code, tooltip: !!document.querySelector('.cm-tooltip-autocomplete'), focus: document.activeElement.className })`));
+  assert.deepEqual(await evaluate(`[completeAsks.at(-1).lang, completeAsks.at(-1).code.split('\\n').at(-1), completeAsks.at(-1).cursor === completeAsks.at(-1).code.length]`), ['python', 'answ', true]);
+  fs.writeFileSync(path.join(os.tmpdir(), 'notebook-completion.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, sid)).result.data, 'base64'));
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, sid);
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, sid);
+  await until(`docState.editor.listCells()[0].code.endsWith('\\nanswer_fn')`, 'Enter did not take the suggestion (the first, alphabetically)');
+  await evaluate(`(() => { const c = docState.editor.listCells()[0]; docState.editor.view.dispatch({ changes: { from: c.to - 4 - '\\nanswer_fn'.length, to: c.to - 4 } }); })()`);
   // The kernel: the variables drawer and the kernel menu (rat mocked).
   await evaluate(`(() => {
     window.kernelOps = []; window.confirm = () => true;

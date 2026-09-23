@@ -12685,11 +12685,20 @@ async function docKernelRunningIdle(doc, runtime) {
   return { ok: true, name };
 }
 // `rat look --code`: up to 50 lines "name   kind", or "No completions."
+// The name is what goes in at the cursor's token. A kernel started by rat
+// before e33423b answers without Jedi with the whole expression
+// ("thing.colour", "paint()"): keep the last name, mark calls functions.
 function parseCompletions(out) {
-  const items = [];
+  const items = [], seen = new Set();
   for (const line of String(out || '').split('\n')) {
     const m = line.match(/^(\S+)\s+(\S+)\s*$/);
-    if (m) items.push({ label: m[1], kind: m[2] });
+    if (!m) continue;
+    let label = m[1], kind = m[2];
+    if (/\(\)?$/.test(label)) { label = label.replace(/\(\)?$/, ''); kind = 'function'; }
+    label = label.split('.').pop();
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    items.push({ label, kind });
   }
   return items;
 }
@@ -13822,7 +13831,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.15.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.15.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
-      '/vendor/mrmd-document/0.16.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.16.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.16.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.16.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/chattering.apk': { file: 'chattering.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];

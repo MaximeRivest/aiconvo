@@ -6344,7 +6344,7 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal chattering startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.16.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.16.1/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
 const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.15.0/mrmd-document.iife.min.js';
@@ -6951,6 +6951,46 @@ async function docPlayPrerequisites(st, say) {
   return { ok: true };
 }
 
+// Completion in code cells, from the cell's running kernel (rat look
+// --code: Jedi over the live namespace, so `df.` lists what df really
+// has). Only inside a runnable cell, only after an identifier or a dot
+// (Ctrl+Space asks anywhere in a cell); a short pause first, so fast
+// typing does not ask the kernel on every key, and the answer then
+// narrows locally as typing goes on. A kernel that is not running, or is
+// busy with a cell, answers nothing (the server never starts one).
+const DOC_COMPLETE_KIND = { function: 'function', method: 'method', class: 'class', module: 'namespace', keyword: 'keyword',
+  instance: 'variable', statement: 'variable', param: 'variable', property: 'property', path: 'text' };
+function docCompletionService(st) {
+  return {
+    name: 'kernel',
+    async complete({ text, pos, explicit, signal }) {
+      if (docState !== st) return null;
+      const cell = st.editor.listCells().find(c => c.from < pos && pos <= c.to);
+      if (!cell || !Object.hasOwn(NotebookEnv.RUN_LANGS, String(cell.lang || '').toLowerCase())) return null;
+      const codeFrom = text.indexOf('\n', cell.from) + 1;
+      const cursor = pos - codeFrom;
+      if (codeFrom <= 0 || cursor < 0 || cursor > cell.code.length) return null; // on a fence line
+      const before = cell.code.slice(0, cursor);
+      const word = (before.match(/[A-Za-z_][A-Za-z0-9_]*$/) || [''])[0];
+      if (!explicit && !word && !before.endsWith('.')) return null;
+      if (!explicit) {
+        await new Promise(r => setTimeout(r, 120));
+        if (signal.aborted) return null;
+      }
+      let r;
+      try {
+        r = await (await fetch('/api/doc/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ doc: st.path, lang: cell.lang, code: cell.code, cursor }), signal })).json();
+      } catch { return null; }
+      if (!r.items || !r.items.length) return null;
+      return {
+        from: pos - word.length,
+        options: r.items.map(i => ({ label: i.label, type: DOC_COMPLETE_KIND[i.kind] || 'variable', detail: i.kind, boost: 1 })),
+        validFor: /^[A-Za-z0-9_]*$/,
+      };
+    },
+  };
+}
+
 // Follow this notebook's kernels on the tab's event stream (the one it
 // already has — see /api/doc/follow): other clients' runs reach the
 // runner as they happen. Called at open and on every stream reconnect.
@@ -7554,6 +7594,11 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
     },
   });
   st.runner = createDocRunner(st, bundle);
+  if (st.runner && st.editor.setLanguageServices) {
+    st.editor.setLanguageServices(docCompletionService(st));
+    const el = $('liveServiceStatus');
+    if (el) el.title = 'Code cells complete from the notebook\u2019s running kernel (rat); Ctrl+Space asks';
+  }
   docState = st;
   docFollow(st);
   if (shared) { fileWs.wasShared = true; fileWs.collabUnsub = collabOnPeople(shared, () => fileWsSharedStatus(fileWs)); $('docSave').disabled = false; $('docSave').title = 'Shared: the disk follows as you type. Save writes it right now · Ctrl+S'; }

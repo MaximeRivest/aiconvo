@@ -11,7 +11,13 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.16.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.16.1 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.16.1: host completion shows. `setLanguageServices({complete})` never
+  displayed an answer in either editor (a new completion source per
+  lookup made CodeMirror drop each answer and ask again). Chattering uses
+  it for code cells: completion from the notebook's running kernel.
+  0.16.0 was never served and is removed; the fallback stays 0.15.0 (the
+  newest version the running server knew).
 - 0.16.0: one rat adapter. `mrmdDocument.ratNotebook` (src/rat-notebook.js,
   plain functions, also vendored by the VS Code extension) is what a run on
   rat means: output cleaning, plot markers, the result format, which result
@@ -115,8 +121,8 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `a2c5d4b` (0.16.0 is `d0c433e` plus the interrupt(cell) fix).
-- SHA-256: `5b9ee0df658c61b0c84266669d61e0f9a32006519f3d7fc74f1539879c144140`
+- Source commit: `b9a61bb` ("document entry 0.16.1").
+- SHA-256: `fc042e455e28ec85329f256d77f7567a7cec3e427ba979cfcef7365dcb507029`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to

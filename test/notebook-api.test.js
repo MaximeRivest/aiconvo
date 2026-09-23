@@ -412,3 +412,28 @@ test('plots: shown from rat\u2019s plot folder only, kept in the project by cont
   assert.ok(fs.readFileSync(path.join(path.dirname(nb), saved.images[0].src)).equals(png));
   assert.match((await post('/api/doc/plots', { doc: nb, paths: ['/etc/hostname'] })).error, /not a plot/);
 });
+
+test('completion comes from the running kernel, never starts one, never waits behind a cell', { skip: !haveRat && 'rat is not installed' }, async t => {
+  const { post, base } = await bootServer(t, { RAT_NOTEBOOK_REQUIREMENTS: '' });
+  const { repo, nb } = makeProject();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const cold = await post('/api/doc/complete', { doc: nb, lang: 'python', code: 'pri', cursor: 3 });
+  assert.deepEqual(cold, { items: [], reason: 'not running' });
+  assert.equal((await (await fetch(base + '/api/doc/kernel?doc=' + encodeURIComponent(nb))).json()).running, false, 'asking for completions started a kernel');
+
+  assert.equal((await post('/api/doc/run-cell', { lang: 'py', code: 'answer_value = 42\nclass Thing:\n    colour = "green"\nthing = Thing()', doc: nb, runId: 'w' })).code, 0);
+  const names = async (code, cursor = code.length) => (await post('/api/doc/complete', { doc: nb, lang: 'python', code, cursor })).items.map(i => i.label);
+  assert.ok((await names('answer_v')).includes('answer_value'), 'a variable from the namespace');
+  assert.ok((await names('thing.col')).includes('colour'), 'an attribute of a live object');
+  assert.ok((await names('x = 1\nthing.co\nprint(x)', 'x = 1\nthing.co'.length)).includes('colour'), 'the code before the cursor, in a longer cell');
+  const dashed = await post('/api/doc/complete', { doc: nb, lang: 'python', code: '-answer_v', cursor: 9 });
+  assert.equal(dashed.reason, undefined, 'code starting with a dash reached rat as code, not as a flag: ' + JSON.stringify(dashed));
+  assert.deepEqual((await post('/api/doc/complete', { doc: nb, lang: 'text', code: 'a', cursor: 1 })).items, []);
+
+  const slow = post('/api/doc/run-cell', { lang: 'py', code: 'import time\ntime.sleep(2)', doc: nb, runId: 'slow' });
+  await new Promise(r => setTimeout(r, 500));
+  const t0 = Date.now();
+  assert.deepEqual(await post('/api/doc/complete', { doc: nb, lang: 'python', code: 'answer_v', cursor: 8 }), { items: [], reason: 'busy' });
+  assert.ok(Date.now() - t0 < 1000, 'completion waited behind the running cell');
+  await slow;
+});
