@@ -1,0 +1,46 @@
+/* Voice commands (voice-commands.js): a pill while listening, and the
+   overlay of what is heard and decided, in a dock at the bottom right that
+   the page lifts above the bars docked at the bottom (its style.bottom). */
+#voiceDock { position: fixed; right: 12px; bottom: 10px; z-index: 76; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+#voiceDock:empty { display: none; }
+#voiceListenPill { display: inline-flex; align-items: stretch; pointer-events: auto; border: 1px solid var(--border-strong); border-radius: var(--r-pill); background: var(--surface-1); box-shadow: 0 2px 10px var(--shadow-soft); font-size: var(--fs-micro); overflow: hidden; }
+#voiceListenPill button { border: 0; background: transparent; height: 28px; min-height: 28px; padding: 0 10px; color: var(--text); font-size: var(--fs-micro); border-radius: 0; }
+#voiceListenPill button:hover { background: var(--surface-2); }
+#voiceListenPill .vl-main { display: inline-flex; align-items: center; gap: 7px; }
+#voiceListenPill .vl-off { padding: 0 8px; color: var(--text-dim); border-left: 1px solid var(--border); }
+#voiceListenPill .vl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+#voiceListenPill[data-state="listening"] .vl-dot { background: var(--danger); animation: vl-breathe 1.6s ease-in-out infinite alternate; }
+#voiceListenPill[data-mode="dictation"] .vl-dot { background: var(--accent); }
+#voiceListenPill[data-state="error"] { border-color: var(--warn); }
+#voiceListenPill[data-state="error"] .vl-dot { background: var(--warn); }
+@keyframes vl-breathe { from { opacity: 1; } to { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { #voiceListenPill .vl-dot { animation: none !important; } }
+
+#voiceOverlay { pointer-events: auto; width: min(420px, calc(100vw - 24px)); max-height: 55vh; display: flex; flex-direction: column; border: 1px solid var(--border-strong); border-radius: var(--r-dialog); background: var(--surface-1); box-shadow: 0 8px 28px var(--shadow-color); font-size: var(--fs-micro); overflow: hidden; }
+#voiceOverlay header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+#voiceOverlay header b { color: var(--accent); font-weight: 600; }
+#voiceOverlay .vo-meta { flex: 1; min-width: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#voiceOverlay .vo-close { border: 0; background: transparent; height: 22px; min-height: 22px; padding: 0 6px; color: var(--text-dim); }
+#voiceOverlay .vo-error { padding: 5px 10px; color: var(--text); background: color-mix(in srgb, var(--warn) 14%, var(--surface-1)); border-bottom: 1px solid var(--border); }
+#voiceOverlay .vo-error[hidden] { display: none; }
+#voiceOverlay .vo-heard { padding: 8px 10px; max-height: 7.5em; overflow-y: auto; line-height: 1.5; font-size: var(--fs-meta); border-bottom: 1px solid var(--border); }
+#voiceOverlay .vo-committed { color: var(--text-faint); }
+#voiceOverlay .vo-stable { color: var(--text); }
+#voiceOverlay .vo-volatile { color: var(--text-dim); }
+#voiceOverlay .vo-decisions { list-style: none; margin: 0; padding: 4px 0; overflow-y: auto; }
+#voiceOverlay .vo-decisions li { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; padding: 3px 10px; }
+#voiceOverlay .vo-mark { grid-row: span 2; text-align: center; color: var(--text-dim); }
+#voiceOverlay li[data-status="done"] .vo-mark { color: var(--success, var(--accent)); }
+#voiceOverlay li[data-status="failed"] .vo-mark { color: var(--danger); }
+#voiceOverlay li[data-status="asked"] { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+#voiceOverlay .vo-said { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+#voiceOverlay li[data-status="ignored"] .vo-said { color: var(--text-faint); }
+#voiceOverlay .vo-what { color: var(--text-dim); overflow-wrap: anywhere; }
+#voiceOverlay .vo-ask { grid-column: 2; display: flex; gap: 6px; margin-top: 3px; }
+#voiceOverlay .vo-ask button { height: 22px; min-height: 22px; padding: 0 8px; font-size: var(--fs-micro); }
+#voiceOverlay .vo-ask button[data-vo="yes"] { border-color: var(--accent); color: var(--accent); }
+
+/* Binary e-ink: solid frames, no shadow, no tint, no breathing. */
+:root[data-theme-mode="binary"] #voiceListenPill, :root[data-theme-mode="binary"] #voiceOverlay { box-shadow: none; border: 2px solid var(--text); background: var(--bg); }
+:root[data-theme-mode="binary"] #voiceListenPill .vl-dot { background: var(--text); animation: none; }
+:root[data-theme-mode="binary"] #voiceOverlay li[data-status="asked"] { background: transparent; outline: 1px solid var(--text); }

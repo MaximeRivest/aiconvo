@@ -2401,6 +2401,9 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <script src="/live-file.js"></script>
 <link rel="stylesheet" href="/live-file.css">
 <script src="/ai-outcomes.js"></script>
+<script src="/voice-actions.js"></script>
+<script src="/voice-commands.js"></script>
+<link rel="stylesheet" href="/voice-commands.css">
 <script src="/ask-bubble.js"></script>
 <link rel="stylesheet" href="/ask-bubble.css">
 <script src="/collab-client.js"></script>
@@ -6347,10 +6350,10 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal chattering startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.21.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.22.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
-const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.20.0/mrmd-document.iife.min.js';
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.21.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -15117,7 +15120,7 @@ let voiceMuteTimer = null;
 const SETTINGS_PANES = [
   ['profile', 'your profile', 'Your name, initials and picture.'],
   ['model', 'model', 'Which model writes notes, titles, epics, and memory.'],
-  ['sound', 'sound', 'What the speakers do when a run finishes.'],
+  ['sound', 'sound', 'What the speakers do when a run finishes; voice commands.'],
   ['search', 'search', 'Meaning-based search on the GPU server.'],
   ['snippets', 'snippets', 'Sentences you type often.'],
   ['machines', 'machines', 'Other Chattering installs to switch to.'],
@@ -15311,6 +15314,7 @@ function paneSound() {
     ${effective !== mode ? `<div class="set-help"><b>Playing now: ${esc(effective)}.</b> The ${esc(mode)} mode needs a voice service that is not set up here.</div>` : '<div class="set-help">If speech cannot be made (voice server down), the chime plays instead.</div>'}
     <div class="set-row" id="setMuteRow">${muteRowHtml()}</div>
     ${phoneNotifyRowHtml()}
+    ${typeof voiceSettingsHtml === 'function' ? voiceSettingsHtml() : ''}
     <h3>voice services</h3>
     <div class="set-help">Optional servers you run or trust. Recorded speech and reply text are sent to them. Leave them empty to keep sound on this computer: the chime still plays, and the microphone and read-aloud buttons stay hidden.</div>
     ${field('speechUrl', 'speech-to-text server', 'Dictation and spoken replies. Chattering sends audio to <address>/transcribe and <address>/stream.')}
@@ -15361,6 +15365,7 @@ document.addEventListener('click', e => {
 }, true);
 
 function bindPaneSound(root) {
+  if (typeof voiceBindSettings === 'function') voiceBindSettings(root);
   root.querySelectorAll('input[data-voice-key]').forEach(input => {
     input.onchange = () => saveSettings({ [input.dataset.voiceKey]: input.value.trim() }, input.value.trim() ? 'voice service saved' : 'voice service removed');
   });
@@ -16975,6 +16980,7 @@ const HELP_GLOBAL = [
   ['j', 'jobs'],
   [',', 'settings'],
   ['h', 'pin / unpin the corner hint'],
+  ['alt+l', 'voice commands: always listening on / off — also while typing'],
   ['? · ctrl+?', 'this help — ctrl+? also while typing'],
   ['esc', 'close / clear / leave the field'],
 ];

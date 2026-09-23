@@ -13634,6 +13634,163 @@ async function transcribePcm(pcm) {
 // stray transcription words ("Send. Complete.", "send thank you").
 const VOICE_SEND_TAIL = /[\s.,!]*(send|done|go|submit|enter|control enter|ship it|that'?s all)[\s.,!]*(\w+[\s.,!]*){0,2}$/i;
 
+// ---- voice commands: always listening (voice-window.js, voice-actions.js) ----
+// A listener streams its microphone here (/api/voice/listen); the window
+// transcribes it with context and hands on each utterance. The page asks
+// /api/voice/decide what an utterance means (one Jev request, the key stays
+// here) and runs the action. Each decision and what became of it is kept in
+// ~/.local/share/chattering/voice-commands.jsonl, to tune the thresholds.
+const voiceActions = require('./voice-actions.js');
+const { VoiceWindow, clampWindowSeconds } = require('./voice-window.js');
+const TYPESAFE_URL = process.env.TYPESAFE_URL || 'https://api.typesafe.ai/v1/systemone';
+const VOICE_JEV_MODEL = process.env.CHATTERING_VOICE_JEV_MODEL || 'jev-latest';
+const TYPESAFE_KEY_FILE = path.join(os.homedir(), '.config', 'chattering', 'typesafe-api-key');
+const VOICE_LOG_FILE = path.join(os.homedir(), '.local', 'share', 'chattering', 'voice-commands.jsonl');
+const VOICE_DECIDE_TIMEOUT_MS = 8000;
+const voiceDecisions = new Map(); // id → the logged decision, for its outcome (recent only)
+
+// The TypeSafe key: the environment's, else the file Settings writes (0600).
+function typesafeKey() {
+  if (process.env.TYPESAFE_API_KEY) return process.env.TYPESAFE_API_KEY.trim();
+  try { return fs.readFileSync(TYPESAFE_KEY_FILE, 'utf8').trim(); } catch { return ''; }
+}
+function saveTypesafeKey(key) {
+  const k = String(key || '').trim();
+  if (k && !/^[\w.-]{16,512}$/.test(k)) throw new Error('that does not look like a TypeSafe key');
+  fs.mkdirSync(path.dirname(TYPESAFE_KEY_FILE), { recursive: true, mode: 0o700 });
+  if (!k) { fs.rmSync(TYPESAFE_KEY_FILE, { force: true }); return; }
+  fs.writeFileSync(TYPESAFE_KEY_FILE, k + '\n', { mode: 0o600 });
+  fs.chmodSync(TYPESAFE_KEY_FILE, 0o600);
+}
+
+function voiceLog(record) {
+  try {
+    fs.mkdirSync(path.dirname(VOICE_LOG_FILE), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(VOICE_LOG_FILE, JSON.stringify(record) + '\n', { mode: 0o600 });
+  } catch (e) { console.error('voice log:', e.message); }
+}
+
+// Voice runs on this machine's GPU and the owner's TypeSafe account: not
+// for guests (their walls do not reach either).
+function voiceRefusal(identity) {
+  if (identity && usersLib.isGuest(identity.user)) return 'Voice commands are not available to guests.';
+  return null;
+}
+
+// One utterance → one Jev request → a decision. Every decision is logged;
+// "not a command" only with its words when the page is in debug mode
+// (always listening hears the room).
+async function voiceDecide(context, identity) {
+  const key = typesafeKey();
+  if (!key) throw Object.assign(new Error('No TypeSafe key yet: add it in Settings → sound → voice commands.'), { status: 503 });
+  // "Open the file called…": the page knows the files on screen; the
+  // project's own files come from here (the request keeps the ones that
+  // share words with what was said).
+  if (context.project && Array.isArray(context.actions) && context.actions.includes('open_file')) {
+    const files = await voiceProjectFiles(String(context.project), identity).catch(() => []);
+    const lists = context.lists && typeof context.lists === 'object' ? context.lists : {};
+    const known = new Set((lists.files || []).map(f => f && f.id));
+    context.lists = { ...lists, files: (lists.files || []).concat(files.filter(f => !known.has(f.id))) };
+  }
+  const built = voiceActions.buildRequest(context, { model: VOICE_JEV_MODEL });
+  const t0 = Date.now();
+  let res;
+  try {
+    res = await fetch(TYPESAFE_URL, {
+      method: 'POST', headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
+      body: JSON.stringify(built.request), signal: AbortSignal.timeout(VOICE_DECIDE_TIMEOUT_MS),
+    });
+  } catch (e) { throw Object.assign(new Error('TypeSafe did not answer: ' + (e.name === 'TimeoutError' ? 'timed out' : e.message)), { status: 502 }); }
+  const body = await res.json().catch(() => null);
+  const ms = Date.now() - t0;
+  if (!res.ok || !body || !body.answers) {
+    const why = body && (body.error && (body.error.message || body.error) || body.detail) || 'status ' + res.status;
+    throw Object.assign(new Error('TypeSafe: ' + (typeof why === 'string' ? why : JSON.stringify(why)).slice(0, 300)), { status: 502 });
+  }
+  const decision = voiceActions.readDecision(built, body.answers, context.said);
+  const id = crypto.randomUUID();
+  const record = {
+    v: 1, id, ts: new Date().toISOString(), user: principalFor(identity).user.id, ms, model: VOICE_JEV_MODEL,
+    mode: context.mode === 'dictation' ? 'dictation' : 'command', screen: String(context.screen || '').slice(0, 200),
+    said: decision.action === 'none' && !context.debug ? null : String(context.said).slice(0, 600),
+    action: decision.action, args: decision.args, confidence: decision.confidence, missing: decision.missing || null,
+    alternatives: decision.alternatives, questions: Object.keys(built.request.questions).length,
+  };
+  voiceLog(record);
+  voiceDecisions.set(id, record);
+  if (voiceDecisions.size > 200) voiceDecisions.delete(voiceDecisions.keys().next().value);
+  return { id, decision, ms };
+}
+
+// A project's files for "open the file called…": every file under its
+// folder (skipping dependencies and build output), at most 20 000, cached a
+// minute. Labels are paths from the project folder.
+const VOICE_FILE_SKIP = new Set(['.git', 'node_modules', '.direnv', 'target', '__pycache__', '.venv', 'dist', 'build', '.cache', '.next']);
+const voiceFileCache = new Map(); // folder → {at, files}
+async function voiceProjectFiles(project, identity) {
+  const meta = projectMetaFor(project);
+  if (!meta || !meta.cwd || !projectVisible(identity, project)) return [];
+  const root = path.resolve(meta.cwd);
+  const hit = voiceFileCache.get(root);
+  if (hit && Date.now() - hit.at < 60000) return hit.files;
+  const files = [], deadline = Date.now() + 1500;
+  const walk = async dir => {
+    let ents;
+    try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      if (files.length >= 20000 || Date.now() > deadline) return;
+      if (VOICE_FILE_SKIP.has(e.name) || (e.name.startsWith('.') && e.isDirectory())) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(full);
+      else if (e.isFile()) files.push({ id: full, label: path.relative(root, full) });
+    }
+  };
+  await walk(root);
+  voiceFileCache.set(root, { at: Date.now(), files });
+  return files;
+}
+
+// What the page did with a decision: done, asked, confirmed, cancelled,
+// undone, failed, ignored.
+const VOICE_OUTCOMES = new Set(['done', 'asked', 'confirmed', 'cancelled', 'undone', 'failed', 'ignored', 'expired']);
+function voiceOutcome(body, identity) {
+  const d = voiceDecisions.get(String(body.id || ''));
+  if (!d || d.user !== principalFor(identity).user.id) throw Object.assign(new Error('unknown decision'), { status: 404 });
+  if (!VOICE_OUTCOMES.has(body.outcome)) throw Object.assign(new Error('unknown outcome'), { status: 400 });
+  voiceLog({ v: 1, ts: new Date().toISOString(), outcomeOf: d.id, outcome: body.outcome, detail: String(body.detail || '').slice(0, 300) || undefined });
+}
+
+// ws(s)://host/api/voice/listen?window=60 — binary frames of 16 kHz mono
+// 16-bit PCM in; JSON events out ({type: ready | heard | utterance | slide
+// | error}). Text frames: {type:'window', seconds} changes the window,
+// {type:'stop'} hands on the last words and ends.
+function voiceListenUpgrade(req, socket, head) {
+  const identity = identifyRequest(req);
+  if (!identity) return refuseUpgrade(socket, 401, 'Unauthorized');
+  if (voiceRefusal(identity)) return refuseUpgrade(socket, 403, 'Forbidden');
+  if (!speechUrl()) return refuseUpgrade(socket, 503, 'Service Unavailable');
+  const u = new URL(req.url, 'http://x');
+  const conn = acceptWebSocket(req, socket, head, { maxPayload: 1024 * 1024 });
+  if (!conn) return;
+  const send = event => { try { conn.send(JSON.stringify(event)); } catch {} };
+  const transcribe = async pcm => {
+    const out = await httpRaw(speechUrl() + '/transcribe', pcm, 'audio/L16', 30000);
+    if (out.status !== 200) throw new Error(out.buf.toString('utf8').slice(0, 200) || 'status ' + out.status);
+    return out.buf.toString('utf8');
+  };
+  const listener = new VoiceWindow({ transcribe, emit: send, windowSeconds: clampWindowSeconds(u.searchParams.get('window')) });
+  send({ type: 'ready', windowSeconds: listener.windowSeconds });
+  conn.on('message', (data, binary) => {
+    if (binary) return listener.feed(data);
+    let m;
+    try { m = JSON.parse(data); } catch { return; }
+    if (m.type === 'window') { listener.setWindowSeconds(m.seconds); send({ type: 'window', windowSeconds: listener.windowSeconds }); }
+    else if (m.type === 'stop') listener.close().then(() => conn.close(1000, 'stopped'));
+  });
+  conn.on('close', () => { listener.close({ flush: false }); });
+  conn.on('error', () => {});
+}
+
 async function voiceGate(transcript) {
   if (voiceModelReady()) try {
     const res = await httpJson(voiceSetting('voiceModelUrl'), {
@@ -14114,6 +14271,9 @@ async function handleRequest(req, res) {
       '/live-file.css': { file: 'live-file.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/ai-outcomes.js': { file: 'ai-outcomes.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/ask-bubble.js': { file: 'ask-bubble.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/voice-actions.js': { file: 'voice-actions.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/voice-commands.js': { file: 'voice-commands.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/voice-commands.css': { file: 'voice-commands.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/ask-bubble.css': { file: 'ask-bubble.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/collab-client.js': { file: 'collab-client.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/people.js': { file: 'people.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
@@ -14162,6 +14322,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.20.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.20.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.21.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.21.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.22.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.22.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/chattering.apk': { file: 'chattering.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
@@ -16078,6 +16239,20 @@ async function handleRequest(req, res) {
         mixed: parsed.mixed === true,
       });
       json(res, 200, { ok: true });
+    } else if (u.pathname === '/api/voice/status' && req.method === 'GET') {
+      json(res, 200, { refused: voiceRefusal(identity), key: !!typesafeKey(), keyFromEnv: !!process.env.TYPESAFE_API_KEY, speech: !!speechUrl(), model: VOICE_JEV_MODEL, canSetKey: usersLib.canManageUsers(identity), log: VOICE_LOG_FILE });
+    } else if (u.pathname === '/api/voice/key' && req.method === 'POST') {
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'Only this machine\u2019s owner or an admin sets the TypeSafe key.' });
+      try { saveTypesafeKey(JSON.parse(await readRequestText(req, 4096)).key); json(res, 200, { ok: true, key: !!typesafeKey() }); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/voice/decide' && req.method === 'POST') {
+      const refusal = voiceRefusal(identity);
+      if (refusal) return json(res, 403, { error: refusal });
+      try { json(res, 200, await voiceDecide(JSON.parse(await readRequestText(req, 256 * 1024)), identity)); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/voice/outcome' && req.method === 'POST') {
+      try { voiceOutcome(JSON.parse(await readRequestText(req, 4096)), identity); json(res, 200, { ok: true }); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/ai-feedback' && req.method === 'POST') {
       // What became of an AI proposal in a file (ai-feedback.js).
       let parsed;
@@ -16598,11 +16773,14 @@ collab.on('change', ev => {
 collab.on('awareness', ev => broadcast({ type: 'collab-people', name: ev.name, people: ev.people }));
 collab.on('join', ev => broadcast({ type: 'collab-people', name: ev.name, people: ev.people }));
 collab.on('leave', ev => broadcast({ type: 'collab-people', name: ev.name, people: ev.people }));
-server.on('upgrade', (req, socket, head) => {
+// One dispatcher for WebSocket upgrades, on the plain and the TLS listener.
+function upgradeRequest(req, socket, head) {
   const u = new URL(req.url, 'http://x');
   if (u.pathname.startsWith('/api/collab/')) return collabUpgrade(req, socket, head).catch(() => { try { socket.destroy(); } catch {} });
+  if (u.pathname === '/api/voice/listen') return voiceListenUpgrade(req, socket, head);
   return speechStreamUpgrade(req, socket, head);
-});
+}
+server.on('upgrade', upgradeRequest);
 // A failed bind at startup (port taken) ends the process as before, so the
 // service manager reports it. A failed re-bind after a reach flip must not
 // take down the agent runs living in this process: report it and keep the
@@ -16660,7 +16838,7 @@ function startLanTls() {
   try {
     const tls = ensureLanTls();
     tlsServer = https.createServer(tls, (req, res) => server.emit('request', req, res));
-    tlsServer.on('upgrade', speechStreamUpgrade);
+    tlsServer.on('upgrade', upgradeRequest);
     tlsServer.on('error', e => console.log('chattering TLS listener: ' + e.message));
     tlsServer.listen(TLS_PORT, HOST, () => {
       for (const ip of lanAddresses()) console.log(`chattering PWA → https://${ip}:${TLS_PORT}/?token=${LAN_TOKEN}`);
