@@ -11,7 +11,12 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.20.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.21.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.21.0: `lineWrapping` option and `setLineWrapping(on)` in both editors.
+  Chattering: code and text files wrap as the device says (live-file.js
+  "how files look": Alt+Z, the ⋯ menu, Settings → appearance); text size
+  and the documents' font are host CSS custom properties read by the theme
+  (`--editor-font-family`, `--editor-font-size` in mrmdHostTheme).
 - 0.20.0: AI commands in the whole-file editor (`createCodeEditor({ai:
   {…, scope, language}})`): the box, the ✦, suggest or review, outcomes,
   keyHelp. Without a selection a command acts on the outermost syntax
@@ -165,15 +170,15 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `b5bc97b` (review fixes, after `423657d` "document entry 0.20.0").
-- SHA-256: `0465a24ce72d9dc6b1588e56d4d4d035abe6d0f60a142709d7550791c00fbeb6`
+- Source commit: `b7abb0d` ("document entry 0.21.0").
+- SHA-256: `0489e265cb28ac617a518891b0d975d8c145cbc6db0dcfb049f2391fbaefba09`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.19.0 (everything but AI commands in non-Markdown files: they keep the ask
-  box and reviews). Keep that artifact and route while the fallback exists.
-  0.18.0 and older are no longer loaded; delete their folders and routes
-  once 0.20.0 has run for a few days.
+  0.20.0 (everything but switching wrapping: code files keep wrapping).
+  Keep that artifact and route while the fallback exists. 0.19.0 and older
+  are no longer loaded; delete their folders and routes once 0.21.0 has run
+  for a few days.
 
 ## Features enabled in chattering
 
