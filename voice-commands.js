@@ -1619,16 +1619,19 @@ function voiceDock() {
   }
   return dock;
 }
-const VOICE_BOTTOM_BARS = '#composerDock, .doc-run-strip, .doc-run-setup, .doc-run-fix, #phoneBar';
+const VOICE_BOTTOM_BARS = '#composerDock, #agentCompose, .ls-row, #runCards:not(:empty), .doc-run-strip, .doc-run-setup, .doc-run-fix, #phoneBar';
 function voicePlaceDock() {
   const dock = $('voiceDock');
   if (!dock) return;
   let top = window.innerHeight;
-  for (const el of document.querySelectorAll(VOICE_BOTTOM_BARS)) {
-    if (!voiceVisible(el) && getComputedStyle(el).position !== 'fixed') continue;
-    const r = el.getBoundingClientRect();
-    // Only what sits along the bottom edge and spans under the dock.
-    if (r.height && r.bottom >= window.innerHeight - 4 - (window.innerHeight - top) && r.right > window.innerWidth - 440) top = Math.min(top, r.top);
+  const bars = [...document.querySelectorAll(VOICE_BOTTOM_BARS)]
+    .filter(el => voiceVisible(el) || getComputedStyle(el).position === 'fixed')
+    .map(el => el.getBoundingClientRect()).filter(r => r.height && r.right > window.innerWidth - 440);
+  // Stacked bars (the live strip over the message box): climb until none
+  // touches the edge reached so far.
+  for (let moved = true; moved;) {
+    moved = false;
+    for (const r of bars) if (r.top < top && r.bottom >= top - 12) { top = r.top; moved = true; }
   }
   dock.style.bottom = Math.max(10, window.innerHeight - top + 8) + 'px';
 }
@@ -1660,8 +1663,13 @@ function voicePaintOffButton() {
     b.setAttribute('aria-label', 'Listen for voice commands');
     b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>';
     b.onclick = () => voiceSetOn(true);
-    voiceDock().appendChild(b);
   }
+  // With a message box on screen: in its row of buttons, beside the
+  // dictation microphone, never over send or abort. Elsewhere: the corner.
+  const row = document.querySelector('#agentCompose .compose-left');
+  const home = row && voiceVisible(row) ? row : voiceDock();
+  b.classList.toggle('inline', home === row);
+  if (b.parentElement !== home) home.appendChild(b);
   voicePlaceDock();
 }
 
@@ -1669,7 +1677,14 @@ function voicePaint() {
   const shown = voice.on || voice.status === 'error';
   const pill = $('voiceListenPill');
   if (shown) { const b = $('voiceOnButton'); if (b) b.remove(); }
-  if (!shown) { if (pill) pill.remove(); voiceShowOverlay(false); voicePaintSettings(); clearInterval(voice.placeTimer); voice.placeTimer = 0; voicePaintHints(); voicePaintOffButton(); return; }
+  if (!shown) {
+    if (pill) pill.remove(); voiceShowOverlay(false); voicePaintSettings(); voicePaintHints(); voicePaintOffButton();
+    // The view changes under it (a conversation opens): follow.
+    clearInterval(voice.placeTimer);
+    voice.placeTimer = setInterval(() => { voicePaintOffButton(); voicePlaceDock(); }, 700);
+    return;
+  }
+  clearInterval(voice.placeTimer); voice.placeTimer = 0;
   // The bars below move with the view (a conversation opens, a run strip appears).
   if (!voice.placeTimer) voice.placeTimer = setInterval(() => { voicePlaceDock(); voicePaintHints(); voiceFocus(); }, 700);
   voicePlaceDock();
