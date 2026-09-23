@@ -529,22 +529,35 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
     docState.editor.view.dispatch({ selection: { anchor: at } });
     docState.editor.view.focus();
   })()`);
-  const key = async (key, code, vk, modifiers = 0) => {
+  const pressKey = async (key, code, vk, modifiers = 0) => {
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk, modifiers }, sid);
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, modifiers }, sid);
   };
-  await key('j', 'KeyJ', 74, 2);
+  // Found without knowing a key: the ✦ beside the cursor's line, and the
+  // help — ctrl+? opens it while typing — lists the document's keys, live.
+  await send('Emulation.setFocusEmulationEnabled', { enabled: true }, sid); // the ✦ shows while the text has focus, in a focused page
+  await until(`document.querySelector('.mrmd-ai-spark-gutter .cm-gutterElement:not([style*="visibility"]) .mrmd-ai-spark')?.dataset.mode === 'rest'`, 'no ✦ beside the cursor');
+  assert.deepEqual(await evaluate(`helpNow()[0]`), { label: 'document', keys: [['ctrl+j', 'AI commands: this paragraph — or click the ✦ beside the line']] });
+  await pressKey('?', 'Slash', 191, 2 | 8);
+  await until(`!document.getElementById('helpOverlay').hidden`, 'ctrl+? did not open the help from inside the document');
+  assert.match(await evaluate(`document.getElementById('helpDialog').textContent`), /ctrl\+jAI commands: this paragraph/);
+  await pressKey('Escape', 'Escape', 27);
+  await until(`document.getElementById('helpOverlay').hidden`, 'esc did not close the help');
+  assert.equal(await evaluate(`document.activeElement === docState.editor.view.contentDOM`), true, 'the text kept the focus');
+  await pressKey('j', 'KeyJ', 74, 2);
   await until(`document.activeElement?.classList.contains('mrmd-ai-menu-input')`, 'Ctrl+J did not open the AI command box');
+  assert.deepEqual(await evaluate(`helpNow().map(s => s.label)`), ['AI command box'], 'the open box owns the keyboard, and the help says so');
   assert.match(await evaluate(`document.querySelector('.mrmd-ai-menu-foot').textContent`), /model: fixture\/model/);
   await send('Input.insertText', { text: 'grammar' }, sid);
-  await key('Enter', 'Enter', 13);
+  await pressKey('Enter', 'Enter', 13);
   await until(`document.querySelector('.mrmd-ai-panel')?.dataset.state === 'ready'`, 'no AI suggestion');
+  assert.deepEqual(await evaluate(`[helpNow()[0].label, helpNow()[0].keys[0]]`), ['AI suggestion', ['tab', 'accept']]);
   const beforeAi = await evaluate(`docState.editor.getContent()`);
   assert.equal(await evaluate(`aiCalls[0].command`), 'grammar');
   assert.equal(await evaluate(`aiCalls[0].request.target.text`), 'A note.');
   assert.ok(beforeAi.includes('A note.') && !beforeAi.includes('A better note.'), 'the suggestion is not document text');
   fs.writeFileSync(path.join(os.tmpdir(), 'notebook-ai-suggestion.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, sid)).result.data, 'base64'));
-  await key('Tab', 'Tab', 9);
+  await pressKey('Tab', 'Tab', 9);
   await until(`docState.editor.getContent().includes('A better note.')`, 'Tab did not apply the suggestion');
   await until(`aiAccepts.length === 1`, 'no accept notice');
   assert.equal(await evaluate(`aiAccepts[0].text === docState.editor.getContent()`), true, 'the notice names exactly the resulting document');

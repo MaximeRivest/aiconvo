@@ -58,7 +58,7 @@ function liveFileHead(ws) {
       ${ws.project ? '<button id="liveBrowse">Browse this folder</button>' : ''}
       ${md ? '<button id="docRunAll">Run all cells</button><button id="docAi">AI commands (Ctrl+J)</button><button id="docVars">Variables</button><button id="docKernel">Kernel: restart, clear, shut down…</button><button id="docSource">Markdown source</button><button id="docUnwrap" hidden>Unwrap prose</button>' : ''}
       <span id="liveAnnotationStatus">Gutter: changes and line attribution</span>
-      <span>Ctrl+Space: completion · Ctrl+F: find</span>
+      <button id="liveKeys">Keyboard shortcuts (Ctrl+?)</button>
     </div></details>
   </header>`;
 }
@@ -175,6 +175,8 @@ function liveFileAfterMount(ws) {
   for (const id of ['liveHistory', 'liveHistoryMenu']) $(id).onclick = () => liveFileHistory(ws);
   for (const id of ['liveAsk', 'liveAskMenu']) $(id).onclick = () => fileWsToggleAsk(true);
   if ($('liveBrowse')) $('liveBrowse').onclick = () => liveFileBrowseFolder(ws);
+  // The help follows the view: it lists this file's keys, the editor's own included.
+  $('liveKeys').onclick = e => { e.currentTarget.closest('details')?.removeAttribute('open'); toggleHelpOverlay(); };
   const editor = ws.editor;
   if (editor.view?.dom) editor.view.dom.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); fileWsToggleAsk(true); }

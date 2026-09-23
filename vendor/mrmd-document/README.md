@@ -11,7 +11,18 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.17.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.18.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.18.0: AI commands can be found without knowing a key. A ✦ in a narrow
+  gutter of its own on the cursor's line (while the editor has focus and
+  commands can act there) opens the command box on a click; faint at rest,
+  lit for a selection or an open box, pulsing while an answer is written,
+  lit when it is ready. Rest opacity is the token `--mrmd-ai-spark-rest`
+  (Chattering's binary e-ink theme sets 1). Suggestion buttons show their
+  keys; a box opened without Mod-j names it. `editor.keyHelp()` reports the
+  editor's keys that act here, now (the open box, exclusive; a suggestion;
+  the cell or document at the cursor), and `mrmdDocument.formatKey(name)`
+  spells a CodeMirror key name — Chattering's `?` help (`fileEditorHelp`)
+  shows them.
 - 0.17.0: AI commands (`ai`, document-ai.js). A command box at the cursor
   (Mod-j; the ✦ on a code cell; `openAiMenu()`): typing filters the host's
   commands, and text that names none becomes the instruction of the host's
@@ -134,15 +145,15 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `1a4d56a` ("document entry 0.17.0").
-- SHA-256: `91d80d2a9333d6eafa3574e7ef31163680f6cf3db29eb2a9586e509a7ef5745e`
+- Source commit: `3ce13dd` ("document entry 0.18.0").
+- SHA-256: `cf72be9086235f5cef558b906a7b8a7ac202f3b9e3a1d1dcb181ecaeb0b8c9a7`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.16.1 (documents open and cells run; no AI commands — the ⋯ entry asks
-  for a reload). Keep that artifact and route while the fallback exists.
-  0.15.0 is no longer loaded (app.html's pre-runner path is gone); delete
-  its folder and route once 0.17.0 has run for a few days.
+  0.17.0 (AI commands work; no spark, and the `?` help lists the document's
+  keys from its own fixed list). Keep that artifact and route while the
+  fallback exists. 0.16.1 and 0.15.0 are no longer loaded; delete their
+  folders and routes once 0.18.0 has run for a few days.
 
 ## Features enabled in chattering
 
@@ -168,6 +179,8 @@ owns the editing surface.
   plots; other clients' runs from /api/doc/follow on the tab's event stream)
 - `ai` — AI commands (app.html `docAiOptions`; the catalog and prompts in
   ai-commands.js; /api/doc/ai, /api/doc/ai-accept in server.js)
+- `keyHelp()` / `formatKey` — the document's live keys in the `?` help and
+  the pinned corner hint (app.html `fileEditorHelp`)
 - cell controls (`runnableLanguages`, `onCancelCell`, `run.setStatus`,
   `clearCellStatuses`) — Run/Stop on each cell and its run state
   (app.html `runDocCell`, `runAllDocCells`, `cancelDocCell`)

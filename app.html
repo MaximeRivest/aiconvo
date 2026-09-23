@@ -1804,6 +1804,9 @@ body:not(.can-read-aloud) .msg .msg-read { display: none; }
 .toast.err { border-left-color: var(--danger); }
 
 /* ---- situated keyboard help ---- */
+/* Above the full-screen surfaces (search 90, reading 85): the help is
+   asked for from them too (?, ctrl+?), so it is the topmost thing. */
+#helpOverlay { z-index: 95; }
 #helpOverlay h4 { margin: 12px 0 4px; font-size: var(--fs-label); color: var(--text-dim); font-weight: 600; }
 #helpOverlay .dialog { max-height: 84vh; overflow: auto; }
 /* Settings modal: fixed head with the close ✗, only the body scrolls. */
@@ -6343,10 +6346,10 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal chattering startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.17.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.18.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
-const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.16.1/mrmd-document.iife.min.js';
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.17.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -6546,6 +6549,8 @@ function mrmdHostTheme() {
       '--editor-selection-match': 'transparent',
       '--editor-matching-bracket': 'transparent',
       '--mrmd-selection-bg': 'var(--text)',
+      // the AI spark at rest: faint is a half-tone; solid, like the rest
+      '--mrmd-ai-spark-rest': '1',
     } : {}),
   };
 }
@@ -16808,6 +16813,12 @@ function helpNow() {
     ] });
     return sections;
   }
+  // The file workspace's editor keeps every key it gets (the page's
+  // shortcuts stay quiet there): only its own keys act.
+  if (fileWs && ae?.closest?.('.live-file-view .cm-editor')) {
+    sections.push(...fileEditorHelp({ inEditor: true }));
+    return sections;
+  }
   if (ae && ae.closest && ae.closest('input, select, textarea, [contenteditable="true"]')) {
     const keys = [['esc', 'leave the field — then the other shortcuts are live']];
     if ($('modelPick')) keys.unshift(['alt+m', 'model'], ['alt+o', 'mode'], ['shift+tab', 'reasoning']);
@@ -16895,12 +16906,7 @@ function helpNow() {
       ['→', 'last conversation in this project'],
     ] });
   }
-  if (viewKind === 'file' && fileWs) {
-    sections.push({ label: 'file', keys: [
-      ['ctrl+s', 'save to disk'], ['ctrl+f', 'find in this file'], ['ctrl+space', 'completion'], ['ctrl+k', 'ask an agent for a change to this file'],
-      ...(fileWs.kind === 'md' ? [['ctrl+enter', 'run this cell'], ['shift+enter', 'run and advance']] : []),
-    ] });
-  }
+  if (viewKind === 'file' && fileWs) sections.push(...fileEditorHelp({ inEditor: false }));
   if (viewKind === 'home') {
     const listKeys = [
       ['↑ ↓ / pgup pgdn', 'scroll'],
@@ -16919,6 +16925,29 @@ function helpNow() {
   return sections;
 }
 
+// The keys of the file workspace's editor, most local first. A Markdown
+// document's editor reports its own, live (mrmd keyHelp(): the AI command
+// box while open — it then owns the keyboard —, a suggestion, the cell or
+// paragraph at the cursor); the page adds the keys it binds itself.
+function fileEditorHelp({ inEditor }) {
+  const sections = [];
+  const editor = fileWs?.kind === 'md' ? docState?.editor : null;
+  const reported = typeof editor?.keyHelp === 'function' && typeof window.mrmdDocument?.formatKey === 'function';
+  if (reported) {
+    const spell = names => names.map(n => mrmdDocument.formatKey(n).toLowerCase()).join(' ');
+    const live = editor.keyHelp();
+    for (const s of live) sections.push({ label: s.label, keys: s.keys.map(([names, what]) => [spell(names), what]) });
+    if (live.some(s => s.exclusive)) return sections;
+  }
+  const keys = [['ctrl+s', 'save to disk'], ['ctrl+f', 'find in this file'], ['ctrl+space', 'completion'], ['ctrl+k', 'ask an agent for a change to this file']];
+  // An editor bundle from before keyHelp() (the loader's fallback): its keys, as they were.
+  if (fileWs?.kind === 'md' && !reported) keys.push(['ctrl+enter', 'run this cell'], ['shift+enter', 'run and advance'], ['ctrl+j', 'AI commands']);
+  keys.push(['ctrl+?', 'this help — also while typing']);
+  if (inEditor) keys.push(['esc, then tab', 'leave the text — then the page’s shortcuts work']);
+  sections.push({ label: 'file', keys });
+  return sections;
+}
+
 const HELP_GLOBAL = [
   ['/', 'open search — keeps this page'],
   ['F', 'conversations ⇄ files mode'],
@@ -16930,7 +16959,7 @@ const HELP_GLOBAL = [
   ['j', 'jobs'],
   [',', 'settings'],
   ['h', 'pin / unpin the corner hint'],
-  ['?', 'this help'],
+  ['? · ctrl+?', 'this help — ctrl+? also while typing'],
   ['esc', 'close / clear / leave the field'],
 ];
 
@@ -16993,6 +17022,23 @@ function refreshHelp() {
 setInterval(refreshHelp, 600);
 document.addEventListener('focusin', refreshHelp);
 document.addEventListener('focusout', () => setTimeout(refreshHelp, 0));
+// ctrl+? opens the help from anywhere, typing included: `?` alone types a
+// question mark in a field, and an editor keeps the keys it gets. Control,
+// not Command, on a Mac too: ⌘? is the system's Help menu. In the capture
+// phase, so no field's own key handling hides it; for the same reason,
+// while the help is open esc closes it before the focused field sees the
+// key (in a document, esc would also discard an AI suggestion).
+document.addEventListener('keydown', e => {
+  if (e.key === '?' && e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleHelpOverlay();
+  } else if (e.key === 'Escape' && !e.isComposing && !$('helpOverlay').hidden) {
+    e.preventDefault();
+    e.stopPropagation();
+    $('helpOverlay').hidden = true;
+  }
+}, true);
 
 document.addEventListener('keydown', e => {
   // A focused file owns its editor shortcuts. In particular, app-wide search
