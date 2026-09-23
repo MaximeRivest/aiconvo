@@ -170,6 +170,18 @@ test('always listening: heard, decided, done, asked, dictated, stopped', { timeo
   await until(`fileWs && fileWs.path.endsWith('first.md')`, 'the last file on the right did not open');
   assert.deepEqual(await ev(`voice.decisions.at(-1).decision.args`), { place: 'last', list: 'right panel/file' });
 
+  // What was said, in Settings: the sentences not understood, and a note on what was meant.
+  await ev(`showSettings('sound')`);
+  await until(`document.querySelector('[data-voice-history="missed"]')`, 'no history buttons');
+  await ev(`document.querySelector('[data-voice-history="missed"]').click()`);
+  await until(`document.querySelector('.voice-history li')`, 'the history did not show');
+  const missed = await ev(`[...document.querySelectorAll('.voice-history .vhist-said')].map(e => e.textContent)`);
+  assert.ok(missed.includes('\u201chello there\u201d'), missed.join(' | '));
+  assert.ok(!missed.some(t => /appearance settings/.test(t)), 'understood sentences are not listed as missed');
+  await ev(`(() => { const i = [...document.querySelectorAll('.voice-history li')].find(li => /hello there/.test(li.textContent)).querySelector('.vhist-note'); i.value = 'just testing the mic'; i.dispatchEvent(new Event('change')); })()`);
+  await until(`document.querySelector('.vhist-note.saved')`, 'the note was not saved');
+  await b.screenshot('voice-history.png');
+
   // The record has every decision; Alt+L stops the microphone.
   const records = fs.readFileSync(path.join(b.home, '.local', 'share', 'chattering', 'voice-commands.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
   assert.ok(records.some(r => r.action === 'settings') && records.some(r => r.outcome === 'confirmed'), JSON.stringify(records.map(r => r.action || r.outcome)));

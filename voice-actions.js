@@ -41,9 +41,18 @@
     none: { label: 'Not a request to the app', say: 'talking to someone else, thinking aloud, dictating a thought, or noise' },
     confirm: { label: 'Yes: do the suggested action', say: 'yes, do it, go ahead, correct, that one' },
     cancel: { label: 'No: drop the suggested action', say: 'no, never mind, cancel, not that' },
-    stop_listening: { label: 'Stop listening', say: 'stop listening, turn off voice commands, go to sleep' },
+    stop_listening: { label: 'Stop listening entirely: turn voice commands off (not: stop dictating)', say: 'stop listening, turn off voice commands, go to sleep' },
+    // "Stop dictation" when nothing is being dictated: said often, and must
+    // never switch listening off (the record shows it did).
+    stop_dictation: { label: 'Stop dictating (stop writing what is said into the box)', say: 'stop dictation, stop dictating, stop writing' },
+    status: { label: 'Ask whether the app is listening, and in which mode', say: 'are you listening, is it still listening, can you hear me' },
     dictate: { label: 'Start dictating into the message box', say: 'start the microphone, start dictating, take a note, let me write' },
+    focus_box: { label: 'Put the cursor in the message box, without dictating', say: 'focus the message box, go to the input box, into the compose box' },
     send: { label: 'Send the message in the box', say: 'send, send it, submit' },
+    new_conversation: { label: 'Start a new conversation', say: 'start a new conversation, new chat, new conversation' },
+    regenerate: { label: 'Regenerate the last answer: ask the model again', say: 'regenerate, regenerate the last answer, ask again, try that again' },
+    expand: { label: 'Show the whole of a folded message (its "more")', say: 'show more, expand the last message, click more on the last message' },
+    scroll: { label: 'Scroll the conversation or the file', say: 'scroll up, scroll down, page down, one page up, go to the top, go to the bottom', args: { direction: { kind: 'fixed', options: { up: 'up a little', down: 'down a little', page_up: 'one page up', page_down: 'one page down', top: 'to the very top', bottom: 'to the very bottom, the latest' }, question: 'In `said`, which way, and how far, does the user want to scroll?' } } },
     model: { label: 'Change the model that answers', say: 'change the model to…, switch to…, use…', args: { model: { kind: 'list', list: 'models', question: 'Which model does the user want to use?' } } },
     reasoning: { label: 'Change the reasoning (thinking) level', say: 'reasoning off, think harder, set thinking to high', args: { level: { kind: 'fixed', options: Object.fromEntries(THINKING.map(l => [l, null])), question: 'Which reasoning level does the user want (off is no reasoning, max is the most)?' } } },
     open: { label: 'Open or pick something: a conversation, a file, a project, a search result', say: 'open the third one, the last file, the previous one, the one about air bills, open the file called…, number seven', args: {
@@ -52,7 +61,7 @@
       place: { kind: 'fixed', options: null, question: 'In `said`, does the user pick the item by its place in its list? Which place?' },
       name: { kind: 'list', list: 'targets', question: 'Which of these items does the user name in `said`, by words of its title or file name ("dot js" said for .js, spaces for dashes)? Only what `said` names: not the item open now unless it is named.' },
     } },
-    help: { label: 'Show what the user can say here', say: 'what can I say, show the commands, help' },
+    help: { label: 'Show what the user can say here: the list of voice commands', say: 'what can I say, show the commands, open the command panel, list the commands, help' },
     settings: { label: 'Open the settings', say: 'open the settings, show the appearance settings', args: { pane: { kind: 'fixed', options: SETTINGS_PANES, question: 'Which part of the settings does the user want? Without a part named, profile.' } } },
     go_home: { label: 'Go to the home page (all conversations, the timeline)', say: 'go home' },
     go_back: { label: 'Go back to the previous screen', say: 'go back, previous' },

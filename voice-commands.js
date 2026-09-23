@@ -316,8 +316,45 @@ function voiceTextTarget() {
   return null;
 }
 
+// What scrolls here: the file's text, else the page's view.
+function voiceScroller() {
+  const ed = voiceEditor();
+  if (ed) {
+    const host = ed.view.dom.closest('.doc-editor-host');
+    const inner = ed.view.scrollDOM;
+    return inner.scrollHeight > inner.clientHeight + 1 ? inner : host || inner;
+  }
+  return $('view');
+}
+const voiceLast = sel => [...document.querySelectorAll(sel)].filter(voiceVisible).pop() || null;
+
 const VOICE_ACTIONS = {
   stop_listening: { available: () => true, run: async () => { await voiceSetOn(false); return 'stopped listening'; } },
+  stop_dictation: { available: () => voice.mode === 'command', run: () => 'you were not dictating — still listening for commands' },
+  status: {
+    available: () => true,
+    run: () => (voice.mode === 'dictation' ? 'yes: dictating into ' + voice.target.label : 'yes: listening for commands') + ' · window ' + Math.round(voice.heard.windowSeconds || 0) + ' s',
+  },
+  focus_box: { available: () => !!voiceTextTarget(), run: () => { const t = voiceTextTarget(); t.ta.focus(); return 'cursor in ' + t.label; } },
+  new_conversation: { available: () => typeof startNewConversation === 'function', run: async () => { await startNewConversation(); return 'new conversation'; } },
+  regenerate: {
+    available: () => !!voiceLast('#view .msg-regenerate'),
+    run: () => { const b = voiceLast('#view .msg-regenerate'); b.scrollIntoView({ block: 'nearest' }); b.click(); return 'asking again'; },
+  },
+  expand: {
+    available: () => !!voiceLast('#view .msg .more, #view .msg .unfold'),
+    run: () => { voiceLast('#view .msg .more, #view .msg .unfold').click(); return 'expanded'; },
+  },
+  scroll: {
+    available: () => !!voiceScroller(),
+    run: ({ direction }) => {
+      const el = voiceScroller(), page = Math.max(120, el.clientHeight * 0.9);
+      const by = { up: -page / 3, down: page / 3, page_up: -page, page_down: page }[direction];
+      if (by !== undefined) el.scrollBy({ top: by });
+      else el.scrollTop = direction === 'top' ? 0 : el.scrollHeight;
+      return 'scrolled ' + String(direction || 'down').replace('_', ' ');
+    },
+  },
   dictate: {
     available: () => !!voiceTextTarget(),
     run: () => { const t = voiceTextTarget(); voiceBeginDictation(t); return 'dictating into ' + t.label; },
@@ -472,7 +509,7 @@ function voiceScreen() {
 }
 
 async function voiceContext(said) {
-  const context = { said, heard: voice.heard.committed.split(' ').slice(-120).join(' '), screen: voiceScreen(), mode: voice.mode, debug: voicePrefs().overlay, lists: {} };
+  const context = { said, heard: voice.heard.committed.split(' ').slice(-120).join(' '), screen: voiceScreen(), mode: voice.mode, lists: {} };
   if (voice.mode === 'dictation') return context;
   context.actions = Object.entries(VOICE_ACTIONS).filter(([, a]) => { try { return a.available(); } catch { return false; } }).map(([id]) => id);
   for (const id of context.actions) if (VOICE_ACTIONS[id].lists) Object.assign(context.lists, await VOICE_ACTIONS[id].lists());
@@ -494,6 +531,7 @@ async function voiceUnderstand(said, asrMs) {
   let out;
   try {
     const context = await voiceContext(said);
+    if (Number.isFinite(asrMs)) context.asrMs = asrMs;
     const r = await fetch('/api/voice/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(context) });
     out = await r.json();
     if (!r.ok || out.error) throw new Error(out.error || 'the server did not decide');
@@ -810,14 +848,58 @@ function voiceSettingsHtml() {
     <label class="set-check"><input type="checkbox" data-voice="numbers"${p.numbers ? ' checked' : ''}> Number what I can pick (conversations, files, projects) while listening</label>
     <div class="set-help">Say “open seven”. Without numbers, a place (“the third one”, “the last file”, “the previous one”) or words of the name still pick.</div>
     <label class="set-check"><input type="checkbox" data-voice="overlay"${p.overlay ? ' checked' : ''}> Show what is heard and decided (debug view)</label>
-    <div class="set-help">Also keeps the words of sentences that were not commands in the record, to tune it (~/.local/share/chattering/voice-commands.jsonl). Off: only commands are kept, and a small note says what was done.</div>
+    <div class="set-help">Off: a small note says what was done.</div>
+    <h3>what you said</h3>
+    <div class="set-help">Every sentence heard while listening is kept on this machine, with what the screen offered, what Jev chose and how sure, and what became of it — so you can see what you meant and which command was missing, and write it down. ~/.local/share/chattering/voice-commands.jsonl, readable by you alone.</div>
+    <div class="set-row"><button type="button" data-voice-history="all">Show all</button><button type="button" data-voice-history="missed">Show what was not understood</button><button type="button" class="ghost" data-voice-history="clear">Forget my history</button></div>
+    <div id="voiceHistory"></div>
     <div class="set-field" id="voiceKeyField"><span class="hint">checking the TypeSafe key…</span></div>
   </div>`;
+}
+
+// ---- the history: what was said, what it became, what was meant ----
+
+// Not understood: not taken for a command, asked about and not confirmed,
+// failed, or never decided.
+const voiceMissed = r => r.action === 'none' || r.error || r.missing || r.outcomes.some(o => /^(expired|cancelled|failed)/.test(o)) && !r.outcomes.includes('confirmed');
+
+async function voiceShowHistory(host, which) {
+  host.innerHTML = '<div class="hint">loading…</div>';
+  let data;
+  try { data = await (await fetch('/api/voice/history?limit=500')).json(); } catch { data = { error: 'network failure' }; }
+  if (data.error) { host.innerHTML = `<div class="hint">${esc(data.error)}</div>`; return; }
+  const rows = which === 'missed' ? data.rows.filter(voiceMissed) : data.rows;
+  if (!rows.length) { host.innerHTML = `<div class="hint">${which === 'missed' ? 'Everything was understood.' : 'Nothing said yet.'}</div>`; return; }
+  const decided = r => r.error ? '✗ ' + r.error
+    : r.action === 'none' ? 'not a command' + (r.alternatives && r.alternatives[1] ? ' (next: ' + r.alternatives[1].action + ' ' + Math.round(r.alternatives[1].probability * 100) + '%)' : '')
+    : r.action + (r.args && Object.keys(r.args).length ? ' ' + Object.values(r.args).map(v => (v && typeof v === 'object' ? 'selection' : String(v).split('/').pop())).join(' → ') : '') + (r.missing ? ' — which ' + r.missing + '?' : '');
+  host.innerHTML = `<div class="hint">${rows.length} of ${data.rows.length} · newest first · a note says what you meant</div><ol class="voice-history">` + rows.map(r => `<li data-id="${esc(r.id)}">
+      <div class="vhist-head"><span class="vhist-time">${esc(new Date(r.ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }))}</span>${r.mode === 'dictation' ? '<span class="vhist-mode">dictating</span>' : ''}<span class="vhist-said">\u201c${esc(r.said || '')}\u201d</span></div>
+      <div class="vhist-what">→ ${esc(decided(r))}${r.confidence != null && !r.error ? ' · ' + Math.round(r.confidence * 100) + '%' : ''}${r.outcomes.length ? ' · ' + esc(r.outcomes.join(', ')) : ''}<span class="vhist-screen"> · on ${esc(r.screen || '?')}</span></div>
+      <input class="vhist-note" type="text" placeholder="what did you want?" value="${esc(r.note || '')}" aria-label="What you wanted">
+    </li>`).join('') + '</ol>';
+  host.querySelectorAll('.vhist-note').forEach(input => {
+    input.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') input.blur(); });
+    input.addEventListener('change', async () => {
+      const out = await postJson('/api/voice/note', { id: input.closest('li').dataset.id, wanted: input.value });
+      if (out.error) return errToast(out.error);
+      input.classList.add('saved');
+    });
+  });
 }
 
 async function voiceBindSettings(root) {
   const box = root.querySelector('#voiceSettings');
   if (!box) return;
+  box.querySelectorAll('[data-voice-history]').forEach(b => b.onclick = async () => {
+    const which = b.dataset.voiceHistory, host = box.querySelector('#voiceHistory');
+    if (which !== 'clear') return voiceShowHistory(host, which);
+    if (!confirm('Forget everything you said to voice commands on this machine? This cannot be undone.')) return;
+    const out = await postJson('/api/voice/history/clear', {});
+    if (out.error) return errToast(out.error);
+    toast('forgot ' + out.removed + ' sentences');
+    host.innerHTML = '';
+  });
   box.addEventListener('change', e => {
     const f = e.target.dataset.voice;
     if (f === 'on') voiceSetOn(e.target.checked);

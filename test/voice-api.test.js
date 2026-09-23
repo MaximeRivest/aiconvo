@@ -54,8 +54,8 @@ async function standIns(t) {
     });
   });
   await Promise.all([speech, jev].map(s => new Promise(r => s.listen(0, '127.0.0.1', r))));
-  t.after(() => { speech.close(); jev.close(); });
-  return { speechUrl: 'http://127.0.0.1:' + speech.address().port, jevUrl: 'http://127.0.0.1:' + jev.address().port + '/v1/systemone', jevCalls };
+  t.after(() => { speech.close(); if (jev.listening) jev.close(); });
+  return { speechUrl: 'http://127.0.0.1:' + speech.address().port, jevUrl: 'http://127.0.0.1:' + jev.address().port + '/v1/systemone', jevCalls, jev };
 }
 
 async function boot(t, { key = 'test-key-0123456789abcdef' } = {}) {
@@ -117,13 +117,36 @@ test('deciding: one request to Jev with the key; a decision and its outcome are 
   assert.deepEqual(Object.keys(s.jevCalls.at(-1).body.questions).sort(), ['action', 'reasoning.level', 'settings.pane']);
   assert.equal((await post(s.base, '/api/voice/outcome', { id: r.id, outcome: 'done' })).status, 200);
   assert.equal((await post(s.base, '/api/voice/outcome', { id: r.id, outcome: 'maybe' })).status, 400);
-  // A sentence that is no command: its words are kept only in debug mode.
-  await post(s.base, '/api/voice/decide', { said: 'pass the salt', actions: ['settings'] });
-  await post(s.base, '/api/voice/decide', { said: 'pass the salt please', actions: ['settings'], debug: true });
-  const log = fs.readFileSync(path.join(s.home, '.local', 'share', 'chattering', 'voice-commands.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
-  assert.deepEqual(log.map(l => l.action || l.outcome), ['reasoning', 'done', 'none', 'none']);
-  assert.deepEqual(log.filter(l => l.action === 'none').map(l => l.said), [null, 'pass the salt please']);
-  assert.equal(fs.statSync(path.join(s.home, '.local', 'share', 'chattering', 'voice-commands.jsonl')).mode & 0o777, 0o600);
+  // Every sentence is kept, with what the screen offered and Jev's answers.
+  await post(s.base, '/api/voice/decide', { said: 'pass the salt', screen: 'home', actions: ['settings'], asrMs: 210 });
+  const file = path.join(s.home, '.local', 'share', 'chattering', 'voice-commands.jsonl');
+  const log = fs.readFileSync(file, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(log.map(l => l.action || l.outcome), ['reasoning', 'done', 'none']);
+  const salt = log.at(-1);
+  assert.deepEqual([salt.said, salt.screen, salt.asrMs, salt.offered.sort()], ['pass the salt', 'home', 210, ['none', 'settings']]);
+  assert.deepEqual(salt.answers.action, { choice: 'none', confidence: 0.97, top: [['none', 0.97]] }, 'Jev\u2019s answer (the stand-in reports the chosen option only)');
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+
+  // The history: newest first, with outcomes; a note on what was meant.
+  const hist = await (await fetch(s.base + '/api/voice/history')).json();
+  assert.deepEqual(hist.rows.map(h => [h.said, h.action, h.outcomes]), [['pass the salt', 'none', []], ['reasoning off please', 'reasoning', ['done']]]);
+  assert.equal((await post(s.base, '/api/voice/note', { id: hist.rows[0].id, wanted: 'nothing, I was talking to someone' })).status, 200);
+  assert.equal((await post(s.base, '/api/voice/note', { id: 'nope', wanted: 'x' })).status, 404);
+  assert.equal((await (await fetch(s.base + '/api/voice/history')).json()).rows[0].note, 'nothing, I was talking to someone');
+  // Forgetting removes the sentences, their outcomes and their notes.
+  assert.equal((await (await post(s.base, '/api/voice/history/clear', {})).json()).removed, 2);
+  assert.deepEqual((await (await fetch(s.base + '/api/voice/history')).json()).rows, []);
+  assert.equal(fs.readFileSync(file, 'utf8'), '');
+});
+
+test('a call to Jev that fails is recorded too, with what was said', async t => {
+  const s = await boot(t);
+  await new Promise(r => s.jev.close(r)); // Jev unreachable
+  const r = await post(s.base, '/api/voice/decide', { said: 'open the settings', actions: ['settings'] });
+  assert.equal(r.status, 502);
+  const row = (await (await fetch(s.base + '/api/voice/history')).json()).rows[0];
+  assert.deepEqual([row.said, row.action], ['open the settings', null]);
+  assert.match(row.error, /TypeSafe did not answer/);
 });
 
 test('the key: saved by the owner only to a private file, never sent back; without it, a clear refusal', async t => {

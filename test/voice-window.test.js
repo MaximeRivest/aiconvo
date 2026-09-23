@@ -78,6 +78,24 @@ test('past its target the window slides: final text, nothing lost or said twice'
   assert.deepEqual((last.committed + ' ' + last.stable + ' ' + last.volatile).trim().split(/\s+/), spoken, 'final + live text is everything said');
 });
 
+test('a word rewritten at the last hand-off is not handed on again', async () => {
+  // Like Parakeet with more context (or another language): words already
+  // handed on come back different in the next transcription.
+  for (const rewrite of [
+    words => words.map((w, i) => (i === 2 && words.length > 3 ? 'W3X' : w)),         // the boundary word
+    words => words.map((w, i) => (i < 3 && words.length > 4 ? w + 'X' : w)),        // three of them
+  ]) {
+    const events = [];
+    let calls = 0;
+    const w = new VoiceWindow({ emit: e => events.push(e), transcribe: async pcm => { calls++; return rewrite(recognize(pcm).split(' ').filter(Boolean)).join(' '); } });
+    const l = { w };
+    await say(l, word(1), pause(200), word(2), pause(1000), word(3), pause(1000));
+    await say(l, word(4), pause(200), word(5), pause(1000), word(6), pause(200), word(7), pause(1000));
+    assert.deepEqual(events.filter(e => e.type === 'utterance').map(e => e.text), ['w1 w2', 'w3', 'w4 w5', 'w6 w7']);
+    assert.ok(events.some(e => e.type === 'realign'), 'the decided audio was transcribed again to count');
+  }
+});
+
 test('an index follows a word through a revised transcription', () => {
   const prev = 'please open the sittings now'.split(' ');
   const next = 'please open the settings now and send'.split(' ');

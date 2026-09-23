@@ -59,3 +59,15 @@
 #voiceOverlay .vo-help li { margin: 1px 0; color: var(--text-dim); }
 #voiceOverlay .vo-help li b { color: var(--text); font-weight: 500; }
 #voiceOverlay .vo-help-lead { margin: 4px 0 2px; color: var(--text-dim); }
+
+/* Settings → sound → what you said. */
+.voice-history { list-style: none; margin: 8px 0 0; padding: 0; max-height: 60vh; overflow-y: auto; border-top: 1px solid var(--border); }
+.voice-history li { padding: 6px 2px; border-bottom: 1px solid var(--border); font-size: var(--fs-micro); }
+.voice-history .vhist-head { display: flex; gap: 8px; align-items: baseline; }
+.voice-history .vhist-time { color: var(--text-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.voice-history .vhist-mode { color: var(--accent); white-space: nowrap; }
+.voice-history .vhist-said { color: var(--text); font-size: var(--fs-meta); }
+.voice-history .vhist-what { color: var(--text-dim); margin: 2px 0 4px; overflow-wrap: anywhere; }
+.voice-history .vhist-screen { color: var(--text-faint); }
+.voice-history .vhist-note { width: 100%; box-sizing: border-box; height: 24px; font: var(--fs-micro) var(--font); margin: 0; }
+.voice-history .vhist-note.saved { border-color: var(--accent); }

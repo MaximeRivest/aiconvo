@@ -106,6 +106,41 @@ one aside): 18 right, twice; 15 at ≥ 0.8. Going somewhere now acts from 0.6
 this screen with example phrasings — the same catalog Jev picks from — and
 the lists that can be picked from; while dictating, what steers dictation.
 
+## Keeping everything, and what the first session taught (2026-09-23)
+
+The record now keeps every sentence (v2 lines): what was said, the words
+before it, the screen, the speech-to-text time, the actions offered, how
+many candidates each list had, Jev's answer to every question (the action's
+whole distribution, the five likeliest options of each argument), the
+decision and its outcome; a failed call to TypeSafe with what was said; and
+the person's note on a sentence ("what did you want?"). Settings → sound →
+what you said shows it (all, or not understood: not a command, asked and
+not confirmed, failed), takes notes, and forgets on request.
+`GET /api/voice/history`, `POST /api/voice/note`, `POST /api/voice/history/clear`.
+
+The first real session (99 sentences, 20 minutes) showed:
+
+- Missing commands, now added: regenerate ("regenerate the last answer",
+  "resend last message"), scroll (up, down, a page, top, bottom), start a
+  new conversation, put the cursor in the message box ("focus the input
+  box", "get into the compose box"), expand a folded message ("click more
+  on the last message"), "are you listening", and "open the command panel"
+  (the list of commands).
+- "Stop dictation" said when not dictating turned listening off (99% sure,
+  twice). `stop_dictation` now catches it in command mode, harmlessly;
+  `stop_listening` says it is not that.
+- Utterances repeated words already handed on (French re-heard with more
+  context; "Start dictation." sent again as text). The window aligned the
+  new transcription with the old by words; a word rewritten at the boundary
+  matched nothing. Now an unsure alignment counts from the last shared word,
+  and transcribes the decided audio once to count its words (same audio, same
+  context). A word re-heard as two words can still leak one: Parakeet's word
+  timestamps would settle it, but its server does not send them (shared with
+  the tablet keyboard; not changed).
+
+Replaying the session's missed sentences and a sample of the rest against
+Jev with the new catalog: 26 of 26 right.
+
 ## Limits and next steps
 
 - Parakeet and the always-on Qwen service share the GPUs; when the Qwen

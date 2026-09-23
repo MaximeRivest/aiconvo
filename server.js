@@ -13763,8 +13763,11 @@ const VOICE_SEND_TAIL = /[\s.,!]*(send|done|go|submit|enter|control enter|ship i
 // A listener streams its microphone here (/api/voice/listen); the window
 // transcribes it with context and hands on each utterance. The page asks
 // /api/voice/decide what an utterance means (one Jev request, the key stays
-// here) and runs the action. Each decision and what became of it is kept in
-// ~/.local/share/chattering/voice-commands.jsonl, to tune the thresholds.
+// here) and runs the action. Everything is kept in
+// ~/.local/share/chattering/voice-commands.jsonl (0600), to see later what
+// was meant and which command was missing: each sentence with what the
+// screen offered and Jev's full answer, the decision, what became of it,
+// a failed call, and the person's own note ("I wanted …").
 const voiceActions = require('./voice-actions.js');
 const { VoiceWindow, clampWindowSeconds } = require('./voice-window.js');
 const TYPESAFE_URL = process.env.TYPESAFE_URL || 'https://api.typesafe.ai/v1/systemone';
@@ -13819,6 +13822,20 @@ async function voiceDecide(context, identity) {
     context.lists = { ...lists, targets: targets.concat(files.map(f => ({ id: 'file:' + f.id, label: 'file · ' + f.label })).filter(f => !known.has(f.id))) };
   }
   const built = voiceActions.buildRequest(context, { model: VOICE_JEV_MODEL });
+  const id = crypto.randomUUID();
+  // What the person said and what the screen offered: kept whatever happens next.
+  const lists = context.lists && typeof context.lists === 'object' ? context.lists : {};
+  const heardAs = {
+    v: 2, id, ts: new Date().toISOString(), user: principalFor(identity).user.id, model: VOICE_JEV_MODEL,
+    mode: context.mode === 'dictation' ? 'dictation' : 'command', screen: String(context.screen || '').slice(0, 200),
+    said: String(context.said).slice(0, 600), earlier: String(context.heard || '').slice(-300) || undefined,
+    asrMs: Number.isFinite(context.asrMs) ? context.asrMs : undefined,
+    offered: Object.keys(built.request.questions.action.criteria),
+    lists: Object.fromEntries(Object.entries(lists).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, v.length])),
+    pending: context.pending ? String(context.pending).slice(0, 160) : undefined,
+    questions: Object.keys(built.request.questions).length,
+  };
+  const failed = message => { voiceLog({ ...heardAs, action: null, error: message }); return Object.assign(new Error(message), { status: 502 }); };
   const t0 = Date.now();
   let res;
   try {
@@ -13826,21 +13843,21 @@ async function voiceDecide(context, identity) {
       method: 'POST', headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' },
       body: JSON.stringify(built.request), signal: AbortSignal.timeout(VOICE_DECIDE_TIMEOUT_MS),
     });
-  } catch (e) { throw Object.assign(new Error('TypeSafe did not answer: ' + (e.name === 'TimeoutError' ? 'timed out' : e.message)), { status: 502 }); }
+  } catch (e) { throw failed('TypeSafe did not answer: ' + (e.name === 'TimeoutError' ? 'timed out' : e.message)); }
   const body = await res.json().catch(() => null);
   const ms = Date.now() - t0;
   if (!res.ok || !body || !body.answers) {
     const why = body && (body.error && (body.error.message || body.error) || body.detail) || 'status ' + res.status;
-    throw Object.assign(new Error('TypeSafe: ' + (typeof why === 'string' ? why : JSON.stringify(why)).slice(0, 300)), { status: 502 });
+    throw failed('TypeSafe: ' + (typeof why === 'string' ? why : JSON.stringify(why)).slice(0, 300));
   }
   const decision = voiceActions.readDecision(built, body.answers, context.said);
-  const id = crypto.randomUUID();
   const record = {
-    v: 1, id, ts: new Date().toISOString(), user: principalFor(identity).user.id, ms, model: VOICE_JEV_MODEL,
-    mode: context.mode === 'dictation' ? 'dictation' : 'command', screen: String(context.screen || '').slice(0, 200),
-    said: decision.action === 'none' && !context.debug ? null : String(context.said).slice(0, 600),
+    ...heardAs, ms,
     action: decision.action, args: decision.args, confidence: decision.confidence, missing: decision.missing || null,
-    alternatives: decision.alternatives, questions: Object.keys(built.request.questions).length,
+    alternatives: decision.alternatives,
+    // Jev's answer to every question: the action's whole distribution, the
+    // five likeliest options of each argument — what was near.
+    answers: voiceAnswerSummary(body.answers),
   };
   voiceLog(record);
   voiceDecisions.set(id, record);
@@ -13874,6 +13891,71 @@ async function voiceProjectFiles(project, identity) {
   await walk(root);
   voiceFileCache.set(root, { at: Date.now(), files });
   return files;
+}
+
+function voiceAnswerSummary(answers) {
+  const out = {};
+  for (const [q, a] of Object.entries(answers || {})) {
+    if (!a || typeof a !== 'object') continue;
+    const ranked = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]).map(([k, p]) => [k, Math.round(p * 1000) / 1000]);
+    out[q] = { choice: a.choice, confidence: Math.round((Number(a.confidence) || 0) * 1000) / 1000, top: q === 'action' ? ranked : ranked.slice(0, 5) };
+  }
+  return out;
+}
+
+// The person's own history: each sentence with its decision, what became
+// of it, and their note — newest first. Read from the file (the record of
+// record); a few thousand lines read in milliseconds.
+function voiceHistory(identity, limit) {
+  const me = principalFor(identity).user.id;
+  let raw = '';
+  try { raw = fs.readFileSync(VOICE_LOG_FILE, 'utf8'); } catch { return []; }
+  const rows = new Map(), extra = new Map();
+  for (const line of raw.split('\n')) {
+    if (!line) continue;
+    let r; try { r = JSON.parse(line); } catch { continue; }
+    if (r.outcomeOf || r.noteOf) {
+      const ref = r.outcomeOf || r.noteOf;
+      if (!extra.has(ref)) extra.set(ref, { outcomes: [], note: null });
+      if (r.outcomeOf) extra.get(ref).outcomes.push(r.outcome + (r.detail ? ': ' + r.detail : ''));
+      else extra.get(ref).note = r.wanted;
+    } else if (r.id && r.user === me) rows.set(r.id, r);
+  }
+  return [...rows.values()].reverse().slice(0, limit).map(r => ({
+    id: r.id, ts: r.ts, mode: r.mode, screen: r.screen, said: r.said, action: r.action, args: r.args, confidence: r.confidence,
+    missing: r.missing, error: r.error, alternatives: r.alternatives, ms: r.ms,
+    outcomes: (extra.get(r.id) || {}).outcomes || [], note: (extra.get(r.id) || {}).note || null,
+  }));
+}
+
+// Forget a person's voice history: the file is rewritten without their lines.
+function voiceClearHistory(identity) {
+  const me = principalFor(identity).user.id;
+  let raw = '';
+  try { raw = fs.readFileSync(VOICE_LOG_FILE, 'utf8'); } catch { return 0; }
+  const mine = new Set();
+  const keep = [];
+  for (const line of raw.split('\n')) {
+    if (!line) continue;
+    let r; try { r = JSON.parse(line); } catch { keep.push(line); continue; }
+    if (r.user === me && r.id) { mine.add(r.id); continue; }
+    if (mine.has(r.outcomeOf || r.noteOf)) continue;
+    keep.push(line);
+  }
+  const tmp = VOICE_LOG_FILE + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, keep.map(l => l + '\n').join(''), { mode: 0o600 });
+  fs.renameSync(tmp, VOICE_LOG_FILE);
+  for (const id of mine) voiceDecisions.delete(id);
+  return mine.size;
+}
+
+// A note on a sentence: what the person meant ("scroll up", "a command to
+// regenerate"). Their own sentences only.
+function voiceNote(body, identity) {
+  const id = String(body.id || '');
+  const mine = voiceHistory(identity, 5000).some(r => r.id === id);
+  if (!mine) throw Object.assign(new Error('unknown sentence'), { status: 404 });
+  voiceLog({ v: 2, ts: new Date().toISOString(), noteOf: id, wanted: String(body.wanted || '').replace(/\s+/g, ' ').trim().slice(0, 500) });
 }
 
 // What the page did with a decision: done, asked, confirmed, cancelled,
@@ -16408,6 +16490,16 @@ async function handleRequest(req, res) {
       if (refusal) return json(res, 403, { error: refusal });
       try { json(res, 200, await voiceDecide(JSON.parse(await readRequestText(req, 256 * 1024)), identity)); }
       catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/voice/history' && req.method === 'GET') {
+      const refusal = voiceRefusal(identity);
+      if (refusal) return json(res, 403, { error: refusal });
+      json(res, 200, { file: VOICE_LOG_FILE, rows: voiceHistory(identity, Math.max(1, Math.min(5000, Number(u.searchParams.get('limit')) || 300))) });
+    } else if (u.pathname === '/api/voice/note' && req.method === 'POST') {
+      try { voiceNote(JSON.parse(await readRequestText(req, 4096)), identity); json(res, 200, { ok: true }); }
+      catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/voice/history/clear' && req.method === 'POST') {
+      try { json(res, 200, { ok: true, removed: voiceClearHistory(identity) }); }
+      catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/voice/outcome' && req.method === 'POST') {
       try { voiceOutcome(JSON.parse(await readRequestText(req, 4096)), identity); json(res, 200, { ok: true }); }
       catch (e) { json(res, e.status || 400, { error: e.message }); }
