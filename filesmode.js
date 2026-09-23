@@ -354,6 +354,14 @@ async function fileWsMountCode(ws, opts) {
     onLineHover: line => liveFileHover(ws, line),
     onNavigateLocation: location => liveFileNavigate(ws, location),
     onLineHoverEnd: () => { if (ws.live) { ws.live.hover++; ws.live.hoverController?.abort(); } },
+    // Changes proposed in the text (an ask in review mode): each decision
+    // is kept. Code never autosaves: a rejected change is on disk until Save.
+    review: {
+      onResolved: outcome => {
+        aiReviewHost(ws.path).onResolved(outcome);
+        if (fileWs === ws && ws.dirty && outcome.decision !== 'accepted') toast('your review changed the text: Save (Ctrl+S) writes it to disk');
+      },
+    },
   });
   $('fwSave').onclick = () => fileWsSaveCode(ws);
   $('docReload').onclick = () => fileWsReloadCode(ws);
@@ -474,11 +482,22 @@ function fileWsAfterMount(ws, opts) {
 // ---- an agent working on this file (asked from the ask box, ask-bubble.js) ----
 // The run a workspace started: the editor is read-only until it settles, so
 // nothing typed races the agent's edits; then the file reloads and the
-// agent's lines are marked.
+// agent's lines are marked — or, in review mode, shown as changes to
+// accept or reject (the editor's review captures everything the run
+// changes in the text).
 
-// out: the /api/files/ask reply.
-function fileWsBeginRun(ws, out) {
+// out: the /api/files/ask reply. ask: what the box sent ({prompt, mode,
+// model, thinking, include, selection}), kept with the outcome.
+function fileWsBeginRun(ws, out, ask = {}) {
   ws.run = { jobId: out.job ? out.job.id : null, key: out.key, startedAt: Date.now(), preSha: ws.sha, preText: ws.editor ? ws.editor.getContent() : null, title: out.title || (out.created ? 'new conversation' : 'conversation'), created: out.created, queued: out.queued };
+  ws.run.ask = { ...ask, jobId: ws.run.jobId, key: out.key, created: !!out.created };
+  ws.run.editor = ws.editor;
+  // A queued ask shares the running turn: its changes are that turn's.
+  if (ask.mode === 'review' && !out.queued && ws.editor && ws.editor.review) {
+    const label = 'Ask: \u201c' + (ask.prompt.length > 40 ? ask.prompt.slice(0, 39) + '\u2026' : ask.prompt) + '\u201d';
+    try { ws.run.capture = ws.editor.review.capture({ source: 'ask', label, ...ws.run.ask }); }
+    catch (e) { ws.run.ask.mode = 'apply'; toast('the changes will not be reviewed: ' + e.message); }
+  } else if (ask.mode === 'review') ws.run.ask.mode = 'apply';
   fileWsLockEditor(ws, true);
   fileWsPaintRun(ws, { statusText: out.queued ? 'queued behind the running turn' : 'starting' });
   clearInterval(ws.runTick);
@@ -513,44 +532,57 @@ function fileWsRunEvent(d) {
   if (!d.final) { fileWsPaintRun(ws, d); return; }
   clearInterval(ws.runTick);
   const status = d.status === 'done' ? '✓ settled' : '✗ ' + (d.statusText || d.status || 'ended');
+  const failed = d.status !== 'done';
   const run = ws.run;
   ws.run = null;
-  fileWsLockEditor(ws, false);
-  // The agent may have rewritten the file: reload, mark what changed.
+  // The agent may have rewritten the file: reload (still read-only, so the
+  // review captures only the agent's changes), then give the text back.
   fileWsReloadAfterRun(ws, run).then(result => {
-    if (fileWs !== ws) return;
-    if (typeof askBubbleSettled === 'function') askBubbleSettled(ws, run, { status, ...result });
+    const here = fileWs === ws && ws.editor === run.editor;
+    const reviewing = !!(run.capture && here && run.capture.end());
+    if (here) fileWsLockEditor(ws, false);
+    // Recorded now unless a review will record it when it is decided.
+    if (!reviewing) aiAskSettled(ws.path, run.ask, { changed: result.changed, failed, before: run.preText, after: result.text, status: d.statusText || d.status || null });
+    if (!here) return;
+    if (typeof askBubbleSettled === 'function') askBubbleSettled(ws, run, { status, ...result, reviewing });
   });
 }
 
-// Reload the file after a run. {summary, changed, undoable}: undoable when
-// the reload was one change in this editor (Ctrl+Z takes it back).
+// Reload the file after a run by the smallest changes (the cursor, marks
+// and a review keep their places). {summary, changed, undoable, text}:
+// undoable when the reload was one change in this editor (Ctrl+Z takes it
+// back); text, the file as the run left it.
+function fileWsShowText(editor, text) {
+  if (typeof editor.updateContent === 'function') editor.updateContent(text);
+  else editor.setContent(text);
+}
 async function fileWsReloadAfterRun(ws, run) {
   let d;
   try { d = await (await fetch('/api/file/read?path=' + encodeURIComponent(ws.path))).json(); } catch { return { summary: 'could not re-read the file', changed: false }; }
   if (fileWs !== ws || d.error) return { summary: d && d.error ? d.error : '', changed: false };
-  if (d.sha === run.preSha) return { summary: 'the file did not change', changed: false };
+  if (d.sha === run.preSha) return { summary: 'the file did not change', changed: false, text: d.text };
   const before = run.preText || '';
   let undoable = false;
   if (ws.kind === 'md' && docState && docState.path === ws.path) {
     if (docState.dirty) return { summary: 'the file changed on disk while you had edits — reload from disk to see them', changed: true };
     // A shared document already carries the agent's write (it merged in).
-    if (docState.editor.getContent() !== d.text) { docState.editor.setContent(d.text); undoable = !ws.collab; }
+    if (docState.editor.getContent() !== d.text) { fileWsShowText(docState.editor, d.text); undoable = !ws.collab; }
     docState.sha = d.sha;
     docState.dirty = false;
     if ($('docReload')) $('docReload').hidden = true;
   } else if (ws.kind === 'code' && ws.editor) {
     const sel = ws.editor.selection();
-    if (ws.editor.getContent() !== d.text) { ws.editor.setContent(d.text); undoable = !ws.collab; }
+    const minimal = typeof ws.editor.updateContent === 'function';
+    if (ws.editor.getContent() !== d.text) { fileWsShowText(ws.editor, d.text); undoable = !ws.collab; }
     ws.baseText = d.text; ws.sha = d.sha; ws.dirty = false;
     if ($('fwSave')) $('fwSave').disabled = true;
-    try { ws.editor.gotoLine(sel.line); } catch {}
+    if (!minimal) try { ws.editor.gotoLine(sel.line); } catch {} // a whole replace lost the cursor
   }
   // The gutter keeps the opening text as its baseline, so the agent's
   // lines show as changes; the disk baseline moves to what was just read.
   liveFileSaved(ws, d.text, d.sha);
   const stats = typeof LineDiff !== 'undefined' ? LineDiff.scriptStats(LineDiff.diffLines(before, d.text)) : null;
-  return { summary: stats ? `agent changed +${stats.added} −${stats.removed} lines` : 'agent changed the file', changed: true, undoable };
+  return { summary: stats ? `agent changed +${stats.added} −${stats.removed} lines` : 'agent changed the file', changed: true, undoable, text: d.text };
 }
 
 // ---- who touched this file ----

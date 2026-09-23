@@ -11,7 +11,20 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.18.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.19.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.19.0: reviewing changes in the text, in both editors (`editor.review`,
+  document-review.js on @codemirror/merge): a proposal (`review.propose`,
+  or everything during `review.capture` — Chattering captures an ask's run)
+  shows against the text before it, old lines struck through above the new
+  ones, which stay editable; Accept / Reject on each, a panel under the text
+  (accept all, reject all, next/previous; Alt-y, Alt-n, Alt-Shift-y,
+  Alt-Shift-n, Alt-] / Alt-[). Other edits never show as changes (copied
+  into the original). `review.onResolved` gives per region the text before,
+  proposed and kept (Chattering: ai-outcomes.js → /api/ai-feedback).
+  `updateContent(text)` reaches a text by the smallest changes. AI commands:
+  `ai.mode` (suggest | review, switched in the box), "Edit in text", and
+  `ai.onOutcome` for every command. Tokens `--mrmd-review-inserted` /
+  `--mrmd-review-deleted` (the binary e-ink theme sets them transparent).
 - 0.18.0: AI commands can be found without knowing a key. A ✦ in a narrow
   gutter of its own on the cursor's line (while the editor has focus and
   commands can act there) opens the command box on a click; faint at rest,
@@ -145,15 +158,15 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `3ce13dd` ("document entry 0.18.0").
-- SHA-256: `cf72be9086235f5cef558b906a7b8a7ac202f3b9e3a1d1dcb181ecaeb0b8c9a7`
+- Source commit: `bb19e8c` ("review: first() …", after `008438a` "document entry 0.19.0").
+- SHA-256: `b2d667b43e525a5e5e4a11f14587ac6aabb904adcfe509d2b96d80c00836bc3e`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.17.0 (AI commands work; no spark, and the `?` help lists the document's
-  keys from its own fixed list). Keep that artifact and route while the
-  fallback exists. 0.16.1 and 0.15.0 are no longer loaded; delete their
-  folders and routes once 0.18.0 has run for a few days.
+  0.18.0 (everything but reviews: an ask's changes are applied directly and
+  AI commands only suggest). Keep that artifact and route while the fallback
+  exists. 0.17.0, 0.16.1 and 0.15.0 are no longer loaded; delete their
+  folders and routes once 0.19.0 has run for a few days.
 
 ## Features enabled in chattering
 
@@ -181,6 +194,9 @@ owns the editing surface.
   ai-commands.js; /api/doc/ai, /api/doc/ai-accept in server.js)
 - `keyHelp()` / `formatKey` — the document's live keys in the `?` help and
   the pinned corner hint (app.html `fileEditorHelp`)
+- `review`, `updateContent` — an ask's changes reviewed in the text
+  (filesmode.js `fileWsBeginRun` / `fileWsRunEvent`), AI command answers in
+  review mode, and the outcomes recorded (ai-outcomes.js)
 - cell controls (`runnableLanguages`, `onCancelCell`, `run.setStatus`,
   `clearCellStatuses`) — Run/Stop on each cell and its run state
   (app.html `runDocCell`, `runAllDocCells`, `cancelDocCell`)

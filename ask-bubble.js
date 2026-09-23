@@ -13,8 +13,15 @@
    it, and — for a new conversation — the project's memory. The server
    renders them (file-ask.js); "What goes along" shows the exact text.
 
-   While the agent works the box shows the run; when it settles, the result,
-   and the next ask continues the same conversation.
+   How the agent's changes arrive is the box's switch: "review" (the
+   default) shows them in the text against what it was, to accept, reject
+   or edit (the editor's review); "apply" writes them straight in, with the
+   lines marked and Ctrl+Z to take them back. Either way the ask, the
+   agent's answer and what was kept are recorded (ai-outcomes.js).
+
+   While the agent works the box shows the run; when it settles, the result
+   (in review mode the box steps aside and the text shows the changes), and
+   the next ask continues the same conversation.
 
    Globals (fileWs, docState, the composer helpers) come from app.html and
    filesmode.js, as conversation-draft.js does. */
@@ -36,6 +43,7 @@ function askPrefs() {
   return {
     model: raw && typeof raw.model === 'string' && raw.model.includes('/') ? raw.model : null,
     thinking: raw && THINKING_LEVELS.includes(raw.thinking) ? raw.thinking : null,
+    review: !(raw && raw.review === false),
     include: { edits: inc.edits !== false, asks: inc.asks !== false, memory: inc.memory === true },
   };
 }
@@ -106,6 +114,7 @@ function askBubbleOpen(ws) {
       <span class="ask-glyph" aria-hidden="true">✦</span>
       <span class="ask-where"></span>
       <select class="ask-target" aria-label="Where the request goes" title="Where the request goes: a conversation that worked on this file, or a new one"><option value="auto">finding where this goes…</option></select>
+      <button type="button" class="ghost ask-mode" aria-pressed="true"></button>
       <button type="button" class="ghost ask-close" title="Close (Esc) — what you typed stays" aria-label="Close">✕</button>
     </div>
     <div class="ask-history" hidden></div>
@@ -193,6 +202,7 @@ function askBubbleWire(b) {
     else askBubbleClose({ refocus: true });
   });
   q('.ask-close').onclick = () => askBubbleClose({ refocus: true });
+  q('.ask-mode').onclick = () => { saveAskPrefs({ review: !askPrefs().review }); askBubblePaintControls(); ta.focus(); };
   b.send.onclick = () => askBubbleSend();
   b.target.onchange = () => { ws.askChoice = b.target.value; askBubblePaintControls(); };
 
@@ -417,6 +427,15 @@ function askBubblePaintControls() {
   const think = b.root.querySelector('.ask-think');
   think.textContent = '∴ ' + (prefs.thinking || 'default') + ' ▾';
   think.title = (prefs.thinking ? 'Reasoning for asks from this box: ' + prefs.thinking + '.' : 'Reasoning: the conversation’s own level.') + ' Click to choose (Shift+Tab). Less reasoning answers sooner.';
+  // Review needs an editor that can show it (mrmd-document 0.19+).
+  const canReview = !!(b.ws.editor && b.ws.editor.review);
+  const review = canReview && prefs.review;
+  const mode = b.root.querySelector('.ask-mode');
+  mode.hidden = !canReview;
+  mode.setAttribute('aria-pressed', String(review));
+  mode.textContent = review ? '✓ review' : 'apply';
+  mode.title = review ? 'The agent’s changes show in the text to accept, reject or edit first. Click: apply them directly'
+    : 'The agent’s changes go straight into the text (Ctrl+Z takes them back). Click: review them first';
   b.root.querySelector('[data-ask="open"]').hidden = !key;
   b.root.querySelector('[data-ask="own-model"]').hidden = !prefs.model;
   askBubblePaintChips();
@@ -490,6 +509,10 @@ async function askBubbleSend() {
   };
   if (prefs.model) body.models = [askModelOf(prefs.model)];
   if (prefs.thinking) body.thinking = prefs.thinking;
+  const ask = {
+    prompt, mode: prefs.review && ws.editor && ws.editor.review ? 'review' : 'apply',
+    model: prefs.model, thinking: prefs.thinking, include: prefs.include, selection: { line: body.line || null, range: body.range || null },
+  };
   b.sending = true;
   askBubblePaintSend();
   let out;
@@ -515,7 +538,7 @@ async function askBubbleSend() {
     askBubblePaintThumbs();
     b.root.querySelector('.ask-preview').hidden = true;
   }
-  fileWsBeginRun(ws, out);
+  fileWsBeginRun(ws, out, ask);
   for (const note of out.notes || []) toast(note);
   if (askBox === b) askBubbleLoadTarget(b); // the new conversation, and this ask, in the lists
 }
@@ -536,8 +559,19 @@ function askBubblePaintRun(ws, d) {
 }
 
 // The run settled: its result in the box (or a toast when the box is
-// closed); the next ask continues the same conversation.
-function askBubbleSettled(ws, run, { status, summary, changed, undoable }) {
+// closed); the next ask continues the same conversation. Changes to
+// review: the box steps aside (its draft kept), the cursor goes to the
+// first change, and the panel under the text carries the decisions.
+function askBubbleSettled(ws, run, { status, summary, changed, undoable, reviewing }) {
+  if (reviewing) {
+    askBubbleClose({ refocus: false });
+    const editor = ws.editor;
+    const n = editor.review.summary().changes;
+    editor.review.first();
+    editor.focus();
+    toast(`${status} · ${n} change${n === 1 ? '' : 's'} to review — Alt+Y accepts, Alt+N rejects (or the buttons on each)`);
+    return;
+  }
   const b = askBox;
   if (!b || b.ws !== ws) {
     toast(status + (summary ? ' · ' + summary : '') + (undoable ? ' · Ctrl+Z in the text takes it back' : ''), null, status.startsWith('✗') ? 'err' : undefined);

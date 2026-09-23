@@ -36,6 +36,7 @@ const previewAssets = new fileMedia.PreviewAssets();
 const notebookEnv = require('./notebook-env.js');
 const fileAsk = require('./file-ask.js');
 const aiCommands = require('./ai-commands.js');
+const aiFeedback = require('./ai-feedback.js');
 const notebookDerive = require('./notebook-derive.js');
 const { agentPath } = require('./agentpath.js');
 const themesLib = require('./themes.js');
@@ -9551,6 +9552,41 @@ async function filesCreateReadmeResponse(body) {
   return { ok: true, path: abs };
 }
 
+// ---- what became of AI proposals in files ----
+// What became of AI proposals in files (ai-feedback.js): durable, next to
+// the saved file history, not in the rebuildable cache.
+const AI_FEEDBACK_FILE = path.join(os.homedir(), '.local', 'share', 'chattering', 'ai-feedback.jsonl');
+const AI_FEEDBACK_MAX_BYTES = 4 * 1024 * 1024;
+const aiFeedbackLog = new aiFeedback.FeedbackLog(AI_FEEDBACK_FILE);
+// Which prompts produced a command's answer: the command catalog as a whole
+// (its code and reply contracts) and the command's own task.
+const AI_COMMANDS_VERSION = crypto.createHash('sha256').update(fs.readFileSync(path.join(__dirname, 'ai-commands.js'))).digest('hex').slice(0, 12);
+
+// One outcome, as the page reported it, with what only the server knows:
+// who, when, the file's project, the prompt's version for a command, and
+// for an ask the agent's own final answer and its model (from the run).
+function aiFeedbackRecord(parsed, identity) {
+  const given = typeof parsed.path === 'string' ? parsed.path : '';
+  if (!given) throw Object.assign(new Error('path (the file) is required'), { status: 400 });
+  const abs = path.resolve(expandHomePath(given));
+  assertPathAccess(identity, abs, 'see');
+  const report = aiFeedback.normalizeReport(parsed);
+  const record = { v: 1, id: crypto.randomUUID(), ts: new Date().toISOString(), user: principalFor(identity).user.id, path: abs, project: projectOfPath(abs) || null, ...report };
+  if (report.kind === 'command') {
+    const command = aiCommands.commandById(report.command);
+    record.prompt = { catalog: AI_COMMANDS_VERSION, task: command ? sha256Hex(command.task).slice(0, 12) : null };
+  } else if (report.jobId) {
+    const job = agentRunJobs.get(report.jobId);
+    // Only the run this ask started: its conversation must match.
+    if (job && (!report.conversation || job.key === report.conversation)) {
+      record.answer = job.lastAssistantText ? job.lastAssistantText.slice(0, aiFeedback.TEXT_MAX) : null;
+      record.model = job.model || record.model;
+      record.run = { status: job.status, statusText: job.statusText || null, ms: job.finishedAt && job.startedAt ? job.finishedAt - job.startedAt : null };
+    }
+  }
+  return record;
+}
+
 // ---- ask for a change (design/33 §5.4; the ask box, file-ask.js) ----
 // The target of a file prompt: the newest conversation of this project that
 // touched the file in the last six hours and is free (no terminal owner, no
@@ -14055,6 +14091,7 @@ async function handleRequest(req, res) {
       '/files-browser.js': { file: 'files-browser.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.js': { file: 'live-file.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/live-file.css': { file: 'live-file.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
+      '/ai-outcomes.js': { file: 'ai-outcomes.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/ask-bubble.js': { file: 'ask-bubble.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/ask-bubble.css': { file: 'ask-bubble.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/collab-client.js': { file: 'collab-client.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
@@ -14101,6 +14138,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.16.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.16.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.17.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.17.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.18.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.18.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/chattering.apk': { file: 'chattering.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
@@ -16019,6 +16057,24 @@ async function handleRequest(req, res) {
         userId: identity && identity.user ? identity.user.id : null,
       });
       json(res, 200, { ok: true });
+    } else if (u.pathname === '/api/ai-feedback' && req.method === 'POST') {
+      // What became of an AI proposal in a file (ai-feedback.js).
+      let parsed;
+      try { parsed = JSON.parse(await readRequestText(req, AI_FEEDBACK_MAX_BYTES)); }
+      catch (e) { return json(res, e.status || 400, { error: e.status ? e.message : 'bad json' }); }
+      try {
+        const record = aiFeedbackRecord(parsed, identity);
+        aiFeedbackLog.append(record);
+        json(res, 200, { ok: true, id: record.id });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/ai-feedback' && req.method === 'GET') {
+      // A person's newest records, for an export or a look. Guests keep
+      // theirs too, but the file lives outside their walls.
+      try { assertNotGuest(identity, 'The AI feedback records'); }
+      catch (e) { return json(res, e.status || 403, { error: e.message }); }
+      const limit = Math.max(1, Math.min(1000, Number(u.searchParams.get('limit')) || 50));
+      const me = principalFor(identity).user.id;
+      json(res, 200, { file: AI_FEEDBACK_FILE, records: aiFeedbackLog.recent(limit * 4).filter(r => r.user === me).slice(-limit) });
     } else if (u.pathname === '/api/doc/complete' && req.method === 'POST') {
       // Completions for the code before the cursor in one cell, from its
       // running kernel. Empty (with the reason) when the kernel is not

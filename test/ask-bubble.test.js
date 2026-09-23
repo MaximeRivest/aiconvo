@@ -101,6 +101,62 @@ test('the ask box: over the text, what goes along, choices that stick, a send an
   assert.equal(await ev(`document.querySelector('.ask-where').textContent`), 'line 3 · notes.md');
   await ev(`document.querySelector('.ask-text').focus()`);
 
+  // Review mode (the default): the agent's change shows in the text to
+  // accept or reject; the box steps aside; the decision is recorded.
+  assert.equal(await ev(`document.querySelector('.ask-mode').textContent`), '✓ review');
+  const draft = await ev(`document.querySelector('.ask-text').value`);
+  await ev(`document.querySelector('.ask-text').value = ''`);
+  await command('Input.insertText', { text: 'rename the heading' });
+  await key('Enter', 'Enter', 13);
+  await until(`askSent.length === 2 && fileWs.run && fileWs.run.capture`, 'the second ask did not start a capture');
+  // The agent writes the file (the server's watcher is off in this harness).
+  fs.writeFileSync(path.join(b.work, 'notes.md'), DOC.replace('# Notes', '# Field notes'));
+  await ev(`fileWsRunEvent({ jobId: 'run:test', key: 'pi:fixture/media.jsonl', final: true, status: 'done' })`);
+  await until(`docState.editor.review.summary().changes === 1 && !document.querySelector('.ask-bubble')`, 'the change is not under review');
+  assert.equal(await ev(`docState.editor.view.state.readOnly`), false, 'the text is given back');
+  assert.equal(await ev(`document.querySelector('.cm-deletedChunk .cm-deletedLine').textContent`), '# Notes');
+  assert.equal(await ev(`docState.editor.view.state.selection.main.head`), 0, 'the cursor is on the first change');
+  await b.screenshot('ask-review.png');
+  await key('y', 'KeyY', 89, 1); // Alt+Y: accept
+  await until(`docState.editor.review.summary().changes === 0`, 'Alt+Y did not accept');
+  const records = async () => (await (await fetch(b.base + '/api/ai-feedback?limit=20', { headers: b.auth })).json()).records;
+  let kept;
+  for (let i = 0; i < 100 && !(kept = (await records()).find(r => r.kind === 'ask' && r.review)); i++) await new Promise(r => setTimeout(r, 30));
+  assert.ok(kept, 'the review was not recorded');
+  assert.deepEqual([kept.decision, kept.prompt, kept.review.hunks[0].before, kept.review.hunks[0].final], ['accepted', 'rename the heading', '# Notes\n', '# Field notes\n']);
+  assert.ok((await records()).some(r => r.kind === 'ask' && r.decision === 'unchanged' && r.prompt === 'make it shorter'), 'the first ask (no change) is recorded too');
+  // An AI command in review mode (the model answered by the page): its
+  // answer goes into the text; rejecting it is recorded with the answer.
+  await ev(`(() => {
+    aiCommandMode.set('review');
+    const real = window.fetch;
+    window.fetch = (url, opts) => {
+      if (String(url).endsWith('/api/doc/ai') && opts && opts.method === 'POST') {
+        const lines = [{ type: 'delta', text: 'Paragraph one' }, { type: 'done', text: 'Paragraph one says a lot.', model: 'fixture/model' }];
+        return Promise.resolve(new Response(lines.map(l => JSON.stringify(l)).join('\\n') + '\\n', { headers: { 'Content-Type': 'application/x-ndjson' } }));
+      }
+      if (String(url).endsWith('/api/doc/ai')) return Promise.resolve(new Response(JSON.stringify({ available: true, model: 'fixture/model' })));
+      return real(url, opts);
+    };
+    docState.aiStatus = { available: true, model: 'fixture/model' };
+    const v = docState.editor.view, p = v.state.doc.toString().indexOf('Paragraph 1 ');
+    v.dispatch({ selection: { anchor: p + 3 } });
+    v.focus();
+    docState.editor.runAiCommand('grammar');
+  })()`);
+  await until(`docState.editor.review.summary().changes === 1`, 'the command\u2019s answer is not under review');
+  await key('n', 'KeyN', 78, 1); // Alt+N: reject
+  await until(`docState.editor.review.summary().changes === 0 && docState.editor.getContent().includes('Paragraph 1 says little.')`, 'Alt+N did not reject');
+  let cmd;
+  for (let i = 0; i < 100 && !(cmd = (await records()).find(r => r.kind === 'command')); i++) await new Promise(r => setTimeout(r, 30));
+  assert.ok(cmd, 'the command was not recorded');
+  assert.deepEqual([cmd.command, cmd.mode, cmd.decision, cmd.answers[0].text, cmd.review.hunks[0].final], ['grammar', 'review', 'rejected', 'Paragraph one says a lot.', 'Paragraph 1 says little.\n']);
+  await ev(`aiCommandMode.set('suggest')`);
+
+  await ev(`fileWsToggleAsk(true)`);
+  await until(`document.querySelector('.ask-text')`, 'the box did not reopen');
+  await ev(`document.querySelector('.ask-text').value = ${JSON.stringify('')}`);
+
   // Esc closes and keeps the draft; Ctrl+K brings it back.
   await command('Input.insertText', { text: 'a draft' });
   await key('Escape', 'Escape', 27);

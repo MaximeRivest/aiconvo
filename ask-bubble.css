@@ -24,6 +24,10 @@
 .ask-where { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ask-head .ask-target { flex: 1 1 auto; min-width: 0; max-width: 60%; height: 22px; margin-left: auto; font: var(--fs-micro) var(--font); }
 .ask-head .ask-close { flex: 0 0 auto; height: 22px; min-height: 22px; padding: 0 6px; }
+/* How the agent's changes arrive: review (lit) or apply. */
+.ask-head .ask-mode { flex: 0 0 auto; height: 22px; min-height: 22px; padding: 0 8px; font-size: var(--fs-micro); border: 1px solid var(--border); }
+.ask-head .ask-mode[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.ask-head .ask-mode[hidden] { display: none; }
 
 .ask-history { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-micro); color: var(--text); }
 .ask-history[hidden] { display: none; }

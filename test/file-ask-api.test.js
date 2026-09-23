@@ -81,3 +81,27 @@ test('what goes along with an ask: the file, the brief with the notebook\u2019s 
   const missing = await (await post(s.base, '/api/files/ask', { path: s.doc, prompt: '  ' })).json();
   assert.match(missing.error, /write what should change/);
 });
+
+test('what became of AI proposals is kept: a command with its prompt version, an ask; each person reads their own', async t => {
+  const s = await boot(t);
+  const report = { kind: 'command', path: s.doc, mode: 'review', decision: 'rejected', command: 'grammar', label: 'Fix grammar', target: 'The mean is computed below.',
+    answers: [{ text: 'The mean is computed here.', model: 'p/m', status: 'ready' }], shown: 0, model: 'p/m',
+    review: { decision: 'rejected', how: 'reviewed', hunks: [{ before: 'a\n', proposed: 'b\n', final: 'a\n', decision: 'rejected' }], ms: 5 } };
+  const posted = await (await post(s.base, '/api/ai-feedback', report)).json();
+  assert.equal(posted.ok, true, JSON.stringify(posted));
+  const ask = await (await post(s.base, '/api/ai-feedback', { kind: 'ask', path: s.doc, mode: 'apply', decision: 'applied', prompt: 'shorter', jobId: 'run:none', diff: '@@ -1 +1 @@' })).json();
+  assert.equal(ask.ok, true);
+  assert.equal((await post(s.base, '/api/ai-feedback', { kind: 'ask', decision: 'applied' })).status, 400, 'a record names its file');
+  assert.equal((await post(s.base, '/api/ai-feedback', { kind: 'nope', path: s.doc, decision: 'applied' })).status, 400);
+
+  const got = await (await fetch(s.base + '/api/ai-feedback?limit=10')).json();
+  assert.equal(got.file, path.join(s.home, '.local', 'share', 'chattering', 'ai-feedback.jsonl'));
+  assert.equal(got.records.length, 2);
+  const [command, asked] = got.records;
+  assert.deepEqual([command.kind, command.decision, command.review.hunks[0].final, command.path, command.project], ['command', 'rejected', 'a\n', s.doc, 'analysis']);
+  assert.match(command.prompt.catalog, /^[0-9a-f]{12}$/);
+  assert.match(command.prompt.task, /^[0-9a-f]{12}$/, 'the grammar command’s own prompt');
+  assert.ok(command.user && command.ts && command.id);
+  assert.deepEqual([asked.kind, asked.prompt, asked.answer], ['ask', 'shorter', undefined], 'no such run: no answer made up');
+});
+

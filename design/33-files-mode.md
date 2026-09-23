@@ -560,3 +560,38 @@ for the next ask (`chattering.ask.v1`); "default" keeps the target's own.
 - The ask routes check the person: the file must be theirs to see / act
   on, the continued conversation theirs to act on, and the run is theirs
   (a guest runs behind the walls). Before, a guest's ask ran as the owner.
+
+## 13. Reviewing AI changes, and keeping what became of them (2026-09-23)
+
+Two ways for AI changes to arrive, chosen per box and remembered per device:
+
+- **Ctrl+K (ask box)**: "✓ review" (default) or "apply". In review mode the
+  editor's review (mrmd-document 0.19, `editor.review.capture`) captures
+  everything the run changes in the text; at settle the file reloads by the
+  smallest changes (`updateContent`), the capture ends, the box steps aside
+  and the cursor goes to the first change: old lines struck through above
+  the new ones, which stay editable, Accept / Reject on each, a panel with
+  accept all / reject all (Alt+Y, Alt+N, Alt+Shift+Y/N, Alt+] / Alt+[).
+  The agent's text is on disk meanwhile, as when applied directly (the
+  pattern of agent editors: the agent's later reads see what it wrote);
+  a reject is the person's edit (autosaved for Markdown; a code file asks
+  for Save, as code never autosaves).
+- **Ctrl+J (AI commands)**: "suggest beside it" (default, Tab accepts) or
+  "review in the text", switched in the command box; "Edit in text" moves
+  one suggestion into the text.
+
+Every outcome is one JSON line in `~/.local/share/chattering/ai-feedback.jsonl`
+(`ai-outcomes.js` in the page, `ai-feedback.js` for the record's shape,
+`POST/GET /api/ai-feedback`): for a command, the target and its
+surroundings, every answer (alternates included), the one shown, the
+decision (accepted, discarded, stopped, stale, replaced, …) and, reviewed,
+per region the text before, proposed and kept; the prompt's version (hash
+of the catalog and of the command's task). For an ask, the request, the
+switches, model and level, the agent's own final answer (from the run),
+and the diff applied or the reviewed regions. A dataset for evaluating
+models and optimizing the prompts.
+
+Limits: collaborators' edits made while an agent runs on a shared file are
+captured with the agent's (the person's own editor is read-only then); an
+ask queued into a running turn is applied, not reviewed; a review left
+open when the file closes keeps its changes and is recorded as `left`.
