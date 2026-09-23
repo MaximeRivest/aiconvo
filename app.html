@@ -6344,10 +6344,10 @@ async function renderReposTab(refresh = false) {
 // provenance ledger (design boundary in vendor/mrmd-document/README.md).
 // The vendored light MRMD bundle owns only the editing surface. Loaded
 // lazily: normal chattering startup never pays for the editor.
-const MRMD_DOC_SRC = '/vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js';
+const MRMD_DOC_SRC = '/vendor/mrmd-document/0.20.0/mrmd-document.iife.min.js';
 // A refreshed page can precede the server restart that adds the new route.
 // Keep documents usable during that window without interrupting active runs.
-const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.18.0/mrmd-document.iife.min.js';
+const MRMD_DOC_FALLBACK_SRC = '/vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js';
 let mrmdDocLoad = null;
 // Warm the HTTP cache with the editor bundle once the app is idle, so the
 // first documents page does not wait on a 1.3 MB download. Fetch only: the
@@ -6996,43 +6996,67 @@ function docCompletionService(st) {
   };
 }
 
-// ---- AI commands in documents ----
-// mrmd-document (0.17+) draws the command box (Ctrl+J, the ✦ on a code
-// cell, ⋯ → AI commands) and the suggestion beside the text; this page
-// lends the model: /api/doc/ai runs the command (ai-commands.js) on
-// Chattering's own model and streams the answer back. Accepting a
-// suggestion first saves what the person typed (theirs), then tells the
-// server what the document is about to become, so the save that writes it
-// is recorded as the AI edit — command, model, who accepted it.
-function docAiOptions(st) {
+// ---- AI commands in files ----
+// mrmd-document (0.17+; the whole-file editor since 0.20) draws the command
+// box (Ctrl+J, the ✦ beside the line, ⋯ → AI commands) and the answer
+// beside the text or in it for review; this page lends the model:
+// /api/doc/ai runs the command (ai-commands.js) on Chattering's own model
+// and streams the answer back. Which commands a file gets is its surface
+// (ai-commands.js surfaceOf: a document, a source file, plain text).
+//
+// Accepting a suggestion first saves what the person typed (theirs), then
+// tells the server what the file is about to become, so the save that
+// writes it is recorded as the AI edit — command, model, who accepted it.
+// A code file that is not shared saves only on Save: nothing is written on
+// accept; the save that writes exactly the result is the AI's, or — when
+// the person's unsaved typing went along — theirs, noting the AI's part.
+//
+// holder: the editor's state object, which keeps .aiStatus.
+// io: {path, surface, alive(), savesItself, savePending(), unsaved()} —
+//   savesItself: the file follows the text on its own (a document, or any
+//   shared file); savePending(): put the person's typing on disk now.
+function fileAiOptions(holder, io) {
   if (typeof ChatteringAiCommands === 'undefined') return undefined;
   // Known after one request; until then the server is the judge.
-  st.aiStatus = { available: true, model: '' };
+  holder.aiStatus = { available: true, model: '' };
   docGetJson('/api/doc/ai').then(r => {
-    if (docState !== st || r.error) return;
-    st.aiStatus = { available: r.available === true ? true : String(r.available || 'AI commands are off'), model: r.model || '' };
+    if (!io.alive() || r.error) return;
+    holder.aiStatus = { available: r.available === true ? true : String(r.available || 'AI commands are off'), model: r.model || '' };
   });
   return {
-    commands: ChatteringAiCommands.publicCommands(),
-    run: (request, { signal, onText }) => docAiCall(st, request, signal, onText),
-    model: () => st.aiStatus.model,
-    available: () => st.aiStatus.available,
-    beforeAccept: event => docAiBeforeAccept(st, event),
-    onAccept: () => docAiAccepted(st),
+    commands: ChatteringAiCommands.publicCommands(io.surface),
+    run: (request, { signal, onText }) => fileAiCall(io.path, request, signal, onText),
+    model: () => holder.aiStatus.model,
+    available: () => holder.aiStatus.available,
+    beforeAccept: event => fileAiBeforeAccept(io, event),
+    onAccept: () => { if (io.alive() && io.savesItself) io.savePending(); },
     // Suggest beside the text, or review in it; every command's end is
     // kept (ai-outcomes.js).
     mode: aiCommandMode,
-    onOutcome: outcome => aiCommandOutcome(st.path, outcome),
+    onOutcome: outcome => aiCommandOutcome(io.path, outcome),
     notify: message => toast(message),
     escalate: { label: 'Ask an agent', run: text => docAiEscalate(text) },
   };
 }
 
+// The Markdown editor's AI commands (docState).
+function docAiOptions(st) {
+  return fileAiOptions(st, {
+    path: st.path, surface: 'document', alive: () => docState === st, savesItself: true,
+    savePending: () => {
+      if (st.collab) return fileWsSharedSave(fileWs);
+      clearTimeout(st.saveTimer);
+      return autosaveDocument();
+    },
+    unsaved: () => !!st.dirty,
+  });
+}
+
 // One command's answer, streamed: NDJSON deltas, then done or error.
-async function docAiCall(st, request, signal, onText) {
+async function fileAiCall(path, request, signal, onText) {
   const res = await fetch('/api/doc/ai', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-    body: JSON.stringify({ doc: st.path, command: request.command, request }),
+    body: JSON.stringify({ doc: path, command: request.command, request }),
   });
   if (!/ndjson/.test(res.headers.get('content-type') || '')) {
     let r = {};
@@ -7060,25 +7084,21 @@ async function docAiCall(st, request, signal, onText) {
   return { text: done.text, model: done.model };
 }
 
-async function docAiBeforeAccept(st, event) {
-  if (docState !== st) throw new Error('the document closed');
-  // What the person typed before accepting is theirs: on disk first.
-  if (st.collab) await fileWsSharedSave(fileWs);
-  else { clearTimeout(st.saveTimer); await autosaveDocument(); }
+async function fileAiBeforeAccept(io, event) {
+  if (!io.alive()) throw new Error('the file closed');
+  // What the person typed before accepting is theirs: on disk first, when
+  // the file follows the text. Otherwise it rides along to the next Save.
+  const mixed = !io.savesItself && io.unsaved();
+  if (io.savesItself) await io.savePending();
   const after = event.result();
   if (after == null) return; // the suggestion went away meanwhile; the editor will not apply it
   // Attribution is bookkeeping: if the notice fails, the person's accept
   // still happens, and they are told the edit is recorded as theirs.
-  const r = await postJson('/api/doc/ai-accept', { doc: st.path, command: event.command, model: event.model, instruction: event.instruction, text: after });
+  const r = await postJson('/api/doc/ai-accept', {
+    doc: io.path, command: event.command, model: event.model, instruction: event.instruction, text: after,
+    ...(io.savesItself ? {} : { until: 'save', mixed }),
+  });
   if (r.error) toast('the AI edit will be saved without its AI attribution: ' + r.error, null, 'err');
-}
-
-// The suggestion is in the document: save now rather than after the
-// autosave pause, so the recorded edit is exactly the suggestion.
-function docAiAccepted(st) {
-  if (docState !== st) return;
-  if (st.collab) fileWsSharedSave(fileWs);
-  else { clearTimeout(st.saveTimer); autosaveDocument(); }
 }
 
 // A request too big for an inline suggestion: to an agent, in the file's ask box.
@@ -7532,11 +7552,6 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   if ($('docRunMenu')) $('docRunMenu').onclick = $('docRun').onclick;
   $('docRunAll').onclick = runAllDocCells;
   if ($('docVars')) $('docVars').onclick = () => toggleDocVars(st);
-  if ($('docAi')) $('docAi').onclick = e => {
-    e.currentTarget.closest('details')?.removeAttribute('open');
-    if (typeof st.editor.openAiMenu !== 'function') return toast('this editor version has no AI commands — reload the page');
-    st.editor.openAiMenu(); // says why itself when AI commands are off here
-  };
   if ($('docKernel')) $('docKernel').onclick = e => { e.stopPropagation(); e.currentTarget.closest('details')?.removeAttribute('open'); const r = e.currentTarget.getBoundingClientRect(); openDocKernelMenu(r.left, r.bottom + 4); };
   if (localStorage.getItem('chattering.docVars') === 'open' && st.editor.listCells && st.editor.listCells().length) toggleDocVars(st, true);
   if (st.editor.listCells && st.editor.listCells().length) refreshDocDoctor();
@@ -13766,7 +13781,7 @@ function noteViewer(text, pathLabel, context = null) {
       const editable = savePath && node.start != null;
       $('npane').innerHTML = `<h3>${esc(node.title)}${editable ? ' <button id="npEdit" class="ghost" title="Edit this section (heading and its own text)">edit</button> <button id="npVouch" class="ghost" title="Vouch this section: you read it and it is correct">✓ vouch section</button>' : ''}</h3>` +
         (node.body.trim() ? mdRender(node.body) : '<p style="color:var(--text-dim)">no note at this level — open the branch.</p>');
-      if (editable) $('npEdit').onclick = () => noteFileEditor(text, pathLabel, context, { start: node.start, end: node.end, title: node.title });
+      if (editable) $('npEdit').onclick = () => editNoteFile(savePath, node.start + 1);
       if (editable) $('npVouch').onclick = async () => {
         const block = text.split('\n').slice(node.start, node.end).join('\n');
         const out = await postVouch({ action: 'vouch', path: savePath, range: [node.start + 1, node.end], text: block, source: 'note-section' });
@@ -13784,7 +13799,7 @@ function noteViewer(text, pathLabel, context = null) {
     try { await copyText(text); flashCopied($('noteCopy')); }
     catch (e) { errToast(e.message); }
   };
-  if (savePath) $('noteEdit').onclick = () => noteFileEditor(text, pathLabel, context, null);
+  if (savePath) $('noteEdit').onclick = () => editNoteFile(savePath, null);
   // Trust: notes are AI-generated until a human vouches for them. The state is
   // always shown; disputed or stale content stays readable, only labeled.
   const refreshNoteTrust = async () => {
@@ -13812,33 +13827,15 @@ function noteViewer(text, pathLabel, context = null) {
 }
 
 // ---- note editor ----
-// Edits a whole markdown file, or splices one section (heading + own body)
-// back into it. Saves go to the file's native place under ~/notes/chattering.
-function noteFileEditor(text, pathLabel, context, section) {
-  const lines = text.split('\n');
-  const chunk = section ? lines.slice(section.start, section.end).join('\n') : text;
-  $('view').innerHTML =
-    `<div class="convhead"><div class="ch-title">edit ${section ? 'section · ' + esc(section.title) : 'file'}</div>
-      <div class="ch-row"><span class="ch-meta">markdown · saves to <code>${esc(pathLabel)}</code></span>
-      <button class="primary" id="noteEditSave">save</button> <button id="noteEditCancel">cancel</button></div></div>` +
-    `<textarea id="noteEditText" spellcheck="false" style="display:block;width:100%;max-width:var(--read-max);margin:0 auto;height:calc(100% - 120px);background:var(--surface-1);color:var(--text);border:1px solid var(--border);padding:16px;font:13px/1.5 var(--font);resize:none"></textarea>`;
-  $('noteEditText').value = chunk;
-  $('noteEditCancel').onclick = () => noteViewer(text, pathLabel, context);
-  $('noteEditSave').onclick = async () => {
-    const edited = $('noteEditText').value;
-    const full = section
-      ? [...lines.slice(0, section.start), ...edited.split('\n'), ...lines.slice(section.end)].join('\n')
-      : edited;
-    $('noteEditSave').disabled = true;
-    let d;
-    try {
-      d = await (await fetch('/api/notefile/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: pathLabel, text: full }) })).json();
-    } catch { d = { error: 'network failure' }; }
-    if (d.error) { $('noteEditSave').disabled = false; return errToast('save failed: ' + d.error); }
-    toast('saved · ' + pathLabel.split('/').pop());
-    noteViewer(full, pathLabel, context);
-  };
+// A note (distilled note, epic, project memory) is edited in the file
+// editor like any Markdown file: history, AI commands, the ask box, review.
+// `line`: where to put the cursor (a section's heading). Back returns here.
+async function editNoteFile(notePath, line) {
+  let info;
+  try { info = await (await fetch('/api/path/info?' + new URLSearchParams({ id: '', path: notePath }))).json(); }
+  catch { info = { error: 'could not find the note' }; }
+  if (info.error || !info.path) return errToast(info.error || 'could not find the note');
+  openLiveFile(info.path, { back: currentHash, line: line || null });
 }
 
 // ---- conversation tree (design: root at the top, y axis is time) ----

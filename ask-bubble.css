@@ -14,6 +14,7 @@
 .ask-bubble[data-place="below"] .ask-compose::before {
   content: ""; position: absolute; left: 22px; width: 10px; height: 10px; background: var(--surface-1);
   border: solid var(--border-strong); transform: rotate(45deg);
+  border-radius: 0; /* a pointer: a rotated square, not a surface */
 }
 .ask-bubble[data-place="above"] .ask-compose::after { bottom: -6px; border-width: 0 1px 1px 0; }
 .ask-bubble[data-place="below"] .ask-compose::before { top: -6px; border-width: 1px 0 0 1px; }

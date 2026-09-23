@@ -129,7 +129,7 @@ test('only known commands on the document they name; stopping frees the call', a
   const mismatch = grammarRequest(s.doc);
   mismatch.request.target.text = 'something else';
   assert.match((await (await post(s.base, '/api/doc/ai', mismatch)).json()).error, /does not match/);
-  assert.match((await (await post(s.base, '/api/doc/ai', { ...grammarRequest(path.join(s.home, 'nope.md')) })).json()).error, /doc/);
+  assert.match((await (await post(s.base, '/api/doc/ai', { ...grammarRequest(path.join(s.home, 'nope.md')) })).json()).error, /not found/);
   const huge = await post(s.base, '/api/doc/ai-accept', { doc: s.doc, command: 'grammar', text: 'x'.repeat(17 * 1024 * 1024) });
   assert.equal(huge.status, 413);
 
@@ -147,3 +147,31 @@ test('only known commands on the document they name; stopping frees the call', a
   const events = await ndjson(await post(s.base, '/api/doc/ai', grammarRequest(s.doc)));
   assert.equal(events.at(-1).type, 'done', 'stopped calls did not keep their slots');
 });
+
+test('source files: their own commands and prompt; an accepted edit saved later is the AI\u2019s, or the person\u2019s when their typing went along', async t => {
+  const s = await boot(t);
+  const file = path.join(path.dirname(s.doc), 'calc.py');
+  const CODE = 'def add(a, b):\n    return a + b\n';
+  fs.writeFileSync(file, CODE);
+  const target = { from: 0, to: CODE.length - 1, text: CODE.slice(0, -1) };
+  const request = command => ({ doc: file, command, request: { command, scope: 'code', instruction: '', target, block: { type: 'code', language: 'python', text: target.text }, document: CODE } });
+
+  assert.match((await (await post(s.base, '/api/doc/ai', request('markdown'))).json()).error, /kind of file/);
+  s.pi.answer('def add(a: int, b: int) -> int:\n    return a + b');
+  const events = await ndjson(await post(s.base, '/api/doc/ai', request('types')));
+  assert.equal(events.at(-1).type, 'done', JSON.stringify(events.at(-1)));
+  assert.match(s.pi.calls().at(-1).args.at(-1), /^You are editing part of a python file/);
+
+  const edits = () => fs.readFileSync(path.join(s.home, 'notes', 'chattering', 'doc-edits.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  // Accepted with nothing unsaved; saved later with Save: the AI's edit.
+  const after = 'def add(a: int, b: int) -> int:\n    return a + b\n';
+  assert.equal((await (await post(s.base, '/api/doc/ai-accept', { doc: file, command: 'types', model: 'fake/fake-1', text: after, until: 'save', mixed: false })).json()).ok, true);
+  assert.equal((await (await post(s.base, '/api/file/save', { path: file, text: after })).json()).ok, true);
+  assert.deepEqual([edits().at(-1).actor, edits().at(-1).input, edits().at(-1).ai.command, edits().at(-1).ai.mixed], ['ai', 'ai-edit', 'types', undefined]);
+  // Accepted over unsaved typing: the save stays the person's, with the AI's part noted.
+  const typed = after + '\n# mine\n';
+  await post(s.base, '/api/doc/ai-accept', { doc: file, command: 'comments', model: 'fake/fake-1', text: typed, until: 'save', mixed: true });
+  await post(s.base, '/api/file/save', { path: file, text: typed });
+  assert.deepEqual([edits().at(-1).actor, edits().at(-1).ai.command, edits().at(-1).ai.mixed], ['human', 'comments', true]);
+});
+

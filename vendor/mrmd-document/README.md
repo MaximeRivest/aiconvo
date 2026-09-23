@@ -11,7 +11,14 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.19.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.20.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.20.0: AI commands in the whole-file editor (`createCodeEditor({ai:
+  {…, scope, language}})`): the box, the ✦, suggest or review, outcomes,
+  keyHelp. Without a selection a command acts on the outermost syntax
+  construct at the cursor that fits 12 000 characters (comments above it
+  included; a one-line construct gives way to the lines up to blank lines);
+  in plain text (`scope: 'prose'`), the paragraph. Chattering passes the
+  file's surface (ai-commands.js `surfaceOf`) and its language name.
 - 0.19.0: reviewing changes in the text, in both editors (`editor.review`,
   document-review.js on @codemirror/merge): a proposal (`review.propose`,
   or everything during `review.capture` — Chattering captures an ask's run)
@@ -158,15 +165,15 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `bb19e8c` ("review: first() …", after `008438a` "document entry 0.19.0").
-- SHA-256: `b2d667b43e525a5e5e4a11f14587ac6aabb904adcfe509d2b96d80c00836bc3e`
+- Source commit: `b5bc97b` (review fixes, after `423657d` "document entry 0.20.0").
+- SHA-256: `0465a24ce72d9dc6b1588e56d4d4d035abe6d0f60a142709d7550791c00fbeb6`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.18.0 (everything but reviews: an ask's changes are applied directly and
-  AI commands only suggest). Keep that artifact and route while the fallback
-  exists. 0.17.0, 0.16.1 and 0.15.0 are no longer loaded; delete their
-  folders and routes once 0.19.0 has run for a few days.
+  0.19.0 (everything but AI commands in non-Markdown files: they keep the ask
+  box and reviews). Keep that artifact and route while the fallback exists.
+  0.18.0 and older are no longer loaded; delete their folders and routes
+  once 0.20.0 has run for a few days.
 
 ## Features enabled in chattering
 

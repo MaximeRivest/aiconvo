@@ -56,7 +56,8 @@ function liveFileHead(ws) {
       <button id="liveAskMenu" class="lf-narrow">✦ Ask for a change (Ctrl+K)</button>
       ${md ? '<button id="docRunMenu" class="lf-narrow">▶ Run this cell</button>' : ''}
       ${ws.project ? '<button id="liveBrowse">Browse this folder</button>' : ''}
-      ${md ? '<button id="docRunAll">Run all cells</button><button id="docAi">AI commands (Ctrl+J)</button><button id="docVars">Variables</button><button id="docKernel">Kernel: restart, clear, shut down…</button><button id="docSource">Markdown source</button><button id="docUnwrap" hidden>Unwrap prose</button>' : ''}
+      <button id="liveAi">✦ AI commands (Ctrl+J)</button>
+      ${md ? '<button id="docRunAll">Run all cells</button><button id="docVars">Variables</button><button id="docKernel">Kernel: restart, clear, shut down…</button><button id="docSource">Markdown source</button><button id="docUnwrap" hidden>Unwrap prose</button>' : ''}
       <span id="liveAnnotationStatus">Gutter: changes and line attribution</span>
       <button id="liveKeys">Keyboard shortcuts (Ctrl+?)</button>
     </div></details>
@@ -177,6 +178,12 @@ function liveFileAfterMount(ws) {
   if ($('liveBrowse')) $('liveBrowse').onclick = () => liveFileBrowseFolder(ws);
   // The help follows the view: it lists this file's keys, the editor's own included.
   $('liveKeys').onclick = e => { e.currentTarget.closest('details')?.removeAttribute('open'); toggleHelpOverlay(); };
+  // AI commands, in any text file whose editor has them (it says why not).
+  $('liveAi').onclick = e => {
+    e.currentTarget.closest('details')?.removeAttribute('open');
+    if (typeof ws.editor.openAiMenu !== 'function') return toast('this editor version has no AI commands — reload the page');
+    ws.editor.openAiMenu();
+  };
   const editor = ws.editor;
   if (editor.view?.dom) editor.view.dom.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); fileWsToggleAsk(true); }

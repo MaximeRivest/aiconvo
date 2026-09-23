@@ -595,3 +595,33 @@ Limits: collaborators' edits made while an agent runs on a shared file are
 captured with the agent's (the person's own editor is read-only then); an
 ask queued into a running turn is applied, not reviewed; a review left
 open when the file closes keeps its changes and is recorded as `left`.
+
+## 14. The same AI surface in every text file (2026-09-23)
+
+Every text file the workspace opens now has what Markdown documents have:
+Ctrl+J commands with the ✦ beside the line, suggest or review, "Edit in
+text", the outcome records, the key help, and (already) the ask box and
+review of an ask's changes. mrmd-document 0.20.0 gives the whole-file
+editor the `ai` option.
+
+- Surfaces (ai-commands.js `surfaceOf`): a Markdown `document`; a `source`
+  file (code, config) with the code commands — "Finish this block"
+  (`code-block`) instead of the cell's; plain `text` (.txt, .rst, .tex,
+  .org, .adoc, README/LICENSE without extension…) with the prose commands.
+  The server refuses a command on a file of another surface; the prompt
+  says what the file is ("part of a python file").
+- In a source file a command without a selection acts on the outermost
+  syntax construct at the cursor that fits 12 000 characters, with the
+  comments right above it; in plain text, the paragraph.
+- Provenance for code: a shared file saves as you type, as documents do.
+  One that is not shared saves only on Save: accepting writes nothing; the
+  save that writes exactly the result (within the hour) is recorded as the
+  AI's edit — or, when the person's unsaved typing went along, as theirs
+  with the AI's part noted (`ai.mixed`). /api/file/save now records AI
+  edits in the edit log like /api/doc/save (`claimAiEdit`).
+- Notes, epics and project memory (Markdown under ~/notes/chattering) open
+  in the file editor ("edit file", a section's "edit" at its line) instead
+  of the bare textarea, which bypassed history, AI and review. The
+  workspace accepts them (`editableFilePath`, `isNotesDocument`); the old
+  /api/notefile/save route is gone. The distill "review the note" box is
+  a draft that is not a file yet and stays as it is.

@@ -13,15 +13,52 @@ const request = (over = {}) => ({
   document: DOC, ...over,
 });
 
-test('the page gets labels and targets, never the prompts', () => {
-  const shown = A.publicCommands();
-  assert.equal(shown.length, A.COMMANDS.length);
-  for (const c of shown) {
-    assert.equal('task' in c || 'thinking' in c, false, c.id);
-    for (const k of ['id', 'label', 'scope', 'target', 'kind']) assert.ok(c[k], c.id + ' ' + k);
+test('the page gets labels and targets, never the prompts; each kind of file its own commands', () => {
+  const all = new Set();
+  for (const surface of A.SURFACES) {
+    const shown = A.publicCommands(surface);
+    for (const c of shown) {
+      assert.equal('task' in c || 'thinking' in c || 'surfaces' in c, false, c.id);
+      for (const k of ['id', 'label', 'scope', 'target', 'kind']) assert.ok(c[k], c.id + ' ' + k);
+      all.add(c.id);
+    }
+    assert.equal(shown.filter(c => c.instruction).length, 1, surface + ': one command takes an instruction');
+    assert.equal(new Set(shown.map(c => c.id)).size, shown.length, 'ids are unique');
   }
-  assert.equal(shown.filter(c => c.instruction).length, 1, 'one command takes an instruction');
-  assert.equal(new Set(shown.map(c => c.id)).size, shown.length, 'ids are unique');
+  assert.equal(all.size, A.COMMANDS.length, 'every command is on some surface');
+  const ids = surface => A.publicCommands(surface).map(c => c.id);
+  assert.ok(!ids('source').some(id => ['grammar', 'markdown', 'code-cell'].includes(id)), 'no prose or cell commands in a source file');
+  assert.ok(ids('source').includes('code-block'));
+  assert.ok(!ids('text').some(id => A.commandById(id).scope === 'code'), 'plain text gets prose commands');
+  assert.ok(!ids('text').includes('markdown'));
+});
+
+test('a file’s surface: the Markdown family, plain prose, or source', () => {
+  const cases = { 'a/b.md': 'document', 'x.MDX': 'document', 'notes.txt': 'text', 'README': 'text', 'docs/guide.rst': 'text',
+    'LICENSE': 'text', 'main.py': 'source', 'config.yaml': 'source', 'Makefile': 'source', 'README.py': 'source' };
+  for (const [file, surface] of Object.entries(cases)) assert.equal(A.surfaceOf(file), surface, file);
+  // One Markdown family for the server's documents, the file view and the commands.
+  const fs = require('node:fs'), path = require('node:path');
+  const root = path.join(__dirname, '..');
+  const family = src => src.match(/\(([a-z|]+)\)\$\/i/)[1];
+  const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8').match(/const DOCUMENT_EXT = (\/.*\/i);/)[1];
+  const files = fs.readFileSync(path.join(root, 'filesmode.js'), 'utf8').match(/const MD_EXT = (\/.*\/i);/)[1];
+  const mine = fs.readFileSync(path.join(root, 'ai-commands.js'), 'utf8').match(/const DOCUMENT_EXT = (\/.*\/i);/)[1];
+  assert.equal(family(server), family(mine));
+  assert.equal(family(files), family(mine));
+});
+
+test('a command on a file of another surface is refused; the prompt names the kind of file', () => {
+  const code = 'def f(a):\n    return a\n';
+  const req = { command: 'comments', request: { document: code, target: { from: 0, to: code.length - 1, text: code.slice(0, -1) }, scope: 'code', block: { language: 'python', text: code } } };
+  assert.match(A.validateRequest({ ...req, command: 'markdown', request: { ...req.request, scope: 'prose' } }, 'source').error, /kind of file/);
+  const ok = A.validateRequest(req, 'source');
+  assert.equal(ok.error, undefined);
+  const { prompt } = A.buildPrompt(ok.command, ok.request, { path: '/p/f.py', nonce: 'abcdef012345' });
+  assert.match(prompt, /^You are editing part of a python file for the person who wrote it\. The attached file holds the file/);
+  const text = A.validateRequest({ command: 'grammar', request: { document: 'Their here.', target: { from: 0, to: 11, text: 'Their here.' }, scope: 'prose', block: { text: 'Their here.' } } }, 'text');
+  assert.match(A.buildPrompt(text.command, text.request, { nonce: 'abcdef012345' }).prompt, /part of a plain-text file/);
+  assert.match(A.buildPrompt(text.command, { ...text.request, surface: 'document' }, { nonce: 'abcdef012345' }).prompt, /part of a Markdown document/);
 });
 
 test('requests are checked against the document they claim to come from', () => {

@@ -10601,6 +10601,9 @@ async function editableFilePath(pathValue, key = '') {
   // Snippet files are user-owned prompt text; they open in the editor even
   // when no repository or conversation covers their folder.
   if (snippetsLib.isSnippetPath(abs)) return abs;
+  // Chattering's own Markdown — distilled notes, epics, project memory —
+  // opens in the file editor like any document (history, AI, review).
+  if (isNotesDocument(abs)) return abs;
   for (const entry of Object.values(index)) if (inside(entry.cwd)) return abs;
   const repos = await discoverGitRepos();
   if (repos.some(repo => inside(repo.root))) return abs;
@@ -10809,6 +10812,8 @@ async function fileSaveResponse(body, user = null) {
   }
   let oldText = '', oldState = 'present';
   try { oldText = await fsp.readFile(abs, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; oldState = 'deleted'; }
+  let aiEdit = null;
+  if (oldText !== text) ({ body, ai: aiEdit } = claimAiEdit(abs, text, body));
   let historyWarning = observeFileHistory(abs, { text: oldText, state: oldState, source: 'before editor save' });
   const archiveFrom = fileArchive?.latestId(abs);
   await writeFileAtomic(abs, text);
@@ -10817,6 +10822,8 @@ async function fileSaveResponse(body, user = null) {
   if (oldText !== text) {
     const delta = docLineDelta(oldText, text);
     ledgerRecordEditorSave(abs, { added: delta.added, removed: delta.removed, chars: docCharDelta(oldText, text), sha: sha256Hex(text), actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard', archiveFrom, archiveTo, user: body.actor === 'ai' ? null : user });
+    // The edit log keeps the AI's part of a save: command, model, who accepted it.
+    if (aiEdit) await recordDocEdit({ ts: Date.now(), path: abs, action: 'save', actor: body.actor === 'ai' ? 'ai' : 'human', input: body.input || 'keyboard', added: delta.added, removed: delta.removed, sha: sha256Hex(text), user: user && body.actor !== 'ai' ? user.id : undefined, ai: aiEdit });
     if (!body.actor || body.actor === 'human' || ['ai', 'external-agent'].includes(body.actor)) {
       const actor = ['ai', 'external-agent'].includes(body.actor) ? 'agent' : 'human';
       recentFilesTouch(abs, { project: String(body.project || ''), kind: actor === 'human' ? 'saved' : 'edited', actor });
@@ -10850,17 +10857,37 @@ const DOC_INPUTS = new Set(['keyboard', 'voice', 'pen', 'paste', 'ai-edit', 'fil
 // accepted it), whichever path saves first. Typing again before that save
 // changes the text, and the save is then, truthfully, a person's.
 const AI_ACCEPT_TTL_MS = 60 * 1000;
+const AI_ACCEPT_UNTIL_SAVE_MS = 60 * 60 * 1000;
 const pendingAiEdits = new Map(); // abs path → {sha, command, model, instruction, userId, at}
 function registerAiEdit(abs, entry) {
   const now = Date.now();
-  for (const [key, e] of pendingAiEdits) if (now - e.at > AI_ACCEPT_TTL_MS) pendingAiEdits.delete(key);
+  for (const [key, e] of pendingAiEdits) if (now - e.at > (e.ttlMs || AI_ACCEPT_TTL_MS)) pendingAiEdits.delete(key);
   pendingAiEdits.set(abs, { ...entry, at: now });
 }
 function takeAiEdit(abs, sha) {
   const e = pendingAiEdits.get(abs);
-  if (!e || e.sha !== sha || Date.now() - e.at > AI_ACCEPT_TTL_MS) return null;
+  if (!e || e.sha !== sha || Date.now() - e.at > (e.ttlMs || AI_ACCEPT_TTL_MS)) return null;
   pendingAiEdits.delete(abs);
   return e;
+}
+// A save that writes exactly an accepted AI suggestion is that edit. When
+// the person's own unsaved typing went along (`mixed`: a code file saved
+// only on Save), the save stays theirs and notes the AI's part. Returns the
+// save's body (actor, input) and the edit log's `ai` field, or null.
+function claimAiEdit(abs, text, body) {
+  const edit = takeAiEdit(abs, sha256Hex(text));
+  if (!edit) return { body, ai: null };
+  const ai = { command: edit.command, model: edit.model, instruction: edit.instruction || undefined, acceptedBy: edit.userId || undefined, ...(edit.mixed ? { mixed: true } : {}) };
+  return { body: edit.mixed ? body : { ...body, actor: 'ai', input: 'ai-edit' }, ai };
+}
+
+// The file an AI command acts on: an editable text file (a project's, a
+// note's) the person may act on. Refused otherwise, with the status to send.
+async function aiCommandFile(p, identity) {
+  if (typeof p !== 'string' || !p) throw Object.assign(new Error('doc (the file) is required'), { status: 400 });
+  const abs = await editableFilePath(p).catch(e => { throw Object.assign(e, { status: 400 }); });
+  assertPathAccess(identity, abs, 'act');
+  return abs;
 }
 
 // Whether AI commands are open to this person: the reason when not.
@@ -10939,9 +10966,8 @@ async function docSaveResponse(body, user = null) {
   if (baseSha && sha256Hex(oldText) !== baseSha) throw new Error('the file changed on disk after you loaded it');
   let historyWarning = '';
   if (oldText !== text) {
-    // A save that writes exactly an accepted AI suggestion is that edit.
-    const aiEdit = takeAiEdit(abs, sha256Hex(text));
-    if (aiEdit) body = { ...body, actor: 'ai', input: 'ai-edit' };
+    let aiEdit;
+    ({ body, ai: aiEdit } = claimAiEdit(abs, text, body));
     historyWarning = observeFileHistory(abs, { text: oldText, source: 'before Markdown save' });
     const archiveFrom = fileArchive?.latestId(abs);
     await writeFileAtomic(abs, text);
@@ -10953,7 +10979,7 @@ async function docSaveResponse(body, user = null) {
       input: DOC_INPUTS.has(body.input) ? body.input : 'keyboard',
       added: delta.added, removed: delta.removed, sha: sha256Hex(text),
       user: user && body.actor !== 'ai' ? user.id : undefined,
-      ...(aiEdit ? { ai: { command: aiEdit.command, model: aiEdit.model, instruction: aiEdit.instruction || undefined, acceptedBy: aiEdit.userId || undefined } } : {}),
+      ...(aiEdit ? { ai: aiEdit } : {}),
     });
     // The 24h activity index (code tree badges) hears about editor saves
     // directly — no dependency on a watcher being attached yet.
@@ -11091,14 +11117,9 @@ async function docAssetResponse(docPath, src) {
 }
 
 // Notes, epics, and project-memory documents are markdown under NOTES_DIR.
-async function noteFileSaveResponse(body) {
-  const { path: p, text } = body;
-  if (typeof text !== 'string') throw new Error('missing text');
-  const abs = path.resolve(expandHomePath(p || ''));
-  if (!abs.endsWith('.md') || !abs.startsWith(NOTES_DIR + path.sep)) throw new Error('only markdown files under ~/notes/chattering are editable here');
-  await fsp.stat(abs); // the file must already exist: this edits, it does not create
-  await writeFileAtomic(abs, text);
-  return { ok: true, path: abs };
+// A Markdown file under ~/notes/chattering (notes, epics, project memory).
+function isNotesDocument(abs) {
+  return abs.startsWith(NOTES_DIR + path.sep) && /\.md$/i.test(abs);
 }
 
 // ---- trust: the vouch ledger ----
@@ -14139,6 +14160,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.17.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.17.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.18.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.18.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.19.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.20.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.20.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/chattering.apk': { file: 'chattering.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
@@ -14680,11 +14702,6 @@ async function handleRequest(req, res) {
         res.writeHead(200, { 'Content-Type': out.mime, 'Cache-Control': 'no-store' });
         return res.end(out.bytes);
       } catch (e) { json(res, 404, { error: e.message }); }
-    } else if (u.pathname === '/api/notefile/save' && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      try { json(res, 200, await noteFileSaveResponse(JSON.parse(body || '{}'))); }
-      catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/vouch' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -16002,8 +16019,9 @@ async function handleRequest(req, res) {
       // commands are open to this person.
       json(res, 200, { available: aiCommandsRefusal(identity) || true, model: currentModelLabel() });
     } else if (u.pathname === '/api/doc/ai' && req.method === 'POST') {
-      // Run one AI command (ai-commands.js) on a document's text: a
-      // no-session, tool-less call to Chattering's model, streamed back as
+      // Run one AI command (ai-commands.js) on a text file's text (a
+      // document, a source file, plain text — the file's surface decides
+      // which commands apply): a no-session, tool-less call to Chattering's model, streamed back as
       // NDJSON — {type:'delta', text} while it writes, then {type:'done',
       // text, model} or {type:'error', message}. Closing the request stops
       // the call.
@@ -16012,10 +16030,9 @@ async function handleRequest(req, res) {
       let parsed;
       try { parsed = JSON.parse(await readRequestText(req, AI_REQUEST_MAX_BYTES)); }
       catch (e) { return json(res, e.status || 400, { error: e.status ? e.message : 'bad json' }); }
-      const abs = notebookPath(parsed.doc);
-      if (!abs || !DOCUMENT_EXT.test(abs)) return json(res, 400, { error: 'doc (a Markdown document path) is required' });
-      try { assertPathAccess(identity, abs, 'act'); } catch (e) { return json(res, e.status || 403, { error: e.message }); }
-      const checked = aiCommands.validateRequest(parsed);
+      let abs;
+      try { abs = await aiCommandFile(parsed.doc, identity); } catch (e) { return json(res, e.status || 400, { error: e.message }); }
+      const checked = aiCommands.validateRequest(parsed, aiCommands.surfaceOf(abs));
       if (checked.error) return json(res, 400, { error: checked.error });
       const who = docRunOwner(identity);
       if ((aiCallsRunning.get(who) || 0) >= AI_CALLS_PER_PERSON) return json(res, 429, { error: 'three AI commands are already running — wait for one to finish' });
@@ -16040,21 +16057,24 @@ async function handleRequest(req, res) {
         if (!res.writableEnded) res.end();
       }
     } else if (u.pathname === '/api/doc/ai-accept' && req.method === 'POST') {
-      // An AI suggestion is about to be applied: remember what the document
+      // An AI suggestion is about to be applied: remember what the file
       // will then be, so the save that writes it records the AI edit (see
       // registerAiEdit). Only a fingerprint of the text is kept.
       let parsed;
       try { parsed = JSON.parse(await readRequestText(req, DOC_TEXT_MAX_BYTES)); }
       catch (e) { return json(res, e.status || 400, { error: e.status ? e.message : 'bad json' }); }
-      const abs = notebookPath(parsed.doc);
-      if (!abs || !DOCUMENT_EXT.test(abs)) return json(res, 400, { error: 'doc (a Markdown document path) is required' });
-      try { assertPathAccess(identity, abs, 'act'); } catch (e) { return json(res, e.status || 403, { error: e.message }); }
+      let abs;
+      try { abs = await aiCommandFile(parsed.doc, identity); } catch (e) { return json(res, e.status || 400, { error: e.message }); }
       const command = aiCommands.commandById(parsed.command);
       if (!command || typeof parsed.text !== 'string') return json(res, 400, { error: 'command and text are required' });
       registerAiEdit(abs, {
         sha: sha256Hex(parsed.text), command: command.id,
         model: String(parsed.model || '').slice(0, 200), instruction: String(parsed.instruction || '').slice(0, aiCommands.LIMITS.instruction),
         userId: identity && identity.user ? identity.user.id : null,
+        // An editor that saves only on Save (a code file not shared) may
+        // write it much later; its unsaved typing, if any, goes along.
+        ttlMs: parsed.until === 'save' ? AI_ACCEPT_UNTIL_SAVE_MS : AI_ACCEPT_TTL_MS,
+        mixed: parsed.mixed === true,
       });
       json(res, 200, { ok: true });
     } else if (u.pathname === '/api/ai-feedback' && req.method === 'POST') {

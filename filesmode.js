@@ -293,6 +293,21 @@ async function fileWsMountMarkdown(ws, opts) {
   fileWsAfterMount(ws, opts);
 }
 
+// The whole-file editor's AI commands (app.html fileAiOptions). A shared
+// file follows the text on its own; one that is not saves only on Save.
+function fileWsAiOptions(ws) {
+  if (typeof fileAiOptions !== 'function' || typeof ChatteringAiCommands === 'undefined') return undefined;
+  const surface = ChatteringAiCommands.surfaceOf(ws.path);
+  const options = fileAiOptions(ws, {
+    path: ws.path, surface,
+    alive: () => fileWs === ws && !!ws.editor,
+    get savesItself() { return !!ws.collab; },
+    savePending: () => fileWsSharedSave(ws),
+    unsaved: () => !!ws.dirty,
+  });
+  return options && { ...options, scope: surface === 'text' ? 'prose' : 'code', language: liveLanguage(ws.path) };
+}
+
 // ---- write mode: code (CodeMirror from the same vendored bundle) ----
 // The header stays whatever happens to the file, so Back always works.
 function fileWsOpenFailed(ws, label, detail = '') {
@@ -354,6 +369,10 @@ async function fileWsMountCode(ws, opts) {
     onLineHover: line => liveFileHover(ws, line),
     onNavigateLocation: location => liveFileNavigate(ws, location),
     onLineHoverEnd: () => { if (ws.live) { ws.live.hover++; ws.live.hoverController?.abort(); } },
+    // AI commands (Ctrl+J) for a source or plain-text file: its surface
+    // decides the commands and how a block is found; a read-only file has
+    // none (the editor refuses).
+    ai: fileWsAiOptions(ws),
     // Changes proposed in the text (an ask in review mode): each decision
     // is kept. Code never autosaves: a rejected change is on disk until Save.
     review: {
@@ -376,7 +395,7 @@ async function fileWsMountCode(ws, opts) {
     ws.readOnly = true;
     try { ws.editor.setReadonly(true); } catch {}
     $('fwSave').hidden = true;
-    for (const id of ['liveAsk', 'liveAskMenu']) if ($(id)) $(id).hidden = true;
+    for (const id of ['liveAsk', 'liveAskMenu', 'liveAi']) if ($(id)) $(id).hidden = true;
     status('Read-only · ' + d.why);
     fileWsAfterMount(ws, opts);
     return;
