@@ -11,7 +11,21 @@ owns the editing surface.
 
 ## Current artifact
 
-- Version: 0.15.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- Version: 0.16.0 (entry `src/document-entry.js`, global `mrmdDocument`)
+- 0.16.0: one rat adapter. `mrmdDocument.ratNotebook` (src/rat-notebook.js,
+  plain functions, also vendored by the VS Code extension) is what a run on
+  rat means: output cleaning, plot markers, the result format, which result
+  a cell owns, matching another client's run to its cell, following `rat
+  events`. `mrmdDocument.createNotebookRunner(editor, {transport, runnable,
+  hooks})` runs cells the same way in every host: status, live panel with
+  plots, prompts, the result under the cell where it is now (never over
+  code edited during the run), run all, and other clients' runs (drawn on
+  their cell, kept with a note, not saved; Stop interrupts the kernel).
+  Result format: program output only, a fence longer than any backtick run
+  inside (was: such lines indented), plots as `![plot](…/_assets/generated/
+  <hash>.png)` after the block; a result owns only images a run made, so a
+  person's image under it survives a rerun. `setCellOutput(cell, text,
+  {images})`. The live panel gains `appendImage`, `finish`, a no-dim mode.
 - 0.15.0: cell controls. With `onRunCell`, every runnable cell (the host's
   `runnableLanguages`; default any named language but output and diagrams)
   carries a `▶ Run` button at the right of its fence row, and the host
@@ -101,14 +115,14 @@ owns the editing surface.
   app.html); every value is a `var()` reference into tokens.css, so the
   editor follows light, dark, custom, and binary e-ink themes.
 - Source: `/home/maxime/Projects/mrmd-packages/mrmd-editor`
-- Source commit: `41fd0fa` ("document entry 0.15.0").
-- SHA-256: `b43ff37a10c8ea8cfe34fbc116157c7266cbf5a181c0831a2d5cb75b6d310b61`
+- Source commit: `a2c5d4b` (0.16.0 is `d0c433e` plus the interrupt(cell) fix).
+- SHA-256: `5b9ee0df658c61b0c84266669d61e0f9a32006519f3d7fc74f1539879c144140`
 - License: MIT (see `0.13.0/LICENSE`)
 - Deployment: restart the server **after active runs finish**, then reload
   clients. Until the new static route is available, the loader falls back to
-  0.14.0 (documents open and cells stream; cells have no Run button or
-  on-cell state — Mod-Enter and the run strip still work). Keep that
-  artifact and route while the fallback exists.
+  0.15.0 (documents open, cells run with Run buttons and status through
+  app.html's `legacyRunDocCell`; no plots, no other clients' runs). Keep
+  that artifact, its route and `legacyRunDocCell` while the fallback exists.
 
 ## Features enabled in chattering
 
@@ -129,6 +143,9 @@ owns the editing surface.
   `refreshDiagrams()` after a theme change
 - `file-link-navigate` — links inside the document open in the file
   workspace (filesmode.js `fileWsWireDocLinks`)
+- `createNotebookRunner` — every cell run (app.html `createDocRunner`: the
+  transport over /api/doc/run-cell, run-input, cancel-run, kernel, plot,
+  plots; other clients' runs from /api/doc/follow on the tab's event stream)
 - cell controls (`runnableLanguages`, `onCancelCell`, `run.setStatus`,
   `clearCellStatuses`) — Run/Stop on each cell and its run state
   (app.html `runDocCell`, `runAllDocCells`, `cancelDocCell`)

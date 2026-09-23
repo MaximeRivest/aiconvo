@@ -304,3 +304,111 @@ test('the notebook kernel: state, variables, clear, restart, shut down', { skip:
   assert.equal(stop.kernel.running, false);
   assert.match((await post('/api/doc/kernel', { doc: nb, op: 'explode' })).error, /op must be/);
 });
+
+// Following a notebook's kernel on the tab's event stream, and plots.
+const ratFollows = haveRat && /Follow what happens/.test(String(spawnSync(ratBin, ['--help'], { encoding: 'utf8' }).stdout || ''));
+
+async function openLive(base) {
+  const ctrl = new AbortController();
+  const res = await fetch(base + '/api/events', { signal: ctrl.signal });
+  const reader = res.body.getReader(), dec = new TextDecoder(), events = [];
+  let buf = '', conn = null;
+  const pump = (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i); buf = buf.slice(i + 2);
+          const data = block.split('\n').filter(l => l.startsWith('data: ')).map(l => l.slice(6)).join('\n');
+          if (!data) continue;
+          const d = JSON.parse(data);
+          if (d.type === 'hello') conn = d.conn;
+          events.push(d);
+        }
+      }
+    } catch {}
+  })();
+  for (let i = 0; i < 100 && !conn; i++) await new Promise(r => setTimeout(r, 50));
+  return { conn, events, close: () => { ctrl.abort(); return pump; } };
+}
+const waitFor = async (cond, what, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (cond()) return; await new Promise(r => setTimeout(r, 100)); } assert.fail(what); };
+
+test('a tab follows its notebook kernel: other clients\u2019 runs arrive, named, as they happen', { skip: !ratFollows && 'this rat has no `rat events`' }, async t => {
+  const { post, base, home } = await bootServer(t, { RAT_NOTEBOOK_REQUIREMENTS: '' });
+  const { repo, nb } = makeProject();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const warm = await post('/api/doc/run-cell', { lang: 'py', code: 'x = 1', doc: nb, runId: 'w' });
+  assert.equal(warm.code, 0, warm.out);
+
+  const live = await openLive(base);
+  t.after(() => live.close());
+  assert.ok(live.conn, 'no hello on the event stream');
+  assert.match((await post('/api/doc/follow', { doc: nb, conn: 'not-mine', langs: ['python'] })).error, /no such event stream/);
+  const follow = await post('/api/doc/follow', { doc: nb, conn: live.conn, langs: ['python', 'py'] });
+  assert.ok(follow.kernels, JSON.stringify(follow));
+  assert.equal(follow.kernels.length, 1, JSON.stringify(follow));
+  await new Promise(r => setTimeout(r, 1200));
+
+  // An agent runs code in the same kernel from a terminal.
+  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), XDG_CACHE_HOME: path.join(home, '.cache'), XDG_DATA_HOME: path.join(home, '.local', 'share'), XDG_STATE_HOME: path.join(home, '.local', 'state'), RAT_CALLER: "Lilly's agent" };
+  const agent = spawnSync(ratBin, ['run', '--doc', nb, 'py', 'import time\nprint("agent step", flush=True)\ntime.sleep(0.4)\nprint("agent done")'], { env, encoding: 'utf8' });
+  assert.equal(agent.status, 0, agent.stderr);
+  const kev = () => live.events.filter(e => e.type === 'kernel-event').map(e => e.event);
+  await waitFor(() => kev().some(e => e.event === 'run_ended' && e.caller === "Lilly's agent"), 'the agent\u2019s run never reached the tab');
+  const started = kev().find(e => e.event === 'run_started' && e.caller === "Lilly's agent");
+  assert.match(started.code, /agent step/);
+  const text = kev().filter(e => e.run_id === started.run_id && e.event === 'run_output').map(e => e.text).join('') + kev().find(e => e.event === 'run_ended' && e.run_id === started.run_id).output;
+  assert.match(text, /agent step/);
+
+  // The page's own streamed run says its rat run id, and carries the person's name.
+  const res = await fetch(base + '/api/doc/run-cell', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lang: 'py', code: 'print("mine")', doc: nb, runId: 'own', stream: true }) });
+  const lines = (await res.text()).trim().split('\n').map(l => JSON.parse(l));
+  const own = lines.find(l => l.type === 'started');
+  assert.ok(own && own.ratRunId, JSON.stringify(lines));
+  await waitFor(() => kev().some(e => e.event === 'run_started' && e.run_id === own.ratRunId), 'own run not on the stream');
+  assert.match(kev().find(e => e.run_id === own.ratRunId).caller, /\(Chattering\)$/);
+
+  // Stop on another client's run: a kernel-wide interrupt.
+  const slow = spawnSync(ratBin, ['run', '--doc', nb, 'py', 'pass'], { env, encoding: 'utf8' });
+  assert.equal(slow.status, 0);
+  assert.equal((await post('/api/doc/kernel', { doc: nb, op: 'cancel' })).ok, true);
+
+  assert.equal((await post('/api/doc/follow', { doc: null, conn: live.conn })).ok, true);
+});
+
+test('plots: shown from rat\u2019s plot folder only, kept in the project by content', { skip: !haveRat && 'rat is not installed' }, async t => {
+  const { post, base, home } = await bootServer(t, { RAT_NOTEBOOK_REQUIREMENTS: '' });
+  // Inside home: the page shows document images from home only, so plots
+  // are kept only for projects there.
+  const repo = path.join(home, 'Projects', 'thing');
+  fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: repo });
+  fs.writeFileSync(path.join(repo, 'pyproject.toml'), '[project]\nname = "thing"\nversion = "0"\n');
+  const nb = path.join(repo, 'docs', 'guide.md');
+  fs.writeFileSync(nb, '# Guide\n');
+  const outside = makeProject();
+  t.after(() => fs.rmSync(outside.repo, { recursive: true, force: true }));
+  assert.match((await post('/api/doc/plots', { doc: outside.nb, paths: [] })).error, /outside home/);
+  const plotDir = path.join(home, '.cache', 'rat', 'plots');
+  fs.mkdirSync(plotDir, { recursive: true });
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const fig = path.join(plotDir, 'fig-1-0.png');
+  fs.writeFileSync(fig, png);
+  fs.writeFileSync(path.join(plotDir, 'fig-1-1.png'), png);
+
+  const shown = await fetch(base + '/api/doc/plot?path=' + encodeURIComponent(fig));
+  assert.equal(shown.headers.get('content-type'), 'image/png');
+  for (const bad of [path.join(repo, 'pyproject.toml'), path.join(plotDir, '..', '..', 'x.png'), '/etc/passwd'])
+    assert.equal((await fetch(base + '/api/doc/plot?path=' + encodeURIComponent(bad))).status, 404, bad);
+
+  const saved = await post('/api/doc/plots', { doc: nb, paths: [fig, path.join(plotDir, 'fig-1-1.png')] });
+  assert.ok(saved.images, JSON.stringify(saved));
+  assert.equal(saved.images.length, 2, JSON.stringify(saved));
+  assert.equal(saved.images[0].src, saved.images[1].src, 'the same plot is one file');
+  assert.match(saved.images[0].src, /^\.\.\/_assets\/generated\/[0-9a-f]{12}\.png$/);
+  assert.ok(fs.readFileSync(path.join(path.dirname(nb), saved.images[0].src)).equals(png));
+  assert.match((await post('/api/doc/plots', { doc: nb, paths: ['/etc/hostname'] })).error, /not a plot/);
+});

@@ -441,6 +441,50 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
   const afterStream = await evaluate(`docState.editor.getContent()`);
   assert.match(afterStream, /\x60\x60\x60output\nOpen https:\/\/accounts.example\/device\nsigned in\n\x60\x60\x60/);
   assert.doesNotMatch(afterStream, /s3cret/);
+  // Plots from this page's own run: shown while it runs, kept in the
+  // project, linked after the output (rat and the server mocked).
+  await evaluate(`(() => {
+    window.runStream = null; window.plotSaves = [];
+    window.fetch = (url, opts) => {
+      const u = String(url);
+      if (u.includes('/api/doc/plots')) { plotSaves.push(JSON.parse(opts.body)); return Promise.resolve(new Response(JSON.stringify({ images: [{ src: '../_assets/generated/abc123def456.png', alt: 'plot' }] }))); }
+      if (u.includes('/api/doc/run-cell')) return Promise.resolve(new Response(new ReadableStream({ start(c) { window.runStream = c; } }), { headers: { 'Content-Type': 'application/x-ndjson' } }));
+      return liveOriginalFetch(url, opts);
+    };
+    document.querySelector('.mrmd-cell-btn-run').click();
+  })()`);
+  await until(`!!window.runStream`, 'the plot run was not made');
+  await evaluate(`(() => { emit({ type: 'started', ratRunId: 'rat-own-1' }); emit({ type: 'output', text: 'drawing\\n__RAT_PLOT__:/c/rat/plots/fig-9-0.png\\n' }); })()`);
+  await until(`(document.querySelector('.mrmd-cell-run-images img')?.getAttribute('src') || '').startsWith('/api/doc/plot?path=')`, 'the plot did not show while running');
+  await evaluate(`(() => { emit({ type: 'done', code: 0, out: 'drawing\\n__RAT_PLOT__:/c/rat/plots/fig-9-0.png\\n\\n\u2713 0.2s | 3 vars', runtime: 'py', ms: 200 }); runStream.close(); })()`);
+  await until(`!docState.running && docState.editor.getContent().includes('abc123def456.png')`, 'the plot was not linked in the document');
+  assert.deepEqual(await evaluate(`plotSaves.map(p => p.paths)`), [['/c/rat/plots/fig-9-0.png']]);
+  assert.match(await evaluate(`docState.editor.getContent()`), /\x60\x60\x60output\ndrawing\n\x60\x60\x60\n\n!\[plot\]\(\.\.\/_assets\/generated\/abc123def456\.png\)/);
+  // Another client's run, followed on this tab's event stream: drawn on its
+  // cell, with a Stop that interrupts the kernel; not written.
+  await evaluate(`(() => {
+    window.kernelCalls = [];
+    window.fetch = (url, opts) => {
+      if (String(url).includes('/api/doc/kernel') && opts && opts.method === 'POST') { kernelCalls.push(JSON.parse(opts.body)); return Promise.resolve(new Response(JSON.stringify({ ok: true }))); }
+      return liveOriginalFetch(url, opts);
+    };
+    docState.followKernels = ['py@work'];
+    window.kev = event => live.onmessage({ data: JSON.stringify({ type: 'kernel-event', kernel: 'py@work', event }) });
+    kev({ event: 'run_started', run_id: 'agent-7', caller: "Lilly's agent", code: '40 + 2', ts: Date.now() - 2000 });
+    kev({ event: 'run_output', run_id: 'agent-7', text: 'thinking\\n' });
+    kev({ event: 'run_started', run_id: 'rat-own-1', caller: 'x', code: '40 + 2' });
+  })()`);
+  await until(`/^Lilly's agent · running · [23]s■ Stop$/.test(document.querySelector('.mrmd-cell-toolbar').textContent)`, 'the agent\u2019s run is not on its cell');
+  await evaluate(`document.querySelector('.mrmd-cell-btn-stop').click()`);
+  await until(`kernelCalls.length === 1`, 'Stop did not interrupt the kernel');
+  assert.deepEqual(await evaluate(`kernelCalls[0]`), { doc: await evaluate(`docState.path`), lang: 'python', op: 'cancel' });
+  const beforeAgentEnd = await evaluate(`docState.editor.getContent()`);
+  await evaluate(`kev({ event: 'run_ended', run_id: 'agent-7', ok: false, duration_ms: 2100, output: '', error: 'thinking\\nKeyboardInterrupt' })`);
+  await until(`/^\u2717 Lilly's agent · 2\\.1s▶ Run$/.test(document.querySelector('.mrmd-cell-toolbar').textContent)`, 'the agent\u2019s verdict is not on its cell');
+  assert.match(await evaluate(`document.querySelector('.mrmd-cell-run-footer').textContent`), /Lilly's agent’s run — shown here, not saved/);
+  assert.equal(await evaluate(`docState.editor.getContent()`), beforeAgentEnd, 'another client\u2019s run was written into the document');
+  fs.writeFileSync(path.join(os.tmpdir(), 'notebook-other-run.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, sid)).result.data, 'base64'));
+  await evaluate(`document.querySelector('.mrmd-cell-run-close').click()`);
   // The kernel: the variables drawer and the kernel menu (rat mocked).
   await evaluate(`(() => {
     window.kernelOps = []; window.confirm = () => true;

@@ -2721,7 +2721,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
       const engine = customMessage || principal.sandbox ? pisdk : piEng();
       if (author && engine !== pisdk) recordAuthorship(key, author, { via: 'rpc', chars: String(message || '').length, input, coauthors });
       if (modelNote) { job.statusText = modelNote; jobChanged(job); }
-      const handle = engine.piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(principal), ...sessionEnv }, sessionEnv, extraArgs, sandbox: principal.sandbox || undefined }, { provider, modelId, message, images, customMessage, author, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
+      const handle = engine.piHeadlessRun({ sessionPath, cwd, env: { ...agentEnv(principal), ...agentCallerEnv(principal), ...sessionEnv }, sessionEnv, extraArgs, sandbox: principal.sandbox || undefined }, { provider, modelId, message, images, customMessage, author, simplifyAnswers: appSettings.simplifyAnswers && !owner && !customMessage, simplifyPrompt: appSettings.simplifyPrompt, onEvent: runEventForwarder(job) });
       appliedContextBySession.set(path.resolve(sessionPath), { sig: nextCtxSig, hash: bundleHash });
       record.handle = handle;
       await handle.done;
@@ -2789,7 +2789,7 @@ async function resumeDelegationFromHost(id, spec) {
   const key = delegationSessionKey(file);
   if (key && findRunningConversation(key)) throw new Error('A terminal owns this conversation. Close it before the worker continues.');
   assertNotGuest(currentIdentity(), 'Resuming a delegated worker');
-  const task = await delegationLib.resumeDelegation(id, spec, { root: DELEGATION_ROOT, env: agentEnv() });
+  const task = await delegationLib.resumeDelegation(id, spec, { root: DELEGATION_ROOT, env: { ...agentEnv(), ...agentCallerEnv(null) } });
   await delegationCoordinator.forget(id);
   await delegationCoordinator.refresh();
   return task;
@@ -4324,7 +4324,7 @@ async function guestSandboxFor(user, project) {
   fs.mkdirSync(mainSessionDir, { recursive: true });
   if (!sessionBinds.some(b => b.src === mainSessionDir)) sessionBinds.push({ src: mainSessionDir, dst: mainSessionDir, rw: true });
   const piPkg = (() => { try { return require('./pisdk-runtime.js').piPackageDir(); } catch { return null; } })();
-  const env = sandboxLib.sandboxEnv({ principalEnv: { CHATTERING_USER: user.id, CHATTERING_USER_NAME: user.name, CHATTERING_PORT: String(PORT) }, guest: user, agentDir: insideAgentDir, piPackageDir: piPkg, token: guestApiTokenFor(user),
+  const env = sandboxLib.sandboxEnv({ principalEnv: { CHATTERING_USER: user.id, CHATTERING_USER_NAME: user.name, CHATTERING_PORT: String(PORT), RAT_CALLER: user.name + '\u2019s agent' }, guest: user, agentDir: insideAgentDir, piPackageDir: piPkg, token: guestApiTokenFor(user),
     extra: { PATH: agentPath(process.env.PATH), PI_CLAUDE_CODE_TRANSPORT: 'api', PI_CLAUDE_CODE_BASE_URL: proxyUrl + '/claude-code', CHATTERING_GUEST_PROJECT: project, ...(hostFacts.claudeVersion ? { CLAUDE_CODE_VERSION: hostFacts.claudeVersion } : {}) } });
   const cgroup = await guestCgroupFor(user);
   const sb = sandboxLib.createSandbox({ id: 'guest:' + user.id + ':' + projectRoot, bwrap: BWRAP, home: os.homedir(), projectRoot, guest: { id: user.id, name: user.name },
@@ -12247,7 +12247,7 @@ async function startProjectConversation(options) {
     const principal = guestPrincipal || options.principal || principalFor(null);
     const engine = principal.sandbox ? pisdk : piEng();
     const walls = principal.sandbox ? { sandbox: principal.sandbox, sessionDir: principal.sandbox.sessionDir } : {};
-    const begun = await engine.piBeginWarm({ cwd, env: agentEnv(principal), extraArgs: ['--name', label, ...piProviderExtraArgs(), ...piCtxArgs], ...walls });
+    const begun = await engine.piBeginWarm({ cwd, env: { ...agentEnv(principal), ...agentCallerEnv(principal) }, extraArgs: ['--name', label, ...piProviderExtraArgs(), ...piCtxArgs], ...walls });
     // Pi reports sessionFile before it writes. The first prompt creates the file.
     const job = {
       id: 'run:' + crypto.randomUUID().slice(0, 8),
@@ -12338,6 +12338,64 @@ const TTS_DIR = path.join(CACHE_DIR, 'tts');
 // Document cell runs in flight, keyed by client runId — the cancel
 // endpoint interrupts the kernel and ends the matching subprocess.
 const activeDocRuns = new Map();
+// Kernel followers: `rat events --json` per (person, kernel), fanned out
+// to the event streams of that person's tabs that follow it.
+const docFollowers = new Map();   // key → {child, conns:Set, kernel}
+const docFollowsByConn = new Map(); // conn → Set(key)
+async function docFollowAttach(conn, owner, kernel, doc, runtime) {
+  const key = owner + '|' + kernel;
+  let f = docFollowers.get(key);
+  if (!f) {
+    f = { conns: new Set(), kernel, child: null, restarts: 0 };
+    docFollowers.set(key, f);
+    const start = async () => {
+      if (!f.conns.size || docFollowers.get(key) !== f) return;
+      let child;
+      try { child = await ratSpawn(['events', '--doc', doc, runtime, '--json'], { cwd: path.dirname(doc) }); }
+      catch { child = null; }
+      if (!child) return;
+      f.child = child;
+      let buf = '';
+      child.stdout.on('data', d => {
+        buf += d;
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i); buf = buf.slice(i + 1);
+          if (!line.trim()) continue;
+          let ev;
+          try { ev = JSON.parse(line); } catch { continue; }
+          if (ev.event === 'look_called') continue; // the drawers' own looks: noise
+          const msg = 'data: ' + JSON.stringify({ type: 'kernel-event', kernel, event: ev }) + '\n\n';
+          for (const c of f.conns) { const client = sseByConn.get(c); if (client) { try { client.res.write(msg); } catch {} } }
+        }
+      });
+      child.stderr.on('data', () => {});
+      child.on('close', () => {
+        if (f.child === child) f.child = null;
+        // rat events follows stops and restarts itself; it ends only if
+        // killed or broken. Start it again while someone follows.
+        if (f.conns.size && docFollowers.get(key) === f && f.restarts++ < 20) setTimeout(start, 1000);
+      });
+    };
+    f.start = start;
+  }
+  f.conns.add(conn);
+  if (!docFollowsByConn.has(conn)) docFollowsByConn.set(conn, new Set());
+  docFollowsByConn.get(conn).add(key);
+  if (!f.child) await f.start();
+}
+function docFollowDetach(conn) {
+  const keys = docFollowsByConn.get(conn);
+  if (!keys) return;
+  docFollowsByConn.delete(conn);
+  for (const key of keys) {
+    const f = docFollowers.get(key);
+    if (!f) continue;
+    f.conns.delete(conn);
+    if (!f.conns.size) { docFollowers.delete(key); try { f.child && f.child.kill('SIGTERM'); } catch {} }
+  }
+}
+
 // Who started a run (an input answer must come from the same person).
 const docRunOwner = identity => (identity && identity.user && identity.user.id) || 'owner';
 
@@ -12365,13 +12423,13 @@ const RAT_MISSING = 'rat is not installed on this server (or not on its PATH). I
 // receives the process so a caller can register it for cancellation.
 // Start one rat command as the current principal (a guest's runs go
 // through their sandbox). Returns the child, or null when rat is missing.
-async function ratSpawn(args, { cwd } = {}) {
+async function ratSpawn(args, { cwd, env = null } = {}) {
   const rat = ratBinary();
   if (!rat.path) return null;
   const principal = await currentPrincipal(cwd ? projectOfPath(cwd) : null);
   assertPrincipalCanRun(principal, 'a notebook cell');
   const launched = principal.sandbox ? principal.sandbox.launch(rat.path, args, { cwd }) : { file: rat.path, args, env: process.env };
-  const child = spawn(launched.file, launched.args, { cwd: principal.sandbox ? undefined : (cwd || os.homedir()), env: launched.env });
+  const child = spawn(launched.file, launched.args, { cwd: principal.sandbox ? undefined : (cwd || os.homedir()), env: env ? { ...launched.env, ...env } : launched.env });
   if (principal.guest) { child.guestId = principal.user.id; guestChildren.add(child); child.on('close', () => guestChildren.delete(child)); }
   return child;
 }
@@ -12403,9 +12461,17 @@ function ratSpeaksEvents() {
   try { key = fs.realpathSync(rat.path); } catch { return false; }
   if (ratEventsProbe.key !== key) {
     const help = spawnSync(key, ['run', '--help'], { encoding: 'utf8', timeout: 10000 });
-    ratEventsProbe = { key, ok: /--events\b/.test(String(help.stdout || '') + String(help.stderr || '')) };
+    const follow = spawnSync(key, ['events', '--help'], { encoding: 'utf8', timeout: 10000 });
+    ratEventsProbe = { key, ok: /--events\b/.test(String(help.stdout || '') + String(help.stderr || '')),
+      follows: follow.status === 0 && /Follow a kernel/.test(String(follow.stdout || '')) };
   }
   return ratEventsProbe.ok;
+}
+// Can this rat follow a kernel (`rat events`)? An older one cannot; the
+// page then shows only its own runs.
+function ratFollowsKernels() {
+  ratSpeaksEvents();
+  return !!ratEventsProbe.follows;
 }
 
 // A streamed notebook run: `rat run --events`, relayed to the page as
@@ -12417,9 +12483,10 @@ function ratSpeaksEvents() {
 // rat's stdin is closed, so a later prompt is cancelled rather than left
 // waiting on nobody — the run itself continues to its end.
 const DOC_RUN_LIVE_CAP = 2000000; // live output relayed per run
-async function streamDocRun(res, { doc, runtime, code, runId, owner }) {
+async function streamDocRun(res, { doc, runtime, code, runId, owner, callerName }) {
   const t0 = Date.now();
-  const child = await ratSpawn(['run', '--events', '--timeout', '0', '--doc', doc, runtime, code], { cwd: path.dirname(doc) });
+  // RAT_CALLER: the name every other follower of the kernel sees on this run.
+  const child = await ratSpawn(['run', '--events', '--timeout', '0', '--doc', doc, runtime, code], { cwd: path.dirname(doc), env: { RAT_CALLER: callerName } });
   if (!child) return json(res, 200, { out: RAT_MISSING, code: -1, missing: true, runtime, ms: 0 });
   const entry = { child, runtime, doc, cancelled: false, owner, streamed: true, waiting: false };
   activeDocRuns.set(runId, entry);
@@ -12429,7 +12496,8 @@ async function streamDocRun(res, { doc, runtime, code, runId, owner }) {
   res.on('close', () => { if (!finished) { try { child.stdin.end(); } catch {} } });
   child.stdin.on('error', () => {});
   const onEvent = ev => {
-    if (ev.event === 'output' && typeof ev.text === 'string') {
+    if (ev.event === 'started' && ev.run_id) send({ type: 'started', ratRunId: String(ev.run_id) });
+    else if (ev.event === 'output' && typeof ev.text === 'string') {
       if (live.length < DOC_RUN_LIVE_CAP) { live += ev.text; send({ type: 'output', text: ev.text }); }
       else if (!liveCapped) { liveCapped = true; send({ type: 'output', text: '\n… (live output stops here; the run continues)\n' }); }
     } else if (ev.event === 'input_request') {
@@ -12481,6 +12549,37 @@ async function docKernelState(doc, runtime) {
     idle_seconds: row.idle_seconds ?? null, memory_mb: row.memory_mb ?? null, runtime_version: row.runtime_version || null,
   };
 }
+// The name a kernel's other followers see on runs made for this person:
+// "Maxime (Chattering)" for a cell run from the page, "Maxime's agent"
+// for an agent's code (RAT_CALLER, see `rat events --help`).
+function ratCallerName(identity, via) {
+  const name = (identity && identity.user && identity.user.name) || usersLib.publicUser(usersLib.ownerOf(roster)).name || 'Someone';
+  return via === 'agent' ? name + '\u2019s agent' : name + ' (' + via + ')';
+}
+function agentCallerEnv(principal) {
+  return { RAT_CALLER: ratCallerName(principal ? { user: principal.user } : null, 'agent') };
+}
+
+// ---- plots made by rat kernels ----
+// rat saves a figure shown with plt.show() under its cache and prints
+// "__RAT_PLOT__:<path>". While a cell runs the page shows it from there;
+// when the cell's result is written, the plot is copied into the project
+// (<project>/_assets/generated/<content hash>.png) and the document links
+// it — the format is mrmd's rat-notebook. Only files in rat's plot folder
+// are ever read by these routes.
+function ratPlotDir() {
+  return path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'rat', 'plots');
+}
+async function ratPlotFile(p) {
+  const abs = await fsp.realpath(String(p || '')).catch(() => null);
+  const dir = await fsp.realpath(ratPlotDir()).catch(() => null);
+  if (!abs || !dir || !abs.startsWith(dir + path.sep) || path.extname(abs).toLowerCase() !== '.png') {
+    const e = new Error('not a plot made by a rat kernel on this machine'); e.status = 404; throw e;
+  }
+  return abs;
+}
+const GENERATED_ASSETS_DIR = '_assets/generated';
+
 // Is a streamed or one-shot cell of this notebook running right now?
 const docHasActiveRun = doc => [...activeDocRuns.values()].some(e => e.doc === doc);
 
@@ -13577,6 +13676,7 @@ async function handleRequest(req, res) {
       '/vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.13.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.14.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.15.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.15.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
+      '/vendor/mrmd-document/0.16.0/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.16.0/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js': { file: 'vendor/mrmd-document/0.10.1/mrmd-document.iife.min.js', type: 'text/javascript; charset=utf-8', cache: 'public, max-age=86400' },
       '/chattering.apk': { file: 'chattering.apk', type: 'application/vnd.android.package-archive', cache: 'no-store', compress: false },
     }[u.pathname];
@@ -15323,7 +15423,7 @@ async function handleRequest(req, res) {
       if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
       const runIdIn = String(parsed.runId || '') || ('run-' + Date.now());
       if (parsed.stream && ratSpeaksEvents()) {
-        try { return await streamDocRun(res, { doc, runtime, code, runId: runIdIn, owner: docRunOwner(identity) }); }
+        try { return await streamDocRun(res, { doc, runtime, code, runId: runIdIn, owner: docRunOwner(identity), callerName: ratCallerName(identity, 'Chattering') }); }
         catch (e) { if (!res.headersSent) return json(res, e.status || 403, { error: e.message }); return; }
       }
       const t0run = Date.now();
@@ -15415,6 +15515,77 @@ async function handleRequest(req, res) {
         if (at) return json(res, 200, { kernel, running: true, at, text: r.out.replace(/\s+$/, '') });
         json(res, 200, { kernel, running: true, ...notebookEnv.parseLookOverview(r.out) });
       } catch (e) { json(res, e.status || 403, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/plot' && req.method === 'GET') {
+      // A plot a kernel just made, shown while its cell runs.
+      try {
+        const abs = await ratPlotFile(u.searchParams.get('path'));
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=3600' });
+        return res.end(await fsp.readFile(abs));
+      } catch (e) { return json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/plots' && req.method === 'POST') {
+      // Keep a run's plots with the project: copy each into
+      // <project>/_assets/generated/<sha256 12>.png (same plot, same file)
+      // and answer the paths the document links, relative to it.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const doc = notebookPath(parsed.doc);
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const runtime = RAT_LANGS[String(parsed.lang || 'py').toLowerCase()] || 'py';
+      const paths = Array.isArray(parsed.paths) ? parsed.paths.slice(0, 50) : [];
+      try {
+        assertPathAccess(identity, doc, 'act');
+        const resolved = ratJson((await ratExec(['resolve', '--doc', doc, runtime, '--json'], { cwd: path.dirname(doc), timeoutMs: 20000 })).out);
+        const root = resolved && resolved.cwd ? resolved.cwd : path.dirname(doc);
+        const dir = path.join(root, GENERATED_ASSETS_DIR);
+        if (!(dir + path.sep).startsWith(os.homedir() + path.sep)) throw Object.assign(new Error('the project is outside home'), { status: 403 });
+        assertPathAccess(identity, dir, 'act');
+        await fsp.mkdir(dir, { recursive: true });
+        const images = [];
+        for (const p of paths) {
+          const bytes = await fsp.readFile(await ratPlotFile(p));
+          const name = crypto.createHash('sha256').update(bytes).digest('hex').slice(0, 12) + '.png';
+          const dest = path.join(dir, name);
+          if (!fs.existsSync(dest)) await fsp.writeFile(dest, bytes);
+          images.push({ src: path.relative(path.dirname(doc), dest).split(path.sep).join('/'), alt: 'plot' });
+        }
+        json(res, 200, { images });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/follow' && req.method === 'POST') {
+      // Follow a notebook's kernels on this tab's event stream: every run
+      // from every client (agents, terminals, other tabs) as it happens,
+      // through `rat events`. One follower per person and kernel, shared by
+      // their tabs. A tab follows one notebook at a time; {doc: null}
+      // stops. Events ride the stream the tab already has — a browser
+      // allows six such connections per site across all tabs.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const conn = String(parsed.conn || '');
+      const client = sseByConn.get(conn);
+      if (!client || docRunOwner(client.identity) !== docRunOwner(identity)) return json(res, 404, { error: 'no such event stream for you' });
+      if (!parsed.doc) { docFollowDetach(conn); return json(res, 200, { ok: true, kernels: [] }); }
+      const doc = notebookPath(parsed.doc);
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      if (!ratBinary().path) return json(res, 200, { ratMissing: true, kernels: [] });
+      if (!ratFollowsKernels()) return json(res, 200, { unsupported: 'this rat cannot follow kernels (rat events); update rat', kernels: [] });
+      try {
+        // act, not see: a kernel's activity includes code and output from
+        // terminals and agents beyond this document; running cells gives
+        // the same reach.
+        assertPathAccess(identity, doc, 'act');
+        const runtimes = [...new Set((Array.isArray(parsed.langs) ? parsed.langs : ['py']).map(l => RAT_LANGS[String(l).toLowerCase()]).filter(Boolean))].slice(0, 6);
+        const kernels = [];
+        for (const runtime of runtimes) {
+          const resolved = ratJson((await ratExec(['resolve', '--doc', doc, runtime, '--json'], { cwd: path.dirname(doc), timeoutMs: 20000 })).out);
+          if (resolved && resolved.name) kernels.push({ name: resolved.name, runtime });
+        }
+        docFollowDetach(conn);
+        for (const k of kernels) await docFollowAttach(conn, docRunOwner(identity), k.name, doc, k.runtime);
+        json(res, 200, { ok: true, kernels: kernels.map(k => k.name) });
+      } catch (e) { json(res, e.status || 403, { error: e.message }); }
     } else if (u.pathname === '/api/doc/kernel' && req.method === 'POST') {
       // Restart (fresh process), reset (clear the namespace) or stop (shut
       // down) the notebook's kernel. The kernel is shared: every notebook,
@@ -15430,9 +15601,11 @@ async function handleRequest(req, res) {
       const runtime = RAT_LANGS[String(parsed.lang || 'py').toLowerCase()];
       if (!runtime) return json(res, 400, { error: 'no rat runtime for that language' });
       const op = String(parsed.op || '');
-      if (!['restart', 'reset', 'stop'].includes(op)) return json(res, 400, { error: 'op must be restart, reset or stop' });
+      if (!['restart', 'reset', 'stop', 'cancel'].includes(op)) return json(res, 400, { error: 'op must be restart, reset, stop or cancel' });
       if (op === 'reset' && docHasActiveRun(doc)) return json(res, 409, { error: 'a cell is running — stop it before clearing the variables' });
       try {
+        // cancel: interrupt whatever runs on the kernel (Stop on a cell
+        // another client runs); the kernel keeps its variables.
         const r = await ratExec([op, '--doc', doc, runtime], { cwd: path.dirname(doc), timeoutMs: op === 'restart' ? 120000 : 30000 });
         const kernel = await docKernelState(doc, runtime);
         json(res, 200, { ok: r.code === 0, op, out: r.out.trim().slice(-2000), kernel });
@@ -15602,7 +15775,7 @@ async function handleRequest(req, res) {
       // and the page uses this beat to notice a stream that died quietly
       // (a phone that slept, a network that changed) and reconnect.
       const beat = setInterval(() => { try { res.write('event: ping\ndata: {}\n\n'); } catch {} }, 25000);
-      req.on('close', () => { clearInterval(beat); sseClients.delete(res); sseByConn.delete(conn); if (presence.remove(conn)) broadcastPresence(); });
+      req.on('close', () => { clearInterval(beat); sseClients.delete(res); sseByConn.delete(conn); docFollowDetach(conn); if (presence.remove(conn)) broadcastPresence(); });
     } else if (u.pathname.startsWith('/api/records/') && req.method === 'GET') {
       // The agent-facing read API: same text the CLI and the Pi tools print.
       // Failures are plain text too, so a shell or a tool call reads them as is.
