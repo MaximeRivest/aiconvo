@@ -1193,6 +1193,43 @@ function tailnetName() {
   return name;
 }
 
+// The artifacts of one conversation (design/67), computed when it is indexed,
+// so every list of artifacts is kept current by the same watcher as the
+// conversations themselves: no scan. Only calls that succeeded count.
+// Files: one entry per path (the newest declaration names it). Widgets: one
+// per call. Paths are absolute, resolved against the conversation's folder.
+const ARTIFACT_INDEX_V = 1;
+// Bumped whenever an entry is re-derived: the conversation list's ETag must
+// change when an entry's fields do, even if its file did not (a re-index
+// after an upgrade adds fields to unchanged files).
+let indexRevision = 0;
+// Artifact tools shipped on this day: older files cannot hold any, so they
+// are never re-read just to learn that.
+const ARTIFACTS_SINCE = Date.parse('2026-09-23T00:00:00Z');
+const artifactsStale = (cur, stat) => cur.av !== ARTIFACT_INDEX_V && stat.mtimeMs >= ARTIFACTS_SINCE;
+function artifactsOfMessages(messages, cwd) {
+  const failed = new Set(), done = new Set();
+  for (const m of messages) if (m.role === 'toolresult' && m.tid) (m.err ? failed : done).add(m.tid);
+  const files = new Map(), widgets = [];
+  for (const m of messages) {
+    if (m.role !== 'tool' || !m.artifact || !m.id || failed.has(m.id) || !done.has(m.id)) continue;
+    const a = m.artifact;
+    if (a.kind === 'widget') {
+      widgets.push({ widget: true, title: a.title || 'Widget', eid: m.eid, call: m.id, ts: m.ts || null });
+      continue;
+    }
+    if (typeof a.path !== 'string' || !a.path) continue;
+    const expanded = expandHomePath(a.path);
+    const abs = path.isAbsolute(expanded) ? path.resolve(expanded) : cwd ? path.resolve(cwd, expanded) : null;
+    if (!abs) continue;
+    const prev = files.get(abs);
+    files.set(abs, { path: abs, title: a.title || (prev && prev.title) || path.basename(abs), type: a.type && a.type !== 'auto' ? a.type : (prev && prev.type) || 'auto',
+      eid: m.eid, call: m.id, first: (prev && prev.first) || m.ts || null, ts: m.ts || null, n: ((prev && prev.n) || 0) + 1 });
+  }
+  const out = [...files.values(), ...widgets];
+  return out.length ? out.slice(-200) : undefined;
+}
+
 async function indexFile(source, relPath, stat) {
   const key = source + ':' + relPath;
   const absPath = path.join(SOURCES[source], relPath);
@@ -1268,10 +1305,13 @@ async function indexFile(source, relPath, stat) {
       // What was said last, for the side list's second line (design/59).
       last: lastMessageSummary(messages),
       assistantCount: messages.filter(m => m.role === 'assistant').length,
+      artifacts: artifactsOfMessages(messages, meta.cwd),
+      av: ARTIFACT_INDEX_V,
       densityChat: densityProfile(messages, meta.firstTs, meta.lastTs, false),
       densityAll: densityProfile(messages, meta.firstTs, meta.lastTs, true),
     };
     index[key] = entry;
+    indexRevision++;
     scheduleProjectFoldRefresh(meta.cwd);
     await writeFileAtomic(cachePathFor(key), JSON.stringify({ key, relPath, ...entry, messages, entryParents }));
     // Local transcript tools have explicit paths and completion results.
@@ -1349,7 +1389,7 @@ async function fullScan() {
       let stat;
       try { stat = await fsp.stat(path.join(baseDir, relPath)); } catch { continue; }
       const cur = index[key];
-      if (!cur || cur.v !== CACHE_VERSION || cur.mtimeMs !== stat.mtimeMs || cur.size !== stat.size) {
+      if (!cur || cur.v !== CACHE_VERSION || cur.mtimeMs !== stat.mtimeMs || cur.size !== stat.size || artifactsStale(cur, stat)) {
         await indexFile(source, relPath, stat);
         n++;
       }
@@ -1421,7 +1461,7 @@ function reindexIfChanged(key) {
     try { stat = await fsp.stat(path.join(baseDir, relPath)); }
     catch (e) { if (e.code === 'ENOENT') dropIndexed(key); else console.error('reindex stat failed:', key, e.message); return; }
     const cur = index[key];
-    if (cur && cur.v === CACHE_VERSION && cur.mtimeMs === stat.mtimeMs && cur.size === stat.size) return;
+    if (cur && cur.v === CACHE_VERSION && cur.mtimeMs === stat.mtimeMs && cur.size === stat.size && !artifactsStale(cur, stat)) return;
     const t0 = Date.now();
     await indexFile(source, relPath, stat);
     parseCostMs.set(key, Date.now() - t0);
@@ -15009,7 +15049,7 @@ async function handleRequest(req, res) {
       }
       // The rules and the person are part of the list's identity: a
       // sharing change must not answer 304 with the old list.
-      const etag = '"' + n + '-' + last + '-' + mt + '-' + (identity.user ? identity.user.id : '') + '-' + accessRulesVersion + '"';
+      const etag = '"' + n + '-' + last + '-' + mt + '-' + (identity.user ? identity.user.id : '') + '-' + accessRulesVersion + '-' + BOOT_ID + '.' + indexRevision + '"';
       if (req.headers['if-none-match'] === etag) {
         res.writeHead(304, { ETag: etag });
         return res.end();

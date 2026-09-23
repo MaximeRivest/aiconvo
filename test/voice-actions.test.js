@@ -138,3 +138,38 @@ test('the new commands are in the catalog, each with its example phrasings', () 
   const d = V.readDecision(built, { action: answer('open', 0.9), 'open.place': answer('third', 0.9), 'open.list': answer('unclear', 0.6), 'open.name': answer('(not said)', 0.9) }, 'open the third mark');
   assert.deepEqual(d.args, { place: 'third', list: 'timeline/mark' });
 });
+
+test('replace: the words of the file, the selection, a line by number, a place at the cursor; new words, nothing, or dictation next', () => {
+  const answer = (choice, confidence, probabilities) => ({ choice, confidence, probabilities: probabilities || { [choice]: confidence } });
+  const doc = { nearby: 'Dear Sam, the blue dishes was beautiful. Line ten of filler text.', selection: '', lines: 40 };
+  let built = V.buildRequest({ said: 'replace line ten with good', actions: ['replace'], doc });
+  const old = Object.keys(built.request.questions['replace.old'].criteria);
+  assert.ok(old.includes('(line 10)'), 'the line numbered ten');
+  assert.ok(old.includes('(the sentence at the cursor)'));
+  assert.ok(!old.includes('(the selected text)'), 'no selection, no option');
+  let d = V.readDecision(built, { action: answer('replace', 0.95), 'replace.old': answer('(line 10)', 0.9), 'replace.new': answer('good', 0.9) });
+  assert.deepEqual(d.args, { old: { line: 10 }, new: 'good' });
+  // "this", "this sentence" are never words of the file.
+  built = V.buildRequest({ said: 'replace this sentence', actions: ['replace'], doc: { ...doc, nearby: 'this sentence is here' } });
+  assert.deepEqual(Object.keys(built.request.questions['replace.old'].criteria).filter(k => !k.startsWith('(')), [], 'only places are offered for "this sentence"');
+  d = V.readDecision(built, { action: answer('replace', 0.95), 'replace.old': answer('(the sentence at the cursor)', 0.9), 'replace.new': answer('(what the user dictates next)', 0.9) });
+  assert.deepEqual(d.args, { old: { place: 'sentence' }, new: { dictate: true } });
+  // Overlapping spans are one answer: their shares add up.
+  built = V.buildRequest({ said: 'replace blue with the green plates', actions: ['replace'], doc });
+  d = V.readDecision(built, { action: answer('replace', 0.95), 'replace.old': answer('blue', 0.9), 'replace.new': answer('the green plates', 0.4, { 'the green plates': 0.4, 'green plates': 0.35, 'plates': 0.15, 'blue': 0.1 }) });
+  assert.equal(d.args.new, 'the green plates');
+  assert.ok(Math.abs(d.confidence - 0.9) < 1e-9, 'confidence ' + d.confidence);
+  // "Change that to X" with a selection: that is the selection.
+  built = V.buildRequest({ said: 'change that to green plates', actions: ['replace'], doc: { ...doc, selection: 'blue dishes' } });
+  assert.ok(Object.keys(built.request.questions['replace.old'].criteria).includes('(the selected text)'));
+  d = V.readDecision(built, { action: answer('replace', 0.9), 'replace.old': answer('(not said)', 0.6), 'replace.new': answer('green plates', 0.9) }, 'change that to green plates');
+  assert.deepEqual([d.args, d.missing], [{ old: { selection: true }, new: 'green plates' }, null]);
+});
+
+test('dictating into a file: its own choices, one of them "a command"', () => {
+  const built = V.buildRequest({ said: 'new paragraph', mode: 'dictation', dictationTarget: 'file' });
+  assert.deepEqual(Object.keys(built.request.questions.action.criteria), ['text', 'new_line', 'new_paragraph', 'scratch', 'fix', 'stop', 'command']);
+  const d = V.readDecision(built, { action: { choice: 'text', confidence: 0.9, probabilities: { text: 0.9 } } }, 'We walked to the lake.');
+  assert.deepEqual([d.action, d.text, d.dictating], ['text', 'We walked to the lake.', true]);
+  assert.deepEqual(Object.keys(V.buildRequest({ said: 'send', mode: 'dictation' }).request.questions.action.criteria), ['text', 'text_send', 'send', 'stop', 'clear'], 'the message box: as before');
+});

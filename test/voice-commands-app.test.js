@@ -140,21 +140,124 @@ test('voice commands on the page: cursor, buttons, folds, scrolling, zen, tree, 
   assert.deepEqual(await ev(`voiceFoundList('find parse config').found.map(x => x.id)`), ['parse config', 'config', 'parse'], 'what is in the file, longest first');
   assert.match(await done('find', { text: 'parse config' }), /1 of 1 · line 3/);
   assert.equal(await ev(selected), 'parse_config');
-  await done('select', { what: 'paragraph' });
+  // Select: units, places, counts, named words, ranges; "third" read from what was said.
+  await done('select', { unit: 'paragraph' });
   assert.equal(await ev(selected), 'The first paragraph talks about parse_config and more.\nIt has two lines.');
-  await done('select', { what: 'sentence' });
+  await done('select', { unit: 'sentence' });
   assert.equal(await ev(selected), 'The first paragraph talks about parse_config and more.');
-  await done('select', { what: 'lines', from_line: '1', to_line: '3' });
+  await done('select', { unit: 'sentence', which: 'next' });
+  assert.equal(await ev(selected), 'It has two lines.');
+  await done('select', { unit: 'lines', number: '1', last_number: '3' });
   assert.equal(await ev(selected), '# Notes\n\nThe first paragraph talks about parse_config and more.');
-  await done('select', { what: 'between', from: 'Second', to: 'here' });
+  await done('select', { unit: 'line', which: 'nth', number: '6' });
+  assert.equal(await ev(selected), 'Second paragraph. It ends here.', 'line 6 by its number');
+  await done('select', { unit: 'paragraph', which: 'nth' }, 'select the third paragraph');
+  assert.equal(await ev(selected), 'Second paragraph. It ends here.', 'the third paragraph (the heading is the first)');
+  await done('select', { unit: 'word', words: 'parse config' }, 'select the word parse config');
+  assert.equal(await ev(selected), 'parse_config');
+  await done('select', { unit: 'words', words: 'three', count: '3' }, 'select three words');
+  assert.equal(await ev(selected), 'parse_config and more', 'three words from the cursor');
+  await done('select', { unit: 'range', from: 'Second', to: 'here' });
   assert.equal(await ev(selected), 'Second paragraph. It ends here');
+  await done('select', { unit: 'none' });
+  assert.equal(await ev(selected), '');
+  // The cursor.
+  const at = `(() => { const s = voiceEditor().view.state, h = s.selection.main.head, l = s.doc.lineAt(h); return l.number + ':' + (h - l.from); })()`;
+  assert.match(await done('cursor', { to: 'line', number: '3' }), /line 3/);
+  assert.equal(await ev(at), '3:0');
+  await done('cursor', { to: 'line_end' });
+  assert.equal(await ev(at), '3:54');
+  await done('cursor', { to: 'down', count: '3' });
+  assert.equal(await ev(at), '6:31');
+  await done('cursor', { to: 'up' });
+  assert.equal(await ev(at), '5:0', 'a blank line keeps no column');
+  await done('cursor', { to: 'after', words: 'two lines' });
+  assert.equal(await ev(at), '4:16');
+  await done('cursor', { to: 'before', words: 'It ends' });
+  assert.equal(await ev(at), '6:18');
+  await done('cursor', { to: 'word_previous' });
+  assert.equal(await ev(at), '6:7');
+  await done('cursor', { to: 'paragraph_previous' });
+  assert.equal(await ev(at), '6:0', 'from inside a paragraph: its start first');
+  await done('cursor', { to: 'paragraph_previous' });
+  assert.equal(await ev(at), '3:0');
+  await done('cursor', { to: 'doc_start' });
+  assert.equal(await ev(at), '1:0');
+  await done('cursor', { to: 'center' });
+  // Code chunks.
   assert.match(await done('chunk', { place: 'next' }), /chunk 1 of 2 \(python\)/);
-  await done('select', { what: 'chunk' });
+  await done('select', { unit: 'chunk' });
   assert.match(await ev(selected), /^```python\nx = 1\nprint\(x\)\n```$/);
   assert.match(await done('chunk', { place: 'next' }), /chunk 2 of 2/);
   assert.equal((await run('chunk', { place: 'next' })).note, 'that was the last chunk');
-  assert.match(await done('chunk', { place: 'first' }), /chunk 1 of 2/);
-  await done('select', { what: 'none' });
-  assert.equal(await ev(selected), '');
+  // Replace: a line by number (never the words "line ten"), a place, the
+  // selection; delete; "with what I say" dictates over it. The editor here
+  // proposes changes for review; accept them to go on.
+  const docText = `voiceEditor().view.state.doc.toString()`;
+  const accept = () => ev(`(() => { const r = voiceEditor().review; if (r && r.summary().changes) r.acceptAll(); })()`);
+  await done('replace', { old: { line: 13 }, new: 'Between the cells.' });
+  await accept();
+  assert.match(await ev(docText), /\nBetween the cells\.\n/);
+  await done('cursor', { to: 'words', words: 'It has' });
+  await done('replace', { old: { place: 'sentence' }, new: 'It has three lines.' });
+  await accept();
+  assert.match(await ev(docText), /and more\.\nIt has three lines\.\n/);
+  await done('select', { unit: 'words', words: 'parse config' });
+  await done('replace', { old: { selection: true }, new: 'the settings' });
+  await accept();
+  assert.match(await ev(docText), /talks about the settings and more/);
+  await done('replace', { old: 'and more', new: '' });
+  await accept();
+  assert.match(await ev(docText), /talks about the settings\./);
+  // Dictating into the file: at the cursor, spaced; new paragraph; scratch
+  // that; a command in the middle; undo.
+  await done('cursor', { to: 'after', words: 'It ends here.' });
+  assert.match(await done('dictate', {}), /dictating into the file/);
+  const dictate = (action, said) => ev(`(async () => { const e = { said: ${JSON.stringify(said)}, at: Date.now(), status: 'deciding' }; voice.decisions.push(e); await voiceDictation(e, { action: ${JSON.stringify(action)}, dictating: true, text: ${JSON.stringify(said)}, args: {}, confidence: 1 }); return { status: e.status, summary: e.summary, note: e.note }; })()`);
+  await dictate('text', 'And then we had tea.');
+  assert.match(await ev(docText), /It ends here\. And then we had tea\.\n/);
+  await dictate('text', 'Lots of it.');
+  assert.match(await ev(docText), /we had tea\. Lots of it\.\n/);
+  assert.equal((await dictate('scratch', 'scratch that')).summary, 'removed \u201cLots of it.\u201d');
+  assert.match(await ev(docText), /we had tea\.\n/);
+  await dictate('new_paragraph', 'new paragraph');
+  await dictate('text', 'A new idea.');
+  assert.match(await ev(docText), /we had tea\.\n\nA new idea\.\n/);
+  // "Fix that": the whole dictated run, selected, to the Fix dictation command.
+  await ev(`window.__fixed = null; voiceEditor().runAiCommand = id => { const s = voiceEditor().view.state; window.__fixed = [id, s.sliceDoc(s.selection.main.from, s.selection.main.to)]; return true; }`);
+  await dictate('fix', 'fix that');
+  assert.deepEqual(await ev(`window.__fixed`), ['transcription', 'A new idea.']);
+  await dictate('stop', 'stop dictation');
+  assert.equal(await ev(`voice.mode`), 'command');
+  // Replace with what is said next: selected, then dictated over.
+  await done('replace', { old: 'A new idea.', new: { dictate: true } });
+  assert.equal(await ev(`voice.mode + ' ' + (voice.target && voice.target.label)`), 'dictation the file');
+  await dictate('text', 'An old idea.');
+  assert.match(await ev(docText), /\n\nAn old idea\.\n/);
+  await dictate('stop', 'stop');
+  const beforeUndo = await ev(docText);
+  await done('undo', { how: 'undo' });
+  assert.notEqual(await ev(docText), beforeUndo, 'undo undoes');
+  await done('undo', { how: 'redo' });
+  assert.equal(await ev(docText), beforeUndo, 'redo redoes');
+
+  // A command cut in two by a pause: "go to line" (which line?) then
+  // "eight" (nothing alone) \u2014 decided again joined, and done.
+  await ev(`window.__asked = []; window.voiceDecideSaid = async said => {
+    __asked.push(said);
+    const d = said === 'go to line' ? { action: 'cursor', args: { to: 'line' }, confidence: 0.3, missing: null, alternatives: [] }
+      : said === 'eight' ? { action: 'none', args: {}, confidence: 0.6, alternatives: [] }
+      : said === 'go to line eight' ? { action: 'cursor', args: { to: 'line', number: '8' }, confidence: 0.97, alternatives: [] } : { action: 'none', args: {}, confidence: 0.9, alternatives: [] };
+    return { id: null, decision: d, ms: 1 };
+  }`);
+  await ev(`voiceUnderstand('go to line', 1)`);
+  await ev(`voiceUnderstand('eight', 1)`);
+  assert.deepEqual(await ev(`__asked`), ['go to line', 'eight', 'go to line eight']);
+  assert.equal(await ev(at), '8:0', 'joined and done');
+  assert.deepEqual(await ev(`voice.decisions.slice(-2).map(d => [d.said, d.status])`), [['go to line', 'cancelled'], ['go to line \u2026 eight', 'done']]);
+  // Not joined when the first was complete, or too long ago.
+  await ev(`__asked.length = 0; voice.incomplete = null`);
+  await ev(`voiceUnderstand('eight', 1)`);
+  assert.deepEqual(await ev(`__asked`), ['eight']);
   assert.equal((await run('find', { text: 'no such words' })).note, '\u201cno such words\u201d is not in the file');
 });

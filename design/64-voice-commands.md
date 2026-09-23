@@ -273,6 +273,67 @@ the agent runs, the server waits and reads its answer) with a local model,
 which answered nothing; the SHOW line's reading is unit-tested; a real
 model's answer turned into a screen is not yet tested.
 
+## Editing a file by voice (2026-09-23, fourth pass)
+
+The session after the third pass (119 sentences) showed editing a
+Markdown file was the weak part: no way to move the cursor ("go down
+twenty lines", "press down arrow" scrolled the page), no dictation into a
+file ("start dictation", "add text" were no command), selections that
+reported done but held the wrong text ("select third paragraph", "select
+line 10"), "replace line ten with…" replacing the words "Line ten" of the
+filler, commands cut by a pause ("go to line" … "eight"), "control find"
+sent to the coding agent, "press stop" on a message read aloud taken as
+"stop dictation", and no way to close the voice help.
+
+Every sentence still goes through Jev (no local grammar: the person's
+choice, and Jev understands loose phrasings better). What changed is what
+Jev is asked and what the code does with it:
+
+- `cursor`: up/down N lines, a line by number, next/previous word,
+  sentence or paragraph, start/end of line or file, before/after/at words
+  of the file, center the view. Counts and line numbers are separate
+  questions over the numbers said.
+- `select` by unit (word, words named, line, lines N–M, sentence,
+  paragraph, chunk, all, from words to words, more, none), which one (this,
+  next, previous, first, last, the n-th) and how many. The code reads an
+  ordinal ("the third") from the sentence and settles "select the word
+  blue" answered as unit=word with named words.
+- `replace`: what to replace is the selection, a place at the cursor (word,
+  line, sentence, paragraph), a line said by number ("(line 10)", never the
+  words "line ten"), or words said that are in the file; "this", "this
+  sentence" are never words. The new text: words said, nothing (delete,
+  taking one space with it), or what is dictated next (the old text is
+  selected and dictation writes over it). Replacements are changes to
+  review, so they act from 0.6 instead of 0.92. "Change that to X" with a
+  selection means the selection even when the answer leaves it out.
+  Overlapping spans ("green plates", "the green plates") add their shares:
+  one answer said several ways.
+- Dictation into the file at the cursor (spaced, lower case when it
+  carries on a sentence), with its own choices: text, new line, new
+  paragraph, scratch that, fix that, stop, and "a command to the editor",
+  which decides the sentence again as a command and goes on dictating.
+- `fix_dictation`: the Fix dictation AI command on the dictated run, as a
+  change to review. `undo` / `redo` through the editor's own keys.
+- A sentence that is incomplete (asked, or failed with "which…?") and the
+  next one within 6 s: the next is decided again joined to it, and the
+  joined decision runs when it is sure.
+- The audio player of a message read aloud is pressable (stop, pause,
+  replay, speed); `help` opens and closes.
+
+**The tree was measured and dropped.** TypeSafe's hierarchical pattern (a
+family, then the request in it, all asked at once, the path scored by the
+geometric mean) was asked in the same requests as the flat choice, so both
+read the very same answers: flat 62 of 67 right, tree 47 of 67 (file 36 vs
+42 of 47, conversation 11 vs 20 of 20). The second level spread its
+probability over look-alike families ("next word" into AI commands, "copy
+it" into dictation). Flat stays; the tree's questions only cost time.
+
+After the fixes, the same sentences (the session's own, new editing ones,
+dictation into a file, and the conversation set as a check): **63 of 64
+right** (three more got no answer: TypeSafe was overloaded); 60 sure enough
+to act at once. The miss: "go to the line a place to try voice" is taken
+for dictation. TypeSafe answered in 1.4–2.6 s median this evening.
+
 ## Limits and next steps
 
 - Parakeet and the always-on Qwen service share the GPUs; when the Qwen

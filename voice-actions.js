@@ -33,6 +33,9 @@
   const NOT_SAID = '(not said)';
   const THE_SELECTION = '(the selected text)';
   const DELETE_IT = '(nothing: delete it)';
+  const DICTATE_IT = '(what the user dictates next)';
+  // Places in the file an edit can name instead of its words.
+  const PLACES_IN_FILE = { '(the word at the cursor)': 'word', '(the line at the cursor)': 'line', '(the sentence at the cursor)': 'sentence', '(the paragraph at the cursor)': 'paragraph' };
   const DEICTIC = /^(this|that|it|these|those|this text|that text|the selection)$/i;
 
   // Argument kinds: `list` (candidates the page sends), `fixed` (options
@@ -46,7 +49,7 @@
     // never switch listening off (the record shows it did).
     stop_dictation: { label: 'Stop dictating (stop writing what is said into the box)', say: 'stop dictation, stop dictating, stop writing' },
     status: { label: 'Ask whether the app is listening, and in which mode', say: 'are you listening, is it still listening, can you hear me' },
-    dictate: { label: 'Start dictating into the message box', say: 'start the microphone, start dictating, take a note, let me write' },
+    dictate: { label: 'Start dictating: what is said next is written into the message box, or into the file at the cursor', say: 'start the microphone, start dictating, start dictation, take a note, let me write, add text, type this' },
     focus_box: { label: 'Put the cursor in the message box, without dictating', say: 'focus the message box, go to the input box, into the compose box' },
     send: { label: 'Send the message in the box', say: 'send, send it, submit' },
     new_conversation: { label: 'Start a new conversation', say: 'start a new conversation, new chat, new conversation' },
@@ -69,7 +72,7 @@
     zen: { label: 'Zen mode: show only the conversation or file, nothing around it (on, off)', say: 'zen mode, turn on zen, leave zen, zen off', args: { how: { kind: 'fixed', optional: true, options: { on: 'on, enter', off: 'off, leave, exit', toggle: 'not said' }, question: 'On or off?' } } },
     unread: { label: 'Open the newest conversation with a reply not read yet', say: 'the latest unread, next unread, what is new, open the new reply' },
     tree_move: { label: 'Move the selection in the conversation tree, or open the selected box', say: 'up, down, go to the parent, the child, left, right, next branch, open it, open this box, read it', args: { move: { kind: 'fixed', options: { up: 'up, to the parent, earlier', down: 'down, to the child, later', left: 'left, the previous branch', right: 'right, the next branch', open: 'open it, read it, go there' }, question: 'Where does the user want to move in the tree?' } } },
-    delegate: { label: 'Ask the coding agent to find something and bring it on screen, when no other request here does it (it searches files, conversations and projects)', say: 'find the conversation where we fixed the login, show me where the parser is defined, ask the agent to find…' },
+    delegate: { label: 'Ask the coding agent to find something elsewhere and bring it on screen (other files, past conversations, projects) \u2014 never words in the open file, and only when no other request does it', say: 'find the conversation where we fixed the login, show me where the parser is defined, ask the agent to find…' },
     model: { label: 'Change the model that answers', say: 'change the model to…, switch to…, use…', args: { model: { kind: 'list', list: 'models', question: 'Which model does the user want to use?' } } },
     reasoning: { label: 'Change the reasoning (thinking) level', say: 'reasoning off, think harder, set thinking to high', args: { level: { kind: 'fixed', options: Object.fromEntries(THINKING.map(l => [l, null])), question: 'Which reasoning level does the user want (off is no reasoning, max is the most)?' } } },
     open: { label: 'Open or pick something by its number, place or name: a conversation, a file (of any project), a project, a timeline mark, a box of the tree, a search result', say: 'open the third one, the last file, the previous one, the one about air bills, open the file called… in the … project, the chattering project, select the third mark, number seven', args: {
@@ -78,7 +81,7 @@
       place: { kind: 'fixed', options: null, question: 'In `said`, does the user pick the item by its place in its list? Which place?' },
       name: { kind: 'list', list: 'targets', question: 'Which of these items does the user name in `said`, by words of its title or file name ("dot js" said for .js, spaces for dashes)? Only what `said` names: not the item open now unless it is named.' },
     } },
-    help: { label: 'Show what the user can say here: the list of voice commands', say: 'what can I say, show the commands, open the command panel, list the commands, help' },
+    help: { label: 'Show or close the list of voice commands (the voice help)', say: 'what can I say, show the commands, list the commands, help, close the command menu, hide the voice help', args: { how: { kind: 'fixed', optional: true, options: { open: 'show it', close: 'close, hide, fold it' }, question: 'Show the list of commands, or close it?' } } },
     settings: { label: 'Open the settings', say: 'open the settings, show the appearance settings', args: { pane: { kind: 'fixed', optional: true, options: SETTINGS_PANES, question: 'Which part of the settings does the user want? Without a part named, profile.' } } },
     go_home: { label: 'Go to the home page (all conversations, the timeline)', say: 'go home' },
     go_back: { label: 'Go back to the previous screen', say: 'go back, previous' },
@@ -86,23 +89,33 @@
     ask_box: { label: 'Open the ask box, to ask an agent for a change to this file (Ctrl+K)', say: 'open the ask box, ask an agent, control K' },
     command_box: { label: 'Open the AI command box (Ctrl+J)', say: 'open the command box, AI commands, control J' },
     ai_command: { label: 'Run one AI command on the text here', say: 'fix the grammar, document this code, finish the sentence', args: { command: { kind: 'list', list: 'commands', question: 'Which AI command does the user want to run?' } } },
-    go_to_line: { label: 'Go to a line of the file', say: 'go to line forty two', args: { line: { kind: 'numbers', question: 'Which line number does the user want to go to?' } } },
-    replace: { label: 'Replace exact words in the text with other exact words the user dictates', say: 'change X to Y, replace X with Y, change this to Y — Y being the very words to write', args: {
-      old: { kind: 'oldSpans', question: 'In a request like "change OLD to NEW" or "replace OLD with NEW", which words are OLD: the text that is there now? Only those words, without "to", "with" or "for" after them. "this", "that" or "it" alone mean the selected text.' },
-      new: { kind: 'spans', question: 'In a request like "change OLD to NEW" or "replace OLD with NEW", which words are NEW: the exact words to write in place of OLD?' },
+    replace: { label: 'Replace text in the file with exact words: the words named, the selection, a line, the sentence or paragraph at the cursor — with words said now, with nothing, or with what the user dictates next', say: 'change X to Y, replace X with Y, replace line 10 with Y, replace this sentence with Y, replace the selection, delete the word X, replace that with what I say', args: {
+      old: { kind: 'oldTargets', question: 'In a request like "change OLD to NEW", "replace OLD with NEW" or "delete OLD", what is OLD: the text there now? Words of the file (only those words, not "to", "with" after them), or one of the places: "this", "that", "it" or "the selection" mean the selected text; "line 10" is the line numbered 10, never the words "line ten".' },
+      new: { kind: 'spans', question: 'In a request like "change OLD to NEW" or "replace OLD with NEW", what is NEW: the exact words to write in place of OLD? "Delete" or "remove" is nothing. "Replace that" with no new words, or "with what I say", is what the user dictates next.' },
     } },
     rewrite: { label: 'Rewrite the text here as the user describes, not with exact words', say: 'make this shorter, make it more formal, change this to a friendlier tone, turn this into a list' },
     accept_change: { label: 'Accept the change under review here', say: 'accept, keep it, accept all' , args: { all: { kind: 'fixed', optional: true, options: { one: 'the change at the cursor', all: 'every change' }, question: 'Does the user accept one change or all of them?' } } },
     reject_change: { label: 'Reject the change under review here', say: 'reject, undo that change, reject all', args: { all: { kind: 'fixed', optional: true, options: { one: 'the change at the cursor', all: 'every change' }, question: 'Does the user reject one change or all of them?' } } },
-    find: { label: 'Find words in the file and select them', say: 'find parse config, search for TODO, where is the word total', args: { text: { kind: 'list', list: 'found', question: 'Which words does the user want to find in the file (only words to search, not "find" or "search for")?' } } },
-    find_again: { label: 'Go to the next or previous place of the words last found', say: 'next, the next one, find again, previous match', args: { which: { kind: 'fixed', optional: true, options: { next: 'next, again', previous: 'previous, back' }, question: 'Next or previous?' } } },
-    select: { label: 'Select text in the file: a line, a paragraph, a sentence, the code chunk, everything, lines N to M, or from some words to other words', say: 'select this line, select the paragraph, select all, select lines 3 to 10, select from dear to regards, unselect', args: {
-      what: { kind: 'fixed', options: { line: 'the line', paragraph: 'the paragraph', sentence: 'the sentence', word: 'the word', chunk: 'the code chunk, the cell', all: 'everything, all', lines: 'lines by their numbers', between: 'from some words to other words', none: 'nothing: unselect' }, question: 'What does the user want to select?' },
-      from_line: { kind: 'numbers', optional: true, question: 'The first line number to select?' },
-      to_line: { kind: 'numbers', optional: true, question: 'The last line number to select?' },
-      from: { kind: 'list', optional: true, list: 'found', question: 'The words where the selection starts (after "from")?' },
-      to: { kind: 'list', optional: true, list: 'found', question: 'The words where the selection ends (after "to" or "until")?' },
+    cursor: { label: 'Move the cursor in the file: up or down lines, to a line, a word, the start or end of the line, the next or previous sentence or paragraph, before or after some words; or center the view on it', say: 'up three, down twenty lines, next word, end of line, start of the line, next paragraph, previous sentence, go to line 42, go to dear sam, go to the line that says X, after regards, before the blue dishes, top of the file, put it in the middle of the screen', args: {
+      to: { kind: 'fixed', options: { up: 'up lines', down: 'down lines', line: 'to a line by its number', word_next: 'the next word, right', word_previous: 'the previous word, left, back a word', line_start: 'the start of the line, home', line_end: 'the end of the line', sentence_next: 'the next sentence', sentence_previous: 'the previous sentence, the start of the sentence', paragraph_next: 'the next paragraph, down a paragraph', paragraph_previous: 'the previous paragraph, up a paragraph', doc_start: 'the top, the start of the file', doc_end: 'the bottom, the end of the file', before: 'just before some words of the file', after: 'just after some words of the file, at their end', words: 'to some words of the file (go to X, find X)', center: 'no move: put the cursor in the middle of the screen, center the view' }, question: 'Where does the user want the cursor to go?' },
+      count: { kind: 'numbers', optional: true, question: 'How many lines, words, sentences or paragraphs to move (a count, not a line number)?' },
+      number: { kind: 'numbers', optional: true, question: 'Which line number, when the user names a line ("line 42")?' },
+      words: { kind: 'list', optional: true, list: 'found', question: 'Which words of the file does the user want the cursor at, before or after (only the words to find, not "go to", "before" or "after")?' },
     } },
+    find: { label: 'Find words or a heading in this open file and select them', say: 'find parse config, find a letter to edit, search for TODO, where is the word total', args: { text: { kind: 'list', list: 'found', question: 'Which words does the user want to find in the file (only words to search, not "find" or "search for")?' } } },
+    find_again: { label: 'Go to the next or previous place of the words last found', say: 'next one, find again, next match, previous match', args: { which: { kind: 'fixed', optional: true, options: { next: 'next, again', previous: 'previous, back' }, question: 'Next or previous?' } } },
+    select: { label: 'Select text in the file: a word, some words, a line, a sentence, a paragraph, the code chunk, everything, lines N to M, from some words to other words, more of it; or unselect', say: 'select this word, select three words, select the word blue, select line 10, select lines 3 to 10, select the next sentence, select the third paragraph, select from dear to regards, select all, select more, unselect', args: {
+      unit: { kind: 'fixed', options: { word: 'the word at the cursor, or a number of words ("three words")', words: 'words of the file named in `said` ("select the word blue", "select dear sam")', line: 'a line, or a number of lines', lines: 'lines between two line numbers', sentence: 'a sentence', paragraph: 'a paragraph', chunk: 'the code chunk, the cell', all: 'everything, the whole file', range: 'from some words to other words', more: 'more: grow the selection by one more of what it holds', none: 'nothing: unselect, deselect, clear the selection' }, question: 'What does the user want to select?' },
+      which: { kind: 'fixed', optional: true, options: { this: 'this one, the current one, at the cursor (no other said)', next: 'the next one', previous: 'the previous one, the last one before', first: 'the first in the file', last: 'the last in the file', nth: 'the one counted from the top of the file ("the third paragraph"), or a line by its number' }, question: 'Which one does the user want selected?' },
+      number: { kind: 'numbers', optional: true, question: 'Which line number, or which one counted from the top ("line 10", "the third paragraph": 3)? Not a count of how many.' },
+      last_number: { kind: 'numbers', optional: true, question: 'In "lines N to M", which number is M, the last line?' },
+      count: { kind: 'numbers', optional: true, question: 'How many words, lines, sentences or paragraphs ("three words": 3)? Not a line number.' },
+      words: { kind: 'list', optional: true, list: 'found', question: 'Which words of the file does the user want selected (after "select the word", "select")?' },
+      from: { kind: 'list', optional: true, list: 'found', question: 'In "select from X to Y", the words X where the selection starts?' },
+      to: { kind: 'list', optional: true, list: 'found', question: 'In "select from X to Y", the words Y where the selection ends?' },
+    } },
+    undo: { label: 'Undo or redo the last change to the file (scratch that)', say: 'undo, undo that, scratch that, redo', args: { how: { kind: 'fixed', optional: true, options: { undo: 'undo, scratch that, take it back', redo: 'redo, do it again' }, question: 'Undo or redo?' } } },
+    fix_dictation: { label: 'Fix the text just dictated into the file (speech-to-text errors, punctuation, filler words), shown as a change to review', say: 'fix dictation, fix that, clean up what I said, fix the dictated text' },
     chunk: { label: 'Go to a code chunk (a cell) of the notebook', say: 'next chunk, previous cell, the first chunk, the last cell', args: { place: { kind: 'fixed', optional: true, options: { next: 'the next one', previous: 'the previous one', first: 'the first', last: 'the last', here: 'this one' }, question: 'Which chunk?' } } },
     chunk_run: { label: 'Run code of the notebook: this chunk, this one then the next, every chunk, or stop the run', say: 'run this chunk, run it, run and go to the next, run all, stop the run', args: { which: { kind: 'fixed', optional: true, options: { this: 'this chunk', advance: 'this chunk, then move to the next', all: 'every chunk, run all', stop: 'stop, cancel, interrupt the run' }, question: 'What does the user want to run?' } } },
     text_size: { label: 'Make the text of the file larger or smaller', say: 'bigger text, zoom in, smaller, reset the text size', args: { direction: { kind: 'fixed', options: { larger: 'larger, bigger, zoom in', smaller: 'smaller, zoom out', reset: 'back to normal, 100%' }, question: 'Larger, smaller, or back to normal?' } } },
@@ -115,6 +128,17 @@
     send: { label: 'Send the message as it is', say: 'send, send it (alone)' },
     stop: { label: 'Stop dictating, keep the text', say: 'stop dictating, stop the microphone, pause' },
     clear: { label: 'Clear the message box', say: 'clear it, delete everything, start over' },
+  };
+
+  // Dictating into a file: more ways to steer, and any editing command.
+  const DICTATION_FILE = {
+    text: { label: 'Words to write into the file', say: 'anything that is part of the text' },
+    new_line: { label: 'Start a new line', say: 'new line, next line' },
+    new_paragraph: { label: 'Start a new paragraph', say: 'new paragraph' },
+    scratch: { label: 'Remove what was just dictated', say: 'scratch that, delete that, undo that' },
+    fix: { label: 'Fix what was just dictated (speech-to-text errors, punctuation)', say: 'fix that, fix dictation, clean it up' },
+    stop: { label: 'Stop dictating, keep the text', say: 'stop dictating, stop dictation, stop the microphone' },
+    command: { label: 'A command to the editor, not text: move the cursor, select, find, replace, go to a line, run code, open something', say: 'select the paragraph, go to line 10, find X, replace X with Y, end of line, up three' },
   };
 
   // Places in a list, for `open`: the page turns one into an item.
@@ -204,6 +228,10 @@
     const dictating = c.mode === 'dictation';
     const state = { said, earlier: str(c.heard, LIMITS.heard), screen: str(c.screen, LIMITS.screen) };
     const questions = {}, keys = {};
+    if (dictating && c.dictationTarget === 'file') {
+      questions.action = { type: 'choice', instructions: 'The user is dictating text into a document at the cursor. What is `said`: words to write, or a way to steer the dictation, or a command to the editor?', criteria: Object.fromEntries(Object.entries(DICTATION_FILE).map(([id, a]) => [id, a.label + ' — e.g. ' + a.say])) };
+      return { request: { model, state, questions }, keys, dictating: true, target: 'file' };
+    }
     if (dictating) {
       questions.action = { type: 'choice', instructions: 'The user is dictating a message into a text box. What is `said`: more words for the message, or a request to send it, stop dictating, or clear it?', criteria: Object.fromEntries(Object.entries(DICTATION).map(([id, a]) => [id, a.label + ' — e.g. ' + a.say])) };
       return { request: { model, state, questions }, keys, dictating: true };
@@ -243,6 +271,19 @@
           const nums = numbersIn(said).filter(n => n !== 1 || /\b1\b|\bnumber\s+one\b|\bline\s+one\b/i.test(said));
           if (!nums.length) continue;
           options = Object.fromEntries(nums.map(n => [String(n), null]).concat([[NOT_SAID, 'no number given']]));
+        } else if (arg.kind === 'oldTargets') {
+          // What to replace: the selection, a place at the cursor, a line said
+          // by number, or runs of the words said that are in the file.
+          const nearby = String(doc.nearby || '').toLowerCase();
+          const hasSelection = !!str(doc.selection, LIMITS.selection);
+          const lines = Number(doc.lines) || 0;
+          const opts = [];
+          if (hasSelection) opts.push(THE_SELECTION);
+          opts.push(...Object.keys(PLACES_IN_FILE));
+          for (const n of numbersIn(said)) if (n >= 1 && (!lines || n <= lines)) opts.push('(line ' + n + ')');
+          const words = spansOf(said).filter(x => nearby.includes(x.toLowerCase()) && !/^(change|replace|swap|delete|remove)\b/i.test(x) && !DEICTIC.test(x) && !/^((this|that|the) )?(word|line|sentence|paragraph|selection|text)$/i.test(x));
+          opts.push(...words);
+          options = Object.fromEntries(opts.slice(0, LIMITS.list - 1).map(x => [x, null]).concat([[NOT_SAID, 'not said']]));
         } else if (arg.kind === 'spans' || arg.kind === 'oldSpans') {
           let spans = spansOf(said);
           if (arg.kind === 'oldSpans') {
@@ -252,7 +293,7 @@
             const hasSelection = !!str(doc.selection, LIMITS.selection);
             spans = spans.filter(s => nearby.includes(s.toLowerCase()) && !/^(change|replace|swap)\b/i.test(s) && !(hasSelection && DEICTIC.test(s)));
             if (hasSelection) spans.unshift(THE_SELECTION);
-          } else spans = spans.filter(s => !/^(change|replace|swap)\b/i.test(s)).concat(DELETE_IT);
+          } else spans = spans.filter(s => !/^(change|replace|swap)\b/i.test(s)).concat(DELETE_IT, DICTATE_IT);
           if (!spans.length) continue;
           options = Object.fromEntries(spans.slice(0, LIMITS.list - 1).map(s => [s, null]).concat([[NOT_SAID, 'not said']]));
         }
@@ -260,7 +301,7 @@
       }
     }
     const groups = (Array.isArray(lists.groups) ? lists.groups : []).filter(g => g && g.id && g.label).map(g => ({ id: String(g.id), label: str(g.label, LIMITS.label) }));
-    return { request: { model, state, questions }, keys, dictating: false, defaultGroup: str(lists.defaultGroup, 100) || null, groups };
+    return { request: { model, state, questions }, keys, dictating: false, hasSelection: !!str(doc.selection, LIMITS.selection), defaultGroup: str(lists.defaultGroup, 100) || null, groups };
   }
 
   // The list a sentence names by its words, when exactly one list on
@@ -334,12 +375,27 @@
     // starts…) has a default when not asked or not said, and its doubt does
     // not hold the action back: a wrong one costs little and shows at once.
     for (const [name, arg] of Object.entries((ACTIONS[a.choice] && ACTIONS[a.choice].args) || {})) {
-      const q = pickOf(answers[a.choice + '.' + name]);
+      let q = pickOf(answers[a.choice + '.' + name]);
+      // Words picked from what was said: "green plates", "the green plates"
+      // and "plates" are one answer said three ways; their shares add up.
+      if (q && (arg.kind === 'spans' || arg.kind === 'oldTargets' || arg.list === 'found') && !/^\(/.test(q.choice)) {
+        const c = String(q.choice).toLowerCase();
+        const same = Object.entries(q.probabilities).filter(([k]) => { const x = k.toLowerCase(); return !/^\(/.test(k) && (x.includes(c) || c.includes(x)); }).reduce((n, [, p]) => n + p, 0);
+        q = { ...q, confidence: Math.max(q.confidence, Math.min(1, same)) };
+      }
       if (!q) { if (!arg.optional) missing = missing || name; continue; }
       if (!arg.optional) confidence = Math.min(confidence, q.confidence);
       if (q.choice === NOT_SAID) { if (!arg.optional) missing = missing || name; continue; }
       const map = built.keys[a.choice + '.' + name];
-      args[name] = map ? map[q.choice] : q.choice === THE_SELECTION ? { selection: true } : q.choice === DELETE_IT ? '' : q.choice;
+      const lineSaid = /^\(line (\d+)\)$/.exec(q.choice);
+      args[name] = map ? map[q.choice] : q.choice === THE_SELECTION ? { selection: true } : q.choice === DELETE_IT ? '' : q.choice === DICTATE_IT ? { dictate: true }
+        : PLACES_IN_FILE[q.choice] ? { place: PLACES_IN_FILE[q.choice] } : lineSaid ? { line: Number(lineSaid[1]) } : q.choice;
+    }
+    // "Change that to X" with text selected: "that" is the selection, even
+    // when the answer did not say so.
+    if (a.choice === 'replace' && missing === 'old' && built.hasSelection && /\b(this|that|it|the selection)\b/i.test(said)) {
+      args.old = { selection: true };
+      missing = args.new === undefined ? 'new' : null;
     }
     return { action: a.choice, args, confidence: missing ? Math.min(confidence, 0.3) : confidence, missing, alternatives };
   }
@@ -366,5 +422,5 @@
     return { kind, target: rest.split(/\s+/)[0] };
   }
 
-  return { parseShowLine, LIMITS, ACTIONS, DICTATION, THINKING, SETTINGS_PANES, PLACES, ORDINALS, SEND_TAIL, NOT_SAID, buildRequest, readDecision, rankByOverlap, numbersIn, spansOf };
+  return { parseShowLine, LIMITS, ACTIONS, DICTATION, DICTATION_FILE, THINKING, SETTINGS_PANES, PLACES, ORDINALS, SEND_TAIL, NOT_SAID, buildRequest, readDecision, rankByOverlap, numbersIn, spansOf };
 });

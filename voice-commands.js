@@ -34,7 +34,7 @@ const VOICE_ACT_AT = 0.8;        // most actions
 const VOICE_EASY_AT = 0.6;       // going somewhere: "go back" undoes it
 const VOICE_RISKY_AT = 0.92;     // hard to take back
 // Easy: moving, looking, highlighting, folding, selecting — seen at once, undone at once.
-const VOICE_EASY = new Set(['open', 'help', 'settings', 'go_home', 'go_back', 'go_forward', 'text_size', 'go_to_line', 'ask_box', 'command_box',
+const VOICE_EASY = new Set(['open', 'help', 'settings', 'go_home', 'go_back', 'go_forward', 'text_size', 'cursor', 'undo', 'ask_box', 'command_box',
   'autoscroll', 'autoscroll_adjust', 'point', 'fold', 'zen', 'unread', 'tree_move', 'find', 'find_again', 'select', 'chunk', 'scroll']);
 const VOICE_RISKY = new Set(['send', 'stop_listening', 'replace', 'rewrite', 'reject_change']);
 const VOICE_PENDING_MS = 12000;  // a suggestion waits this long for a yes
@@ -362,7 +362,32 @@ function voiceTextTarget() {
   if (voiceAskOpen()) return { ta: askBox.ta, label: 'the ask box', grow: askBubbleGrow, send: () => askBubbleSend() };
   const ta = $('agentText');
   if (ta && voiceVisible(ta)) return { ta, label: 'the message box', grow: autoGrowCompose, send: () => { const run = $('agentRun'); if (!run) throw new Error('this conversation sends from the terminal'); return headlessSendFromComposer(run); } };
+  // A file: written at the cursor (over the selection), as typing would.
+  const ed = voiceEditor();
+  if (ed && !(typeof fileWs !== 'undefined' && fileWs && fileWs.readOnly)) return { file: true, label: 'the file', ed };
   return null;
+}
+
+// Dictated words into the file at the cursor: a space before them unless
+// the cursor starts a line or follows a space; lower case when they carry
+// on a sentence. The range is kept for "scratch that" and "fix that".
+function voiceWriteFile(text) {
+  const ed = voiceEditor();
+  if (!ed) throw new Error('the file went away; dictation stopped');
+  const st = ed.view.state, sel = st.selection.main;
+  const before = st.doc.sliceString(Math.max(0, sel.from - 2), sel.from);
+  let t = String(text).trim();
+  if (!t) return;
+  const prev = before.slice(-1);
+  if (prev && !/\s/.test(prev) && !/^[.,;:!?)]/.test(t)) t = ' ' + t;
+  // Carrying on a sentence ("the blue | dishes"): no capital from the recognizer.
+  if (prev && /[\p{Ll},;:]/u.test(before.trim().slice(-1) || '') && /^\s?\p{Lu}\p{Ll}/u.test(t) && !/^\s?I\b/.test(t)) t = t.replace(/\p{Lu}/u, c => c.toLowerCase());
+  ed.view.dispatch({ changes: { from: sel.from, to: sel.to, insert: t }, selection: { anchor: sel.from + t.length }, scrollIntoView: true, userEvent: 'input.voice' });
+  const start = sel.from + (t.startsWith(' ') ? 1 : 0);
+  voice.dictated = { from: start, to: sel.from + t.length, text: t.trimStart() };
+  // The whole dictation, for "fix dictation" afterwards.
+  const run = voice.dictatedRun;
+  voice.dictatedRun = run && run.to === sel.from ? { from: run.from, to: sel.from + t.length } : { from: start, to: sel.from + t.length };
 }
 
 // What scrolls here: the file's text, else the page's view.
@@ -550,6 +575,10 @@ function voiceCollectControls() {
     if (seen.has(el)) continue;
     const region = VOICE_CONTROL_REGIONS.find(([sel]) => el.closest(sel));
     if (region && region[1] === null) continue;
+    // A message's own buttons come from the highlighted one; the audio
+    // player of a message read aloud is offered wherever it shows.
+    const player = el.closest('.tts-player');
+    if (player && voiceInView(player)) { add(el, 'in the audio player of the message read aloud', { keep: true }); continue; }
     if (el.closest('#conversationTranscript') && el.closest(VOICE_TRANSCRIPT_ITEM)) continue;
     const menu = el.closest('details:not([open])');
     if (menu && !(el.matches('summary') && el.parentElement === menu)) {
@@ -746,53 +775,184 @@ function voiceFind(words, dir = 1) {
   return 'found \u201c' + words + '\u201d \u00b7 ' + (i + 1) + ' of ' + hits.length + ' \u00b7 line ' + state.doc.lineAt(hits[i][0]).number;
 }
 
-function voiceSelectWhat({ what, from_line, to_line, from, to }) {
+// Units of text around a position: [from, to] of the word, line,
+// sentence or paragraph there, and the list of all of them in the file (for
+// next, previous, the third…). Sentences end at . ! ? and at blank lines.
+function voiceUnits(doc, unit) {
+  const text = doc.toString(), out = [];
+  if (unit === 'line') { for (let n = 1; n <= doc.lines; n++) { const l = doc.line(n); if (l.text.trim()) out.push([l.from, l.to]); } return out; }
+  if (unit === 'word') { for (const m of text.matchAll(/[\p{L}\p{N}_'’-]+/gu)) out.push([m.index, m.index + m[0].length]); return out; }
+  // Paragraphs: runs of non-blank lines.
+  const paras = [];
+  for (const m of text.matchAll(/[^\n]*\S[^\n]*(?:\n[^\n]*\S[^\n]*)*/g)) paras.push([m.index, m.index + m[0].length]);
+  if (unit === 'paragraph') return paras;
+  for (const [pa, pb] of paras) {
+    const t = text.slice(pa, pb);
+    let start = 0;
+    for (const m of t.matchAll(/[.!?]+["')\]]*(?=\s|$)/g)) {
+      const end = m.index + m[0].length;
+      const lead = t.slice(start, end).search(/\S/);
+      if (lead >= 0) out.push([pa + start + lead, pa + end]);
+      start = end;
+    }
+    const lead = t.slice(start).search(/\S/);
+    if (lead >= 0) out.push([pa + start + lead, pb]);
+  }
+  return out;
+}
+// The unit at (or just before) a position; its index in the list.
+function voiceUnitAt(list, at) {
+  let i = list.findIndex(([a, b]) => a <= at && at <= b);
+  if (i < 0) { i = -1; for (let k = 0; k < list.length && list[k][0] <= at; k++) i = k; }
+  return i;
+}
+const VOICE_UNIT_NAMES = { word: 'word', line: 'line', sentence: 'sentence', paragraph: 'paragraph' };
+
+// The range of the n-th / next / previous / this unit, `count` of them.
+function voiceUnitRange(doc, unit, { which = 'this', number, count, at }) {
+  const list = voiceUnits(doc, unit);
+  if (!list.length) throw new Error('the file has no ' + unit);
+  const here = voiceUnitAt(list, at);
+  let i;
+  if (which === 'first') i = 0;
+  else if (which === 'last') i = list.length - 1;
+  else if (which === 'nth') {
+    if (!number) throw new Error('which ' + unit + '?');
+    i = number - 1;
+  } else if (which === 'next') i = here + 1;
+  else if (which === 'previous') i = list[here] && list[here][0] < at && which === 'previous' && unit !== 'line' && at > list[here][1] ? here : here - 1;
+  else i = Math.max(0, here);
+  if (i < 0 || i >= list.length) throw new Error(which === 'next' ? 'there is no next ' + unit : which === 'previous' ? 'there is no previous ' + unit : 'the file has ' + list.length + ' ' + unit + (list.length === 1 ? '' : 's'));
+  const n = Math.max(1, Number(count) || 1);
+  const j = Math.min(list.length - 1, i + n - 1);
+  return { range: [list[i][0], list[j][1]], index: i, total: list.length, n: j - i + 1 };
+}
+
+// The words said, found in the file: the place nearest the cursor.
+function voiceWordsAt(doc, words, at) {
+  const hits = [...doc.toString().matchAll(voiceWordsPattern(words))];
+  if (!hits.length) throw new Error('\u201c' + words + '\u201d is not in the file');
+  const m = hits.reduce((best, h) => (Math.abs(h.index - at) < Math.abs(best.index - at) ? h : best));
+  return [m.index, m.index + m[0].length];
+}
+
+const VOICE_ORDINAL_WORDS = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10 };
+function voiceSelectWhat({ unit, which = 'this', number, last_number, count, words, from, to }, said = '') {
   const ed = voiceEditor(), state = ed.view.state, doc = state.doc, sel = state.selection.main;
-  // "The sentence", "the line": where the cursor is, or where what is
-  // selected starts (after "find", the words found).
+  // "The third paragraph": an ordinal word is no number to the request.
+  if (which === 'nth' && !number) { const m = String(said).toLowerCase().match(/\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b/); if (m) number = VOICE_ORDINAL_WORDS[m[1]]; }
+  // "The word blue": named words, whatever the unit said.
+  if (unit === 'word' && words && !count && !ChatteringVoiceActions.numbersIn(words).length) unit = 'words';
+  // "Three words": a count, not the word "three".
+  if (unit === 'words' && count && ChatteringVoiceActions.numbersIn(words || '').includes(Number(count))) { unit = 'word'; words = null; }
   const at = sel.empty ? sel.head : sel.from;
-  const line = doc.lineAt(at);
-  const paragraph = () => {
-    let a = line.number, b = line.number;
-    while (a > 1 && doc.line(a - 1).text.trim()) a--;
-    while (b < doc.lines && doc.line(b + 1).text.trim()) b++;
-    return [doc.line(a).from, doc.line(b).to];
-  };
-  let range;
-  if (what === 'none') range = [sel.head, sel.head];
-  else if (what === 'all') range = [0, doc.length];
-  else if (what === 'line') range = [line.from, line.to];
-  else if (what === 'paragraph') range = paragraph();
-  else if (what === 'word') { const w = state.wordAt(at); if (!w) throw new Error('the cursor is not on a word'); range = [w.from, w.to]; }
-  else if (what === 'sentence') {
-    const [pa, pb] = paragraph(), t = doc.sliceString(pa, pb), rel = at - pa;
-    let a = 0;
-    for (let m, re = /[.!?]\s+/g; (m = re.exec(t));) { if (m.index + m[0].length <= rel) a = m.index + m[0].length; else break; }
-    const end = t.slice(rel).search(/[.!?](\s|$)/);
-    range = [pa + a, end < 0 ? pb : pa + rel + end + 1];
-  } else if (what === 'chunk') {
+  // "Line 10" said as a number: the line of that number, blank or not.
+  if (unit === 'line' && which === 'nth' && number) { unit = 'lines'; last_number = number; }
+  let range, what;
+  if (unit === 'none') { voiceSelect(sel.head, sel.head); return 'unselected'; }
+  if (unit === 'all') { range = [0, doc.length]; what = 'everything'; }
+  else if (unit === 'lines') {
+    const a = Number(number), b = Number(last_number || number);
+    if (!a) throw new Error('which lines?');
+    if (Math.max(a, b) > doc.lines) throw new Error('the file has ' + doc.lines + ' lines');
+    range = [doc.line(Math.min(a, b)).from, doc.line(Math.max(a, b)).to];
+    what = a === b ? 'line ' + a : 'lines ' + Math.min(a, b) + ' to ' + Math.max(a, b);
+  } else if (unit === 'words') {
+    if (!words) throw new Error('which words?');
+    range = voiceWordsAt(doc, words, at);
+    what = '\u201c' + doc.sliceString(range[0], range[1]) + '\u201d';
+  } else if (unit === 'range') {
+    if (!from || !to) throw new Error('from which words to which?');
+    const s0 = voiceWordsAt(doc, from, at);
+    const endRe = voiceWordsPattern(to);
+    endRe.lastIndex = s0[1];
+    const e = endRe.exec(doc.toString());
+    if (!e) throw new Error('\u201c' + to + '\u201d does not come after \u201c' + from + '\u201d');
+    range = [s0[0], e.index + e[0].length];
+    what = 'from \u201c' + from + '\u201d to \u201c' + to + '\u201d';
+  } else if (unit === 'chunk') {
     const c = ed.codeBlockAtCursor && ed.codeBlockAtCursor();
     if (!c) throw new Error('the cursor is not in a code chunk');
     range = [c.from, c.to];
-  } else if (what === 'lines') {
-    const a = Number(from_line), b = Number(to_line || from_line);
-    if (!a || a > doc.lines) throw new Error('the file has ' + doc.lines + ' lines');
-    range = [doc.line(Math.min(a, b)).from, doc.line(Math.min(doc.lines, Math.max(a, b))).to];
-  } else if (what === 'between') {
-    if (!from || !to) throw new Error('from which words to which?');
-    const text = doc.toString(), start = [...text.matchAll(voiceWordsPattern(from))];
-    if (!start.length) throw new Error('\u201c' + from + '\u201d is not in the file');
-    // The start nearest the cursor, the end after it.
-    const s = start.reduce((best, m) => (Math.abs(m.index - at) < Math.abs(best.index - at) ? m : best));
-    const endRe = voiceWordsPattern(to);
-    endRe.lastIndex = s.index + s[0].length;
-    const e = endRe.exec(text);
-    if (!e) throw new Error('\u201c' + to + '\u201d does not come after \u201c' + from + '\u201d');
-    range = [s.index, e.index + e[0].length];
+    what = 'the code chunk';
+  } else if (unit === 'more') {
+    // One more of what the selection holds (a word, a sentence…), after it.
+    const held = sel.empty ? 'word' : /\n\s*\n/.test(doc.sliceString(sel.from, sel.to)) ? 'paragraph' : /[.!?]\s/.test(doc.sliceString(sel.from, sel.to)) ? 'sentence' : doc.lineAt(sel.from).number !== doc.lineAt(sel.to).number ? 'line' : 'word';
+    const list = voiceUnits(doc, held);
+    const next = list.find(([a]) => a >= sel.to);
+    if (!next) throw new Error('nothing more after the selection');
+    range = [sel.empty ? voiceUnitRange(doc, held, { at }).range[0] : sel.from, next[1]];
+    what = 'one more ' + held;
+  } else if (VOICE_UNIT_NAMES[unit]) {
+    const r = voiceUnitRange(doc, unit, { which, number, count, at });
+    range = r.range;
+    what = (r.n > 1 ? r.n + ' ' + unit + 's' : 'the ' + (which === 'this' ? '' : which === 'nth' ? ChatteringVoiceActions.ORDINALS[r.index] || (r.index + 1) + 'th' : which) + ' ' + unit).replace(/\s+/g, ' ') + ' (' + (r.index + 1) + ' of ' + r.total + ')';
   } else throw new Error('select what?');
   voiceSelect(range[0], range[1]);
-  const n = doc.lineAt(range[1]).number - doc.lineAt(range[0]).number + 1;
-  return what === 'none' ? 'unselected' : 'selected ' + (what === 'lines' || what === 'between' ? '' : 'the ' + what + ' \u00b7 ') + n + (n === 1 ? ' line' : ' lines') + ' (' + (range[1] - range[0]) + ' characters)';
+  const lines = doc.lineAt(range[1]).number - doc.lineAt(range[0]).number + 1;
+  return 'selected ' + what + ' \u00b7 ' + lines + (lines === 1 ? ' line' : ' lines');
+}
+
+// ---- moving the cursor ----
+function voiceCursor({ to, count, number, words }) {
+  const ed = voiceEditor(), state = ed.view.state, doc = state.doc, sel = state.selection.main;
+  const at = sel.head, n = Math.max(1, Number(count) || 1);
+  let pos, said;
+  const unitMove = (unit, dir) => {
+    const list = voiceUnits(doc, unit);
+    if (!list.length) throw new Error('the file has no ' + unit);
+    let i = voiceUnitAt(list, at);
+    // "Previous sentence" from inside one: its start first, like the keys.
+    if (dir < 0 && i >= 0 && list[i][0] < at) { i -= n - 1; }
+    else i += dir * n;
+    i = Math.max(0, Math.min(list.length - 1, i));
+    return list[i][0];
+  };
+  if (to === 'center') { ed.view.dispatch({ effects: voiceScrollCenter(ed, at) }); return 'centered on line ' + doc.lineAt(at).number; }
+  if (to === 'up' || to === 'down') {
+    const line = doc.lineAt(at), target = Math.max(1, Math.min(doc.lines, line.number + (to === 'up' ? -n : n)));
+    const col = at - line.from, l = doc.line(target);
+    pos = Math.min(l.to, l.from + col); said = to + ' ' + n + (n === 1 ? ' line' : ' lines');
+  } else if (to === 'line') {
+    if (!number) throw new Error('which line?');
+    if (number > doc.lines) throw new Error('the file has ' + doc.lines + ' lines');
+    pos = doc.line(number).from; said = 'line ' + number;
+  } else if (to === 'line_start') { pos = doc.lineAt(at).from; said = 'start of the line'; }
+  else if (to === 'line_end') { pos = doc.lineAt(at).to; said = 'end of the line'; }
+  else if (to === 'doc_start') { pos = 0; said = 'top of the file'; }
+  else if (to === 'doc_end') { pos = doc.length; said = 'end of the file'; }
+  else if (to === 'word_next' || to === 'word_previous') {
+    const list = voiceUnits(doc, 'word');
+    if (to === 'word_next') { const k = list.findIndex(([a]) => a > at); pos = k < 0 ? doc.length : list[Math.min(list.length - 1, k + n - 1)][0]; }
+    else { const k = list.map(([a]) => a < at).lastIndexOf(true); pos = k < 0 ? 0 : list[Math.max(0, k - n + 1)][0]; }
+    said = (to === 'word_next' ? 'next word' : 'previous word') + (n > 1 ? ' \u00d7' + n : '');
+  } else if (/^(sentence|paragraph)_(next|previous)$/.test(to)) {
+    const [unit, dir] = to.split('_');
+    pos = unitMove(unit, dir === 'next' ? 1 : -1); said = dir + ' ' + unit;
+  } else if (to === 'before' || to === 'after' || to === 'words') {
+    if (!words) throw new Error('which words?');
+    const r = voiceWordsAt(doc, words, at);
+    pos = to === 'after' ? r[1] : r[0]; said = (to === 'after' ? 'after' : 'before') + ' \u201c' + doc.sliceString(r[0], r[1]) + '\u201d';
+  } else throw new Error('move where?');
+  ed.view.dispatch({ selection: { anchor: pos }, scrollIntoView: true, userEvent: 'select.voice' });
+  if (!matchMedia('(pointer: coarse)').matches) ed.focus();
+  return said + ' \u00b7 line ' + doc.lineAt(pos).number;
+}
+function voiceScrollCenter(ed, pos) {
+  // CodeMirror's own "scroll into view, centered" effect when the bundle has it.
+  const EV = ed.view.constructor;
+  return EV && EV.scrollIntoView ? EV.scrollIntoView(pos, { y: 'center' }) : [];
+}
+
+// Undo and redo, as the keys do (the editor's own history).
+function voiceUndo({ how = 'undo' }) {
+  const ed = voiceEditor();
+  const key = how === 'redo' ? { key: 'y', code: 'KeyY', ctrlKey: true } : { key: 'z', code: 'KeyZ', ctrlKey: true };
+  const before = ed.view.state.doc.toString();
+  ed.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { ...key, bubbles: true, cancelable: true }));
+  if (ed.view.state.doc.toString() === before) throw new Error('nothing to ' + how);
+  voice.dictated = null;
+  return how === 'redo' ? 'redone' : 'undone';
 }
 
 const voiceCells = () => { const ed = voiceEditor(); return ed && ed.listCells ? ed.listCells() : []; };
@@ -918,7 +1078,7 @@ const VOICE_ACTIONS = {
     available: () => true,
     run: () => (voice.mode === 'dictation' ? 'yes: dictating into ' + voice.target.label : 'yes: listening for commands') + ' · window ' + Math.round(voice.heard.windowSeconds || 0) + ' s',
   },
-  focus_box: { available: () => !!voiceTextTarget(), run: () => { const t = voiceTextTarget(); t.ta.focus(); return 'cursor in ' + t.label; } },
+  focus_box: { available: () => !!(voiceTextTarget() && voiceTextTarget().ta), run: () => { const t = voiceTextTarget(); t.ta.focus(); return 'cursor in ' + t.label; } },
   new_conversation: { available: () => typeof startNewConversation === 'function', run: async () => { await startNewConversation(); return 'new conversation'; } },
   regenerate: {
     available: () => !!voiceLast('#view .msg-regenerate'),
@@ -940,7 +1100,10 @@ const VOICE_ACTIONS = {
   delegate: { available: () => true, run: (_, said) => voiceDelegate(said) },
   find: { available: () => !!voiceEditor(), lists: said => voiceFoundList(said), run: ({ text }) => voiceFind(text) },
   find_again: { available: () => !!(voiceEditor() && voice.lastFind), run: ({ which = 'next' }) => voiceFind(voice.lastFind, which === 'previous' ? -1 : 1) },
-  select: { available: () => !!voiceEditor(), run: args => voiceSelectWhat(args) },
+  select: { available: () => !!voiceEditor(), run: (args, said) => voiceSelectWhat(args, said) },
+  cursor: { available: () => !!voiceEditor(), run: args => voiceCursor(args) },
+  undo: { available: () => !!voiceEditor(), run: args => voiceUndo(args) },
+  fix_dictation: { available: () => !!(voiceEditor() && voiceEditor().runAiCommand), run: () => voiceFixDictation() },
   chunk: { available: () => voiceCells().length > 0, run: args => voiceChunk(args) },
   chunk_run: {
     available: () => voiceCells().length > 0 && typeof docState !== 'undefined' && !!(docState && docState.runner && docState.editor === voiceEditor()),
@@ -961,7 +1124,7 @@ const VOICE_ACTIONS = {
     run: () => { const t = voiceTextTarget(); voiceBeginDictation(t); return 'dictating into ' + t.label; },
   },
   send: {
-    available: () => { const t = voiceTextTarget(); return !!(t && t.ta.value.trim()); },
+    available: () => { const t = voiceTextTarget(); return !!(t && t.ta && t.ta.value.trim()); },
     run: async () => { await voiceTextTarget().send(); return 'sent'; },
   },
   model: {
@@ -1000,7 +1163,7 @@ const VOICE_ACTIONS = {
       return 'opened ' + it.title;
     },
   },
-  help: { available: () => true, run: () => { voiceShowHelp(true); return 'here is what you can say'; } },
+  help: { available: () => true, run: ({ how }) => { const open = how !== 'close'; voiceShowHelp(open); return open ? 'here is what you can say' : 'closed the list of commands'; } },
   settings: { available: () => true, run: async ({ pane }) => { await showSettings(pane || 'profile'); return 'settings: ' + (pane || 'profile'); } },
   go_home: { available: () => viewKind !== 'home', run: () => { goHome(); return 'home'; } },
   go_back: { available: () => true, run: () => { nav.back(); return 'back'; } },
@@ -1015,10 +1178,6 @@ const VOICE_ACTIONS = {
   rewrite: {
     available: () => !!(voiceEditor() && voiceEditor().runAiCommand),
     run: (_, said) => { if (!voiceEditor().runAiCommand('edit', { instruction: said })) throw new Error('nothing to rewrite here'); return 'rewriting: \u201c' + said + '\u201d'; },
-  },
-  go_to_line: {
-    available: () => !!voiceEditor(),
-    run: ({ line }) => { voiceEditor().gotoLine(Number(line)); voiceEditor().focus(); return 'line ' + line; },
   },
   replace: {
     available: () => !!voiceEditor(),
@@ -1048,25 +1207,41 @@ function voiceProject() {
 // click away from undone.
 function voiceReplace(old, insert) {
   const ed = voiceEditor();
-  const state = ed.view.state, text = state.doc.toString(), sel = state.selection.main;
-  let from, to;
+  const state = ed.view.state, doc = state.doc, sel = state.selection.main;
+  const at = sel.empty ? sel.head : sel.from;
+  let from, to, named;
   if (old && old.selection) {
     if (sel.empty) throw new Error('nothing is selected');
-    ({ from, to } = sel);
+    ({ from, to } = sel); named = 'the selection';
+  } else if (old && old.line) {
+    if (old.line > doc.lines) throw new Error('the file has ' + doc.lines + ' lines');
+    ({ from, to } = doc.line(old.line)); named = 'line ' + old.line;
+  } else if (old && old.place) {
+    [from, to] = voiceUnitRange(doc, old.place, { at }).range; named = 'the ' + old.place;
   } else {
-    const needle = String(old).toLowerCase(), hay = text.toLowerCase();
-    let best = -1;
-    for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + 1)) if (best < 0 || Math.abs(i - sel.head) < Math.abs(best - sel.head)) best = i;
-    if (best < 0) throw new Error('\u201c' + old + '\u201d is not in the text');
-    from = best; to = best + needle.length;
+    [from, to] = voiceWordsAt(doc, String(old), at); named = '\u201c' + old + '\u201d';
   }
-  const meta = { source: 'voice', label: 'Voice: \u201c' + (old && old.selection ? 'the selection' : old) + '\u201d \u2192 \u201c' + insert + '\u201d' };
+  // "Replace that" with what comes next: select it and dictate over it.
+  if (insert && insert.dictate) {
+    voiceSelect(from, to);
+    const t = voiceTextTarget();
+    voiceBeginDictation(t);
+    return 'say the new text for ' + named + ' (it replaces the selection)';
+  }
+  // Deleting words takes one space with them: the one before, when
+  // punctuation or a line end follows; else the one after.
+  if (!insert && !(old && (old.line || old.place === 'paragraph'))) {
+    const prev = doc.sliceString(from - 1, from), next = doc.sliceString(to, to + 1);
+    if (prev === ' ' && (!next || /[\s.,;:!?)]/.test(next))) from -= 1;
+    else if (next === ' ') to += 1;
+  }
+  const meta = { source: 'voice', label: 'Voice: ' + named + ' \u2192 \u201c' + insert + '\u201d' };
   if (ed.review && ed.review.propose) {
     if (!ed.review.propose({ from, to, insert, meta })) throw new Error('a change is under review there: accept or reject it first');
-    return 'replaced, to review (Alt+Y keeps it)';
+    return (insert ? 'replaced ' : 'deleted ') + named + ', to review (Alt+Y keeps it)';
   }
   ed.view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, userEvent: 'input.voice' });
-  return 'replaced';
+  return (insert ? 'replaced ' : 'deleted ') + named;
 }
 
 function voiceReview(what, all) {
@@ -1083,7 +1258,10 @@ function voiceReview(what, all) {
 function voiceBeginDictation(target) {
   voice.mode = 'dictation';
   voice.target = target;
-  target.ta.focus();
+  voice.dictated = null;
+  voice.dictatedRun = null;
+  if (target.file) { if (!matchMedia('(pointer: coarse)').matches) target.ed.focus(); }
+  else target.ta.focus();
   voicePaint();
 }
 function voiceEndDictation() {
@@ -1093,6 +1271,7 @@ function voiceEndDictation() {
 }
 function voiceWrite(text) {
   const t = voice.target;
+  if (t && t.file) return voiceWriteFile(text);
   if (!t || !t.ta.isConnected) { voiceEndDictation(); throw new Error('the box went away; dictation stopped'); }
   t.ta.value = joinAgentSpeech(t.ta.value, text);
   t.ta.selectionStart = t.ta.selectionEnd = t.ta.value.length;
@@ -1112,14 +1291,14 @@ function voiceScreen() {
 
 async function voiceContext(said) {
   const context = { said, heard: voice.heard.committed.split(' ').slice(-120).join(' '), screen: voiceScreen(), mode: voice.mode, lists: {} };
-  if (voice.mode === 'dictation') return context;
+  if (voice.mode === 'dictation') { if (voice.target && voice.target.file) context.dictationTarget = 'file'; return context; }
   context.actions = Object.entries(VOICE_ACTIONS).filter(([, a]) => { try { return a.available(); } catch { return false; } }).map(([id]) => id);
   for (const id of context.actions) if (VOICE_ACTIONS[id].lists) Object.assign(context.lists, await VOICE_ACTIONS[id].lists(said));
   if (context.actions.includes('open') && voicePrefs().numbers) voicePaintHints(); // the numbers Jev sees are the ones shown
   const ed = voiceEditor();
   if (ed) {
     const st = ed.view.state, sel = st.selection.main;
-    context.doc = { selection: st.doc.sliceString(sel.from, sel.to).slice(0, 2000), nearby: st.doc.sliceString(Math.max(0, sel.head - 4000), sel.head + 4000) };
+    context.doc = { selection: st.doc.sliceString(sel.from, sel.to).slice(0, 2000), nearby: st.doc.sliceString(Math.max(0, sel.head - 4000), sel.head + 4000), lines: st.doc.lines };
   }
   if (voice.pending) context.pending = voice.pending.label;
   const project = voiceProject();
@@ -1127,9 +1306,36 @@ async function voiceContext(said) {
   return context;
 }
 
-async function voiceUnderstand(said, asrMs) {
-  const entry = { said, asrMs, at: Date.now(), status: 'deciding' };
-  voiceRecord(entry);
+// How sure a decision must be to run without asking.
+function voiceNeeds(d) {
+  // A button is as risky as what it says: "delete", "abort", "send"…
+  const control = d.action === 'press' && voice.controls ? voice.controls.get(d.args && d.args.control) : null;
+  const risky = VOICE_RISKY.has(d.action) || (control && VOICE_RISKY_CONTROL.test(control.label)) || (d.action === 'chunk_run' && d.args && d.args.which === 'all');
+  // Stopping the scrolling is never harmful: the top guess is enough.
+  const harmless = d.action === 'autoscroll_adjust' && d.args && d.args.how === 'stop';
+  // A replacement is shown as a change to review: "reject" undoes it.
+  const reviewed = d.action === 'replace' && voiceEditor() && voiceEditor().review && voiceEditor().review.propose;
+  return risky && !reviewed ? VOICE_RISKY_AT : harmless ? 0 : reviewed || VOICE_EASY.has(d.action) ? VOICE_EASY_AT : VOICE_ACT_AT;
+}
+const voiceActionable = d => d && !d.dictating && d.action !== 'none' && !d.missing && d.confidence >= voiceNeeds(d);
+
+async function voiceDecideSaid(said, asrMs) {
+  const context = await voiceContext(said);
+  if (Number.isFinite(asrMs)) context.asrMs = asrMs;
+  const r = await fetch('/api/voice/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(context) });
+  const out = await r.json();
+  if (!r.ok || out.error) throw new Error(out.error || 'the server did not decide');
+  return out;
+}
+
+// A command cut in two by a pause ("go to line" \u2026 "eight"): a sentence
+// that is incomplete alone is decided again joined to the one before, when
+// that one was incomplete too and came moments ago.
+const VOICE_JOIN_MS = 6000;
+
+async function voiceUnderstand(said, asrMs, { entry: reuse = null } = {}) {
+  const entry = reuse || { said, asrMs, at: Date.now(), status: 'deciding' };
+  if (!reuse) voiceRecord(entry);
   // The "stop" that the live words already acted on arrives as a sentence:
   // done already, nothing to ask.
   const words = String(said).trim().split(/\s+/);
@@ -1138,35 +1344,47 @@ async function voiceUnderstand(said, asrMs) {
     return voicePaintDecisions();
   }
   let out;
-  try {
-    const context = await voiceContext(said);
-    if (Number.isFinite(asrMs)) context.asrMs = asrMs;
-    const r = await fetch('/api/voice/decide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(context) });
-    out = await r.json();
-    if (!r.ok || out.error) throw new Error(out.error || 'the server did not decide');
-  } catch (e) {
+  try { out = await voiceDecideSaid(said, asrMs); }
+  catch (e) {
     Object.assign(entry, { status: 'failed', note: e.message });
     return voicePaintDecisions();
   }
-  const d = out.decision;
+  let d = out.decision;
+  const before = voice.incomplete;
+  voice.incomplete = null;
+  if (!d.dictating && !voiceActionable(d) && before && Date.now() - before.at < VOICE_JOIN_MS && voice.mode === 'command') {
+    try {
+      const joined = await voiceDecideSaid(before.said + ' ' + said, asrMs);
+      if (voiceActionable(joined.decision)) {
+        if (voice.pending && voice.pending.entry === before.entry) { clearTimeout(voice.pending.timer); voice.pending = null; }
+        before.entry.status = 'cancelled';
+        before.entry.note = 'joined with the next sentence';
+        voiceOutcome(before.entry.id, 'cancelled', 'joined with the next sentence');
+        entry.said = before.said + ' \u2026 ' + said;
+        out = joined;
+        d = joined.decision;
+      }
+    } catch {}
+  }
   Object.assign(entry, { id: out.id, decision: d, jevMs: out.ms });
   if (d.dictating) return voiceDictation(entry, d);
-  if (d.action === 'none') { Object.assign(entry, { status: 'ignored' }); return voicePaintDecisions(); }
+  if (d.action === 'none') {
+    Object.assign(entry, { status: 'ignored' });
+    if (words.length <= 4) voice.incomplete = { said, at: Date.now(), entry };
+    return voicePaintDecisions();
+  }
   if (d.action === 'confirm' || d.action === 'cancel') return voiceAnswerPending(entry, d.action === 'confirm');
-  // "Open it", "open this box" with nothing named: what is selected now —
+  // "Open it", "open this box" with nothing named: what is selected now \u2014
   // the tree's box, the mark whose card is showing.
   if (d.action === 'open' && d.missing === 'item') {
     const sure = (d.alternatives.find(a => a.action === 'open') || {}).probability || 0;
     const selected = voiceOpenSelected();
     if (selected) Object.assign(d, selected, { missing: null, confidence: sure });
   }
-  // A button is as risky as what it says: "delete", "abort", "send"…
-  const control = d.action === 'press' && voice.controls ? voice.controls.get(d.args && d.args.control) : null;
-  const risky = VOICE_RISKY.has(d.action) || (control && VOICE_RISKY_CONTROL.test(control.label)) || (d.action === 'chunk_run' && d.args && d.args.which === 'all');
-  // Stopping the scrolling is never harmful: the top guess is enough.
-  const harmless = d.action === 'autoscroll_adjust' && d.args && d.args.how === 'stop';
-  const needs = risky ? VOICE_RISKY_AT : harmless ? 0 : VOICE_EASY.has(d.action) ? VOICE_EASY_AT : VOICE_ACT_AT;
-  if (d.missing || d.confidence < needs) return voiceSuggest(entry, d);
+  if (d.missing || d.confidence < voiceNeeds(d)) {
+    voice.incomplete = { said, at: Date.now(), entry };
+    return voiceSuggest(entry, d);
+  }
   await voiceRun(entry, d);
 }
 
@@ -1181,14 +1399,23 @@ async function voiceRun(entry, d) {
   } catch (e) {
     entry.status = 'failed';
     entry.note = e.message;
+    // "Which line?": the next sentence may say it.
+    if (/\?$/.test(e.message)) voice.incomplete = { said: entry.said, at: Date.now(), entry };
     if (!voicePrefs().overlay) toast('\u{1F399} ' + e.message, null, 'err');
   }
   voiceOutcome(entry.id, entry.status === 'done' ? (entry.confirmed ? 'confirmed' : 'done') : 'failed', entry.note);
   voicePaintDecisions();
 }
 
-function voiceDictation(entry, d) {
+async function voiceDictation(entry, d) {
+  // "Select the paragraph" while dictating into a file: decided again as a command.
+  if (d.action === 'command') {
+    voice.mode = 'command';
+    try { return await voiceUnderstand(entry.said, entry.asrMs, { entry, thenDictate: true }); }
+    finally { if (voice.target) voice.mode = 'dictation'; voicePaint(); }
+  }
   try {
+    if (voice.target && voice.target.file && ['new_line', 'new_paragraph', 'scratch', 'fix'].includes(d.action)) entry.summary = await voiceFileDictationStep(d.action);
     if (d.action === 'text' || d.action === 'text_send') { if (d.text) voiceWrite(d.text); entry.summary = 'wrote it'; }
     if (d.action === 'text_send' || d.action === 'send') { voice.target.send(); entry.summary = 'sent'; voiceEndDictation(); }
     else if (d.action === 'stop') { voiceEndDictation(); entry.summary = 'stopped dictating'; }
@@ -1197,6 +1424,44 @@ function voiceDictation(entry, d) {
   } catch (e) { entry.status = 'failed'; entry.note = e.message; }
   voiceOutcome(entry.id, entry.status === 'done' ? 'done' : 'failed', entry.note);
   voicePaintDecisions();
+}
+
+async function voiceFileDictationStep(step) {
+  const ed = voiceEditor();
+  if (!ed) throw new Error('no file is open');
+  const st = ed.view.state, head = st.selection.main.head;
+  if (step === 'new_line' || step === 'new_paragraph') {
+    const insert = step === 'new_line' ? '\n' : '\n\n';
+    ed.view.dispatch({ changes: { from: head, insert }, selection: { anchor: head + insert.length }, scrollIntoView: true, userEvent: 'input.voice' });
+    voice.dictated = null;
+    return step === 'new_line' ? 'new line' : 'new paragraph';
+  }
+  if (step === 'scratch') {
+    const d = voice.dictated;
+    if (!d || st.doc.sliceString(d.from, d.to) !== d.text) throw new Error('nothing just dictated to remove');
+    // With the space written before it.
+    const from = d.from > 0 && st.doc.sliceString(d.from - 1, d.from) === ' ' ? d.from - 1 : d.from;
+    ed.view.dispatch({ changes: { from, to: d.to }, selection: { anchor: from }, userEvent: 'delete.voice' });
+    voice.dictated = null;
+    if (voice.dictatedRun && voice.dictatedRun.to === d.to) voice.dictatedRun = voice.dictatedRun.from < from ? { from: voice.dictatedRun.from, to: from } : null;
+    return 'removed \u201c' + d.text.slice(0, 40) + '\u201d';
+  }
+  return voiceFixDictation();
+}
+
+// "Fix dictation": the AI's Fix dictation command on what was dictated
+// (the whole run, else the last piece, else the selection), as a change
+// to review.
+function voiceFixDictation() {
+  const ed = voiceEditor();
+  const st = ed.view.state, sel = st.selection.main;
+  const r = voice.dictatedRun || voice.dictated;
+  if (r && r.to <= st.doc.length && r.to > r.from) ed.view.dispatch({ selection: { anchor: r.from, head: r.to } });
+  else if (sel.empty) throw new Error('nothing dictated yet \u2014 select the text to fix');
+  if (!ed.runAiCommand || !ed.runAiCommand('transcription')) throw new Error('Fix dictation does not apply here');
+  voice.dictatedRun = null;
+  voice.dictated = null;
+  return 'fixing the dictated text (a change to review)';
 }
 
 // A suggestion: shown with Do it / No; a spoken yes or no answers it.
@@ -1417,7 +1682,7 @@ function voiceHelpHtml() {
   const A = ChatteringVoiceActions;
   if (voice.mode === 'dictation') {
     return `<p class="vo-help-lead">Dictating into ${esc(voice.target.label)}: what you say is written there, except</p><ul>` +
-      Object.entries(A.DICTATION).filter(([id]) => id !== 'text').map(([, a]) => `<li><b>${esc(a.say)}</b> — ${esc(voiceSpeakToYou(a.label))}</li>`).join('') + '</ul>';
+      Object.entries(voice.target && voice.target.file ? A.DICTATION_FILE : A.DICTATION).filter(([id]) => id !== 'text').map(([, a]) => `<li><b>${esc(a.say)}</b> — ${esc(voiceSpeakToYou(a.label))}</li>`).join('') + '</ul>';
   }
   const ids = Object.entries(VOICE_ACTIONS).filter(([, a]) => { try { return a.available(); } catch { return false; } }).map(([id]) => id);
   const rows = ids.filter(id => A.ACTIONS[id]).map(id => `<li><b>${esc(A.ACTIONS[id].say)}</b> — ${esc(voiceSpeakToYou(A.ACTIONS[id].label))}</li>`).join('');
