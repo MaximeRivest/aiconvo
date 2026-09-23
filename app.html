@@ -15208,6 +15208,9 @@ function paneModel() {
       <div class="set-help">${modelSupportsThinking(current.provider, current.model) ? 'How much the model reasons before it answers. Higher is slower and costs more.' : 'This model does not support thinking.'}</div>
     </div>
     ${backgroundAiSectionHtml()}
+    <h3>artifacts</h3>
+    <label class="set-check"><input id="setArtifactLibraries" type="checkbox"${s.artifactNetwork === 'libraries' ? ' checked' : ''}> limit artifact pages to the public library sites</label>
+    <div class="set-help">Pages, apps, slides and widgets that agents make run on a separate preview address, never on Chattering's own. By default they may load and call anything, like any website. Checked: their scripts, styles, fonts and network calls may only come from jsDelivr, unpkg, esm.sh, cdnjs and Google Fonts (what Claude and ChatGPT allow). Pictures may still come from anywhere.</div>
     <h3>conversation answers</h3>
     <label class="set-check"><input id="setSimplifyAnswers" type="checkbox"${s.simplifyAnswers !== false ? ' checked' : ''}> automatically make a simpler version</label>
     <div class="set-help">Re-explain the full answer for someone with no background in the subject. Uses the same model at its lowest reasoning setting and keeps the original. Adds one model call and some waiting. Reuses the conversation for caching, but changing reasoning can reduce cache reuse with some providers. Available for web conversations using the SDK engine, not terminal or delegated runs.</div>
@@ -15262,6 +15265,7 @@ function bindPaneModel(root) {
     await loadAgentRecovery();
   };
   $('setSimplifyAnswers').onchange = () => saveSettings({ simplifyAnswers: $('setSimplifyAnswers').checked }, 'simpler answers updated');
+  $('setArtifactLibraries').onchange = () => saveSettings({ artifactNetwork: $('setArtifactLibraries').checked ? 'libraries' : 'open' }, 'artifact pages updated');
   bindOptions(root, 'setModelSource', v => {
     if (v === 'pi') return saveSettings({ usePiDefault: true, provider: '', model: '' }, 'model: pi’s default');
     const cur = currentSettingsModel();
