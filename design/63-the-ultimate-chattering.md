@@ -97,7 +97,7 @@ Findings that shape the answer:
    while Maxime used the same kernel from Chattering. Nothing showed it, and
    rat's caller name would have said only `rat` for both.
 4. **Two rat adapters for MRMD exist.** VS Code's (`createRatRuntime`,
-   `rat/vscode-rat/media/mrmdEditor.js`, ~180 lines inside a 1,610-line
+   `rat/vscode-rat/media/mrmdEditor.js`, ~150 lines inside a 1,610-line
    webview script) and Chattering's (`runDocCell`, `/api/doc/*`). They
    differ: VS Code writes output as it streams; Chattering shows it live and
    writes once. The same notebook behaves differently in the two editors.
