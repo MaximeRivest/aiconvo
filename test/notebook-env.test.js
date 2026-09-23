@@ -109,3 +109,15 @@ test('agentBrief carries the report, the plan, the editable lines and the rules;
   assert.match(missing, /rat is not installed/);
   assert.doesNotMatch(missing, /doctor report right now/);
 });
+
+test('parseLookOverview reads rat look: header, then name / type / preview columns', () => {
+  const out = NE.parseLookOverview("python idle | 3 vars\n\nauth                Auth              Auth(FileStore(/x/credentials.json))\ncurrent             NoneType          None\nreply               Response          Response(\\n    text='Hi  there')\n");
+  assert.deepEqual([out.language, out.state, out.count], ['python', 'idle', 3]);
+  assert.deepEqual(out.vars, [
+    { name: 'auth', type: 'Auth', preview: 'Auth(FileStore(/x/credentials.json))' },
+    { name: 'current', type: 'NoneType', preview: 'None' },
+    { name: 'reply', type: 'Response', preview: "Response(\\n    text='Hi  there')" },
+  ]);
+  assert.deepEqual(NE.parseLookOverview('python idle | 0 vars\n').vars, []);
+  assert.deepEqual(NE.parseLookOverview('something odd').vars, [{ name: 'something odd', type: '', preview: '' }]);
+});

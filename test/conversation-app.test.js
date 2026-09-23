@@ -441,6 +441,38 @@ test('complete app and server: conversation reading, Files browsing, MRMD, diffs
   const afterStream = await evaluate(`docState.editor.getContent()`);
   assert.match(afterStream, /\x60\x60\x60output\nOpen https:\/\/accounts.example\/device\nsigned in\n\x60\x60\x60/);
   assert.doesNotMatch(afterStream, /s3cret/);
+  // The kernel: the variables drawer and the kernel menu (rat mocked).
+  await evaluate(`(() => {
+    window.kernelOps = []; window.confirm = () => true;
+    window.fetch = (url, opts) => {
+      const u = String(url);
+      const reply = body => Promise.resolve(new Response(JSON.stringify(body)));
+      const kernel = { name: 'py@work', running: true, state: 'idle', runtime_version: 'Python 3.13.13', memory_mb: 74 };
+      if (u.includes('/api/doc/variables') && u.includes('at=auth')) return reply({ kernel, running: true, at: 'auth', text: 'auth: Auth\\n  = Auth(FileStore(/x))' });
+      if (u.includes('/api/doc/variables')) return reply({ kernel, running: true, language: 'python', state: 'idle', count: 2, vars: [{ name: 'auth', type: 'Auth', preview: 'Auth(FileStore(/x))' }, { name: 'answer', type: 'int', preview: '42' }] });
+      if (u.includes('/api/doc/kernel') && opts && opts.method === 'POST') { kernelOps.push(JSON.parse(opts.body).op); return reply({ ok: true, kernel }); }
+      if (u.includes('/api/doc/kernel')) return reply({ runtime: 'py', ...kernel });
+      return liveOriginalFetch(url, opts);
+    };
+    document.querySelector('#docVars').click();
+  })()`);
+  await until(`document.querySelectorAll('.doc-vars .doc-var').length === 2`, 'the variables drawer did not list the kernel variables');
+  assert.match(await evaluate(`document.querySelector('.doc-vars-meta').textContent`), /py@work · 2 · idle/);
+  await evaluate(`(() => { const f = document.querySelector('.doc-vars-filter'); f.value = 'int'; f.dispatchEvent(new Event('input')); })()`);
+  assert.equal(await evaluate(`[...document.querySelectorAll('.doc-var .v-name')].map(e => e.textContent).join()`), 'answer');
+  await evaluate(`(() => { const f = document.querySelector('.doc-vars-filter'); f.value = ''; f.dispatchEvent(new Event('input')); document.querySelector('.doc-var[data-name="auth"]').click(); })()`);
+  await until(`/FileStore/.test(document.querySelector('.doc-var-detail')?.textContent || '')`, 'inspecting a variable showed nothing');
+  fs.writeFileSync(path.join(os.tmpdir(), 'notebook-variables.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, sid)).result.data, 'base64'));
+  await evaluate(`document.querySelector('.doc-run-chip').click()`);
+  await until(`!!document.querySelector('.doc-kernel-menu [data-kernel-item]')`, 'the kernel menu did not open');
+  assert.equal(await evaluate(`[...document.querySelectorAll('.doc-kernel-menu button')].map(b => b.textContent).join('|')`), 'Hide variables|Restart kernel…|Clear variables…|Shut down kernel…');
+  assert.match(await evaluate(`document.querySelector('.doc-kernel-menu .file-action-head').textContent`), /py@work · idle · Python 3.13.13 · 74 MB/);
+  fs.writeFileSync(path.join(os.tmpdir(), 'notebook-kernel-menu.png'), Buffer.from((await send('Page.captureScreenshot', { format: 'png' }, sid)).result.data, 'base64'));
+  await evaluate(`document.querySelector('.doc-kernel-menu [data-kernel-item="1"]').click()`);
+  await until(`kernelOps.join() === 'restart'`, 'restart was not sent');
+  await evaluate(`document.querySelector('.doc-vars-close').click()`);
+  assert.equal(await evaluate(`!!document.querySelector('.doc-vars')`), false);
+  await evaluate(`localStorage.removeItem('chattering.docVars')`);
   await evaluate(`autosaveDocument()`);
   await evaluate(`window.fetch=liveOriginalFetch`);
   const markdownShot = await send('Page.captureScreenshot', { format: 'png' }, sid);

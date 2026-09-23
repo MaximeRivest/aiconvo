@@ -343,5 +343,21 @@
   // rat resolves aliases itself; this map only decides what is runnable.
   const RUN_LANGS = Object.freeze({ python: 'py', py: 'py', python3: 'py', r: 'r', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', julia: 'jl', jl: 'jl', javascript: 'js', js: 'js', node: 'js' });
 
-  return { addDependency, dependencies, setProject, setMapping, readScalar, afterList, missingModule, proposeRequirement, agentBrief, findRat, IMPORT_TO_DIST, RUN_LANGS };
+  // `rat look <runtime>` (no --at): a header "python idle | 18 vars", a
+  // blank line, then one row per variable — name, type, preview — in
+  // columns at least two spaces apart. Rows that do not fit are kept whole
+  // as the preview, so nothing the kernel said is dropped.
+  function parseLookOverview(text) {
+    const lines = String(text || '').replace(/\r/g, '').split('\n');
+    const head = (lines[0] || '').match(/^(\S+)\s+(\S+)\s*\|\s*(\d+)\s+vars?\b/);
+    const vars = [];
+    for (const line of lines.slice(head ? 1 : 0)) {
+      if (!line.trim()) continue;
+      const m = line.match(/^\s*(\S+)\s{2,}(\S+)\s{2,}(.*)$/) || line.match(/^\s*(\S+)\s{2,}(\S+)\s*$/);
+      vars.push(m ? { name: m[1], type: m[2], preview: m[3] || '' } : { name: line.trim(), type: '', preview: '' });
+    }
+    return { language: head ? head[1] : null, state: head ? head[2] : null, count: head ? Number(head[3]) : vars.length, vars };
+  }
+
+  return { addDependency, dependencies, setProject, setMapping, readScalar, afterList, missingModule, proposeRequirement, agentBrief, findRat, IMPORT_TO_DIST, RUN_LANGS, parseLookOverview };
 });

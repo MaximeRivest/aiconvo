@@ -774,6 +774,25 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .doc-view { height: calc(100vh - 82px); min-height: 400px; display: flex; flex-direction: column; margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-6)); }
 
 .doc-editor-host { flex: 1; min-height: 0; overflow: auto; background: var(--bg); }
+/* The editor and, when open, the variables drawer beside it. */
+.doc-body { flex: 1; min-height: 0; display: flex; }
+.doc-body > .doc-editor-host { flex: 1; min-width: 0; }
+.doc-vars { flex: 0 0 320px; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--bg); font-size: var(--fs-micro); }
+.doc-vars-head { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.doc-vars-head b { font-weight: 600; }
+.doc-vars-head .doc-vars-meta { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.doc-vars-head button { min-height: 0; height: 22px; padding: 0 6px; }
+.doc-vars-filter { margin: 6px 10px; height: 24px; padding: 0 6px; font: inherit; color: var(--text); background: var(--surface-1); border: 1px solid var(--border); }
+.doc-vars-list { flex: 1; min-height: 0; overflow: auto; padding-bottom: 12px; }
+.doc-vars-list.is-stale { opacity: .5; }
+.doc-vars-note { padding: 10px; color: var(--text-dim); }
+.doc-var { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; min-height: 0; height: auto; padding: 5px 10px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); text-align: left; font: inherit; }
+.doc-var:hover, .doc-var[aria-expanded="true"] { background: var(--surface-2); }
+.doc-var .v-name { font-family: var(--font-mono); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-var .v-type { color: var(--text-dim); }
+.doc-var .v-preview { grid-column: 1 / -1; font-family: var(--font-mono); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-var-detail { margin: 0; padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--surface-1); font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto; }
+@media (max-width: 700px) { .doc-body { flex-direction: column; } .doc-vars { flex: 0 0 42%; border-left: 0; border-top: 1px solid var(--border); } }
 /* The page: the same reading column as a conversation (--read-max). */
 .doc-editor-host > div { max-width: var(--read-max); margin: 0 auto; padding: 28px 20px 50vh; min-height: 100%; }
 .doc-editor-host .cm-editor { height: auto; }
@@ -814,6 +833,9 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 /* Run status strip: kernel chip · state · cancel. Output lives IN the
    document (```output under the cell, MRMD style), never here. */
 .doc-run-strip { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-3); padding: 4px 10px; font-size: var(--fs-micro); color: var(--text-dim); border-top: 1px solid var(--border-strong); background: var(--bg); }
+.doc-run-strip .doc-run-chip { min-height: 0; height: 22px; padding: 0 6px; border-color: transparent; background: transparent; font-size: var(--fs-micro); color: var(--text-dim); }
+.doc-run-strip .doc-run-chip:hover { color: var(--text); background: var(--surface-2); }
+.doc-run-strip .doc-run-chip:empty { display: none; }
 .doc-run-strip .doc-run-state { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc-run-ask { flex: 0 0 auto; display: flex; align-items: center; gap: var(--sp-2); padding: 4px 10px; font-size: var(--fs-micro); border-top: 1px solid var(--border-strong); background: var(--bg); }
 .doc-run-ask input { flex: 1; min-width: 8em; font: inherit; }
@@ -6638,10 +6660,11 @@ function docRunStrip() {
   if (!view) return null;
   strip = document.createElement('div');
   strip.className = 'doc-run-strip';
-  strip.innerHTML = `<span class="doc-run-chip dim" title="The kernel rat resolves for this notebook"></span>
+  strip.innerHTML = `<button type="button" class="doc-run-chip" aria-haspopup="menu" title="The kernel rat resolves for this notebook — click for variables, restart, clear, shut down"></button>
     <span class="doc-run-state"></span>
     <button class="doc-run-cancel" hidden title="Interrupt the kernel (variables survive)">■ cancel</button>`;
   view.appendChild(strip);
+  strip.querySelector('.doc-run-chip').onclick = e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openDocKernelMenu(r.left, r.top - 4, { above: true }); };
   return strip;
 }
 
@@ -6889,6 +6912,7 @@ async function runDocCell(cell, opts = {}) {
   if (docState !== st) { disposePanel(); return { ok: false }; }
   st.running = null;
   cancelBtn.hidden = true;
+  refreshDocVars(st); // the drawer, if open, shows what the cell left
   if (r.error) { disposePanel(); state.textContent = '✗ ' + r.error; return { ok: false, r }; }
   const secs = Math.round(r.ms / 100) / 10;
   state.textContent = (r.code === 0 ? '✓ ' : '✗ exit ' + r.code + ' · ') + r.runtime + ' · ' + secs + 's';
@@ -6968,6 +6992,145 @@ function docStripAsk(strip, { prompt, secret }) {
 function docStripAskClose() {
   const form = document.querySelector('.doc-run-ask');
   if (form) (form._withdraw || (() => form.remove()))();
+}
+
+// ---- the notebook's kernel: its menu, and the variables drawer ----
+// Python cells' kernel (the doctor report is Python's too). Everything goes
+// through rat: state and variables are read without starting a kernel;
+// restart, clear and shut down act on the one kernel every client shares.
+const DOC_KERNEL_LANG = 'py';
+async function docGetJson(url) {
+  try { return await (await fetch(url)).json(); } catch { return { error: 'network failure' }; }
+}
+
+async function openDocKernelMenu(x, y, { above = false } = {}) {
+  const st = docState;
+  if (!st) return;
+  closeFileActionMenu();
+  const menu = document.createElement('div');
+  menu.className = 'file-action-menu doc-kernel-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = '<div class="file-action-head">kernel · asking rat…</div>';
+  document.body.appendChild(menu);
+  const place = () => {
+    const w = menu.offsetWidth, h = menu.offsetHeight;
+    menu.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+    menu.style.top = Math.max(8, Math.min(above ? y - h : y, innerHeight - h - 8)) + 'px';
+  };
+  place();
+  const k = await docGetJson('/api/doc/kernel?' + new URLSearchParams({ doc: st.path, lang: DOC_KERNEL_LANG }));
+  if (!menu.isConnected || docState !== st) return;
+  if (k.error) { menu.querySelector('.file-action-head').textContent = k.error; return place(); }
+  const running = !!k.running, cellRunning = !!st.running;
+  const facts = [k.name, running ? (k.state === 'waiting_for_input' ? 'waiting for input' : k.state || 'running') : 'not running',
+    running && k.runtime_version, running && k.memory_mb != null && k.memory_mb + ' MB'].filter(Boolean);
+  const items = [
+    [st.varsOpen ? 'Hide variables' : 'Show variables', true, () => toggleDocVars(st)],
+    [running ? 'Restart kernel…' : 'Start kernel', true, () => docKernelOp(st, 'restart', k, running)],
+    ['Clear variables…', running && !cellRunning, () => docKernelOp(st, 'reset', k, running)],
+    ['Shut down kernel…', running, () => docKernelOp(st, 'stop', k, running)],
+  ];
+  menu.innerHTML = `<div class="file-action-head" title="${esc(facts.join(' · '))}">${esc(facts.join(' · '))}</div>` +
+    items.map((it, i) => `<button type="button" role="menuitem" data-kernel-item="${i}" ${it[1] ? '' : 'disabled'}>${esc(it[0])}</button>`).join('') +
+    (cellRunning && running ? '<div class="file-action-head">a cell is running: clear waits for it; restart and shut down stop it</div>' : '');
+  menu.querySelectorAll('[data-kernel-item]').forEach(b => b.onclick = () => { closeFileActionMenu(); items[Number(b.dataset.kernelItem)][2](); });
+  place();
+  menu.querySelector('button:not(:disabled)')?.focus();
+}
+
+async function docKernelOp(st, op, k, running) {
+  const name = k.name || 'the kernel';
+  const shared = ' Every notebook, terminal and agent using ' + name + ' shares it.';
+  if (op === 'restart' && running && !confirm('Restart ' + name + '? All its variables are lost' + (st.running ? ' and the running cell stops' : '') + '.' + shared)) return;
+  if (op === 'reset' && !confirm('Clear every variable in ' + name + '? The kernel keeps running.' + shared)) return;
+  if (op === 'stop' && !confirm('Shut down ' + name + '? Its variables are lost' + (st.running ? ' and the running cell stops' : '') + '; the next run starts it again.' + shared)) return;
+  const verb = { restart: running ? 'restarting' : 'starting', reset: 'clearing', stop: 'shutting down' }[op];
+  toast(verb + ' ' + name + '…');
+  const r = await postJson('/api/doc/kernel', { doc: st.path, lang: DOC_KERNEL_LANG, op });
+  if (docState !== st) return;
+  if (r.error || !r.ok) { toast((r.error || r.out || 'rat could not do it').split('\n').at(-1), null, 'err'); }
+  else toast({ restart: running ? '✓ restarted — a fresh, empty kernel' : '✓ kernel started', reset: '✓ variables cleared', stop: '✓ kernel shut down' }[op]);
+  // A fresh kernel has played no prerequisites; the chip and setup line
+  // follow what rat now reports.
+  refreshDocDoctor();
+  refreshDocVars(st);
+}
+
+function toggleDocVars(st, open = !st.varsOpen) {
+  if (!st || docState !== st) return;
+  const body = document.querySelector('.doc-view .doc-body');
+  if (!body) return;
+  st.varsOpen = open;
+  localStorage.setItem('chattering.docVars', open ? 'open' : 'closed');
+  let panel = body.querySelector('.doc-vars');
+  if (!open) { panel?.remove(); return; }
+  if (!panel) {
+    panel = document.createElement('aside');
+    panel.className = 'doc-vars';
+    panel.setAttribute('aria-label', 'Variables');
+    panel.innerHTML = `<div class="doc-vars-head"><b>Variables</b><span class="doc-vars-meta"></span>
+      <button type="button" class="ghost doc-vars-refresh" title="Ask the kernel again">↻</button>
+      <button type="button" class="ghost doc-vars-close" title="Close">×</button></div>
+      <input class="doc-vars-filter" type="search" placeholder="Filter by name or type" aria-label="Filter variables">
+      <div class="doc-vars-list"></div>`;
+    body.appendChild(panel);
+    panel.querySelector('.doc-vars-close').onclick = () => toggleDocVars(st, false);
+    panel.querySelector('.doc-vars-refresh').onclick = () => refreshDocVars(st);
+    panel.querySelector('.doc-vars-filter').oninput = () => renderDocVars(st);
+  }
+  refreshDocVars(st);
+}
+
+let docVarsSeq = 0;
+async function refreshDocVars(st) {
+  if (!st || docState !== st || !st.varsOpen) return;
+  const panel = document.querySelector('.doc-view .doc-vars');
+  if (!panel) return;
+  const seq = ++docVarsSeq;
+  panel.querySelector('.doc-vars-list').classList.add('is-stale');
+  const r = await docGetJson('/api/doc/variables?' + new URLSearchParams({ doc: st.path, lang: DOC_KERNEL_LANG }));
+  if (seq !== docVarsSeq || docState !== st || !panel.isConnected) return;
+  // A cell running: keep the last list, dimmed, and say why it waits.
+  if (r.busy) { st.varsNote = 'a cell is running — the list refreshes when it ends'; return renderDocVars(st, { stale: true }); }
+  st.vars = r.vars || [];
+  st.varsKernel = r.kernel || null;
+  st.varsNote = r.error ? r.error : r.ratMissing ? r.error : !r.running ? 'The kernel is not running. Run a cell to start it.' : st.vars.length ? '' : 'No variables yet.';
+  renderDocVars(st);
+  if (st.varsOpenName && st.vars.some(v => v.name === st.varsOpenName)) showDocVar(st, st.varsOpenName);
+}
+
+function renderDocVars(st, { stale = false } = {}) {
+  const panel = document.querySelector('.doc-view .doc-vars');
+  if (!panel || docState !== st) return;
+  const list = panel.querySelector('.doc-vars-list');
+  list.classList.toggle('is-stale', stale);
+  const k = st.varsKernel;
+  panel.querySelector('.doc-vars-meta').textContent = k ? [k.name, (st.vars || []).length + ' · ' + (k.running ? (k.state || 'running') : 'not running')].join(' · ') : '';
+  const q = panel.querySelector('.doc-vars-filter').value.trim().toLowerCase();
+  const rows = (st.vars || []).filter(v => !q || v.name.toLowerCase().includes(q) || v.type.toLowerCase().includes(q));
+  const note = st.varsNote ? `<div class="doc-vars-note">${esc(st.varsNote)}</div>` : '';
+  list.innerHTML = note + rows.map(v => `<button type="button" class="doc-var" data-name="${esc(v.name)}" aria-expanded="false" title="Inspect ${esc(v.name)}">
+      <span class="v-name">${esc(v.name)}</span><span class="v-type">${esc(v.type)}</span><span class="v-preview">${esc(v.preview)}</span></button>`).join('')
+    + (!note && q && !rows.length ? '<div class="doc-vars-note">No variable matches.</div>' : '');
+  list.querySelectorAll('.doc-var').forEach(b => b.onclick = () => showDocVar(st, b.dataset.name, true));
+}
+
+async function showDocVar(st, name, toggle = false) {
+  const list = document.querySelector('.doc-view .doc-vars-list');
+  const row = list && [...list.querySelectorAll('.doc-var')].find(b => b.dataset.name === name);
+  if (!row) return;
+  const open = row.nextElementSibling && row.nextElementSibling.classList.contains('doc-var-detail');
+  if (toggle && open) { row.nextElementSibling.remove(); row.setAttribute('aria-expanded', 'false'); st.varsOpenName = null; return; }
+  list.querySelectorAll('.doc-var-detail').forEach(d => { d.previousElementSibling?.setAttribute('aria-expanded', 'false'); d.remove(); });
+  st.varsOpenName = name;
+  row.setAttribute('aria-expanded', 'true');
+  const detail = document.createElement('pre');
+  detail.className = 'doc-var-detail';
+  detail.textContent = 'asking the kernel…';
+  row.after(detail);
+  const r = await docGetJson('/api/doc/variables?' + new URLSearchParams({ doc: st.path, lang: DOC_KERNEL_LANG, at: name }));
+  if (!detail.isConnected) return;
+  detail.textContent = r.busy ? 'a cell is running — inspect again when it ends' : r.text || r.error || 'nothing to show';
 }
 
 // Run every cell, top to bottom, one kernel, one at a time — state builds
@@ -7241,6 +7404,9 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   };
   if ($('docRunMenu')) $('docRunMenu').onclick = $('docRun').onclick;
   $('docRunAll').onclick = runAllDocCells;
+  if ($('docVars')) $('docVars').onclick = () => toggleDocVars(st);
+  if ($('docKernel')) $('docKernel').onclick = e => { e.stopPropagation(); e.currentTarget.closest('details')?.removeAttribute('open'); const r = e.currentTarget.getBoundingClientRect(); openDocKernelMenu(r.left, r.bottom + 4); };
+  if (localStorage.getItem('chattering.docVars') === 'open' && st.editor.listCells && st.editor.listCells().length) toggleDocVars(st, true);
   if (st.editor.listCells && st.editor.listCells().length) refreshDocDoctor();
   $('docSource').onclick = () => {
     st.source = !st.source;

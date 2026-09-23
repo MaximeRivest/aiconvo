@@ -258,3 +258,49 @@ test('an answer is refused when nothing waits, and a page that leaves cancels it
   assert.equal(after.code, 0, after.out);
   assert.match(after.out, /^7$/m, 'the kernel kept its variables');
 });
+
+// Kernel controls and variables: state and variables are read without
+// ever starting a kernel; reset/restart/stop act on the notebook's kernel.
+test('the notebook kernel: state, variables, clear, restart, shut down', { skip: !haveRat && 'rat is not installed' }, async t => {
+  const { post, base } = await bootServer(t, { RAT_NOTEBOOK_REQUIREMENTS: '' });
+  const { repo, nb } = makeProject();
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const get = (p, q) => fetch(base + p + '?' + new URLSearchParams({ doc: nb, ...q })).then(r => r.json());
+
+  const cold = await get('/api/doc/variables');
+  assert.equal(cold.running, false, 'looking at variables did not start a kernel');
+  assert.equal((await get('/api/doc/kernel')).running, false);
+
+  const warm = await post('/api/doc/run-cell', { lang: 'py', code: 'answer = 42\nname = "Ada"', doc: nb, runId: 'w' });
+  assert.equal(warm.code, 0, warm.out);
+  const kernel = await get('/api/doc/kernel');
+  assert.equal(kernel.running, true);
+  assert.equal(kernel.state, 'idle');
+  const vars = await get('/api/doc/variables');
+  assert.deepEqual(vars.vars.map(v => [v.name, v.type, v.preview]), [['answer', 'int', '42'], ['name', 'str', "'Ada'"]]);
+  const one = await get('/api/doc/variables', { at: 'name' });
+  assert.match(one.text, /name: str/);
+
+  // While a cell runs: no look (it would wait behind the cell), no reset.
+  const slow = post('/api/doc/run-cell', { lang: 'py', code: 'import time\ntime.sleep(2)', doc: nb, runId: 'slow' });
+  await new Promise(r => setTimeout(r, 500));
+  assert.equal((await get('/api/doc/variables')).busy, true);
+  const refused = await post('/api/doc/kernel', { doc: nb, op: 'reset' });
+  assert.match(refused.error, /cell is running/);
+  await slow;
+
+  const reset = await post('/api/doc/kernel', { doc: nb, op: 'reset' });
+  assert.equal(reset.ok, true, JSON.stringify(reset));
+  assert.deepEqual((await get('/api/doc/variables')).vars, []);
+
+  await post('/api/doc/run-cell', { lang: 'py', code: 'again = 1', doc: nb, runId: 'a' });
+  const restart = await post('/api/doc/kernel', { doc: nb, op: 'restart' });
+  assert.equal(restart.ok, true, JSON.stringify(restart));
+  assert.equal(restart.kernel.running, true);
+  assert.deepEqual((await get('/api/doc/variables')).vars, [], 'a restarted kernel is empty');
+
+  const stop = await post('/api/doc/kernel', { doc: nb, op: 'stop' });
+  assert.equal(stop.ok, true, JSON.stringify(stop));
+  assert.equal(stop.kernel.running, false);
+  assert.match((await post('/api/doc/kernel', { doc: nb, op: 'explode' })).error, /op must be/);
+});

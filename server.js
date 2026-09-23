@@ -12465,6 +12465,25 @@ async function streamDocRun(res, { doc, runtime, code, runId, owner }) {
   if (!res.writableEnded) res.end();
 }
 
+// The kernel a notebook's cells in `runtime` run on, as rat sees it now:
+// {name, running, state, idle_seconds, memory_mb, runtime_version}. Never
+// starts anything (`rat resolve` and `rat status` only read).
+async function docKernelState(doc, runtime) {
+  const cwd = path.dirname(doc);
+  const resolved = ratJson((await ratExec(['resolve', '--doc', doc, runtime, '--json'], { cwd, timeoutMs: 20000 })).out);
+  if (!resolved || !resolved.name) return { error: 'rat could not resolve the kernel for this notebook' };
+  const st = await ratExec(['status', '--json'], { cwd, timeoutMs: 20000 });
+  let rows = [];
+  try { rows = JSON.parse(st.out.slice(st.out.indexOf('['), st.out.lastIndexOf(']') + 1)); } catch {}
+  const row = rows.find(r => r.name === resolved.name) || {};
+  return {
+    name: resolved.name, running: row.status === 'running', state: row.runtime_state || null,
+    idle_seconds: row.idle_seconds ?? null, memory_mb: row.memory_mb ?? null, runtime_version: row.runtime_version || null,
+  };
+}
+// Is a streamed or one-shot cell of this notebook running right now?
+const docHasActiveRun = doc => [...activeDocRuns.values()].some(e => e.doc === doc);
+
 // rat's JSON reports (doctor/ensure/resolve) go to stdout; progress and
 // errors to stderr — both arrive in `out`. Take the JSON object.
 function ratJson(out) {
@@ -15365,6 +15384,59 @@ async function handleRequest(req, res) {
       const report = ratJson(r.out);
       if (!report) return json(res, 502, { error: 'rat doctor failed', detail: r.out.trim().slice(-2000) });
       json(res, 200, { ...report, ratPath: rat.path, ratNote: rat.note || null });
+    } else if (u.pathname === '/api/doc/kernel' && req.method === 'GET') {
+      // The notebook's kernel: which one, whether it runs, idle or busy.
+      const doc = notebookPath(u.searchParams.get('doc'));
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const runtime = RAT_LANGS[String(u.searchParams.get('lang') || 'py').toLowerCase()];
+      if (!runtime) return json(res, 400, { error: 'no rat runtime for that language' });
+      if (!ratBinary().path) return json(res, 200, { ratMissing: true, error: RAT_MISSING });
+      try { json(res, 200, { runtime, ...(await docKernelState(doc, runtime)) }); }
+      catch (e) { json(res, e.status || 403, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/variables' && req.method === 'GET') {
+      // What the kernel holds: `rat look` (overview) or `rat look --at x`.
+      // Never starts a kernel, and never waits behind a running cell (the
+      // kernel answers a look only between runs): both are said instead.
+      const doc = notebookPath(u.searchParams.get('doc'));
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const runtime = RAT_LANGS[String(u.searchParams.get('lang') || 'py').toLowerCase()];
+      if (!runtime) return json(res, 400, { error: 'no rat runtime for that language' });
+      if (!ratBinary().path) return json(res, 200, { ratMissing: true, error: RAT_MISSING });
+      try {
+        const kernel = await docKernelState(doc, runtime);
+        if (kernel.error) return json(res, 502, kernel);
+        if (!kernel.running) return json(res, 200, { kernel, running: false, vars: [] });
+        if (docHasActiveRun(doc) || kernel.state === 'busy' || kernel.state === 'waiting_for_input') return json(res, 200, { kernel, running: true, busy: true, vars: [] });
+        const at = u.searchParams.get('at');
+        const args = ['look', '--doc', doc, runtime];
+        if (at) args.push('--at', String(at));
+        const r = await ratExec(args, { cwd: path.dirname(doc), timeoutMs: 20000 });
+        if (r.code !== 0) return json(res, 502, { kernel, error: r.out.trim().split('\n').at(-1) || 'rat look failed' });
+        if (at) return json(res, 200, { kernel, running: true, at, text: r.out.replace(/\s+$/, '') });
+        json(res, 200, { kernel, running: true, ...notebookEnv.parseLookOverview(r.out) });
+      } catch (e) { json(res, e.status || 403, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/kernel' && req.method === 'POST') {
+      // Restart (fresh process), reset (clear the namespace) or stop (shut
+      // down) the notebook's kernel. The kernel is shared: every notebook,
+      // terminal and agent on it sees the change. Reset waits for the
+      // kernel, so it is refused while a cell runs; restart and stop end
+      // the running cell.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const doc = notebookPath(parsed.doc);
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const runtime = RAT_LANGS[String(parsed.lang || 'py').toLowerCase()];
+      if (!runtime) return json(res, 400, { error: 'no rat runtime for that language' });
+      const op = String(parsed.op || '');
+      if (!['restart', 'reset', 'stop'].includes(op)) return json(res, 400, { error: 'op must be restart, reset or stop' });
+      if (op === 'reset' && docHasActiveRun(doc)) return json(res, 409, { error: 'a cell is running — stop it before clearing the variables' });
+      try {
+        const r = await ratExec([op, '--doc', doc, runtime], { cwd: path.dirname(doc), timeoutMs: op === 'restart' ? 120000 : 30000 });
+        const kernel = await docKernelState(doc, runtime);
+        json(res, 200, { ok: r.code === 0, op, out: r.out.trim().slice(-2000), kernel });
+      } catch (e) { json(res, e.status || 403, { error: e.message }); }
     } else if (u.pathname === '/api/doc/ensure' && req.method === 'POST') {
       // Make the notebook runnable: `rat ensure <notebook> --json`. Creates
       // the environment, installs what the notebook declares, restarts the
