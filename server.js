@@ -3273,7 +3273,7 @@ async function assignConversationProject(key, rawProject) {
   // regenerates the new project's documents (and any epics) when it lands.
   // Without a leaf there is nothing to re-weigh: the backfill builds it later.
   let reextract = false;
-  if (project !== oldProject && index[key].realUserCount && await readLeaf(key)) {
+  if (project !== oldProject && index[key].realUserCount && backgroundAllowed('memory') && await readLeaf(key)) {
     try {
       startMemoryExtractJob([key], `${oneLine(index[key].title, '(untitled)').slice(0, 60)}: re-read for ${project}`, { automatic: true });
       reextract = true;
@@ -3984,11 +3984,12 @@ async function retitleEpic(id) {
 // A manual (or earlier AI) title always blocks this.
 const projectTitleInFlight = new Set();
 function maybeAutoProjectTitle(project) {
+  if (!backgroundAllowed('names')) return;
   if (projectTitles[project]) return;
   if (projectTitleInFlight.has(project)) return;
   projectTitleInFlight.add(project);
   setTimeout(() => {
-    retitleProject(project, false)
+    modelCallContext.run({ background: 'names' }, () => retitleProject(project, false))
       .catch(e => console.error('auto project title failed:', project, e.message))
       .finally(() => projectTitleInFlight.delete(project));
   }, 500);
@@ -4077,9 +4078,58 @@ const PI_AUTH_FILE = path.join(os.homedir(), '.pi', 'agent', 'auth.json');
 const PI_MODELS_FILE = path.join(os.homedir(), '.pi', 'agent', 'models.json');
 const CLAUDE_CODE_CRED_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
 const CLAUDE_CODE_EXT = path.join(os.homedir(), '.pi', 'agent', 'extensions', 'claude-code-fable-5', 'index.ts');
-let appSettings = settingsLib.normalizeSettings(settingsLib.DEFAULT_SETTINGS);
-try { appSettings = settingsLib.normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'))); } catch {}
+// Settings version 2 (settings.js): a machine that ran Chattering before
+// keeps exactly what it had; a new one starts neutral and is asked before
+// any background model call. "Ran before" = any of its data exists. This
+// runs before anything below writes the index or the roster.
+function loadAppSettings() {
+  let raw = null, exists = false, unreadable = null;
+  try { raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); exists = true; }
+  catch (e) { if (e.code !== 'ENOENT') { exists = true; unreadable = e; } }
+  // Folders do not count: this very start already made the notes and
+  // epics folders above. Only files a previous run wrote do.
+  const notesHaveData = () => {
+    try { return fs.readdirSync(NOTES_DIR).some(n => n !== 'epics') || fs.readdirSync(EPICS_DIR).length > 0; }
+    catch { return false; }
+  };
+  const priorInstall = exists || fs.existsSync(INDEX_FILE)
+    || fs.existsSync(path.join(os.homedir(), '.config', 'chattering', 'users.json')) || notesHaveData();
+  const { settings, migrated } = settingsLib.migrateSettings(raw, { priorInstall });
+  const normalized = settingsLib.normalizeSettings(settings);
+  if (!migrated) return normalized;
+  // An unreadable file is the person's data, not ours to overwrite: keep
+  // a copy beside it before the migrated settings take its place.
+  if (unreadable) {
+    const copy = SETTINGS_FILE + '.unreadable-' + Date.now();
+    try { fs.copyFileSync(SETTINGS_FILE, copy); console.error(`[settings] ${SETTINGS_FILE} could not be read (${unreadable.message}); kept a copy at ${copy}`); }
+    catch (e) { console.error('[settings] could not keep a copy of the unreadable settings file, leaving it untouched:', e.message); return normalized; }
+  }
+  try {
+    fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(normalized, null, 2) + '\n', { mode: 0o600 });
+    console.log(priorInstall
+      ? '[settings] updated to version ' + settingsLib.SETTINGS_VERSION + '; the values this machine already used are now written down, nothing changes'
+      : '[settings] new install: neutral defaults, background AI waits for a decision');
+  } catch (e) { console.error('[settings] could not save the migrated settings:', e.message); }
+  return normalized;
+}
+let appSettings = loadAppSettings();
 memoryModelHealth.setIdentity(currentModelLabel());
+
+// ---- background AI: asked, then shown ----
+// Model calls nobody asked for in that moment (titles, memory) run only
+// for the kinds the owner allowed (settings → backgroundAi). Each place
+// that starts such work checks first; runPi checks again as the last
+// line, so a path nobody gated still cannot send anything.
+function backgroundAllowed(kind) {
+  const b = appSettings.backgroundAi || {};
+  return !!b.decidedAt && b[kind] === true;
+}
+function backgroundRefusal(kind) {
+  const e = new Error(kind === 'names' ? 'automatic names are off (settings → model)' : 'automatic memory is off (settings → model)');
+  e.code = 'BACKGROUND_AI_OFF';
+  return e;
+}
 const recoveryLib = require('./agent-recovery.js');
 const agentRecovery = new recoveryLib.AgentRecovery({
   file: path.join(CACHE_DIR, 'agent-interruptions.json'),
@@ -4845,6 +4895,12 @@ function settingsResponse(identity = ownerIdentity()) {
     // The reach switch as it stands right now (after any runtime flip), and
     // whether the operator pinned the address so the switch cannot move it.
     lan: { on: lanWanted(), fixed: Boolean(ENV_HOST), addresses: lanAddresses() },
+    // What the optional services can do here, so no control is shown that
+    // would fail without saying why (design/32 section 2).
+    capabilities: { ...voiceCapabilities(), doneSound: doneSoundMode() },
+    // For the first-run question about background AI: how much history
+    // there is, so the person knows what "re-read" would cover.
+    conversations: Object.keys(index).length,
   };
 }
 
@@ -4946,10 +5002,16 @@ function splitTextToTokenBudget(text, tokenBudget) {
 }
 
 async function runPi(fileContent, prompt, onChunk, options = {}) {
-  const tmp = path.join(os.tmpdir(), 'chattering-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
-  fs.writeFileSync(tmp, fileContent, { mode: 0o600 });
   const inherited = modelCallContext.getStore();
   const automatic = options.automatic == null ? !!(inherited && inherited.automatic) : !!options.automatic;
+  // Background work names its kind; an automatic call that names none is
+  // treated as memory, the stricter reading. Refused before anything is
+  // written or sent, and before the model's health is touched: a person's
+  // "no" is not a model failure.
+  const background = options.background || (inherited && inherited.background) || (automatic ? 'memory' : null);
+  if (background && !backgroundAllowed(background)) throw backgroundRefusal(background);
+  const tmp = path.join(os.tmpdir(), 'chattering-distill-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.md');
+  fs.writeFileSync(tmp, fileContent, { mode: 0o600 });
   let permit = null;
   let carry = '';
   try {
@@ -5038,6 +5100,8 @@ function mapTimelineLimit(items, limit, fn) {
 }
 
 async function refreshTimelineTitles() {
+  // Without names, the timeline keeps the local short title (timelineTitle()).
+  if (!backgroundAllowed('names')) return;
   if (timelineTitleRunning) { timelineTitleAgain = true; return; }
   const pending = Object.entries(index).filter(([key, e]) => {
     const saved = timelineTitles[key];
@@ -5052,7 +5116,7 @@ async function refreshTimelineTitles() {
     await mapTimelineLimit(batches, 3, async batch => {
       const input = batch.map(([, e], id) => ({ id, request: e.title }));
       try {
-        const raw = await runPi(JSON.stringify(input), TIMELINE_TITLE_PROMPT, null, { automatic: true });
+        const raw = await runPi(JSON.stringify(input), TIMELINE_TITLE_PROMPT, null, { automatic: true, background: 'names' });
         const result = JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, ''));
         if (!Array.isArray(result)) return;
         const updates = [];
@@ -5136,8 +5200,8 @@ function scheduleAutoRetitle(key, delayMs = 2000) {
     let retryDelay = 0;
     try {
       const saved = timelineTitles[key];
-      if (!index[key] || (saved && saved.manual)) return;
-      await retitleConversation(key, { automatic: true });
+      if (!index[key] || (saved && saved.manual) || !backgroundAllowed('names')) return;
+      await retitleConversation(key, { automatic: true, background: 'names' });
     } catch (e) {
       console.error('auto retitle failed:', key, e.message);
       retryDelay = e.code === 'MODEL_CALLS_PAUSED'
@@ -5151,6 +5215,7 @@ function scheduleAutoRetitle(key, delayMs = 2000) {
   timer.unref();
 }
 function maybeAutoRetitle(key, prev, entry) {
+  if (!backgroundAllowed('names')) return;
   const saved = timelineTitles[key];
   if (saved && saved.manual) return; // a person (or an earlier retitle) owns this title
   if (entry.realUserCount < 2) return;
@@ -6717,13 +6782,18 @@ function startMemoryExtractJob(ids, label = null, options = {}) {
     const savedKeys = [];
     await mapLimit(keys, 2, async key => {
       try {
-        await modelCallContext.run({ automatic }, () => extractLeaf(key));
+        await modelCallContext.run({ automatic, background: automatic ? 'memory' : undefined }, () => extractLeaf(key));
         memoryModelHealth.leafSuccess(key);
         savedKeys.push(key);
         const entry = index[key];
         if (entry) projects.add(projectNameOf(entry.cwd, key));
       } catch (e) {
-        if (e.code === 'MODEL_CALLS_PAUSED') {
+        if (e.code === 'BACKGROUND_AI_OFF') {
+          // Turned off while the job ran: not a failure, no retry queue.
+          // The conversation stays marked, so it is read when memory is on again.
+          deferred.push(key);
+          leafDirty.set(key, Date.now());
+        } else if (e.code === 'MODEL_CALLS_PAUSED') {
           deferred.push(key);
           memoryModelHealth.deferLeaf(key, e.retryAt, e);
         } else {
@@ -6784,7 +6854,7 @@ function startDocsJobCore(mapKey, title, project, epicId, run, options = {}) {
   };
   memoryDocsJobs.set(mapKey, job);
   jobChanged(job);
-  job.completion = modelCallContext.run({ automatic: !!options.automatic }, async () => {
+  job.completion = modelCallContext.run({ automatic: !!options.automatic, background: options.automatic ? 'memory' : undefined }, async () => {
     try {
       const manifest = await run((text, done, total) => {
         job.statusText = text; job.done = done; job.total = total; jobChanged(job);
@@ -6902,6 +6972,8 @@ function markLeafDirty(key, prevEntry, entry, mtimeMs) {
 }
 
 async function sweepSettledLeaves() {
+  // Memory off: changed conversations stay marked and are read once it is on.
+  if (!backgroundAllowed('memory')) return;
   // Keep dirty work queued while the circuit is open. After the cooldown, one
   // call becomes the half-open probe; the health gate blocks all other calls.
   if (memoryModelHealth.isAutomaticPaused()) return;
@@ -6946,6 +7018,7 @@ function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
   clearTimeout(docsRegenTimers.get(project));
   docsRegenTimers.set(project, setTimeout(() => {
     docsRegenTimers.delete(project);
+    if (!backgroundAllowed('memory')) return; // the next leaf change schedules it again
     if (memoryModelHealth.isAutomaticPaused()) return scheduleDocsRegen(project, modelAutomaticRetryDelay());
     fsp.access(projectMemoryPaths(project).manifest).then(
       () => {
@@ -6965,6 +7038,7 @@ function scheduleDocsRegen(project, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
     clearTimeout(docsRegenTimers.get(mapKey));
     docsRegenTimers.set(mapKey, setTimeout(() => {
       docsRegenTimers.delete(mapKey);
+      if (!backgroundAllowed('memory')) return;
       if (memoryModelHealth.isAutomaticPaused()) return scheduleDocsRegen(project, modelAutomaticRetryDelay());
       fsp.access(areaMemoryPaths(project, rel).manifest).then(
         () => {
@@ -6992,6 +7066,7 @@ function scheduleEpicRegenForKeys(keys, delayMs = DOCS_REGEN_DEBOUNCE_MS) {
     clearTimeout(docsRegenTimers.get(mapKey));
     docsRegenTimers.set(mapKey, setTimeout(() => {
       docsRegenTimers.delete(mapKey);
+      if (!backgroundAllowed('memory')) return;
       if (memoryModelHealth.isAutomaticPaused()) return scheduleEpicRegenForKeys(epic.sessionIds || [], modelAutomaticRetryDelay());
       fsp.access(epicMemoryPaths(epic.id).manifest).then(
         () => {
@@ -10610,9 +10685,11 @@ const DOC_COMMIT_TITLE_PROMPT =
 // Fire-and-forget: give the fresh commit an AI title. Amend only while HEAD
 // is still that exact commit and the stage is clean — never rewrite other work.
 function scheduleDocCommitTitle(root, hash, diffText) {
+  // Without names, the commit keeps its plain "doc: file (+a −b)" subject.
+  if (!backgroundAllowed('names')) return;
   setTimeout(async () => {
     try {
-      const raw = await runPi(clipped(diffText, 60000), DOC_COMMIT_TITLE_PROMPT);
+      const raw = await runPi(clipped(diffText, 60000), DOC_COMMIT_TITLE_PROMPT, null, { background: 'names' });
       const title = oneLine(JSON.parse(raw.replace(/^```(json)?\s*|\s*```$/g, '')).title, '').slice(0, 60);
       if (!title) return;
       const head = (await gitText(root, ['rev-parse', 'HEAD'])).trim();
@@ -12580,6 +12657,43 @@ async function ratPlotFile(p) {
 }
 const GENERATED_ASSETS_DIR = '_assets/generated';
 
+// ---- completion in notebook cells ----
+// rat completes from the live kernel (Jedi over the namespace: `auth.sta`
+// → status). Two guards: asking must never start a kernel (`rat look`
+// would), and never waits behind a running cell (the kernel answers only
+// between runs). Which kernel a notebook uses is cached briefly; its state
+// is checked on every request.
+const docKernelNameCache = new Map(); // doc|runtime → {name, at}
+async function docKernelNameFor(doc, runtime) {
+  const key = doc + '|' + runtime;
+  const hit = docKernelNameCache.get(key);
+  if (hit && Date.now() - hit.at < 30000) return hit.name;
+  const resolved = ratJson((await ratExec(['resolve', '--doc', doc, runtime, '--json'], { cwd: path.dirname(doc), timeoutMs: 10000 })).out);
+  const name = resolved && resolved.name || null;
+  if (name) docKernelNameCache.set(key, { name, at: Date.now() });
+  return name;
+}
+async function docKernelRunningIdle(doc, runtime) {
+  const name = await docKernelNameFor(doc, runtime);
+  if (!name) return { ok: false, reason: 'no kernel' };
+  const st = await ratExec(['status', '--json'], { cwd: path.dirname(doc), timeoutMs: 10000 });
+  let rows = [];
+  try { rows = JSON.parse(st.out.slice(st.out.indexOf('['), st.out.lastIndexOf(']') + 1)); } catch {}
+  const row = rows.find(r => r.name === name);
+  if (!row || row.status !== 'running') return { ok: false, reason: 'not running' };
+  if (row.runtime_state && row.runtime_state !== 'idle') return { ok: false, reason: 'busy' };
+  return { ok: true, name };
+}
+// `rat look --code`: up to 50 lines "name   kind", or "No completions."
+function parseCompletions(out) {
+  const items = [];
+  for (const line of String(out || '').split('\n')) {
+    const m = line.match(/^(\S+)\s+(\S+)\s*$/);
+    if (m) items.push({ label: m[1], kind: m[2] });
+  }
+  return items;
+}
+
 // Is a streamed or one-shot cell of this notebook running right now?
 const docHasActiveRun = doc => [...activeDocRuns.values()].some(e => e.doc === doc);
 
@@ -12713,12 +12827,33 @@ async function probeProjectPython(root, notebooksDir) {
   finally { await fsp.rm(probe, { force: true }).catch(() => {}); }
   return out;
 }
-// Lambda's Tailscale address works both on the home LAN and while travelling.
-const KOKORO_URL = process.env.KOKORO_URL || 'http://100.86.49.54:8880';
-const SPEECH_URL = process.env.SPEECH_URL || 'http://100.86.49.54:8078';
-const KOKORO_VOICE = process.env.KOKORO_VOICE || 'bm_george';
-const REWRITE_URL = process.env.REWRITE_URL || 'http://100.86.49.54:8000/v1/chat/completions';
-const REWRITE_MODEL = process.env.REWRITE_MODEL || 'qwen/qwen3.8-27b';
+// Voice services, set up in settings → sound (settings.js). The
+// environment variables predate those settings and still win, so a service
+// unit that sets them keeps working; the settings page says when one does.
+// Empty means not set up: every caller refuses with a reason (or plays the
+// chime) instead of reaching for an address that is not this person's.
+const VOICE_ENV = { speechUrl: 'SPEECH_URL', ttsUrl: 'KOKORO_URL', ttsVoice: 'KOKORO_VOICE', voiceModelUrl: 'REWRITE_URL', voiceModel: 'REWRITE_MODEL' };
+function voiceSetting(key) { return String(process.env[VOICE_ENV[key]] || appSettings[key] || '').trim(); }
+const speechUrl = () => voiceSetting('speechUrl').replace(/\/+$/, '');
+const ttsUrl = () => voiceSetting('ttsUrl').replace(/\/+$/, '');
+const voiceModelReady = () => !!(voiceSetting('voiceModelUrl') && voiceSetting('voiceModel'));
+function voiceServiceError(what) {
+  const e = new Error(what + ' is not set up on this machine (settings → sound)');
+  e.code = 'VOICE_NOT_SET_UP';
+  return e;
+}
+// For /api/settings: what is set up, and where the value comes from.
+function voiceCapabilities() {
+  const one = (keys, reason) => {
+    const configured = keys.every(k => !!voiceSetting(k));
+    return { configured, reason: configured ? '' : reason, source: keys.some(k => process.env[VOICE_ENV[k]]) ? 'environment' : 'settings' };
+  };
+  return {
+    speech: one(['speechUrl'], 'no speech-to-text server is set up'),
+    tts: one(['ttsUrl'], 'no read-aloud server is set up'),
+    voiceModel: one(['voiceModelUrl', 'voiceModel'], 'no model for spoken digests is set up'),
+  };
+}
 const REWRITE_API_KEY = process.env.REWRITE_API_KEY || 'inktype-local';
 const ttsJobs = new Map();
 
@@ -12808,8 +12943,9 @@ function httpPcm(urlStr, body, timeoutMs) {
 }
 
 async function rewriteForSpeech(text) {
-  const res = await httpJson(REWRITE_URL, {
-    model: REWRITE_MODEL,
+  if (!voiceModelReady()) throw voiceServiceError('A model for spoken text');
+  const res = await httpJson(voiceSetting('voiceModelUrl'), {
+    model: voiceSetting('voiceModel'),
     messages: [
       { role: 'system', content: TTS_REWRITE_PROMPT },
       { role: 'user', content: text },
@@ -12825,6 +12961,7 @@ async function rewriteForSpeech(text) {
 async function synthesizeSpeech(text, rewrite, speed = 1) {
   const src = String(text || '').trim();
   if (!src) throw new Error('No text to read.');
+  if (!ttsUrl()) throw voiceServiceError('Read-aloud');
   const id = crypto.createHash('sha256').update((rewrite ? 'r1|' : 'r0|') + (speed !== 1 ? 's' + speed + '|' : '') + src).digest('hex').slice(0, 24);
   const wavPath = path.join(TTS_DIR, id + '.wav');
   const metaPath = path.join(TTS_DIR, id + '.json');
@@ -12837,7 +12974,7 @@ async function synthesizeSpeech(text, rewrite, speed = 1) {
   const job = (async () => {
     await fsp.mkdir(TTS_DIR, { recursive: true });
     let spoken = src;
-    if (rewrite) {
+    if (rewrite && voiceModelReady()) {
       try {
         const rewritten = await rewriteForSpeech(src.slice(0, 12000));
         if (rewritten) spoken = rewritten;
@@ -12845,11 +12982,12 @@ async function synthesizeSpeech(text, rewrite, speed = 1) {
         console.log('tts rewrite failed: ' + e.message);
       }
     }
-    const tts = await httpPcm(KOKORO_URL.replace(/\/$/, '') + '/tts', {
-      text: spoken, voice: KOKORO_VOICE, speed,
+    const voiceName = voiceSetting('ttsVoice');
+    const tts = await httpPcm(ttsUrl() + '/tts', {
+      text: spoken, ...(voiceName ? { voice: voiceName } : {}), speed,
     }, 180000);
     if (tts.status !== 200 || !tts.buf.length) {
-      throw new Error('Kokoro TTS failed (' + tts.status + '). Is kokoro-tts running?');
+      throw new Error('The read-aloud server answered ' + tts.status + ' at ' + ttsUrl() + '. Is it running?');
     }
     const rate = Number(tts.headers['x-sample-rate'] || 24000);
     const wav = pcmToWav(tts.buf, rate);
@@ -12880,10 +13018,14 @@ const VOICE_SPEED = Number(process.env.CHATTERING_VOICE_SPEED) || 1.5;
 
 // The effective finished-run sound mode. The two env vars predate the
 // setting and still act as hard caps for deployments that set them.
+// Speech modes need what they speak with: without a read-aloud server
+// every spoken mode is the chime, and the voice reply needs speech-to-text.
+// The settings page shows the chosen mode and this effective one.
 function doneSoundMode() {
   if (process.env.CHATTERING_SPEAK_DONE === '0') return 'off';
-  const mode = settingsLib.DONE_SOUND_MODES.includes(appSettings.doneSound) ? appSettings.doneSound : 'voice';
-  if (mode === 'voice' && process.env.CHATTERING_VOICE_REPLY === '0') return 'summary';
+  let mode = settingsLib.DONE_SOUND_MODES.includes(appSettings.doneSound) ? appSettings.doneSound : 'chime';
+  if (mode === 'voice' && (process.env.CHATTERING_VOICE_REPLY === '0' || !speechUrl())) mode = 'summary';
+  if (mode !== 'off' && mode !== 'chime' && !ttsUrl()) mode = 'chime';
   return mode;
 }
 
@@ -12918,10 +13060,10 @@ async function speakRunDone(job) {
     const opening = voiceOpeningFor(job.key, title);
     let sentence = '';
     if (mode === 'title') sentence = opening;
-    else {
+    else if (voiceModelReady()) {
       try {
-        const res = await httpJson(REWRITE_URL, {
-          model: REWRITE_MODEL,
+        const res = await httpJson(voiceSetting('voiceModelUrl'), {
+          model: voiceSetting('voiceModel'),
           messages: [
             { role: 'system', content: SPEAK_SUMMARY_PROMPT },
             { role: 'user', content: 'OPENING: ' + opening + '\nTITLE: ' + title + '\n\nFull reply:\n' + text.slice(0, 16000) },
@@ -12932,8 +13074,8 @@ async function speakRunDone(job) {
         sentence = String(res.json && res.json.choices && res.json.choices[0]
           && res.json.choices[0].message && res.json.choices[0].message.content || '').trim();
       } catch (e) { console.log('speak-done summarizer unreachable, using fallback: ' + e.message); }
-      if (!sentence) sentence = fallbackSpokenLine(text, opening);
     }
+    if (!sentence) sentence = fallbackSpokenLine(text, opening);
     let wavPath;
     try {
       const clip = await synthesizeSpeech(sentence, false, VOICE_SPEED);
@@ -12953,7 +13095,10 @@ async function previewDoneSound() {
   const mode = doneSoundMode();
   if (mode === 'off') return { ok: false, mode, reason: 'off' };
   if (voiceMuted()) return { ok: false, mode, reason: 'muted' };
-  if (mode === 'chime') { enqueueAnnouncement({ tone: 'done' }); return { ok: true, mode }; }
+  const capped = appSettings.doneSound !== mode
+    ? (mode === 'chime' ? 'no read-aloud server is set up, so the chime plays (settings \u2192 sound)' : 'no speech-to-text server is set up, so the microphone does not open')
+    : undefined;
+  if (mode === 'chime') { enqueueAnnouncement({ tone: 'done' }); return { ok: true, mode, reason: capped }; }
   const opening = 'Your conversation about sound settings has just returned.';
   const sentence = mode === 'title' ? opening
     : opening + ' It says the sound mode is saved. It recommends the mode that fits the room you are in.';
@@ -13148,7 +13293,8 @@ function recordUtterance({ waitMs = 10000, tailMs = 2200, maxMs = 120000 } = {})
 }
 
 async function transcribePcm(pcm) {
-  const out = await httpRaw(SPEECH_URL.replace(/\/$/, '') + '/transcribe', pcm,
+  if (!speechUrl()) throw voiceServiceError('Speech-to-text');
+  const out = await httpRaw(speechUrl() + '/transcribe', pcm,
     'audio/L16;rate=16000;channels=1', 60000 + Math.floor(pcm.length / 128));
   if (out.status !== 200) throw new Error('speech service ' + out.status);
   return out.buf.toString('utf8').trim();
@@ -13159,9 +13305,9 @@ async function transcribePcm(pcm) {
 const VOICE_SEND_TAIL = /[\s.,!]*(send|done|go|submit|enter|control enter|ship it|that'?s all)[\s.,!]*(\w+[\s.,!]*){0,2}$/i;
 
 async function voiceGate(transcript) {
-  try {
-    const res = await httpJson(REWRITE_URL, {
-      model: REWRITE_MODEL,
+  if (voiceModelReady()) try {
+    const res = await httpJson(voiceSetting('voiceModelUrl'), {
+      model: voiceSetting('voiceModel'),
       messages: [
         { role: 'system', content: VOICE_GATE_PROMPT },
         { role: 'user', content: transcript },
@@ -15068,6 +15214,24 @@ async function handleRequest(req, res) {
       } catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/settings' && req.method === 'GET') {
       json(res, 200, settingsResponse(identity));
+    } else if (u.pathname === '/api/settings/background-ai' && req.method === 'POST') {
+      // The owner's answer to "may Chattering call a model on its own?",
+      // per kind. Any answer, yes or no, is a decision and is dated.
+      if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin decides what runs on this machine' });
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 4096) return json(res, 413, { error: 'too large' }); }
+      let p;
+      try { p = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const before = appSettings.backgroundAi || {};
+      const next = { decidedAt: new Date().toISOString() };
+      for (const kind of settingsLib.BACKGROUND_AI_KINDS) next[kind] = typeof p[kind] === 'boolean' ? p[kind] : before[kind] === true;
+      appSettings = settingsLib.normalizeSettings({ ...appSettings, backgroundAi: next });
+      saveAppSettings();
+      console.log('[settings] background AI: names ' + (next.names ? 'on' : 'off') + ', memory ' + (next.memory ? 'on' : 'off') + ' (by ' + identity.user.name + ')');
+      // Newly allowed names: the waiting conversations get theirs now.
+      // Newly allowed memory: the next sweep reads what changed meanwhile.
+      if (next.names && !(before.decidedAt && before.names)) scheduleTimelineTitles(1000);
+      json(res, 200, settingsResponse(identity));
     } else if (u.pathname === '/api/machines/connect' && req.method === 'POST') {
       if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'only the owner or an admin can connect machines' });
       let body = '';
@@ -15100,6 +15264,11 @@ async function handleRequest(req, res) {
       let body = '';
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
+      const inputError = settingsLib.settingsInputError(parsed);
+      if (inputError) return json(res, 400, { error: inputError });
+      // The background-AI decision changes only through its own route: a
+      // page holding older settings must not undo it by saving a theme.
+      parsed.backgroundAi = appSettings.backgroundAi;
       const piDefault = readPiDefault();
       const listed = (modelsCache.models.length ? modelsCache : await listPiModels()).models;
       if (!parsed.usePiDefault && parsed.provider && parsed.model && listed.length && !settingsLib.findModel(listed, parsed.provider, parsed.model)) {
@@ -15369,11 +15538,12 @@ async function handleRequest(req, res) {
         chunks.push(chunk);
       }
       if (size < 3200) return json(res, 400, { error: 'Recording was too short.' });
+      if (!speechUrl()) return json(res, 503, { error: voiceServiceError('Speech-to-text').message });
       try {
         const pcm = Buffer.concat(chunks);
         const timeout = 60000 + Math.floor(pcm.length / 128);
         const out = await httpRaw(
-          SPEECH_URL.replace(/\/$/, '') + '/transcribe', pcm,
+          speechUrl() + '/transcribe', pcm,
           'audio/L16;rate=16000;channels=1', timeout);
         res.writeHead(out.status || 502, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end(out.buf);
@@ -15514,6 +15684,30 @@ async function handleRequest(req, res) {
         if (r.code !== 0) return json(res, 502, { kernel, error: r.out.trim().split('\n').at(-1) || 'rat look failed' });
         if (at) return json(res, 200, { kernel, running: true, at, text: r.out.replace(/\s+$/, '') });
         json(res, 200, { kernel, running: true, ...notebookEnv.parseLookOverview(r.out) });
+      } catch (e) { json(res, e.status || 403, { error: e.message }); }
+    } else if (u.pathname === '/api/doc/complete' && req.method === 'POST') {
+      // Completions for the code before the cursor in one cell, from its
+      // running kernel. Empty (with the reason) when the kernel is not
+      // running or is busy.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return json(res, 400, { error: 'bad json' }); }
+      const doc = notebookPath(parsed.doc);
+      if (!doc) return json(res, 400, { error: 'doc (the notebook path) is required' });
+      const runtime = RAT_LANGS[String(parsed.lang || '').toLowerCase()];
+      if (!runtime) return json(res, 200, { items: [], reason: 'not a runnable language' });
+      const code = String(parsed.code || '').slice(0, 100000);
+      const cursor = Math.max(0, Math.min(code.length, Number(parsed.cursor) || 0));
+      if (!ratBinary().path) return json(res, 200, { items: [], reason: 'rat missing' });
+      try {
+        assertPathAccess(identity, doc, 'act');
+        if (docHasActiveRun(doc)) return json(res, 200, { items: [], reason: 'busy' });
+        const k = await docKernelRunningIdle(doc, runtime);
+        if (!k.ok) return json(res, 200, { items: [], reason: k.reason });
+        const r = await ratExec(['look', '--doc', doc, runtime, '--code=' + code.slice(0, cursor), '--cursor=' + String(cursor)], { cwd: path.dirname(doc), timeoutMs: 5000 });
+        if (r.code !== 0) return json(res, 200, { items: [], reason: 'rat look failed' });
+        json(res, 200, { items: parseCompletions(r.out) });
       } catch (e) { json(res, e.status || 403, { error: e.message }); }
     } else if (u.pathname === '/api/doc/plot' && req.method === 'GET') {
       // A plot a kernel just made, shown while its cell runs.
@@ -15671,7 +15865,7 @@ async function handleRequest(req, res) {
       for await (const chunk of req) body += chunk;
       const parsed = JSON.parse(body || '{}');
       try { json(res, 200, await synthesizeSpeech(parsed.text, parsed.rewrite !== false)); }
-      catch (e) { json(res, 500, { error: e.message }); }
+      catch (e) { json(res, e.code === 'VOICE_NOT_SET_UP' ? 503 : 500, { error: e.message }); }
     } else if (u.pathname === '/api/tts/audio' && req.method === 'GET') {
       const id = String(u.searchParams.get('id') || '').replace(/[^a-f0-9]/g, '');
       const wavPath = path.join(TTS_DIR, id + '.wav');
@@ -15909,7 +16103,12 @@ function speechStreamUpgrade(req, socket, head) {
     socket.destroy();
     return;
   }
-  const target = new URL(SPEECH_URL);
+  if (!speechUrl()) {
+    socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  const target = new URL(speechUrl());
   const upstream = net.connect(Number(target.port) || 80, target.hostname);
   const drop = () => { try { socket.destroy(); } catch {} try { upstream.destroy(); } catch {} };
   upstream.on('connect', () => {

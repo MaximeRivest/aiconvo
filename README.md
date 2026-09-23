@@ -42,15 +42,9 @@ forwards localhost) and use the browser menu → **Install chattering**. The
 PWA gets its own window, own icon, and a Start-menu entry — the same
 app-like feel as the Chromium `--app` window on Ubuntu.
 
-Shared GPU services (optional): in settings → semantic search, enable
-the stage and point the URL at the GPU server. Keep the **namespace**
-unique per user — it defaults to your username. Voice endpoints
-(`KOKORO_URL`, `SPEECH_URL`, `REWRITE_URL`) and the semantic search URL
-default to the family GPU server's Tailscale address (`100.86.49.54`), so
-laptops can reach it at home and away. Tailscale must be connected with
-access to that server. Voice URLs can be overridden with environment
-variables in the service unit; the search URL can be changed in settings.
-Restart Chattering after changing voice URLs.
+**First start.** A new install starts neutral: no server addresses, the model Pi uses by default, and the chime as the only sound. Before Chattering calls a model on its own, it asks the owner once: **short names** (titles for conversations, projects and saved documents) and **project memory** (re-reading a conversation after it changes). Each can be on or off; nothing runs until the question is answered, and Settings → model → background work changes the answer later. Buttons a person presses (build memory, update notes, a new title) always work. An install that ran before this question existed keeps what it had: the values it was using are written into its `settings.json` once (`settingsVersion: 2`), and its background work stays on. Details: `settings.js` (`migrateSettings`) and TODO item 2.
+
+Shared GPU services (optional). Semantic search: settings → search, enable the stage and enter the server address. Keep the **namespace** unique per user — it defaults to your username. Voice: settings → sound → voice services takes a speech-to-text server (dictation, spoken replies), a read-aloud server and voice, and an OpenAI-compatible endpoint and model for spoken digests. Empty means not set up: the microphone and read-aloud buttons stay hidden, and speech sound modes play the chime. The environment variables `SPEECH_URL`, `KOKORO_URL`, `KOKORO_VOICE`, `REWRITE_URL` and `REWRITE_MODEL` still win over those fields, and the page says when one does. In this household the servers are on the family GPU server (`100.86.49.54` over Tailscale).
 
 To use it from a phone or tablet on the same local network, open settings → machines and turn on **reach this machine from other devices**. It takes effect at once (no restart) and shows the links to open on the other device; the choice is saved in settings. `CHATTERING_LAN=1` in the service unit only sets the starting position until someone uses the switch; `CHATTERING_HOST` pins the address and disables the switch. The laptop still opens terminals and agent windows. The tablet only needs the link with `?token=…`. The token is stored in `~/.cache/chattering/lan-token`. After the first open, a cookie keeps the tablet signed in. On the e-paper tablet, pick the **e-ink** theme.
 

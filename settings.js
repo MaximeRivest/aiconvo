@@ -23,16 +23,47 @@ const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ma
 //   summary — that line plus a short spoken digest of the reply
 //   voice   — the digest, then the microphone opens for a reply or command
 const DONE_SOUND_MODES = ['off', 'chime', 'title', 'summary', 'voice'];
+
+// Version 2 (2026-09-23, TODO item 2 "safe for strangers"): a new install
+// starts neutral. No personal server addresses, no fixed model, no speech
+// that needs a server, and no model call it was not asked for
+// (backgroundAi). An install that predates version 2 is migrated with the
+// values it was already using (LEGACY_DEFAULTS), so nothing changes for it.
+const SETTINGS_VERSION = 2;
+
+// Background AI work: model calls Chattering makes without being asked in
+// that moment. Nothing runs until the owner has decided (decidedAt).
+//   names  — short titles for conversations, projects and document commits
+//   memory — re-reading changed conversations into project memory
+const BACKGROUND_AI_KINDS = ['names', 'memory'];
+const BACKGROUND_AI_UNDECIDED = { decidedAt: null, names: false, memory: false };
+
 const DEFAULT_SETTINGS = {
-  usePiDefault: false,
-  provider: 'openai-codex',
-  model: 'gpt-5.6-sol',
+  settingsVersion: SETTINGS_VERSION,
+  // The model for notes, titles and memory: Pi's own default until the
+  // person picks one.
+  usePiDefault: true,
+  provider: '',
+  model: '',
   thinking: 'off',
   contextTokens: DEFAULT_CONTEXT_TOKENS,
   // Optional GPU-server late-interaction search stage (off by default).
   semanticSearch: false,
-  semanticUrl: 'http://100.86.49.54:8090',
+  semanticUrl: '',
   semanticNs: defaultSemanticNs(),
+  // Optional voice services, all set up in settings → sound. Empty: not
+  // set up, and the controls that need them say so instead of failing.
+  //   speechUrl     — speech-to-text (dictation, the voice reply loop)
+  //   ttsUrl        — text-to-speech (read aloud, spoken announcements)
+  //   ttsVoice      — the voice name the TTS server knows; empty: its default
+  //   voiceModelUrl — an OpenAI-compatible chat endpoint for spoken digests
+  //   voiceModel    — the model name at that endpoint
+  speechUrl: '',
+  ttsUrl: '',
+  ttsVoice: '',
+  voiceModelUrl: '',
+  voiceModel: '',
+  backgroundAi: { ...BACKGROUND_AI_UNDECIDED },
   // Engine for web sends: 'sdk' embeds pi in-process (fast forks, full
   // extension UI); 'rpc' spawns pi child processes (isolation fallback).
   piEngine: 'sdk',
@@ -47,7 +78,8 @@ const DEFAULT_SETTINGS = {
   // Typed in the composer, this opens the snippet picker inline. Two
   // semicolons: almost never in prose or code, and one key on most layouts.
   snippetTrigger: ';;',
-  doneSound: 'voice',
+  // Three short notes: no speech, no network. Speech modes need ttsUrl.
+  doneSound: 'chime',
   // Cost analytics keeps billing classification separate from Pi's retail
   // cost estimate. Rules are provider-scoped and never contain credentials.
   usageBilling: { providerModes: {}, monthlyFees: {} },
@@ -71,6 +103,87 @@ const DEFAULT_SETTINGS = {
   publicDoor: false,
   tailscaleApiKey: '',
 };
+
+// What an install from before version 2 ran on without having saved it:
+// the old code defaults (the family GPU server on the tailnet, Maxime's
+// model, spoken summaries). Only the migration uses these.
+const LEGACY_DEFAULTS = {
+  provider: 'openai-codex',
+  model: 'gpt-5.6-sol',
+  semanticUrl: 'http://100.86.49.54:8090',
+  doneSound: 'voice',
+  speechUrl: 'http://100.86.49.54:8078',
+  ttsUrl: 'http://100.86.49.54:8880',
+  ttsVoice: 'bm_george',
+  voiceModelUrl: 'http://100.86.49.54:8000/v1/chat/completions',
+  voiceModel: 'qwen/qwen3.8-27b',
+};
+
+// Bring a settings file up to the current version. `raw` is the file as
+// read (null when there is none); `priorInstall` says whether this machine
+// ran Chattering before (the caller looks for its data). A prior install
+// keeps exactly the behaviour it had: every value the old code filled in
+// silently is written down, and background AI stays on as it was. A new
+// install gets the neutral defaults and is asked. Pure: the caller writes.
+function migrateSettings(raw, { priorInstall = false } = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+  if (Number(src.settingsVersion) >= SETTINGS_VERSION) return { settings: src, migrated: false };
+  if (priorInstall) {
+    // Mirror the old normalizer exactly: only `usePiDefault === true` meant
+    // Pi's default, and an empty provider, model or URL meant the default.
+    if (src.usePiDefault !== true) {
+      src.usePiDefault = false;
+      if (!String(src.provider || '').trim()) src.provider = LEGACY_DEFAULTS.provider;
+      if (!String(src.model || '').trim()) src.model = LEGACY_DEFAULTS.model;
+    }
+    if (!String(src.semanticUrl || '').trim()) src.semanticUrl = LEGACY_DEFAULTS.semanticUrl;
+    if (!DONE_SOUND_MODES.includes(src.doneSound)) src.doneSound = LEGACY_DEFAULTS.doneSound;
+    // The voice endpoints were constants in server.js; environment
+    // variables still override them at run time, as before.
+    for (const k of ['speechUrl', 'ttsUrl', 'ttsVoice', 'voiceModelUrl', 'voiceModel']) {
+      if (typeof src[k] !== 'string') src[k] = LEGACY_DEFAULTS[k];
+    }
+    if (!src.backgroundAi || typeof src.backgroundAi !== 'object') {
+      src.backgroundAi = { decidedAt: 'before-consent', names: true, memory: true };
+    }
+  }
+  src.settingsVersion = SETTINGS_VERSION;
+  return { settings: src, migrated: true };
+}
+
+function normalizeBackgroundAi(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const decidedAt = typeof src.decidedAt === 'string' && src.decidedAt.trim() ? src.decidedAt.trim().slice(0, 40) : null;
+  // Nothing is on before a decision, whatever the file says.
+  if (!decidedAt) return { ...BACKGROUND_AI_UNDECIDED };
+  return { decidedAt, names: src.names === true, memory: src.memory === true };
+}
+
+// Service URLs: http(s) only, no whitespace. Anything else is not a URL a
+// person meant; the caller reports it (settingsInputError) instead of
+// saving it silently wrong.
+const SERVICE_URL = /^https?:\/\/[^\s/]+(?:\/\S*)?$/i;
+function normalizeServiceUrl(raw, { keepPath = true } = {}) {
+  const s = String(raw || '').trim();
+  if (!s || !SERVICE_URL.test(s)) return '';
+  return keepPath ? s : s.replace(/\/+$/, '');
+}
+const VOICE_NAME = /^[\w.:-]{1,64}$/;
+const MODEL_NAME = /^[\w./:@-]{1,200}$/;
+
+// A reason to refuse a settings change, or null. Only the fields a person
+// types by hand are checked; everything else is normalized as before.
+function settingsInputError(src) {
+  if (!src || typeof src !== 'object') return 'settings must be an object';
+  const urls = { semanticUrl: 'the search server', speechUrl: 'the speech-to-text server', ttsUrl: 'the read-aloud server', voiceModelUrl: 'the spoken-digest model endpoint' };
+  for (const [k, what] of Object.entries(urls)) {
+    const v = String(src[k] || '').trim();
+    if (v && !SERVICE_URL.test(v)) return `${what} needs a full address starting with http:// or https://`;
+  }
+  if (String(src.ttsVoice || '').trim() && !VOICE_NAME.test(String(src.ttsVoice).trim())) return 'the voice name may only hold letters, digits, dots, dashes and underscores';
+  if (String(src.voiceModel || '').trim() && !MODEL_NAME.test(String(src.voiceModel).trim())) return 'the spoken-digest model name has characters a model name does not use';
+  return null;
+}
 
 function normalizeGuestLimits(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
@@ -215,7 +328,13 @@ function normalizeSettings(input) {
     ? Math.round(Number(src.contextTokens))
     : DEFAULT_SETTINGS.contextTokens;
   const semanticSearch = src.semanticSearch === true;
-  const semanticUrl = String(src.semanticUrl || DEFAULT_SETTINGS.semanticUrl).trim().replace(/\/$/, '');
+  const semanticUrl = normalizeServiceUrl(src.semanticUrl, { keepPath: false });
+  const speechUrl = normalizeServiceUrl(src.speechUrl, { keepPath: false });
+  const ttsUrl = normalizeServiceUrl(src.ttsUrl, { keepPath: false });
+  const voiceModelUrl = normalizeServiceUrl(src.voiceModelUrl);
+  const ttsVoice = VOICE_NAME.test(String(src.ttsVoice || '').trim()) ? String(src.ttsVoice).trim() : '';
+  const voiceModel = MODEL_NAME.test(String(src.voiceModel || '').trim()) ? String(src.voiceModel).trim() : '';
+  const backgroundAi = normalizeBackgroundAi(src.backgroundAi);
   const semanticNs = String(src.semanticNs || DEFAULT_SETTINGS.semanticNs).trim().replace(/[^\w.-]+/g, '-') || 'default';
   const piEngine = src.piEngine === 'rpc' ? 'rpc' : 'sdk';
   const simplifyAnswers = src.simplifyAnswers !== false;
@@ -231,18 +350,24 @@ function normalizeSettings(input) {
   const guestLimits = normalizeGuestLimits(src.guestLimits);
   const publicDoor = src.publicDoor === true;
   const tailscaleApiKey = typeof src.tailscaleApiKey === 'string' ? src.tailscaleApiKey.trim().slice(0, 200) : '';
-  if (src.usePiDefault === true) {
-    return { usePiDefault: true, provider: '', model: '', thinking, contextTokens, semanticSearch, semanticUrl, semanticNs, piEngine, simplifyAnswers, simplifyPrompt, autoResumeNetwork, resumePrompt, piTheme, usageBilling, snippetTrigger, doneSound, machines, lan, guestLimits, publicDoor, tailscaleApiKey };
-  }
+  // A fixed model needs both halves; half a choice is Pi's default.
+  const piDefault = src.usePiDefault === true || !provider || !model;
   return {
-    usePiDefault: false,
-    provider: provider || DEFAULT_SETTINGS.provider,
-    model: model || DEFAULT_SETTINGS.model,
+    settingsVersion: SETTINGS_VERSION,
+    usePiDefault: piDefault,
+    provider: piDefault ? '' : provider,
+    model: piDefault ? '' : model,
     thinking,
     contextTokens,
     semanticSearch,
     semanticUrl,
     semanticNs,
+    speechUrl,
+    ttsUrl,
+    ttsVoice,
+    voiceModelUrl,
+    voiceModel,
+    backgroundAi,
     piEngine,
     simplifyAnswers,
     simplifyPrompt,
@@ -325,6 +450,12 @@ module.exports = {
   DEFAULT_SETTINGS,
   THINKING_LEVELS,
   DONE_SOUND_MODES,
+  SETTINGS_VERSION,
+  LEGACY_DEFAULTS,
+  BACKGROUND_AI_KINDS,
+  migrateSettings,
+  normalizeBackgroundAi,
+  settingsInputError,
   hasClaudeCodeCredential,
   parseTokenCount,
   formatTokenCount,

@@ -52,7 +52,13 @@ test('parseListModels reads the pi table', () => {
 
 test('normalizeSettings keeps the built-in default', () => {
   assert.deepStrictEqual(normalizeSettings({}), DEFAULT_SETTINGS);
-  assert.strictEqual(normalizeSettings({ thinking: 'high' }).provider, 'openai-codex');
+  // A new install follows Pi's own default model (settings version 2).
+  assert.strictEqual(normalizeSettings({ thinking: 'high' }).usePiDefault, true);
+  assert.strictEqual(normalizeSettings({ thinking: 'high' }).provider, '');
+  // Half a fixed choice is no choice: Pi's default, not a guess.
+  assert.strictEqual(normalizeSettings({ usePiDefault: false, provider: 'xai' }).usePiDefault, true);
+  const fixed = normalizeSettings({ usePiDefault: false, provider: 'xai', model: 'grok-4.6' });
+  assert.deepStrictEqual([fixed.usePiDefault, fixed.provider, fixed.model], [false, 'xai', 'grok-4.6']);
   assert.strictEqual(normalizeSettings({ thinking: 'nope' }).thinking, 'off');
 });
 
@@ -65,9 +71,10 @@ test('the reach switch is unset until chosen, then a plain boolean', () => {
   }
 });
 
-test('semantic search defaults to Tailscale without replacing custom servers', () => {
+test('semantic search has no default server and keeps custom servers', () => {
   for (const usePiDefault of [false, true]) {
-    assert.strictEqual(normalizeSettings({ usePiDefault }).semanticUrl, 'http://100.86.49.54:8090');
+    assert.strictEqual(normalizeSettings({ usePiDefault }).semanticUrl, '');
+    assert.strictEqual(normalizeSettings({ usePiDefault, semanticUrl: 'not a url' }).semanticUrl, '');
     assert.strictEqual(normalizeSettings({ usePiDefault, semanticUrl: 'http://search.example:8090/' }).semanticUrl, 'http://search.example:8090');
   }
 });
@@ -143,16 +150,70 @@ test('resolveContextTokens uses the catalog when present', () => {
   assert.strictEqual(modelLabel({ usePiDefault: true }, { provider: 'xai', model: 'grok-4.6' }), 'pi default (xai/grok-4.6)');
 });
 
-test('normalizeSettings keeps a valid doneSound and falls back to voice', () => {
+test('normalizeSettings keeps a valid doneSound and falls back to the chime', () => {
   const { DONE_SOUND_MODES } = require('../settings.js');
   assert.deepStrictEqual(DONE_SOUND_MODES, ['off', 'chime', 'title', 'summary', 'voice']);
   for (const mode of DONE_SOUND_MODES) {
     assert.strictEqual(normalizeSettings({ doneSound: mode }).doneSound, mode);
     assert.strictEqual(normalizeSettings({ usePiDefault: true, doneSound: mode }).doneSound, mode);
   }
-  assert.strictEqual(normalizeSettings({}).doneSound, 'voice');
-  assert.strictEqual(normalizeSettings({ doneSound: 'loud' }).doneSound, 'voice');
-  assert.strictEqual(normalizeSettings({ doneSound: 3 }).doneSound, 'voice');
+  assert.strictEqual(normalizeSettings({}).doneSound, 'chime');
+  assert.strictEqual(normalizeSettings({ doneSound: 'loud' }).doneSound, 'chime');
+  assert.strictEqual(normalizeSettings({ doneSound: 3 }).doneSound, 'chime');
+});
+
+// ---- settings version 2: neutral new installs, unchanged old ones ----
+const { migrateSettings, normalizeBackgroundAi, settingsInputError, LEGACY_DEFAULTS, SETTINGS_VERSION } = require('../settings.js');
+
+test('a new install gets neutral defaults: no personal address, background AI undecided', () => {
+  const { settings, migrated } = migrateSettings(null, { priorInstall: false });
+  assert.equal(migrated, true);
+  const s = normalizeSettings(settings);
+  assert.equal(s.settingsVersion, SETTINGS_VERSION);
+  assert.deepStrictEqual(s.backgroundAi, { decidedAt: null, names: false, memory: false });
+  for (const k of ['semanticUrl', 'speechUrl', 'ttsUrl', 'ttsVoice', 'voiceModelUrl', 'voiceModel']) assert.equal(s[k], '', k);
+  assert.doesNotMatch(JSON.stringify(s), /100\.86\.|192\.168\./);
+});
+
+test('an old install keeps every value it was already using, and its background work', () => {
+  // No file at all, but the machine ran before: the old code defaults.
+  let s = normalizeSettings(migrateSettings(null, { priorInstall: true }).settings);
+  for (const [k, v] of Object.entries(LEGACY_DEFAULTS)) assert.equal(s[k], v, k);
+  assert.equal(s.usePiDefault, false);
+  assert.deepStrictEqual(s.backgroundAi, { decidedAt: 'before-consent', names: true, memory: true });
+  // A saved file: what it says wins; only what the old code filled in silently is added.
+  const file = { usePiDefault: false, provider: 'anthropic', model: 'claude-x', semanticUrl: 'http://192.168.2.24:8090', doneSound: 'chime', lan: true };
+  s = normalizeSettings(migrateSettings(file, { priorInstall: true }).settings);
+  assert.deepStrictEqual([s.provider, s.model, s.semanticUrl, s.doneSound, s.lan], ['anthropic', 'claude-x', 'http://192.168.2.24:8090', 'chime', true]);
+  assert.equal(s.ttsUrl, LEGACY_DEFAULTS.ttsUrl);
+  // The old normalizer treated an empty provider and a missing doneSound as the defaults.
+  s = normalizeSettings(migrateSettings({ provider: '', doneSound: 'loud' }, { priorInstall: true }).settings);
+  assert.deepStrictEqual([s.provider, s.model, s.doneSound], ['openai-codex', 'gpt-5.6-sol', 'voice']);
+  // Pi's default stays Pi's default.
+  s = normalizeSettings(migrateSettings({ usePiDefault: true }, { priorInstall: true }).settings);
+  assert.equal(s.usePiDefault, true);
+});
+
+test('a migrated file is never migrated again', () => {
+  const once = migrateSettings({ settingsVersion: 2, speechUrl: '', backgroundAi: { decidedAt: null } }, { priorInstall: true });
+  assert.equal(once.migrated, false);
+  assert.equal(normalizeSettings(once.settings).speechUrl, '');
+  assert.equal(normalizeSettings(once.settings).backgroundAi.decidedAt, null);
+});
+
+test('background AI cannot be on without a dated decision', () => {
+  assert.deepStrictEqual(normalizeBackgroundAi({ names: true, memory: true }), { decidedAt: null, names: false, memory: false });
+  assert.deepStrictEqual(normalizeBackgroundAi({ decidedAt: '2026-09-23T10:00:00Z', names: true, memory: 'yes' }), { decidedAt: '2026-09-23T10:00:00Z', names: true, memory: false });
+});
+
+test('hand-typed service addresses and names are checked, not saved wrong', () => {
+  assert.equal(settingsInputError({}), null);
+  assert.equal(settingsInputError({ speechUrl: 'http://box:8078', voiceModelUrl: 'https://api.example/v1/chat/completions', voiceModel: 'qwen/qwen3.8-27b', ttsVoice: 'bm_george' }), null);
+  assert.match(settingsInputError({ speechUrl: 'box:8078' }), /speech-to-text.*http/);
+  assert.match(settingsInputError({ ttsUrl: 'http://a b' }), /read-aloud/);
+  assert.match(settingsInputError({ ttsVoice: 'bad voice!' }), /voice name/);
+  assert.equal(normalizeSettings({ ttsUrl: 'http://kokoro:8880/' }).ttsUrl, 'http://kokoro:8880');
+  assert.equal(normalizeSettings({ voiceModelUrl: 'http://q:8000/v1/chat/completions' }).voiceModelUrl, 'http://q:8000/v1/chat/completions');
 });
 
 test('the resume message is editable, trimmed, bounded, and defaults when blank', () => {

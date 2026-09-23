@@ -992,6 +992,23 @@ body.side-layout.zen:not(.home) .mgantt[data-mg-open] { left: 0; }
 .set-picker-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-picker-main .meta { color: var(--text-dim); font-size: var(--fs-micro); }
 .set-picker-act { color: var(--text-dim); font-size: var(--fs-meta); white-space: nowrap; }
+.set-option:has(input:disabled) { cursor: default; }
+.set-option:has(input:disabled) .name { color: var(--text-dim); }
+.set-field > input[type=text]:disabled { opacity: .7; }
+/* The read-aloud action exists only where a read-aloud server is set up. */
+body:not(.can-read-aloud) .msg .msg-read { display: none; }
+/* First-run question: may Chattering call a model on its own? */
+.bg-ask { width: min(580px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); overflow: auto; box-sizing: border-box; padding: 24px; border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); }
+.bg-ask::backdrop { background: var(--overlay); }
+.bg-ask h2 { font-size: 20px; margin: 0 0 12px; }
+.bg-ask p { font-size: 14px; line-height: 1.55; margin: 0 0 12px; }
+.bg-ask .bg-kind { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--border); cursor: pointer; min-height: 44px; }
+.bg-ask .bg-kind input { margin-top: 4px; flex: 0 0 auto; }
+.bg-ask .bg-kind span { font-size: 14px; line-height: 1.5; }
+.bg-ask .bg-kind small { display: block; color: var(--text-dim); font-size: 13px; }
+.bg-ask .bg-note { color: var(--text-dim); font-size: 13px; border-top: 1px solid var(--border); padding-top: 12px; }
+.bg-ask footer { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; padding-top: 12px; }
+.bg-ask :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 760px) {
   .settings-page { grid-template-columns: 1fr; gap: var(--sp-3); }
   .settings-nav { position: static; flex-direction: row; overflow-x: auto; gap: 4px; padding: 0 0 6px; border-bottom: 1px solid var(--border); scrollbar-width: none; }
@@ -12304,6 +12321,9 @@ function wireAgentSpeech(ta) {
   const nativeSpeech = window.ChatteringSpeech;
   const nativeAvailable = !!(nativeSpeech && typeof nativeSpeech.toggle === 'function');
   if (!mic || (!nativeAvailable && !browserAgentSpeechAvailable())) return;
+  // Both the browser and the Android app transcribe through this server's
+  // speech service: without one, dictation cannot work, so no button.
+  if (!capabilityOn('speech') && !window._agentSpeechState) { mic.hidden = true; return; }
   mic.hidden = false;
   const state = window._agentSpeechState || '';
   mic.classList.toggle('recording', state === 'recording');
@@ -15219,6 +15239,7 @@ function paneModel() {
       <select id="setThinking">${settingsThinkingOptions(resolved.thinking || 'off', modelSupportsThinking(current.provider, current.model))}</select>
       <div class="set-help">${modelSupportsThinking(current.provider, current.model) ? 'How much the model reasons before it answers. Higher is slower and costs more.' : 'This model does not support thinking.'}</div>
     </div>
+    ${backgroundAiSectionHtml()}
     <h3>conversation answers</h3>
     <label class="set-check"><input id="setSimplifyAnswers" type="checkbox"${s.simplifyAnswers !== false ? ' checked' : ''}> automatically make a simpler version</label>
     <div class="set-help">Re-explain the full answer for someone with no background in the subject. Uses the same model at its lowest reasoning setting and keeps the original. Adds one model call and some waiting. Reuses the conversation for caching, but changing reasoning can reduce cache reuse with some providers. Available for web conversations using the SDK engine, not terminal or delegated runs.</div>
@@ -15243,7 +15264,24 @@ function paneModel() {
     </details>`;
 }
 
+// Model calls Chattering makes on its own, with the model above. Changed
+// through their own route (the answer is dated), never by a general save.
+function backgroundAiSectionHtml() {
+  const b = settingsOf().backgroundAi || {};
+  const can = !!(settingsState && settingsState.canEditSettings);
+  const when = !b.decidedAt ? 'Not decided yet: nothing runs until you choose.'
+    : b.decidedAt === 'before-consent' ? 'On since before Chattering asked this question.'
+    : 'Decided ' + new Date(b.decidedAt).toLocaleString() + '.';
+  return `<h3>background work</h3>
+    <div class="set-help">Model calls Chattering makes without being asked each time. They send conversation text to the model above.</div>
+    <label class="set-check"><input id="setBgNames" type="checkbox"${b.names ? ' checked' : ''}${can ? '' : ' disabled'}> short names for conversations, projects and saved documents</label>
+    <label class="set-check"><input id="setBgMemory" type="checkbox"${b.memory ? ' checked' : ''}${can ? '' : ' disabled'}> keep project memory current: re-read a conversation after it changes</label>
+    <div class="set-help">${esc(when)} Buttons you press (build memory, update notes, a new title) always work. Settings → usage shows what these calls used.${can ? '' : ' Only the owner or an admin can change this.'}</div>`;
+}
+
 function bindPaneModel(root) {
+  if ($('setBgNames')) $('setBgNames').onchange = () => saveBackgroundAi({ names: $('setBgNames').checked });
+  if ($('setBgMemory')) $('setBgMemory').onchange = () => saveBackgroundAi({ memory: $('setBgMemory').checked });
   $('setSimplifyPromptSave').onclick = () => saveSettings({ simplifyPrompt: $('setSimplifyPrompt').value }, 'rewrite prompt saved');
   $('setSimplifyPromptReset').onclick = () => saveSettings({ simplifyPrompt: '' }, 'default rewrite prompt restored');
   $('setResumePromptSave').onclick = () => saveSettings({ resumePrompt: $('setResumePrompt').value }, 'resume message saved');
@@ -15284,14 +15322,44 @@ function muteRowHtml() {
   return `<span class="set-muted"><b>muted</b> until ${hh}:${mm} · ${left} min left</span><button type="button" id="setVoiceUnmute">unmute</button>`;
 }
 
+// Which voice services a sound mode needs (server doneSoundMode caps it).
+const DONE_SOUND_NEEDS = { title: ['tts'], summary: ['tts'], voice: ['tts', 'speech'] };
+const VOICE_SERVICE_NAMES = { tts: 'a read-aloud server', speech: 'a speech-to-text server' };
+
 function paneSound() {
-  const mode = settingsOf().doneSound || 'voice';
+  const s = settingsOf();
+  const mode = s.doneSound || 'chime';
+  const caps = (settingsState && settingsState.capabilities) || {};
+  const effective = caps.doneSound || mode;
+  const options = DONE_SOUND_OPTIONS.map(([value, name, desc]) => {
+    const missing = (DONE_SOUND_NEEDS[value] || []).filter(k => !capabilityOn(k));
+    return { value, name, desc: missing.length ? desc + ' Needs ' + missing.map(k => VOICE_SERVICE_NAMES[k]).join(' and ') + ' (below).' : desc, disabled: missing.length > 0 && value !== mode };
+  });
+  const can = !!(settingsState && settingsState.canEditSettings);
+  const field = (key, label, help, cls = '') => {
+    const envName = { speechUrl: 'SPEECH_URL', ttsUrl: 'KOKORO_URL', ttsVoice: 'KOKORO_VOICE', voiceModelUrl: 'REWRITE_URL', voiceModel: 'REWRITE_MODEL' }[key];
+    const cap = key === 'speechUrl' ? caps.speech : key === 'ttsUrl' || key === 'ttsVoice' ? caps.tts : caps.voiceModel;
+    const fromEnv = cap && cap.source === 'environment';
+    return `<div class="set-field">
+      <label for="set_${key}">${esc(label)}</label>
+      <input id="set_${key}" data-voice-key="${key}" type="text"${cls ? ` class="${cls}"` : ''} value="${esc(s[key] || '')}" spellcheck="false" autocomplete="off"${fromEnv || !can ? ' disabled' : ''} placeholder="not set up">
+      <div class="set-help">${fromEnv ? `Set by the service environment (<code>${envName}</code>), which wins over this field. Change it there.` : esc(help)}</div>
+    </div>`;
+  };
   return `<h2>sound</h2>
     <p class="lead">What the speakers do when an agent reply is ready. Pick a mode to hear it.</p>
-    ${setOptionsHtml('setDoneSound', DONE_SOUND_OPTIONS.map(([value, name, desc]) => ({ value, name, desc })), mode)}
-    <div class="set-help">If speech cannot be made (voice server down), the chime plays instead.</div>
+    ${setOptionsHtml('setDoneSound', options, mode)}
+    ${effective !== mode ? `<div class="set-help"><b>Playing now: ${esc(effective)}.</b> The ${esc(mode)} mode needs a voice service that is not set up here.</div>` : '<div class="set-help">If speech cannot be made (voice server down), the chime plays instead.</div>'}
     <div class="set-row" id="setMuteRow">${muteRowHtml()}</div>
-    ${phoneNotifyRowHtml()}`;
+    ${phoneNotifyRowHtml()}
+    <h3>voice services</h3>
+    <div class="set-help">Optional servers you run or trust. Recorded speech and reply text are sent to them. Leave them empty to keep sound on this computer: the chime still plays, and the microphone and read-aloud buttons stay hidden.</div>
+    ${field('speechUrl', 'speech-to-text server', 'Dictation and spoken replies. Chattering sends audio to <address>/transcribe and <address>/stream.')}
+    ${field('ttsUrl', 'read-aloud server', 'Reads replies and announcements aloud. Chattering posts text to <address>/tts.')}
+    ${field('ttsVoice', 'read-aloud voice', 'A voice name that server knows. Empty: its default voice.', 'medium')}
+    ${field('voiceModelUrl', 'spoken-digest model endpoint', 'An OpenAI-compatible chat completions address. Writes the short spoken summaries and understands spoken commands. Without it, announcements read the start of the reply.')}
+    ${field('voiceModel', 'spoken-digest model name', 'The model name at that endpoint.', 'medium')}
+    <div class="set-help">Saved addresses are not tested for reachability yet. Pick a sound mode above to hear whether read-aloud works.</div>`;
 }
 
 // Only the Android app has the native bridge; browsers never see this row.
@@ -15334,6 +15402,9 @@ document.addEventListener('click', e => {
 }, true);
 
 function bindPaneSound(root) {
+  root.querySelectorAll('input[data-voice-key]').forEach(input => {
+    input.onchange = () => saveSettings({ [input.dataset.voiceKey]: input.value.trim() }, input.value.trim() ? 'voice service saved' : 'voice service removed');
+  });
   bindOptions(root, 'setDoneSound', async v => {
     await saveSettings({ doneSound: v }, 'sound: ' + v);
     if (v === 'off') return;
@@ -15368,7 +15439,7 @@ function paneSearch() {
     <label class="set-check"><input id="setSemantic" type="checkbox"${on ? ' checked' : ''}> add meaning-based matches from the GPU server</label>
     ${on ? `<div class="set-field">
       <label for="setSemanticUrl">server URL</label>
-      <input id="setSemanticUrl" type="text" value="${esc(s.semanticUrl || '')}" spellcheck="false">
+      <input id="setSemanticUrl" type="text" value="${esc(s.semanticUrl || '')}" spellcheck="false" placeholder="not set up, e.g. http://gpu-box:8090">
     </div>
     <div class="set-field">
       <label for="setSemanticNs">namespace</label>
@@ -15659,7 +15730,82 @@ async function loadSettings() {
   settingsState = await res.json();
   renderPeopleHeader();
   renderMachineBtn();
+  applyCapabilities();
   if (settingsOpen) renderSettings();
+  maybeAskBackgroundAi();
+}
+
+// What the optional services can do on this machine (GET /api/settings
+// capabilities). A control whose service is not set up is not shown; the
+// settings page says what it needs instead.
+const capabilityOn = name => !!(settingsState && settingsState.capabilities && settingsState.capabilities[name] && settingsState.capabilities[name].configured);
+function applyCapabilities() {
+  document.body.classList.toggle('can-read-aloud', capabilityOn('tts'));
+  const ta = $('agentText');
+  if ($('agentMic')) wireAgentSpeech(ta);
+}
+
+// ---- background AI: asked once, before anything runs ----
+// A new install calls no model on its own until the owner answers. The
+// answer is dated on the server; closing the question (Esc) is not an
+// answer, so it comes back on the next load. Settings → model changes it.
+let bgAskShown = false;
+function maybeAskBackgroundAi() {
+  const s = settingsOf();
+  if (bgAskShown || !settingsState || !settingsState.canEditSettings) return;
+  if (!s.backgroundAi || s.backgroundAi.decidedAt) return;
+  bgAskShown = true;
+  const n = Number(settingsState.conversations) || 0;
+  // Name the model plainly: a newcomer does not know what "pi default" is.
+  const r = settingsState.resolved || {};
+  const model = r.provider && r.model ? r.provider + ' / ' + r.model : 'your default AI model (none is set up yet)';
+  const dialog = document.createElement('dialog');
+  dialog.className = 'bg-ask';
+  dialog.setAttribute('aria-labelledby', 'bgAskTitle');
+  dialog.innerHTML = `<h2 id="bgAskTitle">Before Chattering uses AI on its own</h2>
+    <p>${n ? `Chattering found <b>${n}</b> conversation${n === 1 ? '' : 's'} on this computer. ` : ''}Reading, searching and exporting them happens here. No AI is used and nothing leaves this computer.</p>
+    <p>Two helpers can also work in the background. They send conversation text to <b>${esc(model)}</b>, which counts against your plan or your bill. Nothing runs until you choose.</p>
+    <label class="bg-kind"><input type="checkbox" data-kind="names"><span><b>Short names</b><small>A model reads the first messages of each conversation and gives it a short title. Also titles projects and saved documents. Small requests${n ? `: about ${Math.max(1, Math.ceil(n / 60))} now, then one or two per new conversation` : ''}. Without it, titles are cut from your first message.</small></span></label>
+    <label class="bg-kind"><input type="checkbox" data-kind="memory"><span><b>Project memory</b><small>When a conversation changes and then stays quiet for 10 minutes, a model re-reads all of it to keep that project’s notes current. Much more text than names. Older conversations are read only when you ask, from a project’s page.</small></span></label>
+    ${s.simplifyAnswers !== false ? '<p class="bg-note">Separately, each reply in a web conversation also gets a simpler version: one more request to that conversation’s model. You can switch it off in Settings → model.</p>' : ''}
+    <p class="bg-note">Settings → usage shows what these calls actually used. Change your answer any time in Settings → model.</p>
+    <footer><button type="button" data-none>Keep all off</button><button type="button" data-some>Turn on the ones I checked</button></footer>`;
+  document.body.appendChild(dialog);
+  // Global shortcuts must not fire behind the question.
+  dialog.addEventListener('keydown', e => e.stopPropagation());
+  dialog.addEventListener('close', () => dialog.remove());
+  const answer = async all => {
+    const pick = {};
+    dialog.querySelectorAll('input[data-kind]').forEach(i => { pick[i.dataset.kind] = !all && i.checked; });
+    dialog.querySelectorAll('button, input').forEach(c => { c.disabled = true; });
+    try {
+      const out = await postJson('/api/settings/background-ai', pick);
+      if (!out || out.error) throw new Error(out && out.error || 'could not save the answer');
+      settingsState = out;
+      dialog.close();
+      const on = Object.keys(pick).filter(k => pick[k]);
+      toast(on.length ? 'background AI on: ' + on.map(k => k === 'names' ? 'short names' : 'project memory').join(', ') : 'background AI stays off');
+      if (settingsOpen) renderSettings();
+    } catch (e) {
+      dialog.querySelectorAll('button, input').forEach(c => { c.disabled = false; });
+      errToast(e.message);
+    }
+  };
+  dialog.querySelector('[data-none]').onclick = () => answer(true);
+  dialog.querySelector('[data-some]').onclick = () => answer(false);
+  dialog.showModal();
+  dialog.querySelector('input[data-kind]').focus();
+}
+
+async function saveBackgroundAi(patch) {
+  try {
+    const out = await postJson('/api/settings/background-ai', patch);
+    if (!out || out.error) throw new Error(out && out.error || 'could not save');
+    settingsState = out;
+    const b = settingsOf().backgroundAi || {};
+    toast('background AI: names ' + (b.names ? 'on' : 'off') + ', memory ' + (b.memory ? 'on' : 'off'));
+  } catch (e) { errToast(e.message); }
+  renderSettings();
 }
 
 async function loadModels(refresh = false) {
@@ -15682,6 +15828,7 @@ async function saveSettings(patch, message) {
   renderPeopleHeader();
   toast(message || ('memory model: ' + data.resolved.label));
   renderMachineBtn();
+  applyCapabilities();
   renderSettings();
 }
 
