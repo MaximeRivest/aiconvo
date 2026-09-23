@@ -3027,6 +3027,9 @@ async function startFanOut(key, { node, models, message, images, force, context,
   if (!Array.isArray(models) || models.length < 2) throw new Error('fan-out needs two or more models');
   const runs = [];
   const fanoutId = 'fan:' + crypto.randomUUID().slice(0, 8);
+  // "Continue at the end" still needs a real entry to copy the history to.
+  if (!node) node = await lastEntryIdOf(sessionPathsFor(key).sessionPath);
+  if (!node) throw new Error('This conversation has nothing saved to continue from yet. Send one message first, then ask several models.');
   const contextItems = context !== undefined ? normalizeContextItems(context) : conversationContextOf(key);
   for (let index = 0; index < models.length; index++) {
     const m = models[index];

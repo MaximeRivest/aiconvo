@@ -155,7 +155,9 @@
   // The raw entry a send continues from: the head plus any settings entries
   // written below it (a model or reasoning change), so they stay in context.
   function sendNode(T, head) {
-    if (head == null) return null;
+    // No message yet (a new conversation holds only its settings): continue
+    // at the file's end, so the model, reasoning and mode entries stay.
+    if (head == null) return T.fileLeaf ?? null;
     const rawKids = new Map();
     for (const [id, p] of T.parent) if (p != null) { if (!rawKids.has(p)) rawKids.set(p, []); rawKids.get(p).push(id); }
     const carries = id => { // does this raw subtree hold any message node?

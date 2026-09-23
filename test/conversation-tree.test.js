@@ -93,6 +93,10 @@ test('settings entries are transparent, and a send keeps them in context', () =>
   assert.equal(T.effectiveHead(t, {}), 'a');
   assert.equal(T.sendNode(t, 'a'), 'thinking');
   assert.equal(T.sendNode(t, 'q'), 'q');
+  // A new conversation with settings but no message continues at the file's end.
+  const empty = T.build(convo([['model', null, null], ['mode', 'model', null], ['info', 'mode', null]]));
+  assert.equal(T.effectiveHead(empty, {}), null);
+  assert.equal(T.sendNode(empty, null), 'info');
 });
 
 test('a label anchor between a branch point and a new question is transparent too', () => {
