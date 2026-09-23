@@ -79,3 +79,11 @@
 /* What voice just pressed or picked, for a moment. */
 .voice-pressed { outline: 2px dashed var(--accent) !important; outline-offset: 2px; }
 :root[data-theme-mode="binary"] .voice-pressed { outline: 3px dashed var(--text) !important; }
+
+/* Off: the one-tap microphone in the corner. Round, quiet, a real tap
+   target on a phone. */
+#voiceOnButton { pointer-events: auto; width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text-dim); box-shadow: 0 2px 8px var(--shadow-soft); display: inline-flex; align-items: center; justify-content: center; }
+#voiceOnButton:hover, #voiceOnButton:focus-visible { color: var(--text); background: var(--surface-2); }
+#voiceOnButton svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+@media (pointer: coarse) { #voiceOnButton { width: 46px; height: 46px; } }
+#voiceOverlay .vo-error a { color: inherit; font-weight: 700; text-decoration: underline; }

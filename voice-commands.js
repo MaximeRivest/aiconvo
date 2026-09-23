@@ -62,7 +62,7 @@ function voicePrefs() {
   let raw = null;
   try { raw = JSON.parse(localStorage.getItem(VOICE_PREFS_KEY) || 'null'); } catch {}
   const r = raw && typeof raw === 'object' ? raw : {};
-  return { on: r.on === true, window: VOICE_WINDOWS.includes(r.window) ? r.window : 60, overlay: r.overlay !== false, numbers: r.numbers !== false };
+  return { on: r.on === true, window: VOICE_WINDOWS.includes(r.window) ? r.window : 60, overlay: r.overlay !== false, numbers: r.numbers !== false, button: r.button !== false };
 }
 function saveVoicePrefs(patch) {
   const next = { ...voicePrefs(), ...patch };
@@ -83,7 +83,16 @@ function voiceToggle() { return voiceSetOn(!voice.on); }
 
 async function voiceStart() {
   if (voice.audio) return voiceConnect();
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return voiceFail('this browser gives no microphone to the page');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    // Browsers give the microphone only to secure pages (https).
+    if (!window.isSecureContext) {
+      let st = {};
+      try { st = await (await fetch('/api/voice/status')).json(); } catch {}
+      voice.secureUrl = st.secureUrl || null;
+      return voiceFail('the browser gives the microphone only to a secure (https) address, and this page is on http' + (voice.secureUrl ? '' : ' \u2014 open Chattering by its https address'));
+    }
+    return voiceFail('this browser gives no microphone to the page');
+  }
   voice.status = 'starting';
   voicePaint();
   try {
@@ -1615,10 +1624,30 @@ function voicePill() {
   return pill;
 }
 
+// Off, a small microphone button stays in the corner: one tap listens
+// (Settings → sound can hide it). Guests have no voice: no button.
+function voicePaintOffButton() {
+  const want = voicePrefs().button && !voice.refused;
+  let b = $('voiceOnButton');
+  if (!want) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('button');
+    b.id = 'voiceOnButton';
+    b.type = 'button';
+    b.title = 'Listen for voice commands (Alt+L)';
+    b.setAttribute('aria-label', 'Listen for voice commands');
+    b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>';
+    b.onclick = () => voiceSetOn(true);
+    voiceDock().appendChild(b);
+  }
+  voicePlaceDock();
+}
+
 function voicePaint() {
   const shown = voice.on || voice.status === 'error';
   const pill = $('voiceListenPill');
-  if (!shown) { if (pill) pill.remove(); voiceShowOverlay(false); voicePaintSettings(); clearInterval(voice.placeTimer); voice.placeTimer = 0; voicePaintHints(); return; }
+  if (shown) { const b = $('voiceOnButton'); if (b) b.remove(); }
+  if (!shown) { if (pill) pill.remove(); voiceShowOverlay(false); voicePaintSettings(); clearInterval(voice.placeTimer); voice.placeTimer = 0; voicePaintHints(); voicePaintOffButton(); return; }
   // The bars below move with the view (a conversation opens, a run strip appears).
   if (!voice.placeTimer) voice.placeTimer = setInterval(() => { voicePlaceDock(); voicePaintHints(); voiceFocus(); }, 700);
   voicePlaceDock();
@@ -1678,7 +1707,7 @@ function voicePaintOverlayHead() {
   ].filter(Boolean).join(' · ');
   const err = o.querySelector('.vo-error');
   err.hidden = !voice.error;
-  err.textContent = voice.error;
+  err.innerHTML = esc(voice.error) + (voice.secureUrl && voice.status === 'error' ? ` <a href="${esc(voice.secureUrl)}">Open the secure address</a>` : '');
 }
 
 function voicePaintHeard() {
@@ -1781,6 +1810,7 @@ function voiceSettingsHtml() {
     <div class="set-help">Say what you want — “what can I say” lists it for the screen you are on: “change the model to sonnet”, “reasoning off”, “open the third one”, “the last file”, “the previous one”, “open seven”, “open the file called…”, “open the settings”, “start the microphone” (then talk, then “send”), “highlight the last answer” then “copy it”, “fork”, “review the turn”, “open the thinking”, “start scrolling down” then “stop”, “zen mode”, “the latest unread”, in a file “find parse config”, “select the paragraph”, “next chunk”, “run it”, “go to line 40”, “change X to Y”, “fix the grammar”, “accept”; and “find me the conversation where…” hands it to the coding agent. The speech goes to this machine’s speech-to-text; each sentence goes to TypeSafe’s Jev to pick the action. Silence is not sent to either.</div>
     <label class="set-field"><span>context window</span> <select data-voice="window">${VOICE_WINDOWS.map(s => `<option value="${s}"${s === p.window ? ' selected' : ''}>${s < 60 ? s + ' s' : s / 60 + ' min'}</option>`).join('')}</select></label>
     <div class="set-help">How much of what you said recently the speech-to-text rereads, for better words. Longer is more accurate and slower: about 4 ms per second of window on this GPU (1 min ≈ 0.23 s, 2 min ≈ 0.48 s after each pause).</div>
+    <label class="set-check"><input type="checkbox" data-voice="button"${p.button ? ' checked' : ''}> Show the microphone button in the corner (one tap to listen)</label>
     <label class="set-check"><input type="checkbox" data-voice="numbers"${p.numbers ? ' checked' : ''}> Number what I can pick (conversations, files, projects) while listening</label>
     <div class="set-help">Say “open seven”. Without numbers, a place (“the third one”, “the last file”, “the previous one”) or words of the name still pick.</div>
     <label class="set-check"><input type="checkbox" data-voice="overlay"${p.overlay ? ' checked' : ''}> Show what is heard and decided (debug view)</label>
@@ -1845,6 +1875,7 @@ async function voiceBindSettings(root) {
       voicePaintOverlayHead();
     } else if (f === 'overlay') { saveVoicePrefs({ overlay: e.target.checked }); voiceShowOverlay(e.target.checked && voice.on); }
     else if (f === 'numbers') { saveVoicePrefs({ numbers: e.target.checked }); voicePaintHints(); }
+    else if (f === 'button') { saveVoicePrefs({ button: e.target.checked }); voicePaint(); }
   });
   let st = {};
   try { st = await (await fetch('/api/voice/status')).json(); } catch {}
@@ -1883,3 +1914,5 @@ document.addEventListener('keydown', e => {
 }, true);
 
 if (voicePrefs().on) setTimeout(() => voiceSetOn(true), 0);
+// The corner button once the server says voice is for this person.
+else fetch('/api/voice/status').then(r => r.json()).then(st => { voice.refused = !!st.refused; voicePaint(); }).catch(() => {});

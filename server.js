@@ -16955,7 +16955,14 @@ async function handleRequest(req, res) {
       });
       json(res, 200, { ok: true });
     } else if (u.pathname === '/api/voice/status' && req.method === 'GET') {
-      json(res, 200, { refused: voiceRefusal(identity), key: !!typesafeKey(), keyFromEnv: !!process.env.TYPESAFE_API_KEY, speech: !!speechUrl(), model: VOICE_JEV_MODEL, canSetKey: usersLib.canManageUsers(identity), log: VOICE_LOG_FILE });
+      // A page on plain http gets no microphone from the browser: the same
+      // server's https address (the owner's link carries the LAN token).
+      let secureUrl = null;
+      if (!req.socket.encrypted) {
+        const host = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+        if (host && !/^(localhost|127\.)/.test(host)) secureUrl = 'https://' + host + ':' + TLS_PORT + '/' + (usersLib.canManageUsers(identity) ? '?token=' + encodeURIComponent(LAN_TOKEN) : '');
+      }
+      json(res, 200, { secureUrl, refused: voiceRefusal(identity), key: !!typesafeKey(), keyFromEnv: !!process.env.TYPESAFE_API_KEY, speech: !!speechUrl(), model: VOICE_JEV_MODEL, canSetKey: usersLib.canManageUsers(identity), log: VOICE_LOG_FILE });
     } else if (u.pathname === '/api/voice/key' && req.method === 'POST') {
       if (!usersLib.canManageUsers(identity)) return json(res, 403, { error: 'Only this machine\u2019s owner or an admin sets the TypeSafe key.' });
       try { saveTypesafeKey(JSON.parse(await readRequestText(req, 4096)).key); json(res, 200, { ok: true, key: !!typesafeKey() }); }

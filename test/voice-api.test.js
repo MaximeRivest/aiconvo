@@ -193,3 +193,10 @@ test('open anywhere: every project by name, and the files of a project the sente
   const hist = await (await fetch(s.base + '/api/voice/history')).json();
   assert.equal(hist.rows[0].argLabels.name, 'file · alpha-beta/notes.md');
 });
+
+test('a page on plain http is told the https address, where the browser gives the microphone', async t => {
+  const s = await boot(t);
+  const get = host => new Promise((resolve, reject) => http.get({ host: '127.0.0.1', port: s.port, path: '/api/voice/status', headers: { host } }, res => { let b = ''; res.on('data', c => b += c); res.on('end', () => resolve(JSON.parse(b))); }).on('error', reject));
+  assert.match((await get('100.86.49.54:7433')).secureUrl, /^https:\/\/100\.86\.49\.54:\d+\/\?token=/);
+  assert.equal((await get('localhost:7433')).secureUrl, null, 'localhost is secure already');
+});

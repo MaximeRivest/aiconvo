@@ -79,6 +79,14 @@ test('always listening: heard, decided, done, asked, dictated, stopped', { timeo
   const hear = said => ev(`voiceEvent({ type: 'utterance', text: ${JSON.stringify(said)}, asrMs: 12 })`);
   const last = () => ev(`(() => { const d = voice.decisions.at(-1); return d && { said: d.said, status: d.status, action: d.decision && d.decision.action, summary: d.summary }; })()`);
 
+  // Off: a microphone button in the corner; one tap listens, and stays on.
+  await until(`document.querySelector('#voiceOnButton')`, 'no microphone button while off');
+  await ev(`document.querySelector('#voiceOnButton').click()`);
+  await until(`voice.status === 'listening' && !document.querySelector('#voiceOnButton')`, 'the button did not start listening');
+  assert.equal(await ev(`JSON.parse(localStorage.getItem('chattering.voice.v1')).on`), true);
+  await ev(`voiceSetOn(false)`);
+  await until(`document.querySelector('#voiceOnButton')`, 'the button did not come back when off');
+
   // Alt+L: the microphone streams, the pill says so, the overlay shows the words.
   await key('l', 'KeyL', 76, 1);
   await until(`voice.status === 'listening' && document.querySelector('#voiceListenPill[data-state="listening"]')`, 'Alt+L did not start listening: ' + await ev(`voice.error`).catch(() => ''));
