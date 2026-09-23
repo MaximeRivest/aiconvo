@@ -81,7 +81,28 @@ async function voiceSetOn(on) {
 }
 function voiceToggle() { return voiceSetOn(!voice.on); }
 
+// Inside the Android app, the app listens (android/.../ListenBridge.kt):
+// the page there is on http and gets no microphone. Same server channel,
+// same events, handed to voiceEvent.
+const voiceNative = () => (typeof window.ChatteringListen === 'object' && window.ChatteringListen) || null;
+window.voiceNativeEvent = e => {
+  if (!e || typeof e !== 'object') return;
+  if (e.type !== 'native') return voiceEvent(e);
+  if (e.state === 'open') { voice.status = 'listening'; voice.error = ''; }
+  else if (e.state === 'paused') { voice.status = 'paused'; voice.error = e.message || ''; }
+  else if (e.state === 'error') { voice.status = 'error'; voice.error = e.message || 'the app could not listen'; }
+  voicePaint();
+};
+
 async function voiceStart() {
+  const native = voiceNative();
+  if (native) {
+    voice.status = 'starting';
+    voice.native = true;
+    voicePaint();
+    native.start(voicePrefs().window);
+    return;
+  }
   if (voice.audio) return voiceConnect();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     // Browsers give the microphone only to secure pages (https).
@@ -150,6 +171,7 @@ function voiceConnect() {
 
 function voiceStop() {
   clearTimeout(voice.retryTimer);
+  if (voice.native && voiceNative()) { try { voiceNative().stop(); } catch {} voice.native = false; }
   if (voice.ws) { const ws = voice.ws; voice.ws = null; try { ws.send(JSON.stringify({ type: 'stop' })); } catch {} setTimeout(() => { try { ws.close(); } catch {} }, 1500); }
   const a = voice.audio;
   voice.audio = null;
@@ -1871,7 +1893,8 @@ async function voiceBindSettings(root) {
     if (f === 'on') voiceSetOn(e.target.checked);
     else if (f === 'window') {
       saveVoicePrefs({ window: Number(e.target.value) });
-      if (voice.ws && voice.ws.readyState === WebSocket.OPEN) voice.ws.send(JSON.stringify({ type: 'window', seconds: Number(e.target.value) }));
+      if (voice.native && voiceNative()) voiceNative().setWindow(Number(e.target.value));
+      else if (voice.ws && voice.ws.readyState === WebSocket.OPEN) voice.ws.send(JSON.stringify({ type: 'window', seconds: Number(e.target.value) }));
       voicePaintOverlayHead();
     } else if (f === 'overlay') { saveVoicePrefs({ overlay: e.target.checked }); voiceShowOverlay(e.target.checked && voice.on); }
     else if (f === 'numbers') { saveVoicePrefs({ numbers: e.target.checked }); voicePaintHints(); }

@@ -44,6 +44,7 @@ import androidx.appcompat.app.AppCompatActivity
 class MainActivity : AppCompatActivity() {
     companion object {
         private const val SPEECH_PERMISSION_REQUEST = 4107
+        private const val LISTEN_PERMISSION_REQUEST = 4110
         private const val FILE_CHOOSER_REQUEST = 4108
         private const val NOTIFY_PERMISSION_REQUEST = 4109
     }
@@ -108,6 +109,7 @@ class MainActivity : AppCompatActivity() {
     }
     private lateinit var web: WebView
     private lateinit var speech: SpeechBridge
+    private lateinit var listen: ListenBridge
     private lateinit var ink: InkOverlay
     private lateinit var setup: View
     private lateinit var error: TextView
@@ -167,6 +169,7 @@ class MainActivity : AppCompatActivity() {
         }
         configureInk()
         speech = SpeechBridge(this, web)
+        listen = ListenBridge(this, web)
         configureWebView()
         val saved = prefs.getString("server", "") ?: ""
         if (saved.isNotEmpty() && prefs.contains("token")) openServer(saved, prefs.getString("token", "") ?: "", intent?.getStringExtra(NotifyService.EXTRA_KEY))
@@ -188,6 +191,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         NotifyService.appOnScreen = true
         if (::web.isInitialized) web.onResume()
+        if (::listen.isInitialized) listen.onResume()
         // Coming back to a failed screen: the user may have fixed Wi-Fi or
         // Tailscale in the meantime, so try again without being asked.
         if (conn == Conn.FAILED) autoRetry()
@@ -195,6 +199,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         NotifyService.appOnScreen = false
+        if (::listen.isInitialized) listen.onPause()
         if (::web.isInitialized) {
             web.evaluateJavascript("document.querySelectorAll('video').forEach(v=>v.pause())", null)
             web.onPause()
@@ -276,6 +281,7 @@ class MainActivity : AppCompatActivity() {
         }
         web.addJavascriptInterface(InkBridge(), "ChatteringInk")
         web.addJavascriptInterface(speech, "ChatteringSpeech")
+        web.addJavascriptInterface(listen, "ChatteringListen")
         web.addJavascriptInterface(NotifyBridge(), "ChatteringNotify")
         web.addJavascriptInterface(AppBridge(), "ChatteringApp")
         web.setDownloadListener { url, userAgent, disposition, mime, _ ->
@@ -423,6 +429,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    fun requestListenPermission() {
+        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), LISTEN_PERMISSION_REQUEST)
+    }
+
     fun requestSpeechPermission() {
         requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), SPEECH_PERMISSION_REQUEST)
     }
@@ -474,7 +484,9 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == SPEECH_PERMISSION_REQUEST) {
+        if (requestCode == LISTEN_PERMISSION_REQUEST) {
+            listen.onPermissionResult(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+        } else if (requestCode == SPEECH_PERMISSION_REQUEST) {
             speech.onPermissionResult(
                 grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
         } else if (requestCode == NOTIFY_PERMISSION_REQUEST) {
@@ -606,6 +618,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         hideFullscreenVideo()
         if (::speech.isInitialized) speech.destroy()
+        if (::listen.isInitialized) listen.destroy()
         super.onDestroy()
     }
 

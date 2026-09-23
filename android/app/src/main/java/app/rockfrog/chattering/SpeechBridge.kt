@@ -310,7 +310,7 @@ class SpeechBridge(
     }
 
     /** Chunk-stable boxcar downsampler copied from the proven IME path. */
-    private class Downsampler(captureRate: Int) {
+    internal class Downsampler(captureRate: Int) {
         private val step = captureRate / TARGET_RATE.toDouble()
         private var position = 0.0
         private var pending = ShortArray(0)
