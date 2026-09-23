@@ -1,0 +1,164 @@
+# 67 — Artifacts (proposal)
+
+Status: **proposal**, 2026-09-23. Builds on `65-open-webui-study.md`,
+`66-one-tree-one-head.md` and the Claude / ChatGPT study of the same day
+(conversation 01a0ce59). Nothing here is built yet.
+
+## What the study showed
+
+Two sizes, in both products:
+
+| | Claude | ChatGPT |
+|---|---|---|
+| **Small, in the conversation** | tool `visualize` → MCP Apps widget, `<hash>.claudemcpcontent.com` | "app block", `app-block-<hash>.web-sandbox.oaiusercontent.com` |
+| **Full, in a side panel** | files written by the model (`index.html`, or `deck.json` + `slides/*.html`), served versioned at `<artifact-id>.frame.claudeusercontent.com/_f/<version>/`, optional typed viewer app (`artifact-type/app.js` + `SKILL.md`) and a capability runtime (db, files, comments, room, downloads) | a real site built and tested in the agent's container, deployed to `<name>.<user>.chatgpt.site`; real Office files rendered on canvases by an in-page renderer |
+
+Shared mechanics: HTML runs on **its own site** (a separate registrable
+domain, one sub-address per artifact), in a **double iframe** (a thin proxy
+page on the sandbox domain receives the HTML by `postMessage` and writes it
+into an inner frame), with `allow-scripts allow-same-origin` (safe because the
+origin is not the app's), a **CSP allowlist of public CDNs**, and a host
+**design kit** that a skill tells the model to use.
+
+## What Chattering already has
+
+| Piece | Where | Use for artifacts |
+|---|---|---|
+| One tree, one head | `conversation-tree.js`, `66` | Which version of anything you see |
+| Capability-URL asset route | `file-media.js` `PreviewAssets`, `/api/file/preview-assets/<token>/…` | The serving pattern: unguessable, folder-scoped, expiring, re-authorised per request |
+| Sandboxed HTML preview | `html-preview.js`, `file-viewers.js` | Static preview of a file (scripts off); stays for untrusted views |
+| Checkpoints | `checkpoint-store.js`, `checkpoint-extension.js` | Exact workspace tree **after every tool call**, as git trees keyed by session + call id |
+| File history | `file-archive.js`, `/api/file-history/*` | Per-file versions (text only) |
+| Viewers | `file-viewers.js`, `live-file.js`, MRMD | PDF, image, video, Markdown/notebooks, HTML source |
+| Cards under answers | `ensureNotebookCards` | The pattern for artifact cards in the transcript |
+| Agent's browser | `agent_browser` | An agent can open and test its own artifact |
+| Doors, Tailscale Serve | `frontdoor.js`, `design/56` | Where a second address comes from |
+
+What is missing: an artifact concept, a second origin, a side panel beside
+the conversation, versions of binary assets, a widget protocol, and any
+typed viewer.
+
+## The model
+
+**An artifact is never a new store. It is a view of something the
+conversation already holds, at the head.**
+
+1. **Widget** (small, in the conversation). A Pi tool `show` records the
+   HTML **in the session** as its call arguments. It is therefore versioned
+   by the tree for free: regenerate, branch, merge, and the widget follows.
+   Rendered where the call sits, sized to its content.
+2. **Code block.** An `html`/`svg` fence in an answer gets a **Preview**
+   action (Open WebUI's rule: html + following css/js blocks form one page).
+   Derived from the message text; no tool needed.
+3. **Full artifact** (side panel). The agent writes **real files in the
+   project** (`game/index.html`, `talk/deck.json` + `talk/slides/*.html`, a
+   `.pdf`, a `.md` notebook) and declares them with the tool
+   `artifact({ path, title, type })`. The declaration is a pointer in the
+   session; the content stays on disk, in git, owned by the person.
+   **Version on screen = the checkpoint after the last tool call on the
+   head's path that touched that path.** Moving the head moves the version.
+   When the head is at the conversation's end and the disk has not changed
+   since, the panel shows the live disk (and reloads on change).
+
+Why files and not a database or a hosted copy: the agent already works on
+files; the person can open, edit, commit and keep them; Claude's model
+(files + versions) fits Chattering exactly, and ChatGPT's (deploy) is a
+publishing step we can add later on top of files.
+
+## Serving: the preview origin
+
+- A second listener in the same server process (default port **7435**),
+  serving **only** `/a/<capability>/<version>/<path>` and the proxy page.
+  It ignores cookies entirely; authority is the unguessable capability
+  (as `PreviewAssets` does today), bound to person + conversation + path, and
+  re-checked against current access on every request.
+- Content comes from the checkpoint store (`git cat-file` of the snapshot
+  tree) for a version, or from disk for `live`.
+- Addresses, by where Chattering is reached:
+
+  | Reached at | Preview origin | Isolation |
+  |---|---|---|
+  | this computer | `http://<artifact>.localhost:7435` | one site per artifact (Chrome and Firefox resolve `*.localhost` to this machine) |
+  | Tailscale (`lambda.tail….ts.net`) | `https://lambda.tail….ts.net:8443` (Serve port 8443 → 7435) | **one** preview site shared by all artifacts; a different port only |
+  | future public domain | `https://<artifact>.<user>.<preview-domain>` | one site per artifact, separate registrable domain (the Claude/OpenAI standard) |
+
+  A setting holds the preview base; nothing else changes when a public
+  domain exists.
+- **Hardening the app side** (needed because a different port on the same
+  host is *same-site*, and the HttpOnly `SameSite=Lax` cookie is still sent
+  to the app from a preview page): cookie-authenticated API requests must
+  carry `Sec-Fetch-Site: same-origin` (or `none`); anything else is refused.
+  This is ordinary CSRF protection and is worth having regardless.
+- Frames: widgets and full artifacts both use the double iframe (proxy page
+  on the preview origin, inner frame written from a message), `sandbox=
+  "allow-scripts allow-same-origin allow-forms allow-popups
+  allow-downloads"`, and a CSP whose script/style/connect allowlist is the
+  public CDNs (jsDelivr, unpkg, esm.sh, cdnjs, Google Fonts). Trust stays the
+  default (Maxime, 2026-09-23); the allowlist is a setting, including
+  "anything".
+- Host ↔ artifact messages follow **MCP Apps** (JSON-RPC over `postMessage`:
+  initialise with theme and size, the artifact reports its size, asks to
+  open a link, to download, to send a message to the conversation). Using
+  the open standard means MCP servers' own interfaces render in the same
+  host later (TODO item 4). *To verify against the current spec before
+  building.*
+
+## The panel
+
+- A right-hand pane beside the conversation (resizable split), the same slot
+  as the Files panel (one right panel at a time). Header: title, **Version
+  n of m** (writes on the head's path), live/at-this-point marker, reload,
+  full screen, open in a browser tab, download, copy path, **Ask about
+  this** (puts a reference into the composer). Phone: a full-screen sheet
+  with back. E-ink: a full page, no motion.
+- Contents by type, reusing viewers: web folder or `.html` → preview origin;
+  `.md` / notebook → MRMD read mode; `.pdf` → PDF.js; image, video, `.svg`;
+  typed artifacts → their viewer app.
+- Transcript: an artifact card under the answer that declared it (the
+  notebook-card pattern); clicking opens the panel at that version.
+
+## Typed artifacts (after the general part)
+
+A type = a skill + a viewer, shipped in `artifact-types/<type>/`:
+`SKILL.md` (how to write the format, the design kit, how to test) and a
+viewer served on the preview origin. First type: **slides** (`deck.json` +
+one HTML file per slide, Claude's proven format), with present mode and
+PDF export (Chromium print). Editing in the panel and `.pptx` export are
+later steps.
+
+## The agent tests its own work
+
+The `artifact` tool returns the preview URL (and the Tailscale one). With
+`agent_browser` the agent opens it, clicks, screenshots, and fixes before
+answering — ChatGPT's strongest habit. A skill says when to do it.
+
+## Versions of binary assets
+
+Checkpoints skip images, fonts, PDFs and files over 2 MiB. A declared
+artifact folder becomes a **checkpoint scope** (`approveScope` exists) whose
+captures include binary assets up to a limit (proposal: 20 MB per file,
+within the existing checkpoint budget). Outside declared folders nothing
+changes.
+
+## Limits to state
+
+- Versions exist for Pi web and SDK runs (the checkpoint extension). Pi
+  terminal runs and Claude Code conversations show the **live disk only**.
+- Through Tailscale, all artifacts share one preview site (they could read
+  each other's browser storage) until a public preview domain exists.
+- A widget's HTML lives in the session file: large widgets make the
+  conversation file larger (a size cap per call, e.g. 256 KB).
+- Two branches writing the same folder: each branch's version is exact from
+  its checkpoints; the disk holds whichever wrote last (the files-on-disk
+  line of `66` phase 4 applies).
+- Publishing (a public link) waits for the public domain and relay.
+
+## Phases
+
+1. Preview origin + capability serving from checkpoints/disk + app-side
+   `Sec-Fetch-Site` hardening + Tailscale port.
+2. Side panel with versions following the head; `artifact` tool; cards;
+   code-block Preview.
+3. Widgets (`show` tool) with the MCP Apps message shape; design kit + skill.
+4. Binary assets in artifact scopes; agent self-test in the skill.
+5. Slides type; later publishing.
