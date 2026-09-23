@@ -17207,7 +17207,13 @@ live.onmessage = ev => {
   const d = JSON.parse(ev.data);
   if (d.type === 'kernel-event') {
     const st = docState;
-    if (st && st.runner && (st.followKernels || []).includes(d.kernel)) st.runner.external(d.event);
+    if (!st || !st.runner || !(st.followKernels || []).includes(d.kernel)) return;
+    if (d.event && d.event.event === 'unsupported') {
+      // Kernel started by an older rat: say why other runs do not show.
+      if (!st.running) { const line = docRunStrip()?.querySelector('.doc-run-state'); if (line) line.textContent = 'other clients\u2019 runs are not shown: ' + d.event.message; }
+      return;
+    }
+    st.runner.external(d.event);
     return;
   }
   // A new stream is a new connection id: follow the open notebook on it.
