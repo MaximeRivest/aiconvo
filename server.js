@@ -42,6 +42,7 @@ const { agentPath } = require('./agentpath.js');
 const themesLib = require('./themes.js');
 const fanoutLib = require('./fanout.js');
 const conversationFlow = require('./conversation-flow.js');
+const conversationTree = require('./conversation-tree.js');
 const fanoutMerge = require('./fanoutmerge.js');
 const usageLib = require('./usageanalytics.js');
 const responseSpeed = require('./responsespeed.js');
@@ -738,6 +739,13 @@ async function parseFile(absPath) {
         if (s?.entryId && s.text.chars) speedByEntry.set(s.entryId, { waitMs: s.waitMs, chars: s.text.chars, timedChars: s.text.timedChars, ms: s.text.ms });
       }
       continue;
+    } else if (d.type === 'custom_message' && d.customType === 'chattering-merge') {
+      // A merge request (design/41): the words the model received, typed, so
+      // the tree shows the merged reply as a version of the question's answers.
+      const det = d.details || {};
+      messages.push({ role: 'user', text: textOf(d.content), ts: d.timestamp || null, _eid: eid,
+        operation: { kind: 'merge', sources: Array.isArray(det.sources) ? det.sources : [], instruction: det.instruction || '' } });
+      continue;
     } else if (d.type === 'custom_message' && d.display !== false &&
       ['delegation-complete', 'delegation-review-pending', 'orchestrator-event'].includes(d.customType)) {
       messages.push({ role: 'event', customType: d.customType, text: textOf(d.content), ts: d.timestamp || null, _eid: eid });
@@ -852,6 +860,58 @@ const sseClients = new Set();
 function broadcast(ev) {
   const line = 'data: ' + JSON.stringify(ev) + '\n\n';
   for (const res of sseClients) res.write(line);
+}
+
+// ---- reading: one head per person per conversation (design/41) ----------
+// The head is the last message of the path a person reads; the next message
+// continues from it. It is shared across that person's devices (laptop,
+// phone, e-ink) and never across people. routes remember, per branch point,
+// the path last read below it; cols the answer version last shown per
+// answer column. Only ids are kept: reading state is small and private.
+const READING_FILE = path.join(os.homedir(), '.local', 'share', 'chattering', 'reading.json');
+let readingState = {};
+try { readingState = JSON.parse(fs.readFileSync(READING_FILE, 'utf8')) || {}; } catch {}
+let readingSaveTimer = null;
+function saveReadingSoon() {
+  clearTimeout(readingSaveTimer);
+  readingSaveTimer = setTimeout(async () => {
+    try {
+      await fsp.mkdir(path.dirname(READING_FILE), { recursive: true });
+      await writeFileAtomic(READING_FILE, JSON.stringify(readingState));
+    } catch (e) { console.error('[reading] save failed:', e.message); }
+  }, 400);
+  readingSaveTimer.unref?.();
+}
+const READING_ID = /^[A-Za-z0-9_:.\-]{1,80}$/;
+function cleanReadingMap(map, max) {
+  const out = {};
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
+  for (const [k, v] of Object.entries(map).slice(-max)) {
+    if (READING_ID.test(k.split('|')[0]) && k.length <= 200 && typeof v === 'string' && READING_ID.test(v)) out[k] = v;
+  }
+  return out;
+}
+function readingUserId(identity) {
+  return (identity && identity.user && usersLib.resolveId(roster, identity.user.id)) || 'owner';
+}
+function readingFor(key, identity) {
+  const r = readingState[key] && readingState[key][readingUserId(identity)];
+  return r ? { head: r.head || null, exact: !!r.exact, routes: r.routes || {}, cols: r.cols || {}, at: r.at || 0 } : null;
+}
+function saveReading(key, identity, body) {
+  const head = body.head == null ? null : String(body.head);
+  if (head != null && !READING_ID.test(head)) throw new Error('bad head');
+  const record = { head, exact: !!body.exact, routes: cleanReadingMap(body.routes, 400), cols: cleanReadingMap(body.cols, 200), at: Date.now() };
+  const uid = readingUserId(identity);
+  readingState[key] = { ...(readingState[key] || {}), [uid]: record };
+  saveReadingSoon();
+  // The same person's other screens follow; other people never do.
+  const line = 'data: ' + JSON.stringify({ type: 'reading', key, reading: record, from: body.conn || null }) + '\n\n';
+  for (const client of sseByConn.values()) {
+    if (client.conn === body.conn || readingUserId(client.identity) !== uid) continue;
+    try { client.res.write(line); } catch {}
+  }
+  return record;
 }
 
 async function indexFile(source, relPath, stat) {
@@ -2330,7 +2390,7 @@ function broadcastRunFinal(job, key) {
   const entry = key && index[key];
   const title = (entry && (entry.title || entry.timelineTitle) || '').trim() || null;
   const excerpt = replyExcerpt(job.lastAssistantText || '');
-  broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model,
+  broadcast({ type: 'run-event', jobId: job.id, key, status: job.status, statusText: job.statusText, model: job.model, node: job.node || null, intent: job.intent || null,
     fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
     fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, final: true, finishedAt, title, excerpt });
 }
@@ -2377,7 +2437,7 @@ function runEventForwarder(job) {
     }
     lastPush = now;
     broadcast({ type: 'run-event', jobId: job.id, key: job.key, status: job.status,
-      statusText: job.statusText, model: job.model, startedAt: job.startedAt,
+      statusText: job.statusText, model: job.model, startedAt: job.startedAt, node: job.node || null, intent: job.intent || null,
       fanoutId: job.fanoutId, fanoutRootKey: job.fanoutRootKey, fanoutNode: job.fanoutNode,
       fanoutIndex: job.fanoutIndex, fanoutCount: job.fanoutCount, tail: blocks.map(slim),
       uiRequests: job.uiRequests || [], notices: job.notices || [],
@@ -2573,7 +2633,7 @@ function runEventForwarder(job) {
 // before this prompt (persisted by pi, like the composer's control). A send
 // queued into a running turn can carry neither: that turn's system prompt
 // and level are already fixed (the reply says so: briefDropped).
-async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf, expectedVersion, recoveryAttempts = 0, principal = null, input = 'keyboard', coauthors = null, brief = null, thinking = null }) {
+async function startAgentRun(key, { node, provider, modelId, message, images, force, allowQueue, fanout, context, customMessage, expectedLeaf, expectedVersion, recoveryAttempts = 0, principal = null, input = 'keyboard', coauthors = null, brief = null, thinking = null, intent = null }) {
   const { entry, sessionPath, cwd } = sessionPathsFor(key);
   principal = await principalInProject(principal || principalFor(null), projectNameOf(entry.cwd, key));
   assertPrincipalCanRun(principal, 'an agent');
@@ -2646,6 +2706,10 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     status: 'running', statusText: 'starting', startedAt: Date.now(),
     recoveryAttempts,
     model: provider && modelId ? provider + '/' + modelId : null,
+    // Where this run continues the conversation (null: at the file's end),
+    // and what it is for: another version of a question's answer, a merge.
+    node: node || null,
+    intent: intent || null,
     ...(fanout ? {
       fanoutId: fanout.id, fanoutRootKey: fanout.rootKey, fanoutNode: fanout.node,
       fanoutIndex: fanout.index, fanoutCount: fanout.count,
@@ -2670,6 +2734,9 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     jobChanged(job);
     broadcastRunFinal(job, key);
     maybeSettleFanout(job);
+    // Parallel answers that finished while this conversation was busy could
+    // not fold home then; they can now.
+    if (!job.fanoutId) settlePendingFanouts(key).catch(e => console.error('fan-out settle retry failed:', e.message));
     speakRunDone(job);
   };
   // The caller gets the job immediately; internal callback delivery can also
@@ -3056,6 +3123,16 @@ async function maybeSettleFanout(job) {
   } catch (e) { console.error('fan-out reintegration failed:', job.fanoutId, e.message); }
 }
 
+async function settlePendingFanouts(rootKey) {
+  const groups = new Set();
+  for (const e of Object.values(index)) if (e.hiddenFanout && e.fanoutId && e.fanoutRootKey === rootKey) groups.add(e.fanoutId);
+  for (const fanoutId of groups) {
+    if ([...agentRunJobs.values()].some(j => j.fanoutId === fanoutId && j.status === 'running')) continue;
+    const ok = await reintegrateFanout(rootKey, fanoutId);
+    if (ok) broadcast({ type: 'fanout-settled', key: rootKey, fanoutId, bothId: ok.bothId || null });
+  }
+}
+
 // Server restart safety net: hidden fork groups whose runs died with the
 // old process would linger invisible forever. Fold them home at boot.
 async function sweepOrphanFanouts() {
@@ -3137,6 +3214,51 @@ async function compareGroupsResponse(key) {
   const originNode = parentKey && tree.nodes.filter(n => (n.entryRefs || []).some(r => r.key === parentKey) && (n.entryRefs || []).some(r => r.key === key)).at(-1);
   const origin = parentKey ? { key: parentKey, title: index[parentKey]?.title || 'Original conversation', entryId: originNode?.id || null } : null;
   return { key, groups, branches, origin };
+}
+
+// Merge (design/41): the chosen answers to one question, quoted with their
+// models, and the person's instruction, sent as one typed custom message
+// under the question. The merged reply is then one more answer to it.
+async function startMerge(key, { question, answers, provider, modelId, instruction, force, principal }) {
+  const { entry } = sessionPathsFor(key);
+  if (conversationKind(entry) === 'claude') throw new Error('Merging needs a Pi conversation.');
+  const data = JSON.parse(await fsp.readFile(cachePathFor(key), 'utf8'));
+  const T = conversationTree.build({ ...data, messages: data.messages.map(m => ({ ...m, eid: m.eid || m._eid })) });
+  if (!conversationTree.isQuestion(T, question)) throw new Error('That question is not in this conversation.');
+  const { answers: all } = conversationTree.answersOf(T, conversationTree.questionGroup(T, question));
+  const want = new Set((answers || []).map(String));
+  const picked = all.filter(a => want.has(a.start) && a.kind !== 'both');
+  if (picked.length < 2) throw new Error('Pick at least two answers to merge.');
+  const texts = picked.map(a => conversationTree.packageOf(T, a.start)
+    .flatMap(id => conversationTree.rowsOf(T, id)).filter(m => m.role === 'assistant' && !m.rewriteOf).map(m => conversationTree.cleanText(m.text)).join('\n\n').trim());
+  const parts = picked.map((a, i) => `=== reply ${i + 1} of ${picked.length} · ${a.model || 'unknown model'} ===\n${texts[i]}`);
+  const ask = String(instruction || '').trim() || 'You have the full conversation context. Write the single best reply to my last message. Take the strongest parts of these replies, fix their mistakes, and resolve their disagreements. Your reply replaces them: answer me directly, and do not describe the replies or this merge.';
+  const content = `${picked.length} models answered my last message. Their replies:\n\n${parts.join('\n\n')}\n\n${ask}`;
+  const sources = picked.map(a => ({ id: a.start, key, model: a.model || null, entryIds: conversationTree.packageOf(T, a.start) }));
+  return startAgentRun(key, { node: question, provider, modelId, force, principal, intent: { kind: 'merge', question },
+    customMessage: { customType: 'chattering-merge', content, details: { sources, instruction: String(instruction || '').trim() } } });
+}
+
+async function startRegenerate(key, { question, provider, modelId, force, principal }) {
+  const { entry, sessionPath } = sessionPathsFor(key);
+  if (conversationKind(entry) === 'claude') throw new Error('Claude conversations cannot branch in place. Fork to try again.');
+  if (typeof question !== 'string' || !question) throw new Error('which question?');
+  const raw = await fsp.readFile(sessionPath, 'utf8');
+  let found = null;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try { const d = JSON.parse(line); if (d.id === question) { found = d; break; } } catch {}
+  }
+  if (!found || found.type !== 'message' || found.message?.role !== 'user') throw new Error('That question is not in this conversation.');
+  const content = found.message.content;
+  const message = typeof content === 'string' ? content
+    : (Array.isArray(content) ? content.filter(b => b && b.type === 'text').map(b => b.text).join('\n') : '');
+  const images = Array.isArray(content) ? content.filter(b => b && b.type === 'image' && typeof b.data === 'string').slice(0, 8) : [];
+  if (!message.trim() && !images.length) throw new Error('That question has no text to ask again.');
+  // Re-ask from the question's own parent entry: settings and author records
+  // above it stay in context. A question at the very start has no parent.
+  if (!found.parentId) throw new Error('The first question of a conversation cannot be asked again in place yet. Fork to try again.');
+  return startAgentRun(key, { node: found.parentId, provider, modelId, message, images, force, principal, intent: { kind: 'regenerate', question } });
 }
 
 // Aggregate: collect the answers that branch off a node, quote each with
@@ -14130,6 +14252,7 @@ async function handleRequest(req, res) {
       '/change-review.css': { file: 'change-review.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/files-browser.css': { file: 'files-browser.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
       '/conversation-flow.js': { file: 'conversation-flow.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/conversation-tree.js': { file: 'conversation-tree.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/streaming-tool.js': { file: 'streaming-tool.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-reader.js': { file: 'conversation-reader.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/conversation-reader.css': { file: 'conversation-reader.css', type: 'text/css; charset=utf-8', cache: 'no-cache' },
@@ -14246,6 +14369,7 @@ async function handleRequest(req, res) {
       data.project = projectNameOf(index[key].cwd, key);
       data.selectedModels = await inferredConversationModels(key, data);
       data.attachedContext = conversationContextOf(key);
+      data.reading = readingFor(key, identity);
       data.speedCalibration = usersLib.canManageUsers(identity) ? speedCalibrationOfMessages(data.messages) : {};
       json(res, 200, data);
     } else if (u.pathname === '/api/conversation/media' && req.method === 'GET') {
@@ -15116,6 +15240,36 @@ async function handleRequest(req, res) {
         }
         // The shared box empties for everyone who was writing in it.
         if (p.clearCompose !== false && collab.has('compose:' + p.id)) collab.clear('compose:' + p.id);
+      } catch (e) { json(res, e.needsForce ? 409 : e.status || 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/conversation/reading' && req.method === 'PUT') {
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 256000) return json(res, 413, { error: 'Reading state too large' }); }
+      try {
+        const p = JSON.parse(body || '{}');
+        if (!p.id || !index[p.id]) return json(res, 404, { error: 'not found' });
+        if (!keyVisible(identity, p.id)) return json(res, 403, { error: 'This is not shared with you.' });
+        json(res, 200, { ok: true, reading: saveReading(p.id, identity, p) });
+      } catch (e) { json(res, 400, { error: e.message }); }
+    } else if (u.pathname === '/api/node/regenerate' && req.method === 'POST') {
+      // Another answer to a question: the same words asked again at the same
+      // point, so the model sees exactly the original context (no invented
+      // "Continue." turn). The new answer is a version of the question's.
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        assertCan(identity, 'act', targetOf(p.id), 'this conversation');
+        const out = await startRegenerate(p.id, { question: p.question, provider: p.provider, modelId: p.modelId, force: !!p.force, principal: principalFor(identity) });
+        json(res, 202, { ok: true, job: jobView(out) });
+      } catch (e) { json(res, e.needsForce ? 409 : e.status || 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/node/merge' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const p = JSON.parse(body || '{}');
+        assertCan(identity, 'act', targetOf(p.id), 'this conversation');
+        const out = await startMerge(p.id, { question: p.question, answers: p.answers, provider: p.provider, modelId: p.modelId, instruction: p.instruction, force: !!p.force, principal: principalFor(identity) });
+        json(res, 202, { ok: true, job: jobView(out) });
       } catch (e) { json(res, e.needsForce ? 409 : e.status || 400, { error: e.message, needsForce: !!e.needsForce }); }
     } else if (u.pathname === '/api/node/aggregate' && req.method === 'POST') {
       let body = '';

@@ -113,16 +113,19 @@
   // newest continuation all the way down.
   function descend(T, id, routes) {
     if (id == null || !T.rows.has(id)) return id;
-    const remembered = routes && routes[id];
-    if (remembered && T.rows.has(remembered) && contains(T, id, remembered)) return descendNewest(T, remembered);
-    return descendNewest(T, id);
-  }
-  function descendNewest(T, id) {
     const seen = new Set();
     let n = id;
-    while (!seen.has(n)) { seen.add(n); const k = kids(T, n); if (!k.length) break; n = k[k.length - 1]; }
+    while (!seen.has(n)) {
+      seen.add(n);
+      const remembered = routes && routes[n];
+      if (remembered && remembered !== n && T.rows.has(remembered) && contains(T, n, remembered)) { n = remembered; continue; }
+      const k = kids(T, n);
+      if (!k.length) break;
+      n = k[k.length - 1];
+    }
     return n;
   }
+  function descendNewest(T, id) { return descend(T, id, null); }
   function validHead(T, head) { return head != null && T.rows.has(head); }
   // The head a reader sees: an exact head stays where it was put (a branch
   // point); otherwise it follows the conversation as it grows below it.
@@ -136,7 +139,12 @@
     const s = state || {};
     const old = effectiveHead(T, s);
     const routes = { ...(s.routes || {}) };
-    if (old != null) for (const a of path(T, old)) if (a !== old) routes[a] = old;
+    // Remember the route only where the conversation divides: at a branch
+    // point and at each of its alternatives.
+    if (old != null) for (const a of path(T, old)) {
+      if (a === old) continue;
+      if (kids(T, a).length > 1 || kids(T, nodeParentOf(T, a)).length > 1) { delete routes[a]; routes[a] = old; }
+    }
     const head = target == null ? T.leafNode : exact ? target : descend(T, target, routes);
     return { ...s, head, exact: !!exact, routes: pruneRoutes(T, routes) };
   }
@@ -291,7 +299,10 @@
       const next = P[i + 1];
       const { answers, extras } = answersOf(T, questions);
       const nextAnswer = next == null ? null : answers.find(a => a.start === next || a.via === next);
-      if (answers.length < 2 || !(nextAnswer || next == null)) return null;
+      // A question being answered again shows as a group already: the new
+      // version streams beside the saved one.
+      const forced = s.groups && questions.some(x => s.groups.includes(x));
+      if ((answers.length < 2 && !(forced && answers.length)) || !(nextAnswer || next == null)) return null;
       cut();
       let j = i;
       const pkg = [];

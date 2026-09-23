@@ -1,7 +1,13 @@
-/* Reading a conversation never writes its continuation. The app supplies message,
-   model, file, and session controls; ancestry lives in ConversationFlow. */
-const readerStates = new Map();
-const readerSessions = new Map();
+/* Reading a conversation (design/41): one tree, one head.
+   The head is the last message of the path a person reads. The transcript is
+   the path from the start to the head; the next message continues from the
+   head; the tree view, the context meter and the answer cards all follow it.
+   Moving the head is local and instant (arrows, cards, tree nodes); it is
+   saved per person on the server, so every screen of that person agrees.
+   Tree structure lives in ConversationTree (conversation-tree.js). */
+const CT = ConversationTree;
+const readerStates = new Map();   // key → this device's reading UI: scroll positions, open work folds
+const readerSessions = new Map(); // key → session snapshot of another conversation shown here
 const readerLiveMessages = new Map();
 const readerDrafts = new Map();
 // In-memory reading choices: a live answer never changes underneath its reader.
@@ -12,50 +18,650 @@ function rememberConversationDraft() {
   const key = ta?.closest('[data-conversation-key]')?.dataset.conversationKey;
   if (key) readerDrafts.set(key, ta.value);
 }
-let readerFlow = { groups: [], branches: [] };
-let readerRenderSerial = 0;
 
 function readerState(key) {
   if (!readerStates.has(key)) {
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem('chattering.reader.v1:' + key) || '{}') || {}; } catch {}
-    const state = { leaf: typeof saved.leaf === 'string' ? saved.leaf : null, revision: saved.revision };
-    for (const name of ['routes', 'groups', 'accepted', 'positions', 'work']) state[name] = Object.assign(Object.create(null), saved[name] && typeof saved[name] === 'object' && !Array.isArray(saved[name]) ? saved[name] : {});
+    try { saved = JSON.parse(localStorage.getItem('chattering.reader.v2:' + key) || '{}') || {}; } catch {}
+    const state = { revision: saved.revision };
+    for (const name of ['positions', 'work']) state[name] = Object.assign(Object.create(null), saved[name] && typeof saved[name] === 'object' && !Array.isArray(saved[name]) ? saved[name] : {});
     readerStates.set(key, state);
   }
   return readerStates.get(key);
 }
 function saveReaderState(key) {
-  try { localStorage.setItem('chattering.reader.v1:' + key, JSON.stringify(readerState(key))); } catch {}
+  try { localStorage.setItem('chattering.reader.v2:' + key, JSON.stringify(readerState(key))); } catch {}
 }
-function readerGroup(key, node) {
-  const state = readerState(key);
-  return state.groups[node] || (state.groups[node] = { compare: false, pair: [], sources: null, instruction: '' });
+
+// ---- the shared reading: head, routes, shown answer versions ------------
+const readings = new Map();
+const treeCache = new WeakMap();
+function treeFor(d) {
+  if (!d) return null;
+  let t = treeCache.get(d);
+  if (!t) { t = CT.build(d); treeCache.set(d, t); }
+  return t;
 }
+function readingOf(key) {
+  if (!readings.has(key)) {
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem('chattering.reading.v1:' + key) || 'null'); } catch {}
+    readings.set(key, cached && typeof cached === 'object' ? cached : {});
+  }
+  return readings.get(key);
+}
+// The server copy wins when it is newer: another of this person's screens moved.
+function adoptServerReading(d) {
+  if (!d || !d.key) return;
+  const local = readingOf(d.key), server = d.reading;
+  if (server && (!local.at || (server.at || 0) >= local.at)) setReadingLocal(d.key, server);
+}
+function setReadingLocal(key, r) {
+  readings.set(key, r);
+  try { localStorage.setItem('chattering.reading.v1:' + key, JSON.stringify(r)); } catch {}
+}
+const readingSaveTimers = new Map();
+function saveReading(key, r) {
+  const next = { ...r, at: Date.now() };
+  setReadingLocal(key, next);
+  clearTimeout(readingSaveTimers.get(key));
+  readingSaveTimers.set(key, setTimeout(() => {
+    readingSaveTimers.delete(key);
+    const conn = typeof peopleState !== 'undefined' ? peopleState.conn : null;
+    postJsonMethod('/api/conversation/reading', 'PUT', { id: key, head: next.head ?? null, exact: !!next.exact, routes: next.routes || {}, cols: next.cols || {}, conn })
+      .catch(() => {}); // Offline: the local copy still reads correctly; the next move saves again.
+  }, 250));
+  return next;
+}
+// Another screen of the same person moved the head.
+function applyReadingEvent(ev) {
+  if (!ev || !ev.key || !ev.reading) return;
+  const local = readingOf(ev.key);
+  if ((local.at || 0) > (ev.reading.at || 0)) return;
+  setReadingLocal(ev.key, ev.reading);
+  if (current?.key === ev.key && viewKind === 'conversation') rerenderReading(null);
+}
+function headOf(d) { return d ? CT.effectiveHead(treeFor(d), readingOf(d.key)) : null; }
+// Ancestry of the visible path, in the shape older callers read.
+function computeTrace(d) {
+  if (!d || !d.entryParents) return null;
+  const T = treeFor(d), head = headOf(d), chain = CT.path(T, head);
+  return { tree: T, leaf: head, fileLeaf: T.fileLeaf, leafNode: T.leafNode, chain, onPath: new Set(chain), parents: T.parent };
+}
+// Reading is sending: the next message continues from the head.
+const computeSendTrace = computeTrace;
+// The raw entry a send continues from (the head, plus settings written below it).
+function sendNodeFor(d) {
+  if (!d || !d.entryParents) return null;
+  const T = treeFor(d);
+  return CT.sendNode(T, headOf(d));
+}
+// The message node that holds a raw entry (a run's origin can be a settings entry).
+function nodeOfRaw(T, raw) {
+  const seen = new Set();
+  for (let n = raw; n != null && !seen.has(n); n = T.parent.get(n)) { seen.add(n); if (T.rows.has(n)) return n; }
+  return null;
+}
+
+// Move the head. target: a message node; exact keeps it there (a branch
+// point), otherwise reading descends to the route last read below it.
+async function moveReading(key, target, { exact = false, anchor = null, cols = null } = {}) {
+  rememberConversationDraft();
+  const d = key === current?.key ? current : readerSessions.get(key);
+  if (!d || !d.entryParents) {
+    saveReading(key, { ...readingOf(key), head: target, exact });
+    return open(key, anchor ? 'flow:' + anchor : 'bottom');
+  }
+  let r = CT.moveHead(treeFor(d), readingOf(key), target, { exact });
+  if (cols) r = { ...r, cols: { ...(r.cols || {}), ...cols } };
+  saveReading(key, r);
+  if (key === current?.key && viewKind === 'conversation') await rerenderReading(anchor);
+  else await open(key, anchor ? 'flow:' + anchor : 'bottom');
+}
+function resetConversationReading(key) {
+  const r = readingOf(key);
+  saveReading(key, { routes: r.routes || {}, cols: r.cols || {}, head: null, exact: false });
+}
+
+// ---- answer cards: layout -------------------------------------------------
+// Several answers to one question sit side by side at that point of the
+// conversation. How much screen they take is this device's choice:
+//   all  every answer side by side across the whole width
+//   two  two at a time, the rest a scroll away
+//   one  one answer at reading width; its neighbours peek at the edge
+// Phones and e-ink always read one at a time (swipe, or the arrows).
+const CARD_LAYOUTS = ['all', 'two', 'one'];
+function cardLayoutPref() {
+  const v = localStorage.getItem('chattering.cards.layout');
+  return CARD_LAYOUTS.includes(v) ? v : 'all';
+}
+function cardLayoutFor(count) {
+  if (count <= 1) return 'one';
+  const narrow = (typeof isEink === 'function' && isEink()) || window.matchMedia('(max-width: 900px)').matches;
+  if (narrow) return 'one';
+  const pref = cardLayoutPref();
+  return pref === 'two' && count <= 2 ? 'all' : pref;
+}
+function cardModelName(c) {
+  if (c.key === 'merge') return 'Merged';
+  if (c.key === 'both') return 'All answers';
+  if (c.key === 'edit') return 'Your correction';
+  return typeof shortModelName === 'function' && c.model ? shortModelName(c.model) : c.model || 'Answer';
+}
+function layoutSwitchHtml(layout) {
+  if (layout === 'one' && ((typeof isEink === 'function' && isEink()) || window.matchMedia('(max-width: 900px)').matches)) return '';
+  const label = { all: 'Side by side', two: 'Two at a time', one: 'One at a time' };
+  return `<span class="rd-layout" role="group" aria-label="How answers share the screen">${CARD_LAYOUTS.map(l => `<button type="button" data-rd-layout="${l}" aria-pressed="${l === layout}" title="${label[l]}">${l === 'all' ? '▥ all' : l === 'two' ? '◫ two' : '▯ one'}</button>`).join('')}</span>`;
+}
+
+// ---- block rendering ------------------------------------------------------
+function rowsFor(T, ids) { return ids.flatMap(id => CT.rowsOf(T, id)); }
+function sourceNames(d, T, sources) {
+  return (sources || []).map(s => {
+    const row = s && s.id && CT.rowsOf(T, s.id).find(m => m.model);
+    const model = (s && s.model) || row?.model;
+    return model ? (typeof shortModelName === 'function' ? shortModelName(model) : model) : 'an answer';
+  });
+}
+function includedAnswersHtml(d, T, answer) {
+  const bridge = CT.rowsOf(T, answer.start).find(m => m.role === 'assistant');
+  const sources = answer.sources || [];
+  const pieces = sources.map(src => {
+    if (!src || !src.id || !T.rows.has(src.id)) return null;
+    const ids = (src.entryIds && src.entryIds.length ? src.entryIds : [src.id]).filter(id => T.rows.has(id));
+    const rows = rowsFor(T, ids).filter(m => m.role === 'assistant');
+    if (!rows.length) return null;
+    const model = src.model || rows.find(m => m.model)?.model || 'assistant';
+    return `<section class="rd-included"><div class="rd-included-head">${esc(typeof shortModelName === 'function' ? shortModelName(model) : model)}</div>${transcriptFragmentHtml(d, rows)}</section>`;
+  });
+  const quote = bridge ? msgBlock({ ...bridge, text: CT.cleanText(bridge.text) }, esc, true, '', d.messages.indexOf(bridge), d.key) : '<p>The included answers are unavailable.</p>';
+  return `<div class="rd-origin">Every answer's text goes along with the next message · tool histories and images are not included</div>${pieces.length && pieces.every(Boolean) ? pieces.join('') : quote}`;
+}
+function cardHtml(d, T, b, c, ci) {
+  const a = c.shown;
+  const pi = d.source !== 'claude';
+  const names = c.key === 'merge' || c.key === 'both' ? sourceNames(d, T, a.sources) : [];
+  const sub = c.key === 'merge' ? (names.length ? 'from ' + names.join(' + ') : 'sources not recorded')
+    : c.key === 'both' ? (names.length ? names.join(' + ') : '') : '';
+  const ver = c.versions.length > 1
+    ? `<span class="rd-ver" role="group" aria-label="Versions of this answer"><button type="button" data-rd-ver="-1" aria-label="Previous version"${c.index ? '' : ' disabled'}>‹</button><span>${c.index + 1}/${c.versions.length}</span><button type="button" data-rd-ver="1" aria-label="Next version"${c.index < c.versions.length - 1 ? '' : ' disabled'}>›</button></span>` : '';
+  const state = a.stopped ? '<span class="rd-state">stopped</span>' : a.error ? '<span class="rd-state err">failed</span>' : '';
+  const regen = pi && c.kind === 'model' && d.canAct !== false
+    ? `<button type="button" class="rd-regen" data-rd-regen title="Ask ${esc(cardModelName(c))} again: another version of this answer">↻</button>` : '';
+  const body = c.key === 'both' ? includedAnswersHtml(d, T, a) : transcriptFragmentHtml(d, rowsFor(T, c.nodes));
+  return `<article class="rd-card" role="listitem" data-col="${esc(c.key)}" data-col-index="${ci}" data-answer="${esc(a.start)}" aria-current="${c.selected ? 'true' : 'false'}" tabindex="-1">` +
+    `<header class="rd-card-head"><button type="button" class="rd-pick" data-rd-pick title="${c.selected ? 'The conversation continues from this answer' : 'Continue from this answer'}"><b>${esc(cardModelName(c))}</b>${sub ? `<span class="rd-sub">${esc(sub)}</span>` : ''}</button>${state}${ver}${regen}</header>` +
+    `<div class="rd-card-body">${body}</div></article>`;
+}
+function answersHtml(d, T, b) {
+  const layout = cardLayoutFor(b.columns.length);
+  const pi = d.source !== 'claude' && d.canAct !== false;
+  const mergeable = b.columns.filter(c => c.key !== 'both').length >= 2;
+  // One at a time: the arrows move between answers (and so choose one).
+  const sel = Math.max(0, b.selected), prev = b.columns[sel - 1], next = b.columns[sel + 1];
+  const step = layout === 'one' ? stepperHtml(b.question, sel, b.columns.length, prev && prev.shown.start, next && next.shown.start, 'Answers to this question') : '';
+  const count = b.columns.length > 1 ? b.columns.length + ' answers' : b.columns[0].versions.length + ' versions of this answer';
+  const bar = `<div class="rd-answers-bar"><span class="rd-count">${count}</span>${step}${b.columns.length > 1 ? layoutSwitchHtml(layout) : ''}<span class="rd-spacer"></span>` +
+    (pi && mergeable ? `<button type="button" data-rd-merge title="Write one answer from several of these">Merge…</button>` : '') +
+    (pi && !b.columns.some(c => c.key === 'both') ? `<button type="button" data-rd-both title="Continue with every answer's text in context">Include all</button>` : '') + `</div>`;
+  return `<section class="rd-answers" data-flow-anchor="${esc(b.question)}" data-question="${esc(b.question)}" data-layout="${layout}" style="--cols:${b.columns.length}">${bar}` +
+    `<div class="rd-cards" role="list">${b.columns.map((c, i) => cardHtml(d, T, b, c, i)).join('')}</div>` +
+    (layout === 'one' && b.columns.length > 1 ? `<div class="rd-dots" aria-hidden="true">${b.columns.map(c => `<span${c.selected ? ' class="on"' : ''}></span>`).join('')}</div>` : '') + `</section>`;
+}
+function stepperHtml(anchor, index, count, prevId, nextId, label) {
+  return `<span class="rd-step" role="group" aria-label="${esc(label)}"><button type="button" data-rd-go="${esc(prevId || '')}" data-at="${esc(anchor)}" aria-label="Previous"${prevId ? '' : ' disabled'}>‹</button><span>${index + 1}/${count}</span><button type="button" data-rd-go="${esc(nextId || '')}" data-at="${esc(anchor)}" aria-label="Next"${nextId ? '' : ' disabled'}>›</button></span>`;
+}
+function versionsHtml(b) {
+  const anchor = 'v:' + b.at;
+  const prev = b.versions[b.index - 1], next = b.versions[b.index + 1];
+  return `<div class="rd-versions" data-flow-anchor="${esc(anchor)}">${stepperHtml(anchor, b.index, b.versions.length, prev && prev.id, next && next.id, 'Wordings of this question')}<span class="rd-note">${b.versions.length} wordings of this question</span></div>`;
+}
+function pathsHtml(b) {
+  const anchor = 'p:' + (b.at || 'root');
+  const prev = b.options[b.index - 1], next = b.options[b.index + 1];
+  const list = b.options.map((o, i) => `<button type="button" class="rd-path" data-rd-go="${esc(o.id)}" data-at="${esc(anchor)}"${i === b.index ? ' aria-current="true"' : ''}><b>${esc(o.kind)}${i === b.index ? ' · reading' : ''}</b><span>${esc(o.text || '')}</span><small>${o.count} message${o.count === 1 ? '' : 's'}</small></button>`).join('');
+  return `<div class="rd-paths" data-flow-anchor="${esc(anchor)}">${stepperHtml(anchor, b.index, b.options.length, prev && prev.id, next && next.id, 'Paths from here')}<details><summary>${b.options.length} paths continue from here</summary><div class="rd-path-list">${list}</div></details></div>`;
+}
+function blockSig(b, T) {
+  if (b.type === 'nodes') return 'n:' + b.ids.join(',');
+  if (b.type === 'answers') return 'a:' + b.question + ':' + cardLayoutFor(b.columns.length) + ':' + b.columns.map(c => c.key + '=' + c.shown.start + (c.selected ? '*' : '') + '/' + c.versions.length + ':' + c.nodes.length).join(',');
+  if (b.type === 'versions') return 'v:' + b.at + ':' + b.index + '/' + b.versions.length;
+  return 'p:' + b.at + ':' + b.index + '/' + b.options.length;
+}
+function blockHtml(d, T, b, q, exact) {
+  if (b.type === 'nodes') return transcriptFragmentHtml(d, rowsFor(T, b.ids), { q, exact });
+  if (b.type === 'answers') return answersHtml(d, T, b);
+  if (b.type === 'versions') return versionsHtml(b);
+  return pathsHtml(b);
+}
+function wrapBlock(sig, html) { return `<div class="rd-block" data-rd="${esc(sig)}">${html}</div>`; }
+
+// The transcript for the head: blocks in reading order. Search and exact
+// links move the head so the entry they name is on the path.
+async function prepareConversationReading(d, scroll) {
+  readerSessions.set(d.key, d);
+  adoptServerReading(d);
+  applyPendingFollow(d);
+  const T = treeFor(d);
+  const entry = typeof scroll === 'string' && scroll.startsWith('entry:') ? scroll.slice(6)
+    : typeof scroll === 'string' && scroll.startsWith('hit:') ? d.messages[Number(scroll.slice(4))]?.eid : null;
+  if (entry && T.rows.has(entry) && !CT.path(T, headOf(d)).includes(entry)) {
+    saveReading(d.key, CT.moveHead(T, readingOf(d.key), entry));
+  }
+  const L = CT.layout(T, layoutState(d));
+  const q = typeof scroll === 'string' && scroll.startsWith('hit:') ? transcriptQuery : '';
+  const html = L.blocks.map(b => wrapBlock(blockSig(b, T), blockHtml(d, T, b, q, entry))).join('');
+  const unlinked = d.messages.filter(m => !m.eid || !T.rows.has(m.eid));
+  const unlinkedHtml = unlinked.length ? `<details class="rd-unlinked" data-flow-anchor="unlinked"${entry && unlinked.some(m => m.eid === entry) ? ' open' : ''}><summary>${unlinked.length} messages without a recorded path</summary>${transcriptFragmentHtml(d, unlinked, { exact: entry })}</details>` : '';
+  const origin = forkOriginHtml(d);
+  renderedLayout = { key: d.key, data: d, layout: L };
+  return { html: origin + html + unlinkedHtml, trace: computeTrace(d) };
+}
+let renderedLayout = null;
+// The reading, plus the questions a live run is answering again right now.
+function layoutState(d) {
+  const groups = [];
+  for (const L of runLedgers.values()) if (!L.done && L.key === d.key && L.intent && L.intent.question) groups.push(L.intent.question);
+  return groups.length ? { ...readingOf(d.key), groups } : readingOf(d.key);
+}
+function forkOriginHtml(d) {
+  const parent = d.parentSession && typeof sessions !== 'undefined' ? sessions.find(s => s.relPath && d.parentSession.endsWith(s.relPath)) : null;
+  return parent ? `<div class="rd-origin rd-fork">Separate conversation · copied from <button type="button" data-reader-origin="${esc(JSON.stringify({ key: parent.key }))}">${esc(parent.title || 'the original conversation')}</button></div>` : '';
+}
+
+// Move within the same snapshot: patch the transcript block by block. Blocks
+// above the first difference keep their DOM (and their scroll, selection and
+// open folds); only what changed below is rendered.
+async function rerenderReading(anchor) {
+  const d = current, host = $('conversationTranscript');
+  if (!d || !host || renderedLayout?.data !== d || viewKind !== 'conversation') return renderConv('preserve');
+  const view = $('view');
+  const el = anchor && view.querySelector(`[data-flow-anchor="${CSS.escape(anchor)}"]`);
+  const keep = el ? { id: anchor, flow: true, offset: el.getBoundingClientRect().top - view.getBoundingClientRect().top } : rememberReaderAnchor();
+  const T = treeFor(d);
+  const L = CT.layout(T, layoutState(d));
+  renderedLayout = { key: d.key, data: d, layout: L };
+  const wanted = L.blocks.map(b => ({ b, sig: blockSig(b, T) }));
+  const existing = [...host.querySelectorAll(':scope > .rd-block')];
+  let i = 0;
+  while (i < wanted.length && i < existing.length && existing[i].dataset.rd === wanted[i].sig) i++;
+  for (const node of existing.slice(i)) node.remove();
+  const tpl = document.createElement('template');
+  tpl.innerHTML = wanted.slice(i).map(({ b, sig }) => wrapBlock(sig, blockHtml(d, T, b, '', null))).join('');
+  // Blocks end where the unlinked-messages fold (if any) begins.
+  host.insertBefore(tpl.content, host.querySelector(':scope > .rd-unlinked'));
+  $('liveReplies') && ($('liveReplies').dataset.readingLeaf = L.head || 'live');
+  if (typeof wireTranscript === 'function') wireTranscript();
+  else wireConversationReader();
+  const dest = $('readerDestination'), fresh = readerDestinationHtml(d);
+  if (dest) { if (fresh) dest.outerHTML = fresh; else dest.remove(); }
+  else if (fresh && $('composerDock')) $('composerDock').insertAdjacentHTML('afterbegin', fresh);
+  wireDestination();
+  restoreReaderAnchor(keep);
+  if (typeof renderRunCards === 'function') renderRunCards();
+  if (typeof ctxMeterCache !== 'undefined') { ctxMeterCache.delete(d.key); if (typeof refreshCtxMeter === 'function') refreshCtxMeter(d); }
+}
+
+// ---- the composer's line about where the next message goes ---------------
+// Never a gate: it only says so when the next message starts a new path.
+function readerSendAllowed() {
+  if (!current) return true;
+  const t = computeTrace(current);
+  const running = [...activeRuns.values()].filter(r => r.fanoutRootKey === current.key && r.status === 'running');
+  if (running.length && t) {
+    const origin = running[0].fanoutNode;
+    const at = origin ? nodeOfRaw(t.tree, origin) : null;
+    if (!origin || (at && t.onPath.has(at))) {
+      errToast('These answers are still being written. Wait for them, or stop them, then continue from the one you want.');
+      return false;
+    }
+  }
+  return true;
+}
+function readerDestinationHtml(d) {
+  if (!d || !d.entryParents) return '';
+  const r = readingOf(d.key), T = treeFor(d), head = headOf(d);
+  if (!r.exact || head == null || !CT.kids(T, head).length) return '';
+  return `<div class="reader-destination" id="readerDestination" role="status"><span>Your next message starts a new path here. What came after stays saved.</span><button type="button" data-reader-end>Go to the end</button></div>`;
+}
+function wireDestination() {
+  $('readerDestination')?.querySelector('[data-reader-end]')?.addEventListener('click', () => {
+    const d = current; if (!d) return;
+    const head = headOf(d);
+    moveReading(d.key, head, { exact: false }).then(() => { $('view').scrollTop = $('view').scrollHeight; });
+  });
+}
+
+// ---- following a run's answer when it lands ------------------------------
+// A regeneration, merge or parallel run writes its answer where the reader
+// cannot point yet. When it lands, the head moves to it — unless the person
+// moved elsewhere meanwhile.
+const pendingFollows = new Map(); // key → { origin, known, at, prefer, jobIds }
+function expectAnswer(key, { origin, prefer = null, jobIds = [] }) {
+  const d = key === current?.key ? current : null;
+  const T = d && treeFor(d);
+  pendingFollows.set(key, { origin, known: T ? T.parent.size : 0, at: readingOf(key).at || 0, prefer, jobIds, started: Date.now() });
+}
+function applyPendingFollow(d) {
+  const p = pendingFollows.get(d.key);
+  if (!p) return;
+  if ((readingOf(d.key).at || 0) !== p.at) { pendingFollows.delete(d.key); return; } // the person moved on
+  const T = treeFor(d);
+  const fresh = [...T.parent.keys()].filter(id => T.order.get(id) >= p.known && T.rows.has(id));
+  const under = fresh.filter(id => { for (let n = id, seen = new Set(); n != null && !seen.has(n); n = T.parent.get(n)) { if (n === p.origin) return true; seen.add(n); } return false; });
+  const answers = under.filter(id => CT.rowsOf(T, id).some(m => m.role === 'assistant'));
+  if (!answers.length) { if (Date.now() - p.started > 6 * 3600e3) pendingFollows.delete(d.key); return; }
+  const preferred = p.prefer && answers.find(id => CT.rowsOf(T, id).some(m => m.model === p.prefer || (m.provider && m.provider + '/' + m.model === p.prefer)));
+  const target = preferred || answers[0];
+  // Settled only when none of its runs is still writing.
+  if ([...activeRuns.values()].some(r => p.jobIds.includes(r.jobId) && r.status === 'running')) return;
+  pendingFollows.delete(d.key);
+  const next = CT.moveHead(T, readingOf(d.key), target);
+  saveReading(d.key, next);
+}
+
+// ---- wiring ---------------------------------------------------------------
 function readerMessage(button) {
   const key = button.closest('[data-msg-key]')?.dataset.msgKey || current?.key;
   const d = key === current?.key ? current : readerSessions.get(key);
   return Number(button.dataset.msgIndex) < 0 ? readerLiveMessages.get(button.closest('[data-eid]')?.dataset.eid) : d?.messages[Number(button.dataset.msgIndex)];
 }
-async function readerMessageAction(button, action) {
-  const key = button.closest('[data-msg-key]')?.dataset.msgKey;
-  if (!key || key === current?.key) return action(button);
-  const m = readerMessage(button), cls = ['msg-edit', 'msg-regenerate'].find(c => button.classList.contains(c));
-  if (!m?.eid || !cls) return;
-  await browseConversationPath(key, m.eid, m.eid, { exact: true });
-  const target = $('view').querySelector(`[data-eid="${CSS.escape(m.eid)}"] .${cls}`);
-  if (target) return action(target);
+async function readerMessageAction(button, action) { return action(button); }
+function groupOf(el) {
+  const section = el.closest('.rd-answers');
+  const q = section?.dataset.question;
+  return q && renderedLayout?.layout.blocks.find(b => b.type === 'answers' && b.question === q) || null;
+}
+function pickCard(card, { anchor = true } = {}) {
+  const b = groupOf(card), key = current?.key;
+  if (!b || !key) return;
+  const col = b.columns[Number(card.dataset.colIndex)];
+  if (!col || col.selected) return;
+  return moveReading(key, col.shown.start, { anchor: anchor ? b.question : null });
+}
+// Side-by-side answers break out of the reading column to the view's width.
+let viewWidthObserver = null;
+function trackViewWidth(view) {
+  if (!view || viewWidthObserver || typeof ResizeObserver === 'undefined') return;
+  let frame = 0;
+  viewWidthObserver = new ResizeObserver(() => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => view.style.setProperty('--view-w', view.clientWidth + 'px'));
+  });
+  viewWidthObserver.observe(view);
+  view.style.setProperty('--view-w', view.clientWidth + 'px');
+}
+function wireConversationReader() {
+  const view = $('view'), key = current.key;
+  trackViewWidth(view);
+  if (typeof ensureNotebookCards === 'function') ensureNotebookCards(key);
+  view.querySelectorAll('[data-step-review]').forEach(b => b.onclick = () => { const d = parseChoiceToken(b.dataset.stepReview, 'review button'); if (d) openStepReview(d); });
+  view.querySelectorAll('[data-answer-version]').forEach(button => button.onclick = () => {
+    const box = button.closest('[data-rewrite-choice]'), choice = button.dataset.answerVersion;
+    answerRewriteChoices.set(box.dataset.rewriteChoice, choice);
+    box.querySelectorAll('[data-answer-pane]').forEach(pane => { pane.hidden = pane.dataset.answerPane !== choice; });
+    const reverse = box.querySelector(`[data-answer-pane="${choice}"] [data-answer-version]`);
+    reverse?.closest('.msg')?.focus({ preventScroll: true });
+    reverse?.focus({ preventScroll: true });
+  });
+  for (const id of ['agentRun', 'agentSend']) if ($(id)) $(id).disabled = false;
+  // Steppers and path lists: one move of the head.
+  view.querySelectorAll('[data-rd-go]').forEach(b => b.onclick = () => { if (b.dataset.rdGo) moveReading(key, b.dataset.rdGo, { anchor: b.dataset.at }); });
+  // Cards: a click anywhere that is not a control, a link or a selection.
+  view.querySelectorAll('.rd-card').forEach(card => {
+    card.onclick = e => {
+      if (e.target.closest('button, a, summary, input, select, textarea, [contenteditable], .rd-card-body details[open] > :not(summary)')) {
+        if (!e.target.closest('[data-rd-pick]')) return;
+      }
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
+      pickCard(card);
+    };
+  });
+  view.querySelectorAll('[data-rd-ver]').forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const card = b.closest('.rd-card'), g = groupOf(card), col = g && g.columns[Number(card.dataset.colIndex)];
+    if (!col) return;
+    const v = col.versions[col.index + Number(b.dataset.rdVer)];
+    if (!v) return;
+    // Any version change is a choice: the conversation continues from it.
+    moveReading(key, v.start, { anchor: g.question, cols: { [g.question + '|' + col.key]: v.start } });
+  });
+  view.querySelectorAll('[data-rd-regen]').forEach(b => b.onclick = e => { e.stopPropagation(); regenerateColumn(b); });
+  view.querySelectorAll('[data-rd-layout]').forEach(b => b.onclick = () => {
+    localStorage.setItem('chattering.cards.layout', b.dataset.rdLayout);
+    const section = b.closest('.rd-answers');
+    rerenderReading(section?.dataset.question || null);
+  });
+  view.querySelectorAll('[data-rd-merge]').forEach(b => b.onclick = () => openConversationMerge(key, b.closest('.rd-answers').dataset.question));
+  view.querySelectorAll('[data-rd-both]').forEach(b => b.onclick = async () => {
+    const question = b.closest('.rd-answers').dataset.question;
+    b.disabled = true;
+    try {
+      const out = await postJson('/api/node/both', { id: key, node: question });
+      if (out?.error || !out?.id) throw Error(out?.error || 'Could not include these answers.');
+      expectAnswer(key, { origin: question });
+      await open(key, 'flow:' + question);
+      if (current?.key === key) await moveReading(key, out.id, { anchor: question });
+    } catch (error) { errToast(error.message); }
+    finally { if (b.isConnected) b.disabled = false; }
+  });
+  // One-at-a-time cards: the card a swipe settles on is the one you read,
+  // so it is the one the conversation continues from.
+  view.querySelectorAll('.rd-answers[data-layout="one"] .rd-cards').forEach(strip => {
+    const selected = strip.querySelector('.rd-card[aria-current="true"]');
+    if (selected && !strip.dataset.placed) {
+      strip.dataset.placed = '1';
+      strip.scrollLeft = selected.offsetLeft - strip.offsetLeft - (strip.clientWidth - selected.clientWidth) / 2;
+    }
+    if (strip.dataset.wired) return;
+    strip.dataset.wired = '1';
+    let touched = false, settle = null;
+    for (const ev of ['pointerdown', 'touchstart', 'wheel', 'keydown']) strip.addEventListener(ev, () => { touched = true; }, { passive: true });
+    strip.addEventListener('scroll', () => {
+      if (!touched) return;
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        touched = false;
+        const mid = strip.getBoundingClientRect().left + strip.clientWidth / 2;
+        const card = [...strip.querySelectorAll('.rd-card')].sort((a, b) => Math.abs(a.getBoundingClientRect().left + a.clientWidth / 2 - mid) - Math.abs(b.getBoundingClientRect().left + b.clientWidth / 2 - mid))[0];
+        if (card && card.getAttribute('aria-current') !== 'true') pickCard(card, { anchor: true });
+      }, 140);
+    }, { passive: true });
+  });
+  // Message menus: continue from an exact point, or copy into a new conversation.
+  view.querySelectorAll('[data-reader-continue-at]').forEach(b => b.onclick = () => {
+    const choice = parseChoiceToken(b.dataset.readerContinueAt, 'continue button');
+    if (!choice) return;
+    moveReading(choice.key, choice.id, { exact: true, anchor: null }).then(() => {
+      toast('Your next message starts a new path here. What came after stays saved.');
+      $('agentText')?.focus({ preventScroll: true });
+    });
+  });
+  view.querySelectorAll('[data-reader-fork-at]').forEach(b => b.onclick = () => {
+    const choice = parseChoiceToken(b.dataset.readerForkAt, 'fork button');
+    if (choice) forkFrom(choice.key, { id: choice.id }, b);
+  });
+  view.querySelectorAll('[data-reader-entry]').forEach(b => b.onclick = () => open(key, 'entry:' + b.dataset.readerEntry));
+  view.querySelectorAll('[data-reader-origin]').forEach(b => b.onclick = () => {
+    const origin = parseChoiceToken(b.dataset.readerOrigin, 'fork origin');
+    if (origin) open(origin.key, origin.entryId ? 'entry:' + origin.entryId : 'bottom');
+  });
+  wireDestination();
+  renderLiveInGroups();
+  // Store element-relative reading positions, not fragile document pixels.
+  if (!view.dataset.readerScrollBound) {
+    view.dataset.readerScrollBound = '1';
+    let timer;
+    view.addEventListener('scroll', () => {
+      clearTimeout(timer);
+      const transcript = $('conversationTranscript'), key = current?.key;
+      timer = setTimeout(() => {
+        if (viewKind !== 'conversation' || current?.key !== key || $('conversationTranscript') !== transcript) return;
+        rememberConversationPosition();
+      }, 180);
+    }, { passive: true });
+  }
+}
+function choiceToken(a) { return JSON.stringify({ key: a.key || current.key, id: a.id }); }
+// Dataset tokens are JSON embedded in double-quoted attributes. A token that
+// does not survive the HTML round-trip must surface as a toast, not die as a
+// console exception behind a dead button.
+function parseChoiceToken(raw, what = 'control') {
+  try { return JSON.parse(raw); } catch { errToast('This ' + what + ' lost its target. Reload the conversation.'); return null; }
 }
 
-async function loadConversationFlow(key) {
-  if (compareCache.has(key)) return compareCache.get(key);
-  const pending = fetch('/api/compare?id=' + encodeURIComponent(key)).then(async r => {
-    const data = await r.json();
-    if (!r.ok || data.error) throw Error(data.error || 'Could not load conversation paths.');
-    return { groups: [], branches: [], ...data };
-  }).catch(error => { compareCache.delete(key); throw error; });
-  compareCache.set(key, pending);
-  return pending;
+// ---- another version of an answer -----------------------------------------
+async function regenerateColumn(button) {
+  const card = button.closest('.rd-card'), g = groupOf(card), key = current?.key;
+  const col = g && g.columns[Number(card.dataset.colIndex)];
+  if (!col || !key) return;
+  const question = col.shown.question || g.question;
+  return regenerateQuestion(key, question, col, button);
+}
+async function regenerateQuestion(key, question, col, button) {
+  const T = treeFor(current);
+  const picked = col && col.kind === 'model' && col.model ? [{ provider: col.provider, modelId: col.model }]
+    : (typeof fanModels === 'function' ? fanModels() : []).slice(0, 1);
+  const old = button?.textContent;
+  if (button) { button.disabled = true; button.textContent = '…'; }
+  try {
+    const payload = { id: key, question, provider: picked[0]?.provider, modelId: picked[0]?.modelId };
+    let out = await postJson('/api/node/regenerate', payload);
+    if (out?.needsForce && confirm('A terminal owns this conversation. Stop the terminal and ask again from the web?')) out = await postJson('/api/node/regenerate', { ...payload, force: true });
+    if (!out || out.error) throw Error(out?.error || 'Could not ask again.');
+    const parentRaw = T.parent.get(question);
+    expectAnswer(key, { origin: parentRaw, prefer: picked[0]?.modelId || null, jobIds: out.job ? [out.job.id] : [] });
+    if (out.job) {
+      const seed = { ...out.job, jobId: out.job.id, key, status: 'running', statusText: 'starting', startedAt: Date.now(), tail: [], intent: { kind: 'regenerate', question, column: col?.key || null } };
+      activeRuns.set(seed.jobId, seed); ledgerAbsorb(seed);
+      renderRunCards();
+    }
+  } catch (error) { errToast(error.message); }
+  finally { if (button?.isConnected) { button.disabled = false; button.textContent = old; } }
+}
+
+// ---- merge ----------------------------------------------------------------
+// Pick the answers, the model, and optionally what to do with them. The
+// merged reply is one more answer to the question; originals stay saved.
+const mergeDrafts = new Map(); // question → { sources, instruction, model }
+function openConversationMerge(key, question) {
+  const b = renderedLayout?.layout.blocks.find(x => x.type === 'answers' && x.question === question);
+  if (!b) return errToast('These answers are no longer on screen. Reload the conversation.');
+  const existing = document.querySelector('.flow-merge-dialog');
+  if (existing) { existing.focus(); return; }
+  const answers = b.columns.filter(c => c.key !== 'both').map(c => ({ id: c.shown.start, label: cardModelName(c), key: c.key,
+    text: CT.cleanText(rowsFor(treeFor(current), c.nodes).filter(m => m.role === 'assistant' && !m.rewriteOf).map(m => m.text).join(' ')) }));
+  const state = mergeDrafts.get(question) || { sources: answers.filter(a => a.key !== 'merge').map(a => a.id), instruction: '', model: null };
+  mergeDrafts.set(question, state);
+  const models = typeof fanModels === 'function' ? fanModels() : [];
+  if (!state.model && models[0]) state.model = models[0];
+  const trigger = document.activeElement;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'flow-merge-dialog';
+  dialog.setAttribute('aria-labelledby', 'flowMergeTitle');
+  dialog.innerHTML = `<h2 id="flowMergeTitle">Merge answers</h2><p>Write one new answer from the answers you pick and the conversation before them. The originals stay saved; the new answer becomes one more card, and the conversation continues from it.</p><fieldset><legend>Answers to merge</legend>${answers.map(a => `<label class="flow-source"><input type="checkbox" value="${esc(a.id)}"${state.sources.includes(a.id) ? ' checked' : ''}><span><b>${esc(a.label)}</b><span>${esc(a.text.replace(/\s+/g, ' ').slice(0, 160))}</span></span></label>`).join('')}</fieldset><label class="flow-instruction">What to do with them <span>(optional)</span><textarea rows="4" placeholder="For example: keep the first one's structure, fix the facts with the others, and explain the final recommendation."></textarea></label><button type="button" data-merge-model></button><p class="flow-merge-error" role="alert"></p><div class="flow-merge-footer"><button type="button" data-merge-cancel>Cancel</button><button type="button" class="primary" data-merge-start>Merge answers</button></div>`;
+  document.body.appendChild(dialog);
+  dialog.addEventListener('keydown', event => event.stopPropagation());
+  const ta = dialog.querySelector('textarea'); ta.value = state.instruction || '';
+  const error = dialog.querySelector('.flow-merge-error'), start = dialog.querySelector('[data-merge-start]');
+  const save = () => { state.sources = [...dialog.querySelectorAll('input:checked')].map(i => i.value); state.instruction = ta.value; start.disabled = state.sources.length < 2; };
+  ta.oninput = save;
+  dialog.querySelectorAll('input').forEach(i => i.onchange = save);
+  const model = dialog.querySelector('[data-merge-model]');
+  const paintModel = () => model.textContent = 'Merge with · ' + (state.model?.modelId || 'the conversation model') + ' ▾';
+  paintModel();
+  model.onclick = () => {
+    openModelPicker(model, { multi: false, selected: new Set(state.model ? [state.model.provider + '/' + state.model.modelId] : []) }, picked => {
+      if (picked?.[0]) { state.model = picked[0]; paintModel(); model.focus(); }
+    });
+    const picker = document.querySelector('.mpick');
+    if (picker) dialog.appendChild(picker);
+  };
+  const close = () => { save(); dialog.close(); dialog.remove(); if (trigger?.isConnected) trigger.focus(); };
+  dialog.querySelector('[data-merge-cancel]').onclick = close;
+  dialog.addEventListener('cancel', e => { e.preventDefault(); if (!start.dataset.busy) close(); });
+  start.onclick = async () => {
+    save(); if (start.disabled) return;
+    start.dataset.busy = '1'; start.textContent = 'Starting merge…'; error.textContent = '';
+    dialog.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = true; });
+    const payload = { id: key, question, answers: state.sources, instruction: state.instruction, provider: state.model?.provider, modelId: state.model?.modelId };
+    try {
+      let out = await postJson('/api/node/merge', payload);
+      if (out?.needsForce && confirm('A terminal owns this conversation. Stop it and merge from the web?')) out = await postJson('/api/node/merge', { ...payload, force: true });
+      if (!out || out.error) throw Error(out?.error || 'The merge did not start.');
+      expectAnswer(key, { origin: question, jobIds: out.job ? [out.job.id] : [] });
+      if (out.job) {
+        const seed = { ...out.job, jobId: out.job.id, key, status: 'running', statusText: 'starting', startedAt: Date.now(), tail: [], intent: { kind: 'merge', question } };
+        activeRuns.set(seed.jobId, seed); ledgerAbsorb(seed);
+      }
+      mergeDrafts.delete(question);
+      close();
+      renderRunCards();
+      toast('Merging the answers you picked. The originals stay saved.');
+    } catch (e) { error.textContent = e.message; }
+    finally { if (start.isConnected) {
+      delete start.dataset.busy;
+      dialog.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = false; });
+      start.textContent = 'Merge answers'; save();
+    } }
+  };
+  save(); dialog.showModal();
+}
+
+// ---- live answers inside their group ---------------------------------------
+// A regeneration streams as the newest version of its column; a merge as a
+// new "Merged" card. Both land in the saved conversation when they finish.
+function groupLiveRuns(b) {
+  const out = [];
+  for (const [jobId, L] of runLedgers) {
+    if (L.done || L.key !== current?.key || !L.intent || !L.intent.question) continue;
+    if (!b.questions.includes(L.intent.question) && b.question !== L.intent.question) continue;
+    out.push([jobId, L]);
+  }
+  return out;
+}
+let liveGroupRedraw = null;
+const liveGroupTried = new Set();
+function renderLiveInGroups() {
+  const host = $('conversationTranscript');
+  if (!host || !renderedLayout || renderedLayout.data !== current) return;
+  // A run answering a question again needs that question drawn as a group.
+  const t = computeTrace(current);
+  const missing = [...runLedgers.entries()].filter(([jobId, L]) => !L.done && L.key === current.key && L.intent?.question && !liveGroupTried.has(jobId)
+    && t.onPath.has(L.intent.question) && !renderedLayout.layout.blocks.some(b => b.type === 'answers' && b.questions.includes(L.intent.question)));
+  if (missing.length && !liveGroupRedraw) {
+    for (const [jobId] of missing) liveGroupTried.add(jobId); // once per run: no redraw loop
+    liveGroupRedraw = requestAnimationFrame(() => { liveGroupRedraw = null; rerenderReading(null); });
+    return;
+  }
+  for (const section of host.querySelectorAll('.rd-answers')) {
+    const b = renderedLayout.layout.blocks.find(x => x.type === 'answers' && x.question === section.dataset.question);
+    if (!b) continue;
+    const live = groupLiveRuns(b);
+    const strip = section.querySelector('.rd-cards');
+    for (const card of strip.querySelectorAll('.rd-card[data-live-job]')) if (!live.some(([id]) => id === card.dataset.liveJob)) card.remove();
+    for (const [jobId, L] of live) {
+      let card = strip.querySelector(`.rd-card[data-live-job="${CSS.escape(jobId)}"]`);
+      if (!card) {
+        card = document.createElement('article');
+        card.className = 'rd-card rd-live'; card.dataset.liveJob = jobId; card.setAttribute('aria-current', 'false');
+        card.innerHTML = `<header class="rd-card-head"><span class="rd-pick"><b></b><span class="rd-sub"></span></span><button type="button" class="rd-stop" title="Stop writing this answer">stop</button></header><div class="rd-card-body"></div>`;
+        card.querySelector('.rd-stop').onclick = async e => {
+          const btn = e.currentTarget; btn.disabled = true;
+          try { const out = await postJson('/api/run/abort', { jobId }); if (out?.error) throw Error(out.error); } catch (error) { errToast(error.message); btn.disabled = false; }
+        };
+        // A regeneration sits next to the version it replaces.
+        const colKey = L.intent.kind === 'merge' ? null : L.intent.column || L.model;
+        const col = colKey && strip.querySelector(`.rd-card[data-col="${CSS.escape(colKey)}"]`);
+        if (col) col.after(card); else strip.appendChild(card);
+        section.style.setProperty('--cols', String(strip.children.length));
+      }
+      setLiveText(card.querySelector('b'), L.intent.kind === 'merge' ? 'Merged' : (typeof shortModelName === 'function' && L.model ? shortModelName(L.model.split('/').pop()) : 'New version'));
+      setLiveText(card.querySelector('.rd-sub'), L.statusText && !/^(running|starting)$/.test(L.statusText) ? L.statusText : 'writing…');
+      renderLiveReplyLedger(card.querySelector('.rd-card-body'), jobId, L);
+    }
+  }
 }
 
 function rememberReaderAnchor() {
@@ -122,108 +728,6 @@ function maintainReaderLanding(apply) {
   });
   observer.observe(view);
   for (const child of view.children) observer.observe(child);
-}
-function readerRoute(key, leaf, anchor, replace = false) {
-  const hash = 'path=' + encodeURIComponent(JSON.stringify({ key, leaf: leaf || null, anchor: anchor || null }));
-  // Same screen, another reading path: a step of its own in history, so
-  // back returns to the path read before (a replace only records where the
-  // current path was left).
-  if (replace) replaceRoute(hash);
-  else { navRememberScroll(); currentHash = hash; nav.push(hash, { kind: 'conversation' }); navShownId = nav.current().id; }
-}
-async function browseConversationPath(key, id, anchor, { exact = false, history: record = true } = {}) {
-  const sameView = key === current?.key && viewKind === 'conversation';
-  rememberConversationDraft();
-  if (record && current && viewKind === 'conversation') readerRoute(current.key, readerState(current.key).leaf, rememberReaderAnchor()?.id, true);
-  const origin = sameView && anchor ? $('view').querySelector(`[data-flow-anchor="${CSS.escape(anchor)}"]`) : null;
-  const old = origin ? { offset: origin.getBoundingClientRect().top - $('view').getBoundingClientRect().top } : null;
-  const state = readerState(key);
-  let data = key === current?.key ? current : readerSessions.get(key);
-  if (!data && id) {
-    try {
-      const response = await fetch('/api/session?id=' + encodeURIComponent(key));
-      data = await response.json();
-      if (!response.ok || data.error) throw Error(data.error || 'Conversation unavailable.');
-      readerSessions.set(key, data);
-      learnSpeedCalibration(data.speedCalibration);
-    } catch (error) { return errToast(error.message); }
-  }
-  const trace = data && ConversationFlow.trace(data);
-  if (data) {
-    const previous = ConversationFlow.trace(data, state.leaf);
-    for (const ancestor of previous?.chain || []) state.routes[ancestor] = previous.leaf;
-  }
-  state.leaf = id ? (exact ? id : ConversationFlow.follow(trace, id, state.routes[id])) : null;
-  saveReaderState(key);
-  if (!sameView) await open(key, anchor ? 'flow:' + anchor : 'top', 'path=' + encodeURIComponent(JSON.stringify({ key, leaf: state.leaf, anchor })));
-  else await renderConv('preserve');
-  if (old && anchor) restoreReaderAnchor({ id: anchor, flow: true, offset: old.offset });
-  else if (anchor) $('view').querySelector(`[data-flow-anchor="${CSS.escape(anchor)}"], [data-eid="${CSS.escape(anchor)}"]`)?.scrollIntoView({ block: 'start' });
-  if (record && sameView && current?.key === key) readerRoute(key, state.leaf, anchor);
-}
-function resetConversationReading(key) {
-  const state = readerState(key);
-  state.leaf = null;
-  saveReaderState(key);
-}
-
-function readerPendingChoice(d) {
-  const t = computeSendTrace(d);
-  const last = ConversationFlow.project(d, t).filter(m => ['user', 'assistant'].includes(m.role)).at(-1);
-  return last && ConversationFlow.operation(last)?.kind === 'both'
-    && last.operation?.unresolved && !readerState(d.key).accepted[last.eid] ? last.eid : null;
-}
-function readerIsBrowsing(d) {
-  const read = computeTrace(d), send = computeSendTrace(d);
-  if (!read || !send || read.leaf === send.leaf) return false;
-  const last = t => ConversationFlow.project(d, t).at(-1)?.eid;
-  return last(read) !== last(send);
-}
-function readerSendAllowed() {
-  if (!current) return true;
-  if ([...activeRuns.values()].some(r => r.fanoutRootKey === current.key)) {
-    errToast('Wait for the parallel answers to finish before choosing what the next reply should include.');
-    return false;
-  }
-  if (readerIsBrowsing(current)) {
-    errToast('You are reading another path. Choose “Continue from here” or return to the current conversation.');
-    $('readerDestination')?.scrollIntoView({ block: 'nearest' });
-    return false;
-  }
-  if (readerPendingChoice(current)) {
-    errToast('Choose an answer, include all answers, or merge them before sending.');
-    $('readerDestination')?.scrollIntoView({ block: 'nearest' });
-    return false;
-  }
-  return true;
-}
-function readerDestinationHtml(d) {
-  if (readerIsBrowsing(d)) return `<div class="reader-destination" id="readerDestination" role="status"><span><b>Reading another path</b> · Send has not moved.</span><button data-reader-continue title="Use this conversation context. Files on disk are not rewound.">Continue from here</button><button data-reader-return>Return to current</button></div>`;
-  const pending = readerPendingChoice(d);
-  if (pending) return `<div class="reader-destination" id="readerDestination" role="status"><span><b>Choose what the next reply should include.</b> Read one answer, include all, or merge.</span><button data-reader-include="${esc(pending)}">Include all answers</button><button data-reader-review>Review answers</button></div>`;
-  return '';
-}
-async function continueReadingPath(key, id, button, expectedLeaf = null) {
-  if (!key || !id) return;
-  if (current?.source === 'claude') {
-    return forkFrom(key, { id }, button);
-  }
-  const old = button?.textContent;
-  if (button) { button.disabled = true; button.textContent = 'Moving continuation…'; }
-  try {
-    const out = await postJson('/api/branch', { id: key, node: id, expectedLeaf: expectedLeaf || (current?.key === key ? computeSendTrace(current)?.fileLeaf : null) });
-    if (!out || out.error) throw Error(out?.error || 'Could not change continuation.');
-    readerState(key).accepted[id] = true;
-    resetConversationReading(key);
-    compareCache.delete(key);
-    if (current?.key === key && activeRel === key) {
-      await open(key, 'bottom');
-      readerRoute(key, null, null);
-      $('agentText')?.focus({ preventScroll: true });
-    }
-    toast('Continue here. Other paths are preserved. Files on disk have not been rewound.');
-  } catch (error) { errToast(error.message); }
-  finally { if (button?.isConnected) { button.disabled = false; button.textContent = old; } }
 }
 
 // Every answer, whether ordinary, compared, or included together, uses this
@@ -324,319 +828,6 @@ function transcriptFragmentHtml(d, messages, { after = new Map(), before = new M
   return out.join('');
 }
 
-function answerChoices(group) {
-  return [...group.answers.map((a, i) => ({ ...a, label: `${a.operation?.kind === 'edit' ? 'Your correction' : 'Answer ' + (i + 1)} · ${a.model || 'assistant'}${a.fork ? ' · separate conversation' : ''}` })),
-    ...(group.both ? [{ ...group.both, label: 'All answers included', kind: 'both' }] : []),
-    ...(group.merges || (group.merge ? [group.merge] : [])).map((m, i) => ({ ...m.answer, kind: 'merge', label: 'Merged answer' + (i ? ' ' + (i + 1) : '') + ' · ' + (m.answer.model || 'assistant') }))];
-}
-function choiceToken(a) { return JSON.stringify({ key: a.key || current.key, id: a.id }); }
-// Dataset tokens are JSON embedded in double-quoted attributes. A token that
-// does not survive the HTML round-trip must surface as a toast, not die as a
-// console exception behind a dead button.
-function parseChoiceToken(raw, what = 'control') {
-  try { return JSON.parse(raw); } catch { errToast('This ' + what + ' lost its target. Reload the conversation.'); return null; }
-}
-function answerPackageHtml(d, group, answer) {
-  const source = answer.key === d.key || !answer.key ? d : readerSessions.get(answer.key);
-  if (!source) return `<div class="flow-load-error">This answer’s conversation could not be loaded. <button data-reader-path="${esc(choiceToken(answer))}">Open separate conversation</button></div>`;
-  const messages = ConversationFlow.packageMessages(source, ConversationFlow.trace(source), group, answer);
-  if (!messages.length) return `<div class="flow-load-error">Answer unavailable in the current snapshot. <button data-reader-retry>Reload answers</button></div>`;
-  return transcriptFragmentHtml(source, messages);
-}
-function includedAnswersHtml(d, group) {
-  const ids = new Set([group.both.id, ...(group.both.entryIds || [])]);
-  const bridge = d.messages.find(m => ids.has(m.eid) && ConversationFlow.operation(m)?.kind === 'both');
-  const sources = bridge?.operation?.sources || [];
-  const quote = () => bridge ? msgBlock({ ...bridge, text: bridge.text.replace(/<!--[\s\S]*?-->/g, '').trim() }, esc, true, '', d.messages.indexOf(bridge), d.key) : '<p>The included-answer snapshot is unavailable. Reload this conversation.</p>';
-  const quoted = [];
-  const pieces = sources.map((source, i) => {
-    const data = !source.key || source.key === d.key ? d : readerSessions.get(source.key);
-    if (!data || !source.id) return null;
-    const entryIds = new Set(source.entryIds?.length ? source.entryIds : [source.id]);
-    const toolEntries = new Set(data.messages.filter(m => m.role === 'tool').map(m => m.eid));
-    const messages = data.messages.filter(m => entryIds.has(m.eid) && m.role === 'assistant' && !toolEntries.has(m.eid));
-    if (!messages.length) return null;
-    quoted.push(`=== ${source.model || 'model'} ===\n${messages.map(m => m.text).join('\n\n').trim()}`);
-    return `<section class="flow-answer"><div class="flow-answer-head">Answer ${i + 1} · ${esc(source.model || 'assistant')}<button data-reader-path="${esc(choiceToken({ key: data.key, id: source.id }))}" data-at="${esc(group.node)}">Read original and work</button></div>${transcriptFragmentHtml(data, messages)}</section>`;
-  });
-  // The saved bridge is the context snapshot. If source files were edited
-  // outside the app, never substitute their changed text for what was included.
-  const matchesSnapshot = bridge && quoted.join('\n\n') === bridge.text.replace(/\s*<!--\s*(?:chattering|aiconvo):both\s*-->\s*$/, '').trim();
-  return `<div class="flow-included"><div class="flow-origin">Included answer text · tool histories and images are not combined</div>${pieces.length && pieces.every(Boolean) && matchesSnapshot ? pieces.join('') : quote()}</div>`;
-}
-function answerDetailsHtml(answer) {
-  const details = [['Model', answer.model || 'not recorded'], ['Source entry', answer.id]];
-  if (answer.tok != null) details.push(['Tokens', Number(answer.tok).toLocaleString()]);
-  if (answer.cost != null) details.push(['Recorded cost', '$' + Number(answer.cost).toFixed(4)]);
-  if (answer.secs != null) details.push(['Reply time', answer.secs + ' seconds']);
-  return `<details class="flow-answer-info"><summary>Answer details</summary><dl>${details.map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`).join('')}</dl></details>`;
-}
-function comparisonHtml(d, group) {
-  const state = readerGroup(d.key, group.node);
-  if (!state.compare) return '';
-  const choices = answerChoices(group).filter(a => a.kind !== 'both');
-  const ids = new Set(choices.map(a => a.id));
-  state.pair = [state.pair[0], state.pair[1]].map((id, i) => ids.has(id) ? id : choices[i]?.id);
-  const selected = state.pair.map(id => choices.find(a => a.id === id)).filter(Boolean);
-  return `<div class="flow-comparison" data-msg-key="${esc(d.key)}" data-mobile-side="${state.compareSide === 1 ? 1 : 0}"><div class="flow-mobile-switch" role="group" aria-label="Comparison answer to read">${selected.map((a, i) => `<button data-reader-side="${esc(group.node)}" data-side="${i}" aria-pressed="${i === (state.compareSide || 0)}">${i === 0 ? 'First answer' : 'Second answer'}</button>`).join('')}</div><div class="flow-pair">${selected.map((a, side) => `<section class="flow-answer" data-compare-side="${side}"><div class="flow-answer-head"><select aria-label="${side === 0 ? 'First' : 'Second'} answer to compare" data-reader-pair="${esc(group.node)}" data-side="${side}">${choices.map(c => `<option value="${esc(c.id)}"${a.id === c.id ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>${answerPackageHtml(d, group, a)}<div class="flow-answer-foot"><button data-reader-path="${esc(choiceToken(a))}" data-at="${esc(group.node)}">Read this path and its follow-up</button>${answerDetailsHtml(a)}</div></section>`).join('')}</div></div>`;
-}
-function answerGroupHtml(d, group, trace) {
-  const choices = answerChoices(group);
-  const on = choices.find(c => (!c.key || c.key === d.key) && trace?.onPath.has(c.id));
-  if (readerGroup(d.key, group.node).compare) return `<section class="flow-turn" data-flow-anchor="${esc(group.node)}"><div class="flow-turn-bar"><b class="flow-compare-title">Compare answers</b><button data-reader-compare="${esc(group.node)}" aria-expanded="true">Back to reading</button>${d.source !== 'claude' ? `<button data-reader-merge="${esc(group.node)}">Merge…</button>` : ''}</div>${comparisonHtml(d, group)}<div class="flow-origin">${on ? 'Conversation below follows ' + esc(on.label) : 'Choose a path to read its follow-up.'}</div></section>`;
-  return `<section class="flow-turn" data-flow-anchor="${esc(group.node)}"><div class="flow-turn-bar"><label><span>${group.kind === 'parallel' ? 'Parallel answers' : 'Answers'} · ${group.answers.length}</span><select data-reader-answer="${esc(group.node)}" aria-label="Answer to read"><option value=""${!on ? ' selected' : ''} disabled>Choose an answer to read</option>${choices.map(c => `<option value="${esc(choiceToken(c))}"${c === on ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></label><button data-reader-prev="${esc(group.node)}" aria-label="Previous answer">←</button><button data-reader-next="${esc(group.node)}" aria-label="Next answer">→</button><button data-reader-compare="${esc(group.node)}" aria-expanded="${!!readerGroup(d.key, group.node).compare}">Compare</button>${d.source !== 'claude' ? `<button data-reader-both="${esc(group.node)}">Include all</button><button data-reader-merge="${esc(group.node)}">Merge…</button>` : ''}</div>${comparisonHtml(d, group)}</section>`;
-}
-function branchPointHtml(point) {
-  return `<details class="flow-paths" data-flow-anchor="${esc(point.node)}"><summary>${point.choices.length === 1 ? 'Saved continuation · read what followed' : point.choices.length + ' conversation paths · choose a path to read'}</summary><div>${point.choices.map(c => `<button class="flow-path" data-reader-path="${esc(choiceToken(c))}" data-at="${esc(point.node)}"${c.current ? ' aria-current="true"' : ''}><b>${esc(c.kind || 'Another path')}${c.current ? ' · reading' : ''}</b><span>${esc(c.text || c.title || 'Continue from this point')}</span>${c.count ? `<small>${c.count} messages in this path and its alternatives</small>` : ''}</button>`).join('')}</div></details>`;
-}
-
-async function prepareConversationReading(d, scroll) {
-  const serial = ++readerRenderSerial;
-  readerSessions.set(d.key, d);
-  let flow;
-  try { flow = await loadConversationFlow(d.key); }
-  catch (error) { flow = { groups: [], branches: [], error: error.message }; }
-  if (serial !== readerRenderSerial || current !== d) return null;
-  readerFlow = flow;
-  // Exact/search links read the containing path, not an isolated off-path bubble.
-  const entry = typeof scroll === 'string' && scroll.startsWith('entry:') ? scroll.slice(6)
-    : typeof scroll === 'string' && scroll.startsWith('hit:') ? d.messages[Number(scroll.slice(4))]?.eid : null;
-  let trace = computeTrace(d);
-  if (entry && trace && !trace.onPath.has(entry)) {
-    readerState(d.key).leaf = ConversationFlow.follow(trace, entry, readerState(d.key).routes[entry]);
-    trace = computeTrace(d); saveReaderState(d.key);
-  }
-  for (const g of flow.groups) {
-    const state = readerGroup(d.key, g.node), live = g.runId && readerState(d.key).groups['run:' + g.runId];
-    if (live && !state.fromRun) {
-      state.fromRun = g.runId; state.compare = !!live.compare;
-      const index = Math.min(live.liveIndex || 0, g.answers.length - 1);
-      state.pair = [g.answers[index]?.id, g.answers[(index + 1) % g.answers.length]?.id];
-      if (!readerState(d.key).leaf && g.both && readerPendingChoice(d) === g.both.id) readerState(d.key).leaf = g.answers[index]?.id || null;
-      saveReaderState(d.key); trace = computeTrace(d);
-    }
-  }
-  const groups = flow.groups.filter(g => !trace || trace.onPath.has(g.node));
-  const visibleExternal = new Set();
-  for (const g of groups) if (readerGroup(d.key, g.node).compare || (g.both && trace?.onPath.has(g.both.id))) {
-    for (const a of [...g.answers, ...(g.merges || []).map(m => m.answer)]) if (a.key && a.key !== d.key) visibleExternal.add(a.key);
-  }
-  await Promise.all([...visibleExternal].map(async key => {
-    try {
-      const res = await fetch('/api/session?id=' + encodeURIComponent(key));
-      const source = await res.json();
-      if (res.ok && !source.error) { readerSessions.set(key, source); learnSpeedCalibration(source.speedCalibration); }
-      else readerSessions.delete(key);
-    } catch { readerSessions.delete(key); } // Never substitute a stale source snapshot.
-  }));
-  if (serial !== readerRenderSerial || current !== d) return null;
-  for (const key of readerSessions.keys()) if (key !== d.key && !visibleExternal.has(key)) readerSessions.delete(key);
-  const after = new Map(), before = new Map(), replacements = new Map(), skip = new Set();
-  const add = (map, id, html) => map.set(id, (map.get(id) || '') + html);
-  const projected = ConversationFlow.project(d, trace);
-  const displayed = new Set(projected.map(m => m.eid));
-  const anchorFor = id => {
-    const seen = new Set();
-    while (id && !displayed.has(id) && !seen.has(id)) { seen.add(id); id = trace?.parents.get(id); }
-    return id || '';
-  };
-  for (const g of groups) {
-    add(after, anchorFor(g.node), answerGroupHtml(d, g, trace));
-    if (readerGroup(d.key, g.node).compare) {
-      for (const a of g.answers) if ((!a.key || a.key === d.key) && trace?.onPath.has(a.id) && readerGroup(d.key, g.node).pair.includes(a.id)) {
-        for (const m of ConversationFlow.packageMessages(d, trace, g, a)) skip.add(m.eid);
-      }
-    }
-    if (g.both && trace?.onPath.has(g.both.id)) {
-      replacements.set(g.both.id, includedAnswersHtml(d, g));
-    }
-    for (const merge of g.merges || (g.merge ? [g.merge] : [])) {
-      if (!trace?.onPath.has(merge.answer.id)) continue;
-      const sourceNames = (merge.sources || []).map(s => s.model || 'answer');
-      add(before, merge.bridgeId, `<div class="flow-origin">Merged ${sourceNames.length ? 'from ' + esc(sourceNames.join(' + ')) : 'answer · earlier source selection not recorded'} · <button data-reader-sources="${esc(g.node)}">View source answers</button></div>`);
-    }
-  }
-  const excluded = new Set(groups.map(g => g.node));
-  const local = ConversationFlow.branches(d, trace, excluded);
-  const points = new Map(local.map(p => [p.node, p]));
-  for (const point of flow.branches || []) {
-    if (trace && !trace.onPath.has(point.node)) continue;
-    const existing = points.get(point.node);
-    if (existing) {
-      for (const choice of point.choices) if (choice.key !== d.key && !existing.choices.some(c => c.id === choice.id)) existing.choices.push(choice);
-    } else points.set(point.node, { ...point, anchor: anchorFor(point.node) });
-  }
-  for (const point of points.values()) add(after, point.anchor || '', branchPointHtml(point));
-  const unlinked = trace ? d.messages.filter(m => !m.eid || !trace.parents.has(m.eid)) : [];
-  const unlinkedHtml = unlinked.length ? `<details class="flow-paths" data-flow-anchor="unlinked"${entry && unlinked.some(m => m.eid === entry) ? ' open' : ''}><summary>${unlinked.length} messages without a recorded path</summary>${transcriptFragmentHtml(d, unlinked, { exact: entry })}</details>` : '';
-  const origin = flow.origin ? `<div class="flow-origin flow-fork">Separate conversation · forked from <button data-reader-origin="${esc(JSON.stringify(flow.origin))}">${esc(flow.origin.title)}</button></div>` : '';
-  const error = flow.error ? `<div class="flow-load-error">${esc(flow.error)} The conversation is still readable. <button data-reader-retry>Retry paths</button></div>` : '';
-  return { html: origin + error + transcriptFragmentHtml(d, projected, { after, before, replacements, skip, exact: entry, q: typeof scroll === 'string' && scroll.startsWith('hit:') ? transcriptQuery : '' }) + unlinkedHtml, trace };
-}
-
-function wireConversationReader() {
-  const view = $('view'), key = current.key;
-  if (typeof ensureNotebookCards === 'function') ensureNotebookCards(key);
-  view.querySelectorAll('[data-step-review]').forEach(b => b.onclick = () => { const d = parseChoiceToken(b.dataset.stepReview, 'review button'); if (d) openStepReview(d); });
-  view.querySelectorAll('[data-answer-version]').forEach(button => button.onclick = () => {
-    const box = button.closest('[data-rewrite-choice]'), choice = button.dataset.answerVersion;
-    answerRewriteChoices.set(box.dataset.rewriteChoice, choice);
-    box.querySelectorAll('[data-answer-pane]').forEach(pane => { pane.hidden = pane.dataset.answerPane !== choice; });
-    // The clicked action is now hidden. Keep keyboard/touch access to the
-    // reverse action without a browser-driven jump to the other answer's end.
-    const reverse = box.querySelector(`[data-answer-pane="${choice}"] [data-answer-version]`);
-    reverse?.closest('.msg')?.focus({ preventScroll: true });
-    reverse?.focus({ preventScroll: true });
-  });
-  const blocked = readerIsBrowsing(current) || !!readerPendingChoice(current);
-  for (const id of ['agentRun', 'agentSend']) if ($(id)) $(id).disabled = blocked;
-  const group = node => readerFlow.groups.find(g => g.node === node);
-  const redraw = async node => {
-    const el = view.querySelector(`[data-flow-anchor="${CSS.escape(node)}"]`);
-    const anchor = el ? { id: node, flow: true, offset: el.getBoundingClientRect().top - view.getBoundingClientRect().top } : rememberReaderAnchor();
-    saveReaderState(key); await renderConv('preserve'); restoreReaderAnchor(anchor);
-  };
-  view.querySelectorAll('[data-reader-continue-at]').forEach(b => b.onclick = async () => {
-    const choice = parseChoiceToken(b.dataset.readerContinueAt, 'continue button');
-    if (!choice) return;
-    if (choice.key !== current?.key) await browseConversationPath(choice.key, choice.id, choice.id, { exact: true });
-    if (current?.key === choice.key) await continueReadingPath(choice.key, choice.id, b);
-  });
-  view.querySelectorAll('[data-reader-fork-at]').forEach(b => b.onclick = () => {
-    const choice = parseChoiceToken(b.dataset.readerForkAt, 'fork button');
-    if (choice) forkFrom(choice.key, { id: choice.id }, b);
-  });
-  view.querySelectorAll('[data-reader-path]').forEach(b => b.onclick = () => {
-    const choice = parseChoiceToken(b.dataset.readerPath, 'path button');
-    if (choice) browseConversationPath(choice.key, choice.id, b.dataset.at);
-  });
-  view.querySelectorAll('[data-reader-answer]').forEach(select => select.onchange = () => {
-    const choice = parseChoiceToken(select.value, 'answer picker');
-    if (choice) browseConversationPath(choice.key, choice.id, select.dataset.readerAnswer);
-  });
-  for (const [attr, step] of [['readerPrev', -1], ['readerNext', 1]]) view.querySelectorAll(`[data-${attr.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}]`).forEach(b => {
-    const g = group(b.dataset[attr]), choices = g && answerChoices(g), t = computeTrace(current);
-    const at = choices?.findIndex(c => c.key === key && t?.onPath.has(c.id));
-    const choice = choices?.[(at < 0 ? (step > 0 ? -1 : 1) : at) + step];
-    b.disabled = !choice;
-    if (choice) b.onclick = () => browseConversationPath(choice.key || key, choice.id, g.node);
-  });
-  view.querySelectorAll('[data-reader-compare], [data-reader-sources]').forEach(b => b.onclick = () => {
-    const node = b.dataset.readerCompare || b.dataset.readerSources, state = readerGroup(key, node);
-    state.compare = b.dataset.readerSources ? true : !state.compare;
-    redraw(node);
-  });
-  view.querySelectorAll('[data-reader-side]').forEach(b => b.onclick = () => {
-    const node = b.dataset.readerSide, side = Number(b.dataset.side);
-    readerGroup(key, node).compareSide = side; saveReaderState(key);
-    const comparison = b.closest('.flow-comparison'); comparison.dataset.mobileSide = String(side);
-    comparison.querySelectorAll('[data-reader-side]').forEach(button => button.setAttribute('aria-pressed', String(Number(button.dataset.side) === side)));
-  });
-  view.querySelectorAll('[data-reader-pair]').forEach(select => select.onchange = () => {
-    readerGroup(key, select.dataset.readerPair).pair[Number(select.dataset.side)] = select.value;
-    redraw(select.dataset.readerPair);
-  });
-  view.querySelectorAll('[data-reader-merge]').forEach(b => b.onclick = () => openConversationMerge(key, b.dataset.readerMerge));
-  view.querySelectorAll('[data-reader-both]').forEach(b => b.onclick = async () => {
-    b.disabled = true;
-    try {
-      const g = group(b.dataset.readerBoth);
-      const out = await postJson('/api/node/both', { id: key, node: g.node });
-      if (out?.error || !out?.id) throw Error(out?.error || 'Could not include these answers.');
-      await continueReadingPath(key, out.id, b, !out.existed ? out.id : null);
-    } catch (error) { errToast(error.message); }
-    finally { if (b.isConnected) b.disabled = false; }
-  });
-  view.querySelectorAll('[data-reader-entry]').forEach(b => b.onclick = () => open(key, 'entry:' + b.dataset.readerEntry));
-  view.querySelectorAll('[data-reader-origin]').forEach(b => b.onclick = () => {
-    const origin = parseChoiceToken(b.dataset.readerOrigin, 'fork origin');
-    if (origin) open(origin.key, origin.entryId ? 'entry:' + origin.entryId : 'top');
-  });
-  view.querySelectorAll('[data-reader-retry]').forEach(b => b.onclick = () => { compareCache.delete(key); renderConv('preserve'); });
-  $('readerDestination')?.querySelector('[data-reader-return]')?.addEventListener('click', () => browseConversationPath(key, null, null));
-  $('readerDestination')?.querySelector('[data-reader-continue]')?.addEventListener('click', e => continueReadingPath(key, computeTrace(current)?.leaf, e.currentTarget));
-  $('readerDestination')?.querySelector('[data-reader-include]')?.addEventListener('click', e => continueReadingPath(key, e.currentTarget.dataset.readerInclude, e.currentTarget));
-  $('readerDestination')?.querySelector('[data-reader-review]')?.addEventListener('click', () => {
-    const node = readerFlow.groups.find(g => g.both?.id === readerPendingChoice(current))?.node;
-    if (node) view.querySelector(`[data-flow-anchor="${CSS.escape(node)}"]`)?.scrollIntoView({ block: 'start' });
-  });
-  view.querySelectorAll('.flow-paths').forEach(el => {
-    const state = readerGroup(key, el.dataset.flowAnchor);
-    el.open = !!state.pathsOpen;
-    el.ontoggle = () => { state.pathsOpen = el.open; saveReaderState(key); };
-  });
-  // Store element-relative reading positions, not fragile document pixels.
-  if (!view.dataset.readerScrollBound) {
-    view.dataset.readerScrollBound = '1';
-    let timer;
-    view.addEventListener('scroll', () => {
-      clearTimeout(timer);
-      const transcript = $('conversationTranscript'), key = current?.key;
-      timer = setTimeout(() => {
-        if (viewKind !== 'conversation' || current?.key !== key || $('conversationTranscript') !== transcript) return;
-        rememberConversationPosition();
-      }, 180);
-    }, { passive: true });
-  }
-}
-
-async function openConversationMerge(key, node) {
-  let data;
-  try { data = await loadConversationFlow(key); } catch (error) { return errToast(error.message); }
-  const existing = document.querySelector('.flow-merge-dialog');
-  if (existing) { existing.focus(); return; }
-  const group = data.groups.find(g => g.node === node);
-  if (!group) return errToast('These answers are no longer available. Reload the conversation.');
-  const state = readerGroup(key, node), trigger = document.activeElement;
-  if (!state.sources) state.sources = group.answers.map(a => a.id);
-  const models = key === current?.key ? fanModels() : readerSessions.get(key)?.selectedModels || [];
-  if (!state.model && models[0]) state.model = models[0];
-  const dialog = document.createElement('dialog');
-  dialog.className = 'flow-merge-dialog';
-  dialog.setAttribute('aria-labelledby', 'flowMergeTitle');
-  dialog.innerHTML = `<h2 id="flowMergeTitle">Merge answers</h2><p>Write a new answer from the selected sources and their shared conversation. Originals stay saved. The new answer becomes your continuation.</p><fieldset><legend>Source answers</legend>${group.answers.map((a, i) => `<label class="flow-source"><input type="checkbox" value="${esc(a.id)}"${state.sources.includes(a.id) ? ' checked' : ''}><span><b>Answer ${i + 1} · ${esc(a.model || 'assistant')}</b><span>${esc(String(a.text || '').replace(/\s+/g, ' ').slice(0, 160))}</span></span></label>`).join('')}</fieldset><label class="flow-instruction">Instructions <span>(optional)</span><textarea rows="4" placeholder="For example: resolve disagreements and explain the final recommendation."></textarea></label><button data-merge-model></button><p class="flow-merge-error" role="alert"></p><div class="flow-merge-footer"><button data-merge-cancel>Cancel</button><button class="primary" data-merge-start>Merge answers</button></div>`;
-  document.body.appendChild(dialog);
-  dialog.addEventListener('keydown', event => event.stopPropagation());
-  const ta = dialog.querySelector('textarea'); ta.value = state.instruction || '';
-  const error = dialog.querySelector('.flow-merge-error'), start = dialog.querySelector('[data-merge-start]');
-  const save = () => { state.sources = [...dialog.querySelectorAll('input:checked')].map(i => i.value); state.instruction = ta.value; saveReaderState(key); start.disabled = state.sources.length < 2; };
-  ta.oninput = save;
-  dialog.querySelectorAll('input').forEach(i => i.onchange = save);
-  const model = dialog.querySelector('[data-merge-model]');
-  const paintModel = () => model.textContent = 'Merge model · ' + (state.model?.modelId || 'session model') + ' ▾';
-  paintModel();
-  model.onclick = () => {
-    openModelPicker(model, { multi: false, selected: new Set(state.model ? [state.model.provider + '/' + state.model.modelId] : []) }, picked => {
-      if (picked?.[0]) { state.model = picked[0]; saveReaderState(key); paintModel(); model.focus(); }
-    });
-    // Keep the picker inside the dialog's accessible top layer.
-    const picker = document.querySelector('.mpick');
-    if (picker) dialog.appendChild(picker);
-  };
-  const close = () => { save(); dialog.close(); dialog.remove(); if (trigger?.isConnected) trigger.focus(); };
-  dialog.querySelector('[data-merge-cancel]').onclick = close;
-  dialog.addEventListener('cancel', e => { e.preventDefault(); if (!start.dataset.busy) close(); });
-  start.onclick = async () => {
-    save(); if (start.disabled) return;
-    start.dataset.busy = '1'; start.textContent = 'Starting merge…'; error.textContent = '';
-    dialog.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = true; });
-    const payload = { id: key, node, answers: state.sources, instruction: state.instruction, provider: state.model?.provider, modelId: state.model?.modelId };
-    try {
-      let out = await postJson('/api/node/aggregate', payload);
-      if (out?.needsForce && confirm('A terminal owns this conversation. Stop it and merge from the web?')) out = await postJson('/api/node/aggregate', { ...payload, force: true });
-      if (!out || out.error) throw Error(out?.error || 'The merge did not start.');
-      compareCache.delete(key); resetConversationReading(key); close();
-      if (activeRel === key) await open(key, 'bottom');
-      toast('Merging the selected answers. Originals stay saved.');
-    } catch (e) { error.textContent = e.message; }
-    finally { if (start.isConnected) {
-      delete start.dataset.busy;
-      dialog.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = false; });
-      start.textContent = 'Merge answers'; save();
-    } }
-  };
-  save(); dialog.showModal();
-}
 
 // Live replies share the transcript renderer, not the work monitor.
 function savedLiveReplies(ledger, messages) {
@@ -747,10 +938,11 @@ function renderOpenLiveStream(L, jobId) {
 }
 
 function renderLiveReplies() {
+  renderLiveInGroups();
   const host = $('liveReplies');
   if (!host || !current || current.key !== activeRel || host.dataset.conversationKey !== activeRel) return;
-  host.hidden = readerIsBrowsing(current);
-  if (host.hidden) return;
+  host.hidden = false;
+  const t = computeTrace(current);
   for (const run of [...host.children]) {
     const owner = runLedgers.get(run.dataset.replyRun);
     if (!owner || owner.key !== activeRel) run.remove();
@@ -758,6 +950,11 @@ function renderLiveReplies() {
   for (const [jobId, L] of runLedgers) {
     if (L.key !== activeRel || (L.fanoutId && L.fanoutRootKey === activeRel)) continue;
     let run = host.querySelector(`[data-reply-run="${CSS.escape(jobId)}"]`);
+    // Regenerations and merges stream inside their answer group instead.
+    if (L.intent && L.intent.question) { run?.remove(); continue; }
+    // A reply to another path shows when that path is read.
+    const origin = L.node && t ? nodeOfRaw(t.tree, L.node) : null;
+    if (origin && !t.onPath.has(origin)) { if (run) run.hidden = true; continue; }
     if (!run) {
       run = document.createElement('div'); run.dataset.replyRun = jobId;
       host.appendChild(run);
@@ -810,65 +1007,71 @@ function restoreLiveReplyHandoff(handoff) {
   }
 }
 
+
+// ---- parallel answers while they are written -------------------------------
+// The same cards as saved answers, at the end of the path they continue.
+// Clicking a card chooses it: when the answers land, the conversation
+// continues from that one (the first model otherwise).
+const parallelChoices = new Map(); // fanoutId → chosen index
 function renderReaderParallel(stage, entries) {
   if (!stage) return;
   const runId = entries[0]?.[1].fanoutId;
-  const represented = runId && readerFlow.groups.some(g => g.runId === runId);
-  if (!entries.length || represented || (current && readerIsBrowsing(current))) {
-    stage.hidden = true;
-    return;
-  }
-  stage.hidden = false; stage.classList.add('flow-live');
-  if ($('agentRun')) $('agentRun').disabled = entries.some(([, L]) => !L.done);
-  const state = readerGroup(activeRel, 'run:' + runId);
-  if (stage.dataset.fanout !== runId) {
+  const t = current && computeTrace(current);
+  const origin = entries[0]?.[1].fanoutNode;
+  const at = origin && t ? nodeOfRaw(t.tree, origin) : null;
+  const offPath = at && t && !t.onPath.has(at);
+  const settled = entries.length && entries.every(([, L]) => L.done) && !entries.some(([, L]) => L.retained);
+  if (!entries.length || offPath || (settled && stage.dataset.settling === runId)) { stage.hidden = true; return; }
+  stage.hidden = false;
+  const layout = cardLayoutFor(entries.length);
+  if (stage.dataset.fanout !== runId || stage.dataset.layout !== layout) {
     stage.dataset.fanout = runId;
+    stage.dataset.layout = layout;
+    stage.className = 'parallel-stage rd-answers rd-live-group';
     stage.dataset.flowAnchor = 'live:' + runId;
-    stage.innerHTML = '<div class="flow-turn-bar"><label><span>Parallel answers</span><select aria-label="Live answer to read" data-live-select></select></label><button data-live-compare>Compare</button></div><div class="flow-live-answers"></div><div class="flow-live-note" role="status"></div>';
-    stage.querySelector('[data-live-select]').onchange = e => {
-      state.liveIndex = Number(e.target.value); saveReaderState(activeRel); renderParallelStage();
-    };
-    stage.querySelector('[data-live-compare]').onclick = () => { state.compare = !state.compare; saveReaderState(activeRel); renderParallelStage(); };
+    stage.innerHTML = `<div class="rd-answers-bar"><span class="rd-count">${entries.length} answers · being written</span>${layoutSwitchHtml(layout)}<span class="rd-spacer"></span></div><div class="rd-cards" role="list"></div><div class="rd-live-note" role="status"></div>`;
+    stage.querySelectorAll('[data-rd-layout]').forEach(b => b.onclick = () => {
+      localStorage.setItem('chattering.cards.layout', b.dataset.rdLayout);
+      stage.dataset.layout = ''; renderParallelStage(); rerenderReading(null);
+    });
   }
-  const select = stage.querySelector('[data-live-select]');
-  for (const [i, [, L]] of entries.entries()) {
-    let option = select.options[i];
-    if (!option) { option = new Option('', String(i)); select.add(option); }
-    const status = L.done ? (L.status === 'error' ? 'failed' : 'finished') : 'working';
-    setLiveText(option, `Answer ${i + 1} · ${L.model || 'model'} · ${status}`);
-  }
-  select.value = String(Math.min(state.liveIndex || 0, entries.length - 1));
-  stage.classList.toggle('comparing', !!state.compare);
-  stage.querySelector('[data-live-compare]').setAttribute('aria-pressed', String(!!state.compare));
-  const host = stage.querySelector('.flow-live-answers');
+  stage.dataset.layout = layout;
+  stage.setAttribute('data-layout', layout);
+  stage.style.setProperty('--cols', String(entries.length));
+  const chosen = parallelChoices.get(runId) ?? 0;
+  const host = stage.querySelector('.rd-cards');
   for (const [i, [jobId, L]] of entries.entries()) {
-    let section = host.querySelector(`[data-live-job="${CSS.escape(jobId)}"]`);
-    if (!section) {
-      section = document.createElement('section'); section.className = 'flow-answer'; section.dataset.liveJob = jobId;
-      section.innerHTML = '<div class="flow-answer-head"><b></b><span class="flow-live-status"></span><button>Stop</button></div><details class="flow-live-work"><summary>Work and tools</summary><div class="flow-live-ledger"></div></details><div class="flow-live-reply"></div><div class="flow-answer-foot"><button data-live-open hidden>Open separate conversation</button></div>';
-      host.appendChild(section);
-      section.querySelector('[data-live-open]').onclick = () => open(L.key, 'reply');
-      section.querySelector('button').onclick = async e => {
+    let card = host.querySelector(`[data-live-job="${CSS.escape(jobId)}"]`);
+    if (!card) {
+      card = document.createElement('article');
+      card.className = 'rd-card rd-live'; card.dataset.liveJob = jobId; card.setAttribute('role', 'listitem');
+      card.innerHTML = '<header class="rd-card-head"><button type="button" class="rd-pick" data-rd-pick><b></b><span class="rd-sub"></span></button><button type="button" class="rd-stop" title="Stop writing this answer">stop</button></header><div class="rd-card-body"></div>';
+      host.appendChild(card);
+      card.onclick = e => {
+        if (e.target.closest('.rd-stop, a, summary, details[open] > :not(summary)')) return;
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
+        parallelChoices.set(runId, i);
+        const p = pendingFollows.get(activeRel);
+        if (p) p.prefer = L.model ? L.model.split('/').pop() : null;
+        renderParallelStage();
+      };
+      card.querySelector('.rd-stop').onclick = async e => {
+        e.stopPropagation();
         const b = e.currentTarget; b.disabled = true;
         try { const out = await postJson('/api/run/abort', { jobId }); if (out?.error) throw Error(out.error); }
         catch (error) { errToast(error.message); b.disabled = false; }
       };
     }
-    const selected = Number(select.value);
-    // Reading owns one full-width answer. Explicit compare adds one neighbour,
-    // not arbitrarily many narrow columns.
-    section.hidden = i !== selected && (!state.compare || i !== (selected + 1) % entries.length);
-    section.toggleAttribute('data-live-selected', i === selected);
-    setLiveText(section.querySelector('b'), `Answer ${i + 1} · ${L.model || 'model'}`);
-    setLiveText(section.querySelector('.flow-live-status'), L.done ? (L.status === 'error' ? 'Failed · ' + (L.error || L.statusText || '') : 'Finished') : L.statusText || 'Working…');
-    section.querySelector('button').hidden = !!L.done;
-    section.querySelector('[data-live-open]').hidden = !state.retained;
-    section.querySelector('.flow-live-work').hidden = true;
-    renderLiveReplyLedger(section.querySelector('.flow-live-reply'), jobId, L);
+    card.setAttribute('aria-current', String(i === chosen));
+    setLiveText(card.querySelector('b'), typeof shortModelName === 'function' && L.model ? shortModelName(L.model.split('/').pop()) : L.model || 'model');
+    setLiveText(card.querySelector('.rd-sub'), L.done ? (L.status === 'error' ? 'failed · ' + (L.error || L.statusText || '') : 'done') : (L.statusText && !/^(running|starting)$/.test(L.statusText) ? L.statusText : 'writing…'));
+    card.querySelector('.rd-stop').hidden = !!L.done;
+    renderLiveReplyLedger(card.querySelector('.rd-card-body'), jobId, L);
   }
-  setLiveText(stage.querySelector('.flow-live-note'), state.retained
-    ? 'These workers own delegated work, so their conversations stay separate. Open an answer’s conversation to continue there.'
-    : entries.every(([, L]) => L.done)
-    ? 'Saving these answers into the conversation…'
-    : 'Read while the models work. When finished, choose an answer, include all, or merge.');
+  const retained = entries.some(([, L]) => L.retained);
+  setLiveText(stage.querySelector('.rd-live-note'), retained
+    ? 'These answers delegated work of their own, so each stays its own conversation.'
+    : settled ? 'Saving these answers into the conversation…'
+    : 'Click the answer you want to continue from. You can reply once they are written.');
 }

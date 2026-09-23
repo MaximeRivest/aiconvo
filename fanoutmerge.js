@@ -243,8 +243,11 @@ function computeFanoutMerge(rootRaw, forkRaws, opts = {}) {
     changed = true;
   }
 
+  // Include-all is a choice a person makes (design/41), not a default: the
+  // reader selects one answer and continues from it. Only callers that ask
+  // for it (opts.includeAll) still get the quoting entry here.
   let bothId = null;
-  if (canonical && !hasBoth && answers.filter(a => a.text.trim()).length >= 2) {
+  if (opts.includeAll === true && canonical && !hasBoth && answers.filter(a => a.text.trim()).length >= 2) {
     const both = makeBothEntry(canonical.id, answers.filter(a => a.text.trim()), opts);
     bothId = both.id;
     out.push(JSON.stringify(both));

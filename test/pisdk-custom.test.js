@@ -46,3 +46,17 @@ test('next-turn messages and midstream follow-ups retain SDK queue semantics', a
   await session.sendCustomMessage({ content: 'follow-up' }, { triggerTurn: true, deliverAs: 'followUp' });
   assert.deepEqual(sent.map(s => s.options.deliverAs), ['nextTurn', 'followUp']);
 });
+
+test('Pi 0.87 shape: structured per-run prompt options, prepared like prompt() does', async () => {
+  const sent = [];
+  const session = { isIdle: true, _runSystemPromptOptions: undefined, _baseSystemPromptOptions: { cwd: '/fixture', selectedTools: ['read'] },
+    getActiveToolNames: () => ['read', 'bash'],
+    extensionRunner: { emitBeforeAgentStart: async (text, images, base) => ({ systemPromptOptions: { ...base, appendSystemPrompt: 'mode for ' + text }, messages: [{ customType: 'context', content: 'fixture' }] }) },
+    async sendCustomMessage(message, options) { sent.push({ message, options, prepared: this._runSystemPromptOptions }); },
+  };
+  installCustomPromptPreparation(session);
+  await session.sendCustomMessage({ customType: 'merge', content: 'answers' }, { triggerTurn: true });
+  assert.deepEqual(sent.map(s => s.message.customType), ['context', 'merge']);
+  assert.equal(sent[1].prepared.appendSystemPrompt, 'mode for answers');
+  assert.deepEqual(sent[1].prepared.selectedTools, ['read', 'bash'], 'the live tool loadout is kept unless a handler changed it');
+});

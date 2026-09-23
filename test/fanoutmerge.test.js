@@ -42,7 +42,7 @@ function bothOf(content) {
 }
 
 test('folds forks into sibling branches under one canonical prompt', () => {
-  const r = computeFanoutMerge(root, [fork(1, 'model-a', 'compare'), fork(2, 'model-b', 'compare')], { newId: 'both1', now: 't' });
+  const r = computeFanoutMerge(root, [fork(1, 'model-a', 'compare'), fork(2, 'model-b', 'compare')], { newId: 'both1', now: 't', includeAll: true });
   const p = parentsOf(r.content);
   assert.equal(r.canonicalId, 'pr1');
   assert.equal(p.get('pr1'), 'a0');   // canonical prompt at the branch point
@@ -61,8 +61,8 @@ test('folds forks into sibling branches under one canonical prompt', () => {
 
 test('re-run on the merged result is a byte-for-byte no-op', () => {
   const forks = [fork(1, 'model-a', 'compare'), fork(2, 'model-b', 'compare')];
-  const first = computeFanoutMerge(root, forks, { newId: 'both1', now: 't' });
-  const again = computeFanoutMerge(first.content, forks, { newId: 'both2', now: 't2' });
+  const first = computeFanoutMerge(root, forks, { newId: 'both1', now: 't', includeAll: true });
+  const again = computeFanoutMerge(first.content, forks, { newId: 'both2', now: 't2', includeAll: true });
   assert.equal(again.changed, false);
   assert.equal(again.content, first.content);
   assert.equal(again.bothId, null); // the both entry already exists
@@ -83,7 +83,7 @@ test('repairs the crashed-merge disaster: torn line, cycle, stray prompts', () =
     msg('pr2', 'mc2', 'user', 'compare'),  // stray duplicate prompt
   );
   const forks = [fork(1, 'model-a', 'compare'), fork(2, 'model-b', 'compare')];
-  const r = computeFanoutMerge(broken, forks, { newId: 'both1', now: 't' });
+  const r = computeFanoutMerge(broken, forks, { newId: 'both1', now: 't', includeAll: true });
   const p = parentsOf(r.content);
   assert.equal(r.healed, 1);              // torn line dropped
   assert.equal(p.get('pr1'), 'a0');       // cycle broken: prompt back on the branch point
@@ -92,7 +92,7 @@ test('repairs the crashed-merge disaster: torn line, cycle, stray prompts', () =
   assert.equal(p.has('pr2'), false);      // stray duplicate removed
   assertAcyclic(p);
   // and the repair converges too
-  const again = computeFanoutMerge(r.content, forks, { newId: 'both2', now: 't2' });
+  const again = computeFanoutMerge(r.content, forks, { newId: 'both2', now: 't2', includeAll: true });
   assert.equal(again.changed, false);
 });
 
@@ -141,7 +141,7 @@ test('fan-out from an unwritten merge chain: backfills history, skips bridges', 
     msg('an' + k, 'pr' + k, 'assistant', 'answer ' + k, { model }),
   );
   const forks = [fork2(1, 'model-a'), fork2(2, 'model-b')];
-  const r = computeFanoutMerge(root, forks, { newId: 'both1', now: 't' });
+  const r = computeFanoutMerge(root, forks, { newId: 'both1', now: 't', includeAll: true });
   const p = parentsOf(r.content);
   assert.equal(p.get('mcb'), 'a0');   // shared history backfilled verbatim
   assert.equal(p.get('br'), 'mcb');   // the bridge survives — never dropped
@@ -155,7 +155,7 @@ test('fan-out from an unwritten merge chain: backfills history, skips bridges', 
   assert.equal(p.has('pr2'), false);  // duplicate prompt still collapses
   assert.equal(bothOf(r.content).parentId, 'pr1');
   assertAcyclic(p);
-  const again = computeFanoutMerge(r.content, forks, { newId: 'both2', now: 't2' });
+  const again = computeFanoutMerge(r.content, forks, { newId: 'both2', now: 't2', includeAll: true });
   assert.equal(again.changed, false); // and the merge converges
 });
 
@@ -177,4 +177,13 @@ test('the settings walk stops at real history, not just at the tail edge', () =>
   assert.equal(p.get('mcx'), 'prx');
   assert.equal(p.get('anx'), 'mcx');
   assertAcyclic(p);
+});
+
+test('without includeAll, reintegration writes no include-all entry: the reader picks one answer', () => {
+  const root = [{ type: 'session', id: 's' }, { type: 'message', id: 'u1', parentId: null, message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } }].map(JSON.stringify).join('\n') + '\n';
+  const fork = (n, model) => root + [{ type: 'message', id: 'pr' + n, parentId: 'u1', message: { role: 'user', content: [{ type: 'text', text: 'compare' }] } },
+    { type: 'message', id: 'a' + n, parentId: 'pr' + n, message: { role: 'assistant', model, content: [{ type: 'text', text: 'answer ' + n }] } }].map(JSON.stringify).join('\n') + '\n';
+  const r = computeFanoutMerge(root, [fork(1, 'model-a'), fork(2, 'model-b')], { newId: 'both1', now: 't' });
+  assert.equal(r.bothId, null);
+  assert.doesNotMatch(r.content, /chattering:both/);
 });

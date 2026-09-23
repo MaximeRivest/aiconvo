@@ -19,7 +19,26 @@ function installCustomPromptPreparation(session, { begin = () => () => false, en
     let running;
     const ready = preparation.then(async () => {
       if (cancelled()) throw new Error('Custom turn cancelled before start');
-      if (session.isIdle && session.extensionRunner) {
+      if (session.isIdle && session.extensionRunner && '_runSystemPromptOptions' in session && session._baseSystemPromptOptions) {
+        // Pi ≥ 0.87: the prompt is built per turn from structured options.
+        // Prepare them exactly as prompt() does; the SDK's own next-turn hook
+        // then applies the tool loadout and the system sections, and clears
+        // the per-run options when the run ends.
+        const runner = session.extensionRunner;
+        if (typeof runner.emitBeforeAgentStart !== 'function' || typeof session.getActiveToolNames !== 'function') {
+          throw new Error('This Pi SDK cannot prepare custom turns safely. Revalidate the custom-prompt adapter.');
+        }
+        const base = session._baseSystemPromptOptions;
+        const before = [...(base.selectedTools || [])];
+        const text = typeof message.content === 'string' ? message.content : (message.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
+        const result = await runner.emitBeforeAgentStart(text, undefined, base);
+        if (cancelled()) throw new Error('Custom turn cancelled during preparation');
+        const options = result?.systemPromptOptions || base;
+        const edited = (options.selectedTools || []).length !== before.length || (options.selectedTools || []).some((n, i) => n !== before[i]);
+        if (!edited) options.selectedTools = session.getActiveToolNames();
+        for (const extra of result?.messages || []) await send(extra, { triggerTurn: false });
+        session._runSystemPromptOptions = options;
+      } else if (session.isIdle && session.extensionRunner) {
         const runner = session.extensionRunner;
         if (typeof runner.createCommandContext !== 'function' || typeof runner.emitBeforeAgentStart !== 'function' ||
           typeof session.setActiveToolsByName !== 'function' || !('_systemPromptOverride' in session)) {

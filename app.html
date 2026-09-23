@@ -2379,6 +2379,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <link rel="stylesheet" href="/conversation-reader.css">
 <link rel="stylesheet" href="/conversation-draft.css">
 <script src="/conversation-flow.js"></script>
+<script src="/conversation-tree.js"></script>
 <script src="/conversation-reader.js"></script>
 <script src="/navigation.js"></script>
 <script src="/timeline-chart.js"></script>
@@ -2710,8 +2711,7 @@ function dispatchHash(h, { restore = false } = {}) {
     try {
       const route = JSON.parse(h.slice(5));
       if (typeof route.key !== 'string' || (route.leaf != null && typeof route.leaf !== 'string')) throw Error();
-      readerState(route.key).leaf = route.leaf || null;
-      saveReaderState(route.key);
+      if (route.leaf) saveReading(route.key, { ...readingOf(route.key), head: route.leaf, exact: !!route.exact });
       if (viewKind === 'file' && conversationFileReturn?.key === route.key)
         return returnToConversationFile(route.key, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call, h);
       return open(route.key, restore ? 'restore' : route.anchor ? 'flow:' + route.anchor : 'restore', h);
@@ -2761,7 +2761,6 @@ function dispatchHash(h, { restore = false } = {}) {
   // conversation lands on the control that opened it, not at the bottom.
   if (viewKind === 'file' && conversationFileReturn && conversationFileReturn.key === h)
     return returnToConversationFile(h, conversationFileReturn.path, conversationFileReturn.ts, conversationFileReturn.call);
-  readerState(h).leaf = null;
   return restore ? open(h, 'restore') : open(h);
 }
 
@@ -9771,37 +9770,12 @@ async function regenerateMessage(btn) {
   const i = Number(btn.dataset.msgIndex);
   const message = current && current.messages[i];
   if (!message || message.role !== 'assistant' || !message.eid || !activeRel) return;
-  if (current.source !== 'pi' && current.source !== 'pi-remote') return errToast('regenerate is available for Pi conversations');
-  const trace = computeTrace(current);
-  // A reply can contain many assistant, tool, and model-change nodes. Walk
-  // through that whole turn to the user node. Branching at the reply's last
-  // internal node makes the old reply look like an unrelated side branch.
-  const roleByNode = new Map(current.messages.filter(m => m.eid).map(m => [m.eid, m.role]));
-  let node = trace.parents.get(message.eid);
-  const seen = new Set();
-  while (node && roleByNode.get(node) !== 'user' && !seen.has(node)) {
-    seen.add(node);
-    node = trace.parents.get(node);
-  }
-  if (!node) return errToast('the message has no earlier user node');
-  const old = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'starting…';
-  // The marker lets the transcript distinguish this transport turn from a
-  // real user message. Markdown does not show the comment if it ever renders.
-  const payload = { id: activeRel, node, prompt: `Continue.\n<!-- chattering:regenerate -->\n<!-- chattering:operation ${JSON.stringify({ kind: 'regenerate', sourceEntryId: message.eid })} -->`, models: fanModels().slice(0, 1), images: [] };
-  let out = await postJson('/api/node/send', payload);
-  if (out && out.needsForce) {
-    if (confirm('A terminal owns this conversation. Stop the terminal and regenerate?')) out = await postJson('/api/node/send', { ...payload, force: true });
-    else out = null;
-  }
-  btn.disabled = false;
-  btn.textContent = old;
-  if (!out) return;
-  if (out.error) return errToast('regenerate failed: ' + out.error);
-  resetConversationReading(activeRel);
-  compareCache.delete(activeRel);
-  toast('Creating another answer. The original stays saved.');
+  if (current.source !== 'pi' && current.source !== 'pi-remote') return errToast('Asking again is available for Pi conversations');
+  // Another answer to the question this reply answers, by the same model.
+  const T = treeFor(current), at = ConversationTree.answerAt(T, message.eid);
+  if (!at) return errToast('This reply has no question to ask again.');
+  const col = message.model ? { kind: 'model', key: (message.provider ? message.provider + '/' : '') + message.model, model: message.model, provider: message.provider || null } : null;
+  return regenerateQuestion(activeRel, at.question, col, btn);
 }
 
 async function openTranscriptEditor(btn) {
@@ -9821,8 +9795,8 @@ async function openTranscriptEditor(btn) {
   const editor = document.createElement('div');
   editor.className = 'msg-editor';
   editor.innerHTML = `<textarea spellcheck="false"></textarea>
-    <div class="msg-editor-bar"><span class="dim">${branchEdit ? (d.role === 'user' ? 'Creates a new branch and answer. Keeps the original prompt.' : 'Keeps your correction on a new branch. Does not generate a reply.') : (d.kind === 'json' ? 'tool input · must stay valid JSON' : 'plain text') + ' · changes the original session file'}</span>
-    <button class="primary" data-me-save>${branchEdit ? (d.role === 'user' ? 'save and regenerate' : 'save as branch') : 'save'}</button> <button data-me-cancel>cancel</button></div>`;
+    <div class="msg-editor-bar"><span class="dim">${branchEdit ? (d.role === 'user' ? 'Asks this wording at the same point. The original stays one arrow away.' : 'Keeps your correction as another version of this answer. Nothing is generated.') : (d.kind === 'json' ? 'tool input · must stay valid JSON' : 'plain text') + ' · changes the original session file'}</span>
+    <button class="primary" data-me-save>${branchEdit ? (d.role === 'user' ? 'save and ask' : 'save as a version') : 'save'}</button> <button data-me-cancel>cancel</button></div>`;
   msg.appendChild(editor);
   const ta = editor.querySelector('textarea');
   ta.value = d.raw;
@@ -9834,6 +9808,19 @@ async function openTranscriptEditor(btn) {
     const save = editor.querySelector('[data-me-save]');
     save.disabled = true;
     save.textContent = 'saving…';
+    if (branchEdit && d.role === 'user') {
+      // An edited question is asked at the same point as the original: its
+      // own answer follows, and the original wording stays one arrow away.
+      const T = treeFor(current), parent = T.parent.get(d.eid || current.messages[i].eid);
+      if (parent == null) { save.disabled = false; save.textContent = 'save and ask'; return errToast('The first question cannot be reworded in place yet. Fork to ask it differently.'); }
+      const run = await postJson('/api/node/send', { id: key, node: parent, prompt: ta.value, models: pickedModels, images: [] });
+      if (!run || run.error) { save.disabled = false; save.textContent = 'save and ask'; return errToast('Could not ask the edited question: ' + (run?.error || 'no answer')); }
+      close();
+      expectAnswer(key, { origin: parent, jobIds: run.job ? [run.job.id] : [] });
+      echoUserPrompt(ta.value);
+      toast('Asking the edited question. The original wording stays saved.');
+      return;
+    }
     let out;
     try {
       out = await (await fetch('/api/transcript/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9842,12 +9829,8 @@ async function openTranscriptEditor(btn) {
     if (out.error) { save.disabled = false; save.textContent = 'save'; return errToast('edit failed: ' + out.error); }
     if (out.branched) {
       close();
-      if (out.role === 'user') {
-        const run = await postJson('/api/node/send', { id: key, node: out.node, prompt: `Continue.\n<!-- chattering:regenerate -->\n<!-- chattering:operation ${JSON.stringify({ kind: 'regenerate', sourceEntryId: out.node })} -->`, models: pickedModels, images: [] });
-        if (run.error) errToast('Your edited branch is saved, but the answer could not start: ' + run.error);
-        else toast('Prompt saved on a new branch. Generating an answer.');
-      } else toast('Correction saved on a new branch. Write below to continue.');
-      if (activeRel === key) await openAfterBranch(key);
+      toast('Correction saved as another version of this answer. Write below to continue from it.');
+      if (activeRel === key) { await open(key, 'preserve'); if (out.node && current?.key === key) await moveReading(key, out.node, { exact: true }); }
       return;
     }
     toast(out.reopened ? 'saved · the agent restarts with the edited context' : 'saved into the session file');
@@ -10844,10 +10827,12 @@ async function headlessSendFromComposer(btn, promptOverride) {
     hideSlashPop();
   }
   const models = fanModels();
+  // The next message continues from the head. While a reply is being written
+  // on the path you read, a single-model send joins that turn as a follow-up.
   const trace = current && computeSendTrace(current);
-  const node = models.length >= 2
-    ? (trace && trace.leaf) || null
-    : (trace && trace.leaf !== trace.fileLeaf ? trace.leaf : null);
+  const running = [...activeRuns.values()].find(r => r.key === key && r.status === 'running' && !r.fanoutId);
+  const runningHere = running && trace && (!running.node || trace.onPath.has(nodeOfRaw(trace.tree, running.node)));
+  const node = runningHere && models.length < 2 ? null : sendNodeFor(current);
   btn.disabled = true;
   btn.textContent = 'starting…';
   // Show the strip now: the heartbeat is already on it.
@@ -10856,7 +10841,7 @@ async function headlessSendFromComposer(btn, promptOverride) {
   if ($('liveStrip')) $('liveStrip').hidden = false;
   const images = [];
   if (fromBox) for (const img of (window._agentImages || [])) images.push(await shrinkAgentImage(img));
-  const payload = { id: key, prompt, node, models, images, context: attachedContext(), expectedLeaf: trace?.fileLeaf || null };
+  const payload = { id: key, prompt, node, models, images, context: attachedContext() };
   let out = await postJson('/api/node/send', payload);
   if (out && out.needsForce) {
     if (confirm('A terminal owns this conversation. Stop the terminal and send from the web?'))
@@ -10879,9 +10864,10 @@ async function headlessSendFromComposer(btn, promptOverride) {
     ta.blur();
     updateComposeMin();
   }
-  resetConversationReading(key);
-  compareCache.delete(key);
+  // The head follows the new message: an exact branch point now continues.
+  if (current?.key === key && readingOf(key).exact) saveReading(key, { ...readingOf(key), exact: false });
   if (out.queued) { toast('queued into the running turn — pi picks it up as a follow-up (session model)'); return true; }
+  if (Array.isArray(out.runs) && out.runs.length) expectAnswer(key, { origin: node, prefer: (models[0] && models[0].modelId) || null, jobIds: out.runs.map(r => r.jobId) });
   // Seed the shared stage before the first SSE delta. Every later event carries
   // the same fan-out identity, so reload/reconnect can rebuild it too.
   if (Array.isArray(out.runs)) for (const r of out.runs) {
@@ -10889,7 +10875,7 @@ async function headlessSendFromComposer(btn, promptOverride) {
     activeRuns.set(r.jobId, seed); ledgerAbsorb(seed);
   }
   if (Array.isArray(out.runs)) renderRunCards();
-  toast(out.runs ? out.runs.length + ' models running in parallel — replies appear side by side' : 'running · ' + ((out.job && out.job.model) || (models[0] && models[0].modelId) || 'session model'));
+  toast(out.runs ? out.runs.length + ' models are answering side by side' : 'running · ' + ((out.job && out.job.model) || (models[0] && models[0].modelId) || 'session model'));
   return true;
 }
 
@@ -12606,6 +12592,23 @@ function wireAgentComposer() {
   renderAgentThumbs();
 }
 
+// Everything inside the transcript that needs handlers. Safe to run again
+// after a partial re-render (moving the head patches blocks in place).
+function wireTranscript() {
+  wireConversationReader();
+  foldLongMessages();
+  wireRunButtons();
+  $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
+  $('view').querySelectorAll('[data-media-src]').forEach(b => b.onclick = e => {
+    e.stopPropagation(); e.preventDefault();
+    openMediaLightbox(b.dataset.mediaSrc, b.title || 'image');
+  });
+  $('view').querySelectorAll('[data-transcript-path]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
+  wireTranscriptPathCandidates($('view'), activeRel);
+  wireToolGroups($('view'));
+  if (typeof delegationUI !== 'undefined') delegationUI.attachCards($('conversationTranscript'));
+}
+
 async function renderConv(scroll) {
   stopReaderLanding();
   const d = current;
@@ -12644,7 +12647,7 @@ async function renderConv(scroll) {
     `<div id="liveReplies" class="transcript" data-conversation-key="${esc(d.key)}"></div><div id="runCards"></div><div class="parallel-stage" id="parallelStage" hidden></div>` +
     readerDestinationHtml(d) + agentComposerHtml(d);
   restoreLiveReplyHandoff(liveHandoff);
-  $('liveReplies').dataset.readingLeaf = readerState(d.key).leaf || 'live';
+  $('liveReplies').dataset.readingLeaf = headOf(d) || 'live';
   if ($('readerDestination') && $('composerDock')) $('composerDock').prepend($('readerDestination'));
   mountDelegationView();
   delegationUI.attachCards($('conversationTranscript'));
@@ -12676,10 +12679,8 @@ async function renderConv(scroll) {
   if (scroll == null || scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
   else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
   try {
-  wireConversationReader();
+  wireTranscript();
   renderRunCards();
-  foldLongMessages();
-  wireRunButtons();
   hintReadKey();
   wireHead();
   wireAgentComposer();
@@ -12703,14 +12704,6 @@ async function renderConv(scroll) {
   }
   if (keepCompose && newTa && keepCompose.focused) newTa.focus({ preventScroll: true });
   composeShareCheck();
-  $('view').querySelectorAll('[data-file-diff]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
-  $('view').querySelectorAll('[data-media-src]').forEach(b => b.onclick = e => {
-    e.stopPropagation(); e.preventDefault();
-    openMediaLightbox(b.dataset.mediaSrc, b.title || 'image');
-  });
-  $('view').querySelectorAll('[data-transcript-path]').forEach(b => b.onclick = e => handleFileControlClick(e, b));
-  wireTranscriptPathCandidates($('view'), activeRel);
-  wireToolGroups($('view'));
   } catch (err) { console.error('transcript wiring failed — the words still show:', err); }
   // Default landing is the bottom (the newest messages). 'top' opts out.
   // 'hit:N' lands on the exact message a search result pointed at.
@@ -12725,12 +12718,12 @@ async function renderConv(scroll) {
     else if (scroll === 'bottom') $('view').scrollTop = $('view').scrollHeight;
     else if (scroll === 'reply') { const t = replyAnchorTop(); $('view').scrollTop = t == null ? $('view').scrollHeight : t; }
     else if (scroll === 'preserve' || scroll === 'restore') {
-      const anchor = scroll === 'preserve' ? readingAnchor : readerState(d.key).positions[readerState(d.key).leaf || 'live'];
+      const anchor = scroll === 'preserve' ? readingAnchor : readerState(d.key).positions[headOf(d) || 'live'];
       if (!restoreReaderAnchor(anchor)) $('view').scrollTop = $('view').scrollHeight;
     }
     else if (scroll === 'compare' || (typeof scroll === 'string' && /^(compare|flow):/.test(scroll))) {
       const wanted = scroll.includes(':') ? scroll.slice(scroll.indexOf(':') + 1) : '';
-      const target = wanted ? $('view').querySelector(`[data-flow-anchor="${CSS.escape(wanted)}"], [data-eid="${CSS.escape(wanted)}"]`) : [...$('view').querySelectorAll('.flow-turn')].at(-1);
+      const target = wanted ? $('view').querySelector(`[data-flow-anchor="${CSS.escape(wanted)}"], [data-eid="${CSS.escape(wanted)}"]`) : [...$('view').querySelectorAll('.rd-answers')].at(-1);
       if (target) target.scrollIntoView({ block: 'start' });
     }
     else if (mk) mk.scrollIntoView({ block: 'center' });
@@ -12744,7 +12737,7 @@ async function renderConv(scroll) {
       $('view').scrollTop = top == null ? $('view').scrollHeight : top;
     });
   } else if (scroll === 'restore' || scroll === 'preserve') {
-    const anchor = scroll === 'preserve' ? readingAnchor : readerState(d.key).positions[readerState(d.key).leaf || 'live'];
+    const anchor = scroll === 'preserve' ? readingAnchor : readerState(d.key).positions[headOf(d) || 'live'];
     maintainReaderLanding(() => { if (!restoreReaderAnchor(anchor)) $('view').scrollTop = $('view').scrollHeight; });
   }
   if (hitEl) {
@@ -12782,14 +12775,7 @@ function revealTranscriptHit(view, scroll) {
 // Reading and sending share ancestry, not selection. Only an explicit server
 // operation changes the file's continuation; browsing never supplies a send leaf.
 
-function computeTrace(d) {
-  return ConversationFlow.trace(d, d && readerState(d.key).leaf);
-}
-function computeSendTrace(d) {
-  return ConversationFlow.trace(d);
-}
 
-const compareCache = new Map();
 // ---- run cards: live progress of headless runs on this conversation ----
 // Streaming discipline: the card is patched in place (text nodes only), never
 // rebuilt per token. That keeps <details> fold state, text selection, focus,
@@ -12818,6 +12804,9 @@ function wireToolGroups(view) {
   toolGroupStick.disconnect(); // the previous render's lines are gone
   for (const g of view.querySelectorAll('.toolgroup')) {
     const summary = g.querySelector(':scope > summary');
+    if (summary) toolGroupStick.observe(summary);
+    if (g.dataset.tgWired) continue;
+    g.dataset.tgWired = '1';
     g.addEventListener('toggle', () => {
       const key = g.dataset.msgKey || activeRel;
       toolGroupOpen.set(key + '|' + g.dataset.gkey, g.open);
@@ -12835,7 +12824,6 @@ function wireToolGroups(view) {
       const delta = summary.getBoundingClientRect().top - before;
       if (Math.abs(delta) > 1) view.scrollTop += delta;
     });
-    toolGroupStick.observe(summary);
   }
 }
 
@@ -12866,7 +12854,7 @@ function ledgerAbsorb(r) {
   // Events are patches, not complete run snapshots. In particular the final
   // event carries neither startedAt nor tail. Never erase known ownership.
   if (r.key && r.key !== L.key) return;
-  for (const field of ['statusText', 'model', 'startedAt', 'fanoutId', 'fanoutRootKey',
+  for (const field of ['statusText', 'model', 'startedAt', 'node', 'intent', 'fanoutId', 'fanoutRootKey',
     'fanoutNode', 'fanoutIndex', 'fanoutCount', 'status', 'error', 'finishedAt']) {
     if (r[field] !== undefined) L[field] = r[field];
   }
@@ -13982,7 +13970,7 @@ async function showTree(key, opts = {}) {
     <div class="treebar" id="treebar"></div></div>`;
   const wrap = $('treewrap');
   // Keyboard navigation state: T opens the tree, arrows walk it.
-  const readingLeaf = readerState(key).leaf;
+  const readingLeaf = current?.key === key ? headOf(current) : readingOf(key).head;
   const readingNode = readingLeaf && rows.find(n => (n.entryRefs || []).some(ref => ref.key === key && ref.id === readingLeaf));
   const leaf = readingNode || hereNode || rows[rows.length - 1] || null;
   const keepSel = opts.keepSel && byId.has(opts.keepSel) ? opts.keepSel : null;
@@ -14006,8 +13994,7 @@ async function showTree(key, opts = {}) {
     const pick = n.picks.find(p => p.id === el.dataset.fanChoice && p.kind === el.dataset.fanKind)
       || n.picks.find(p => p.kind === el.dataset.fanKind);
     const targetKey = pick?.key || n.key || key;
-    if (!pick?.id) readerGroup(targetKey, n.promptId).compare = true;
-    await browseConversationPath(targetKey, pick?.id || n.promptId, n.promptId, { exact: true });
+    await moveReading(targetKey, pick?.id || n.promptId, { anchor: n.promptId });
   });
   // Land on the newest message of the active branch (or keep the reader's
   // selection when a snapshot re-drew the tree under them).
@@ -14022,7 +14009,16 @@ function treeOpenNode(n) {
     else toast('that delegated conversation is not indexed yet');
     return;
   }
-  openAtTs(n.key || treeNav.key, n.jumpTs);
+  readTreeNode(n.key || treeNav.key, n);
+}
+// Reading a box moves the head to it (and on down the route last read there).
+async function readTreeNode(key, n) {
+  const id = n.messageId || n.id;
+  await moveReading(key, id, { anchor: null });
+  if (current?.key === key) {
+    const el = $('view').querySelector(`[data-eid="${CSS.escape(id)}"]`);
+    if (el) el.scrollIntoView({ block: 'start' });
+  }
 }
 
 // ---- tree keyboard navigation ----
@@ -14114,8 +14110,8 @@ function paintTreeBar() {
   };
   bar.querySelector('[data-act=read]').onclick = () => {
     const pick = fanPicks.find(p => p.id && p.id === treeNav.fanPick);
-    if (n.role === 'fanout') return browseConversationPath(pick?.key || key, pick?.id || n.promptId, n.promptId, { exact: true });
-    openAtTs(key, n.jumpTs);
+    if (n.role === 'fanout') return moveReading(pick?.key || key, pick?.id || n.promptId, { anchor: n.promptId });
+    readTreeNode(key, n);
   };
   const bb = bar.querySelector('[data-act=branch]');
   if (bb) bb.onclick = async ev => {
@@ -14187,25 +14183,10 @@ function openAggregateDialog(key, n) {
 }
 
 async function branchFrom(key, n, btn) {
-  const old = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'moving…';
-  try {
-    const res = await fetch('/api/branch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: key, node: n.id }) });
-    const d = await res.json();
-    if (d.error) throw new Error(d.error);
-    // Land IN the conversation: the branch point wears a standing orange
-    // ring, the composer sits right below it — the path ends here. The old
-    // continuation is one folded ⤓ other-branch line.
-    resetConversationReading(key);
-    compareCache.delete(key);
-    await openAfterBranch(key);
-    toast('branched — the conversation ends here now; write to continue');
-  } catch (e) {
-    btn.disabled = false;
-    btn.textContent = old;
-    errToast(e.message || 'the branch failed');
-  }
+  // Continue from a box: the head moves there exactly. Nothing is written;
+  // the next message starts the new path, and what came after stays saved.
+  await moveReading(key, n.id, { exact: true });
+  await openAfterBranch(key);
 }
 
 // The tree opens the same branch-preserving editor as the transcript.
@@ -14230,14 +14211,13 @@ async function editFrom(key, n, btn) {
 // box just branched after — folded other-branch details do not count), and
 // put the caret in the composer.
 async function openAfterBranch(key) {
-  resetConversationReading(key);
-  compareCache.delete(key);
-  await open(key, 'bottom');
+  if (current?.key !== key || viewKind !== 'conversation') await open(key, 'bottom');
+  else $('view').scrollTop = $('view').scrollHeight;
   requestAnimationFrame(() => {
     const t = $('conversationTranscript');
     // The branch point can be a message OR a whole steps group ("13 steps ·
     // thinking ×7 · bash ×5"). Ring whichever stands last on the path.
-    const last = t ? [...t.querySelectorAll(':scope > .msg, :scope > .toolgroup')].pop() : null;
+    const last = t ? [...t.querySelectorAll(':scope > .rd-block > .msg, :scope > .rd-block > .toolgroup')].pop() : null;
     if (last) {
       last.classList.add('branchmark');
       // A branch on a work box must not look like one thin folded line —
@@ -17418,10 +17398,9 @@ live.onmessage = ev => {
     }
     return;
   }
+  if (d.type === 'reading') { applyReadingEvent(d); return; }
   if (d.type === 'fanout-retained') {
-    readerGroup(d.key, 'run:' + d.fanoutId).retained = true;
-    saveReaderState(d.key);
-    compareCache.delete(d.key);
+    for (const L of runLedgers.values()) if (L.fanoutId === d.fanoutId) L.retained = true;
     if (activeRel === d.key && current) renderParallelStage();
     return;
   }
@@ -17429,7 +17408,6 @@ live.onmessage = ev => {
     // The parallel opinions now live INSIDE the parent conversation as real
     // sibling branches; the fork files are gone. Land on the comparison,
     // and only then let the live columns yield to it.
-    compareCache.delete(d.key);
     relatedCache.delete(d.key);
     ctxMeterCache.delete(d.key);
     // Settlement adds history; it never changes a reader's selected path.
@@ -17438,8 +17416,9 @@ live.onmessage = ev => {
       if (viewKind === 'conversation') renderRunCards();
     };
     if (activeRel === d.key && current) {
-      const follow = readerAtTail() && !readerState(d.key).leaf;
-      open(d.key, follow ? 'compare' : 'preserve').then(clearLedgers, () => {});
+      const stage = $('parallelStage');
+      if (stage) stage.dataset.settling = d.fanoutId;
+      open(d.key, 'preserve').then(clearLedgers, () => {});
     } else clearLedgers();
     return;
   }
@@ -17485,11 +17464,9 @@ live.onmessage = ev => {
       if (root) {
         // Navigation waits for 'fanout-settled': the server first folds the
         // fork branches back into the parent file, then says where to look.
-        compareCache.delete(root);
         ctxMeterCache.delete(root);
         if (activeRel === root && current) refreshCtxMeter(current);
       } else if (activeRel && d.key !== activeRel) {
-        compareCache.delete(activeRel);
         ctxMeterCache.delete(activeRel);
         if (current) refreshCtxMeter(current);
       }
@@ -17559,7 +17536,6 @@ live.onmessage = ev => {
     return;
   }
   relatedCache.delete(d.key);
-  compareCache.delete(d.key);
   ctxMeterCache.delete(d.key);
   if (d.key === activeRel && current) refreshCtxMeter(current);
   const i = sessions.findIndex(s => s.key === d.key);
