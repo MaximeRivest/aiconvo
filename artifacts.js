@@ -243,7 +243,7 @@
     pane.id = 'artifactPane';
     pane.setAttribute('aria-label', 'Artifact');
     pane.innerHTML = `<div class="art-resize" role="separator" aria-orientation="vertical" aria-label="Resize the artifact panel" tabindex="0"></div>
-      <header class="art-head">
+      <div class="art-head">
         <button type="button" class="art-close" data-art-act="close" title="Close the artifact panel" aria-label="Close">✕</button>
         <div class="art-titles"><b class="art-title"></b><small class="art-sub"></small></div>
         <span class="art-versions" role="group" aria-label="Versions">
@@ -257,7 +257,7 @@
           <a class="art-newtab" target="_blank" rel="noopener noreferrer" title="Open in its own browser tab" aria-label="Open in a new tab">↗</a>
           <button type="button" data-art-act="full" title="Full screen" aria-label="Full screen">⤢</button>
         </span>
-      </header>
+      </div>
       <p class="art-banner" hidden></p>
       <div class="art-body"></div>`;
     document.body.appendChild(pane);
@@ -438,6 +438,10 @@
     const calls = artifactCallsOf(d);
     const known = seenArtifacts.get(d.key);
     seenArtifacts.set(d.key, new Set(calls.map(m => m.id)));
+    // On a phone the panel covers the conversation: it opens only when asked
+    // (the card), never by itself.
+    const narrow = window.matchMedia('(max-width: 700px)').matches;
+    if (narrow && (!state || state.key !== d.key)) { if (state && state.key !== d.key) hidePanel(); return; }
     if (known) {
       // A new artifact landed while this conversation is open: show it.
       const fresh = calls.filter(m => !known.has(m.id));

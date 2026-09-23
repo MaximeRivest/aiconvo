@@ -1,8 +1,45 @@
 # 67 — Artifacts (proposal)
 
-Status: **proposal**, 2026-09-23. Builds on `65-open-webui-study.md`,
-`66-one-tree-one-head.md` and the Claude / ChatGPT study of the same day
-(conversation 01a0ce59). Nothing here is built yet.
+Status: **built** 2026-09-23 (all five phases; publishing waits for a public
+domain). Builds on `65-open-webui-study.md`, `66-one-tree-one-head.md` and the
+Claude / ChatGPT study of the same day (conversation 01a0ce59).
+
+## As built
+
+| Piece | File |
+|---|---|
+| Preview origin: capabilities, policy, MCP Apps sandbox proxy, view kit, file serving from disk or a version | `preview.js` (listener in `server.js`, port 7435; TLS 7445 beside the LAN one; Tailscale Serve 8443) |
+| Versions of artifact folders, binary assets included; loose folders too | `checkpoint-store.js` (`artifact_scopes`), `checkpoint-extension.js` |
+| Endpoints: `/api/artifacts/config`, `resolve` (versions on the head's path), `widget`, `blob`, `declare` | `server.js` |
+| Tools `artifact` and `show` for every web session | `extensions/artifacts.ts` |
+| Widgets, cards, code previews, the panel, the MCP Apps host | `artifacts.js`, `artifacts.css`; hooks in `conversation-reader.js` and `app.html` |
+| Slides: the format for the model, and the viewer | `artifact-types/slides/SKILL.md`, `viewer.html` |
+| Hardening: browser requests another page starts are refused | `server.js` (`Sec-Fetch-Site`) |
+| Tests | `test/artifacts.test.js`, `test/checkpoints-review.test.js` |
+
+Decisions taken while building, with their reasons:
+
+- **Widgets go through the MCP Apps sandbox proxy** (host sends the HTML by
+  `postMessage`), exactly as the spec requires of web hosts, so MCP servers'
+  own interfaces can use the same host later. **Full artifacts load by URL**
+  (they are several files with relative links); the panel talks to them
+  directly with the same messages.
+- **Stateless signed capabilities** (HMAC, 30 days, secret in
+  `~/.local/share/chattering/preview-secret`) instead of an in-memory token
+  table: links survive restarts and history; access is re-checked on every
+  request, so revocation still works at once.
+- **Network open by default** (`artifactNetwork: 'open'`), per the trust
+  default; `libraries` is one setting away. Plugins are always off; only
+  Chattering's own addresses may frame a preview (`frame-ancestors`).
+- **`ui/message` fills the message box instead of sending**: a page cannot
+  start a model run by itself. `ui/update-model-context`, `tools/call` and
+  `resources/read` answer "not supported yet" (no MCP servers yet).
+- **Widgets appear when their tool call is complete**, not while streaming
+  (`tool-input-partial` is not sent): simpler, and the HTML then comes from
+  the saved conversation, so a reload shows the same thing.
+- On a phone the panel is a full-screen sheet opened from the card; it never
+  opens by itself there.
+
 
 ## What the study showed
 
