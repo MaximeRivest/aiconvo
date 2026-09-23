@@ -35,7 +35,7 @@ const VOICE_EASY_AT = 0.6;       // going somewhere: "go back" undoes it
 const VOICE_RISKY_AT = 0.92;     // hard to take back
 // Easy: moving, looking, highlighting, folding, selecting — seen at once, undone at once.
 const VOICE_EASY = new Set(['open', 'help', 'settings', 'go_home', 'go_back', 'go_forward', 'text_size', 'cursor', 'undo', 'ask_box', 'command_box',
-  'autoscroll', 'autoscroll_adjust', 'point', 'fold', 'zen', 'unread', 'tree_move', 'find', 'find_again', 'select', 'chunk', 'scroll']);
+  'key', 'autoscroll', 'autoscroll_adjust', 'point', 'fold', 'zen', 'unread', 'tree_move', 'find', 'find_again', 'select', 'chunk', 'scroll']);
 const VOICE_RISKY = new Set(['send', 'stop_listening', 'replace', 'rewrite', 'reject_change']);
 const VOICE_PENDING_MS = 12000;  // a suggestion waits this long for a yes
 const VOICE_DECISIONS_SHOWN = 8;
@@ -944,6 +944,47 @@ function voiceScrollCenter(ed, pos) {
   return EV && EV.scrollIntoView ? EV.scrollIntoView(pos, { y: 'center' }) : [];
 }
 
+// ---- keys ----
+// A key pressed for you: sent where the keyboard is now (the focused
+// element, else the page), down then up, as the app's own shortcuts
+// listen for them. A browser only lets a page imitate keys, not type
+// them for real: shortcuts, Escape, Enter to send, the editor's keys and
+// arrows all work; in a plain text field a letter is inserted by hand.
+const VOICE_KEY_CODES = { Escape: 'Escape', Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete', ArrowUp: 'ArrowUp', ArrowDown: 'ArrowDown', ArrowLeft: 'ArrowLeft', ArrowRight: 'ArrowRight', PageUp: 'PageUp', PageDown: 'PageDown', Home: 'Home', End: 'End', ' ': 'Space' };
+function voiceKey({ key, ctrl, shift, alt, times }) {
+  if (!key) throw new Error('which key?');
+  const n = Math.max(1, Math.min(50, Number(times) || 1));
+  const mods = { ctrlKey: ctrl === 'yes', shiftKey: shift === 'yes', altKey: alt === 'yes', metaKey: false };
+  const k = mods.shiftKey && key.length === 1 ? key.toUpperCase() : key;
+  const code = VOICE_KEY_CODES[key] || (/^F\d+$/.test(key) ? key : /^[a-z]$/.test(key) ? 'Key' + key.toUpperCase() : /^\d$/.test(key) ? 'Digit' + key : key);
+  for (let i = 0; i < n; i++) {
+    const target = document.activeElement && document.activeElement !== document.body ? document.activeElement : document;
+    const init = { key: k, code, bubbles: true, cancelable: true, composed: true, ...mods };
+    const down = new KeyboardEvent('keydown', init);
+    const handled = !target.dispatchEvent(down);
+    // A text field does nothing with an imitated key: do what it would.
+    if (!handled && !mods.ctrlKey && !mods.altKey && (target.tagName === 'TEXTAREA' || (target.tagName === 'INPUT' && /^(text|search|url|email|)$/.test(target.type)))) voiceKeyInField(target, k);
+    target.dispatchEvent(new KeyboardEvent('keyup', init));
+  }
+  const name = (mods.ctrlKey ? 'Ctrl+' : '') + (mods.altKey ? 'Alt+' : '') + (mods.shiftKey ? 'Shift+' : '') + (key === ' ' ? 'Space' : key.length === 1 ? key.toUpperCase() : key);
+  return 'pressed ' + name + (n > 1 ? ' \u00d7' + n : '');
+}
+function voiceKeyInField(el, key) {
+  const a = el.selectionStart, b = el.selectionEnd, v = el.value;
+  let next = v, at = a;
+  if (key.length === 1) { next = v.slice(0, a) + key + v.slice(b); at = a + 1; }
+  else if (key === 'Backspace') { const f = a === b ? Math.max(0, a - 1) : a; next = v.slice(0, f) + v.slice(b); at = f; }
+  else if (key === 'Delete') { next = v.slice(0, a) + v.slice(a === b ? a + 1 : b); }
+  else if (key === 'Enter' && el.tagName === 'TEXTAREA') { next = v.slice(0, a) + '\n' + v.slice(b); at = a + 1; }
+  else if (key === 'ArrowLeft') at = Math.max(0, a - 1);
+  else if (key === 'ArrowRight') at = Math.min(v.length, b + 1);
+  else if (key === 'Home') at = 0;
+  else if (key === 'End') at = v.length;
+  else return;
+  if (next !== v) { el.value = next; el.dispatchEvent(new Event('input', { bubbles: true })); }
+  el.selectionStart = el.selectionEnd = at;
+}
+
 // Undo and redo, as the keys do (the editor's own history).
 function voiceUndo({ how = 'undo' }) {
   const ed = voiceEditor();
@@ -1103,6 +1144,7 @@ const VOICE_ACTIONS = {
   select: { available: () => !!voiceEditor(), run: (args, said) => voiceSelectWhat(args, said) },
   cursor: { available: () => !!voiceEditor(), run: args => voiceCursor(args) },
   undo: { available: () => !!voiceEditor(), run: args => voiceUndo(args) },
+  key: { available: () => true, run: args => voiceKey(args) },
   fix_dictation: { available: () => !!(voiceEditor() && voiceEditor().runAiCommand), run: () => voiceFixDictation() },
   chunk: { available: () => voiceCells().length > 0, run: args => voiceChunk(args) },
   chunk_run: {
@@ -1238,6 +1280,8 @@ function voiceReplace(old, insert) {
   const meta = { source: 'voice', label: 'Voice: ' + named + ' \u2192 \u201c' + insert + '\u201d' };
   if (ed.review && ed.review.propose) {
     if (!ed.review.propose({ from, to, insert, meta })) throw new Error('a change is under review there: accept or reject it first');
+    // The cursor on the new change: "accept" or "reject" then means it.
+    ed.view.dispatch({ selection: { anchor: from }, scrollIntoView: true });
     return (insert ? 'replaced ' : 'deleted ') + named + ', to review (Alt+Y keeps it)';
   }
   ed.view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, userEvent: 'input.voice' });
@@ -1310,9 +1354,9 @@ async function voiceContext(said) {
 function voiceNeeds(d) {
   // A button is as risky as what it says: "delete", "abort", "send"…
   const control = d.action === 'press' && voice.controls ? voice.controls.get(d.args && d.args.control) : null;
-  const risky = VOICE_RISKY.has(d.action) || (control && VOICE_RISKY_CONTROL.test(control.label)) || (d.action === 'chunk_run' && d.args && d.args.which === 'all');
+  const risky = VOICE_RISKY.has(d.action) || (d.action === 'key' && d.args && (['Enter', 'Delete', 'Backspace'].includes(d.args.key) || d.args.ctrl === 'yes')) || (control && VOICE_RISKY_CONTROL.test(control.label)) || (d.action === 'chunk_run' && d.args && d.args.which === 'all');
   // Stopping the scrolling is never harmful: the top guess is enough.
-  const harmless = d.action === 'autoscroll_adjust' && d.args && d.args.how === 'stop';
+  const harmless = (d.action === 'autoscroll_adjust' && d.args && d.args.how === 'stop') || (d.action === 'key' && d.args && d.args.key === 'Escape');
   // A replacement is shown as a change to review: "reject" undoes it.
   const reviewed = d.action === 'replace' && voiceEditor() && voiceEditor().review && voiceEditor().review.propose;
   return risky && !reviewed ? VOICE_RISKY_AT : harmless ? 0 : reviewed || VOICE_EASY.has(d.action) ? VOICE_EASY_AT : VOICE_ACT_AT;

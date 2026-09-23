@@ -241,6 +241,29 @@ test('voice commands on the page: cursor, buttons, folds, scrolling, zen, tree, 
   await done('undo', { how: 'redo' });
   assert.equal(await ev(docText), beforeUndo, 'redo redoes');
 
+  // Keys: to the editor (its own keymap: Ctrl+Z undoes), to a text field
+  // (typed by hand), Escape to the page (closes the voice help).
+  await ev(`voiceEditor().focus(); voiceEditor().view.dispatch({ selection: { anchor: 0 } })`);
+  assert.equal(await done('key', { key: 'ArrowDown', times: '2' }), 'pressed ArrowDown \u00d72');
+  assert.equal(await ev(at), '3:0', 'the editor moved down two lines');
+  const box = `(() => { let i = document.getElementById('kt'); if (!i) { i = document.createElement('input'); i.id = 'kt'; document.body.append(i); } return i; })()`;
+  await ev(`${box}.focus()`);
+  await done('key', { key: 'a' }); await done('key', { key: 'b', shift: 'yes' }); await done('key', { key: 'Backspace' }); await done('key', { key: 'c' });
+  assert.equal(await ev(`${box}.value`), 'ac');
+  await ev(`${box}.remove(); voiceShowHelp(true)`);
+  assert.equal(await ev(`voice.helpOpen`), true);
+  assert.equal(await done('key', { key: 'Escape', ctrl: 'no' }), 'pressed Escape');
+
+  // Accept right after a voice replacement: the change is under the cursor.
+  await done('replace', { old: 'Between the cells.', new: 'Among the cells.' });
+  await ev(`voiceEditor().view.dispatch({ selection: { anchor: 0 } })`);
+  await done('replace', { old: 'It has three lines.', new: 'It has lines.' });
+  assert.equal(await ev(`voiceEditor().review.summary().changes`), 2);
+  assert.equal(await done('accept_change', {}), 'accepted the change');
+  assert.match(await ev(docText), /It has lines\./);
+  assert.equal(await done('reject_change', { all: 'all' }), 'rejected the change');
+  assert.match(await ev(docText), /Between the cells\./);
+
   // A command cut in two by a pause: "go to line" (which line?) then
   // "eight" (nothing alone) \u2014 decided again joined, and done.
   await ev(`window.__asked = []; window.voiceDecideSaid = async said => {

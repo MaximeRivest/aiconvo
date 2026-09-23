@@ -334,6 +334,19 @@ right** (three more got no answer: TypeSafe was overloaded); 60 sure enough
 to act at once. The miss: "go to the line a place to try voice" is taken
 for dictation. TypeSafe answered in 1.4–2.6 s median this evening.
 
+### Keys, and reviewing voice's own changes
+
+`key` presses any key (Escape, Enter, Tab, arrows, Backspace, Delete, Page
+Up/Down, Home, End, F1–F12, letters, digits) with Ctrl, Shift or Alt, N
+times: a keydown and keyup sent to the focused element, as the app's
+shortcuts and the editor's keymap listen for them. A browser page cannot
+type for real, so in a plain text field the key's effect (a letter,
+Backspace, arrows) is done by hand. Escape acts at any confidence; Enter,
+Delete, Backspace and Ctrl-keys need 92%. A voice replacement leaves the
+cursor on its change, so "accept" / "reject" mean it. Against the real
+Jev: 19 of 20 ("present" alone, misheard for "press enter", is no command:
+too common a word to press Enter on).
+
 ## Limits and next steps
 
 - Parakeet and the always-on Qwen service share the GPUs; when the Qwen

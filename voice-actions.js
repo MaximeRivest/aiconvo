@@ -114,6 +114,13 @@
       from: { kind: 'list', optional: true, list: 'found', question: 'In "select from X to Y", the words X where the selection starts?' },
       to: { kind: 'list', optional: true, list: 'found', question: 'In "select from X to Y", the words Y where the selection ends?' },
     } },
+    key: { label: 'Press a key of the keyboard, with modifiers if said (Escape, Enter, Tab, arrows, Backspace, Delete, Page Up/Down, Home, End, a letter or a digit, F1\u2013F12), once or several times', say: 'press escape, hit enter, press tab three times, press control s, press shift tab, backspace, press alt L, press the down arrow twice', args: {
+      key: { kind: 'fixed', options: null, question: 'Which key does the user want pressed (without the modifiers)? "Present" misheard for "press enter" is Enter.' },
+      ctrl: { kind: 'fixed', optional: true, options: { yes: 'control (ctrl) is said', no: 'not said' }, question: 'Is Control (ctrl) held with it?' },
+      shift: { kind: 'fixed', optional: true, options: { yes: 'shift is said', no: 'not said' }, question: 'Is Shift held with it?' },
+      alt: { kind: 'fixed', optional: true, options: { yes: 'alt or option is said', no: 'not said' }, question: 'Is Alt held with it?' },
+      times: { kind: 'numbers', optional: true, question: 'How many times ("three times": 3)?' },
+    } },
     undo: { label: 'Undo or redo the last change to the file (scratch that)', say: 'undo, undo that, scratch that, redo', args: { how: { kind: 'fixed', optional: true, options: { undo: 'undo, scratch that, take it back', redo: 'redo, do it again' }, question: 'Undo or redo?' } } },
     fix_dictation: { label: 'Fix the text just dictated into the file (speech-to-text errors, punctuation, filler words), shown as a change to review', say: 'fix dictation, fix that, clean up what I said, fix the dictated text' },
     chunk: { label: 'Go to a code chunk (a cell) of the notebook', say: 'next chunk, previous cell, the first chunk, the last cell', args: { place: { kind: 'fixed', optional: true, options: { next: 'the next one', previous: 'the previous one', first: 'the first', last: 'the last', here: 'this one' }, question: 'Which chunk?' } } },
@@ -140,6 +147,16 @@
     stop: { label: 'Stop dictating, keep the text', say: 'stop dictating, stop dictation, stop the microphone' },
     command: { label: 'A command to the editor, not text: move the cursor, select, find, replace, go to a line, run code, open something', say: 'select the paragraph, go to line 10, find X, replace X with Y, end of line, up three' },
   };
+
+  // The keys `key` can press: name → description (for Jev).
+  const KEYS = { Escape: 'escape, esc, cancel key', Enter: 'enter, return', Tab: 'tab', Backspace: 'backspace', Delete: 'delete, del',
+    ArrowUp: 'up arrow', ArrowDown: 'down arrow', ArrowLeft: 'left arrow', ArrowRight: 'right arrow',
+    PageUp: 'page up', PageDown: 'page down', Home: 'home', End: 'end', ' ': 'space bar' };
+  for (let i = 1; i <= 12; i++) KEYS['F' + i] = 'F' + i;
+  for (const c of 'abcdefghijklmnopqrstuvwxyz') KEYS[c] = 'the letter ' + c;
+  for (const c of '0123456789') KEYS[c] = 'the digit ' + c;
+  KEYS['/'] = 'slash'; KEYS['?'] = 'question mark'; KEYS[';'] = 'semicolon';
+  ACTIONS.key.args.key.options = KEYS;
 
   // Places in a list, for `open`: the page turns one into an item.
   const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
@@ -422,5 +439,5 @@
     return { kind, target: rest.split(/\s+/)[0] };
   }
 
-  return { parseShowLine, LIMITS, ACTIONS, DICTATION, DICTATION_FILE, THINKING, SETTINGS_PANES, PLACES, ORDINALS, SEND_TAIL, NOT_SAID, buildRequest, readDecision, rankByOverlap, numbersIn, spansOf };
+  return { KEYS, parseShowLine, LIMITS, ACTIONS, DICTATION, DICTATION_FILE, THINKING, SETTINGS_PANES, PLACES, ORDINALS, SEND_TAIL, NOT_SAID, buildRequest, readDecision, rankByOverlap, numbersIn, spansOf };
 });
