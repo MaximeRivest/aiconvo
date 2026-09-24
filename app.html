@@ -522,6 +522,9 @@ body:not(.home) .count { display: none !important; }
 .ag-item { display: block; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .ag-row .ag-sub { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+/* A conversation on its way in: the previous one fades (open()). */
+#view.view-loading > * { opacity: .4; pointer-events: none; transition: opacity .15s ease .12s; }
+:root[data-theme-mode="binary"] #view.view-loading > * { opacity: 1; transition: none; }
 /* How full the conversation's context window is: a hairline under the row,
    filled left to right, no track. Quiet until it matters: amber when under
    15% is left, as the composer's meter. */
@@ -13509,7 +13512,14 @@ async function open(rel, scroll, routeHash = null) {
   // the top before this fetch. Calling it here made the old transcript flash
   // at the top until the request finished, then jump back to the live tail.
   const fetchStart = Date.now();
-  const next = await (await fetch('/api/session?id=' + encodeURIComponent(rel))).json();
+  // Moving to another conversation: the one on screen fades while the next
+  // loads (after a moment, so a quick load does not flicker), and it takes
+  // no clicks meant for the next. Only the newest load lifts it.
+  const viewEl = $('view');
+  if (navigating && viewEl) viewEl.classList.add('view-loading');
+  let next;
+  try { next = await (await fetch('/api/session?id=' + encodeURIComponent(rel))).json(); }
+  finally { if (seq === conversationLoadSeq && viewEl) viewEl.classList.remove('view-loading'); }
   if (seq !== conversationLoadSeq || rel !== activeRel) return;
   // The user picked models after this fetch left: keep the local pick.
   if ((modelTouchAt.get(rel) || 0) > fetchStart && current && current.key === rel

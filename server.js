@@ -24,6 +24,7 @@ if (!process.env.CHATTERING_CACHE_DIR) require('./legacy-homes.js').migrateHome(
 const { claudeForkContent, groupFamilies } = require('./sessionfork.js');
 const { readSessionSnapshot, publishSession } = require('./session-snapshot.js');
 const settingsLib = require('./settings.js');
+const watchIgnore = require('./watch-ignore.js');
 const snippetsLib = require('./snippets.js');
 const memoryFingerprint = require('./memory-fingerprint.js');
 const { openSearchIndex, SearchIndex } = require('./searchindex.js');
@@ -9789,9 +9790,11 @@ const NO_WATCH = process.env.CHATTERING_NO_WATCH === '1';
 const WATCH_SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', 'target', 'dist', 'build', '__pycache__', '.cache', '.next', '.nuxt', '.turbo', '.gradle', '.idea', '.mypy_cache', '.pytest_cache', '.ruff_cache', 'coverage', '.tox', '.svelte-kit', 'out', 'bower_components']);
 const WATCH_DIR_CAP = 2500;
 
-function watchRepoTree(root, onChange) {
+// ignored: a git ignore oracle (watch-ignore.js). A folder git ignores is
+// never watched, as node_modules is not.
+function watchRepoTree(root, onChange, { ignored = null } = {}) {
   const watchers = new Map();
-  let truncated = false;
+  let truncated = false, closed = false;
   const remove = dir => {
     for (const [d, w] of watchers) if (d === dir || d.startsWith(dir + path.sep)) { try { w.close(); } catch {} watchers.delete(d); }
   };
@@ -9808,7 +9811,7 @@ function watchRepoTree(root, onChange) {
         if (event !== 'rename') return;
         fs.lstat(abs, (err, st) => {
           if (err) { if (watchers.has(abs)) remove(abs); return; }
-          if (st.isDirectory()) add(abs);
+          if (st.isDirectory()) consider(abs);
         });
       });
     } catch { return; }
@@ -9820,11 +9823,15 @@ function watchRepoTree(root, onChange) {
       // when it belongs to the project, and its files must never be
       // reported twice through the enclosing folder.
       if (dir !== root && entries.some(e => e.name === '.git')) { remove(dir); return; }
-      for (const e of entries) if (e.isDirectory() && !WATCH_SKIP_DIRS.has(e.name)) add(path.join(dir, e.name));
+      for (const e of entries) if (e.isDirectory() && !WATCH_SKIP_DIRS.has(e.name)) consider(path.join(dir, e.name));
     });
   };
+  const consider = dir => {
+    if (!ignored) { add(dir); return; }
+    ignored.isIgnored(path.relative(root, dir).replace(/\\/g, '/') + '/').then(skip => { if (!skip && !closed) add(dir); });
+  };
   add(root);
-  return { close: () => remove(root), count: () => watchers.size, truncated: () => truncated };
+  return { close: () => { closed = true; remove(root); if (ignored) ignored.close(); }, count: () => watchers.size, truncated: () => truncated };
 }
 
 async function ensureProjectFileWatch(roots, rows, project = '') {
@@ -9837,15 +9844,19 @@ async function ensureProjectFileWatch(roots, rows, project = '') {
   for (const root of roots) {
     if (projectFileWatchers.has(root) || !fs.existsSync(root)) continue;
     try {
+      // What git ignores is output, not edits: no history, no activity, no
+      // git process per file (watch-ignore.js).
+      const ignored = watchIgnore.createIgnoreOracle(root);
       const watcher = watchRepoTree(root, rel => {
         if (!rel || rel.split('/').some(part => WATCH_SKIP_DIRS.has(part))) return;
+        if (watchIgnore.isIgnoreRulesPath(rel)) ignored.rulesChanged();
         const key = root + '\0' + rel;
         clearTimeout(projectFileWatchPending.get(key));
         projectFileWatchPending.set(key, setTimeout(() => {
           projectFileWatchPending.delete(key);
-          updateWatchedProjectFile(root, rel, project).catch(() => {});
+          ignored.isIgnored(rel).then(skip => skip ? null : updateWatchedProjectFile(root, rel, project)).catch(() => {});
         }, 220));
-      });
+      }, { ignored });
       projectFileWatchers.set(root, watcher);
     } catch (error) { console.error('project file watch failed:', root, error.message); }
   }
