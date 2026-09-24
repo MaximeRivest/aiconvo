@@ -20,6 +20,16 @@ function extract(source, start, end) {
 }
 const textOf = content => typeof content === 'string' ? content : (content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
 
+async function parseAll(t, lines) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'context-fill-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'session.jsonl');
+  fs.writeFileSync(file, lines.map(l => JSON.stringify(l)).join('\n'));
+  const box = vm.createContext({ fs, readline, usageLib, settingsLib, textOf, conversationFlow: require('../conversation-flow'),
+    toolEventsOf: () => [], directImagesOf: () => [], pathCandidates: () => [], isNoise: () => false });
+  vm.runInContext(extract(serverSource, 'async function parseFile(absPath) {', '\nasync function transcriptImage('), box);
+  return JSON.parse(JSON.stringify(await box.parseFile(file)));
+}
 async function parse(t, lines) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'context-fill-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -62,6 +72,17 @@ test('after a compaction nothing is counted until the next reply', async t => {
   assert.equal(await parse(t, lines), null);
   const after = await parse(t, [...lines, ask('q2', 'c'), reply('a2', 'q2', 'm1', usage(8000))]);
   assert.equal(after.used, 8000);
+});
+
+test('a compaction shows in the transcript as a marker that carries the summary', async t => {
+  const parsed = await parseAll(t, [
+    { type: 'session', id: 's', cwd: '/tmp' },
+    ask('q1', null), reply('a1', 'q1', 'm1', usage(150000)),
+    { type: 'compaction', id: 'c', parentId: 'a1', timestamp: '2026-09-24T17:00:00Z', summary: '## Goal\nThe deck.', tokensBefore: 150000 },
+  ]);
+  const mark = parsed.messages.find(m => m.customType === 'compaction');
+  assert.deepEqual({ role: mark.role, text: mark.text, tokensBefore: mark.tokensBefore, eid: mark.eid },
+    { role: 'event', text: '## Goal\nThe deck.', tokensBefore: 150000, eid: 'c' });
 });
 
 test('a Claude transcript counts cache writes and reads too', async t => {

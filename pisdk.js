@@ -298,6 +298,7 @@ function createPiSdkProxy(options = {}) {
       return W && !W.dead ? request(W, 'queue', [wireTarget(target), message, behavior, images]) : false;
     },
     piSetThinking: async (target, level) => request(start(target), 'thinking', [wireTarget(target), level]),
+    piCompact: async (target, instructions) => request(start(target), 'compact', [wireTarget(target), instructions]),
     // A derivation on a private snapshot session: its own worker, stopped
     // when the completion returns. Nothing reaches the real conversation.
     piDeriveAt: async (target, opts) => {

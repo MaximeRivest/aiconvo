@@ -91,7 +91,8 @@ async function launchDelegation(spec, options = {}) {
 function workerArgv({ sessionPath, model, thinking, title, modePath, tools, promptPath }, options = {}) {
   const argv = ['--mode', 'json', '--session', sessionPath, '--model', model, '--thinking', thinking,
     '--name', title, '-e', path.join(__dirname, 'extensions/delegation.ts'),
-    '-e', path.join(__dirname, 'extensions/records.ts')];
+    '-e', path.join(__dirname, 'extensions/records.ts'),
+    '-e', path.join(__dirname, 'extensions/image-budget.ts')];
   if (options.modeExtensionPath) argv.push('-e', path.resolve(options.modeExtensionPath));
   argv.push('--prompt-mode-file', modePath);
   if (tools.length) argv.push('--tools', tools.join(','));

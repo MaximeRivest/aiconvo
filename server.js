@@ -775,6 +775,11 @@ async function parseFile(absPath) {
       messages.push({ role: 'user', text: textOf(d.content), ts: d.timestamp || null, _eid: eid,
         operation: { kind: 'merge', sources: Array.isArray(det.sources) ? det.sources : [], instruction: det.instruction || '' } });
       continue;
+    } else if (d.type === 'compaction') {
+      // pi compacted here: older messages became this summary; the next
+      // request starts from it plus the recent messages.
+      messages.push({ role: 'event', customType: 'compaction', text: String(d.summary || ''), tokensBefore: Number(d.tokensBefore) || null, ts: d.timestamp || null, _eid: eid });
+      continue;
     } else if (d.type === 'custom_message' && d.display !== false &&
       ['delegation-complete', 'delegation-review-pending', 'orchestrator-event'].includes(d.customType)) {
       messages.push({ role: 'event', customType: d.customType, text: textOf(d.content), ts: d.timestamp || null, _eid: eid });
@@ -1977,6 +1982,9 @@ function parseTreeEntries(kind, raw) {
       } else if (d.type === 'thinking_level_change' && d.thinkingLevel) {
         // The reasoning level that serves the turns below this entry.
         node.thinkingChange = d.thinkingLevel;
+      } else if (d.type === 'compaction') {
+        // Everything above is a summary now: older usage no longer counts.
+        node.compaction = { tokensBefore: Number(d.tokensBefore) || null };
       } else if (d.type === 'custom' && d.customType === 'mode-switch' && d.data) {
         // The modes extension persists the active prompt mode as a custom
         // entry. The nearest one above a node serves that node's turns.
@@ -2228,8 +2236,11 @@ async function conversationContextResponse(key, leafId) {
       chain.unshift(tip); // nearest links come first
     }
   }
-  // The newest assistant usage on the trace = the tokens the next turn carries.
-  const lastUsed = chain.find(n => n.role === 'assistant' && n.ctx) || null;
+  // The newest assistant usage on the trace = the tokens the next turn
+  // carries, unless a compaction came after it: until the next reply the
+  // size is not known (the summary replaced what was counted).
+  const lastCounted = chain.find(n => (n.role === 'assistant' && n.ctx) || n.compaction) || null;
+  const lastUsed = lastCounted && !lastCounted.compaction ? lastCounted : null;
   // The model that serves the next turn: the nearest model_change entry wins,
   // else the model of the newest assistant reply on the trace.
   let provider = null, model = null;
@@ -2683,7 +2694,9 @@ function piProviderExtraArgs() {
   return [...(fs.existsSync(CLAUDE_CODE_EXT) ? ['-e', CLAUDE_CODE_EXT] : []),
     '-e', path.join(__dirname, 'extensions', 'delegation.ts'),
     '-e', path.join(__dirname, 'extensions', 'records.ts'),
-    '-e', path.join(__dirname, 'extensions', 'artifacts.ts')];
+    '-e', path.join(__dirname, 'extensions', 'artifacts.ts'),
+    // Old images stop going out before a request passes the provider's size limit.
+    '-e', path.join(__dirname, 'extensions', 'image-budget.ts')];
 }
 
 // Abort the headless run on a file and wait for it to let go.
@@ -3010,6 +3023,7 @@ async function startAgentRun(key, { node, provider, modelId, message, images, fo
     provider = choice.provider; modelId = choice.modelId;
   }
   if (!customMessage && !String(message || '').trim()) throw new Error('empty prompt');
+  if (compactingSessions.has(path.resolve(sessionPath))) throw new Error('This conversation is being compacted. Send again when it is done.');
   if (thinking && !settingsLib.THINKING_LEVELS.includes(thinking)) throw new Error('bad reasoning level: ' + thinking);
   const delegatedOwner = await assertDelegationLaunch(sessionPath, customMessage);
   // A person now drives a stopped worker's conversation. Record it: the parent
@@ -3699,6 +3713,51 @@ async function setConversationThinking(key, level, force) {
   await reindexIfChanged(key);
   if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
   return { ok: true, level: out.level, levels: out.levels, reopened: reopen };
+}
+
+// Compact a conversation through pi's own runtime, as /compact in the
+// terminal: older messages become a written summary (text only; images are
+// not carried) and a compaction entry lands in the session. The way out
+// when a conversation is too large to send, and a way to start lighter.
+const compactingSessions = new Set(); // resolved session paths being compacted
+async function compactConversation(key, instructions, force) {
+  const { entry, sessionPath, cwd } = sessionPathsFor(key);
+  if (conversationKind(entry) === 'claude') throw new Error('Compacting needs pi. Claude conversations compact in the terminal.');
+  const focus = typeof instructions === 'string' ? instructions.trim().slice(0, 4000) : '';
+  const running = findRunningConversation(key);
+  let reopen = false;
+  if (running) {
+    if (!force) {
+      const err = new Error('A terminal owns this conversation (pid ' + running.pid + ').');
+      err.needsForce = true;
+      throw err;
+    }
+    await stopRunningAgent(running);
+    await waitFileQuiet(sessionPath);
+    reopen = true;
+  }
+  if (headlessRuns.has(sessionPath)) throw new Error('A reply is being written in this conversation. Wait for it to finish, or stop it, then compact.');
+  if (compactingSessions.has(path.resolve(sessionPath))) throw new Error('This conversation is already being compacted.');
+  const contextItems = conversationContextOf(key);
+  const ctxBundle = contextItems.length ? await writeAttachedContextFile(contextItems) : null;
+  const principal = await currentPrincipal(projectNameOf(entry.cwd, key));
+  assertPrincipalCanRun(principal, 'compaction');
+  const extraArgs = [...piProviderExtraArgs(), ...(ctxBundle ? ['--append-system-prompt', promptArgFor(principal, ctxBundle.file, ctxBundle.text)] : [])];
+  const engine = principal.sandbox ? pisdk : piEng();
+  compactingSessions.add(path.resolve(sessionPath));
+  broadcast({ type: 'compaction', key, state: 'running' });
+  try {
+    const out = await withSessionOp(sessionPath, () => engine.piCompact({ sessionPath, cwd, env: agentEnv(principal), extraArgs, sandbox: principal.sandbox || undefined }, focus));
+    await reindexIfChanged(key);
+    broadcast({ type: 'compaction', key, state: 'done', tokensBefore: out.tokensBefore, tokensAfter: out.tokensAfter });
+    if (reopen) { try { await openConversationInTerminal(key, { focus: false }); } catch {} }
+    return { ok: true, tokensBefore: out.tokensBefore, tokensAfter: out.tokensAfter, reopened: reopen };
+  } catch (e) {
+    broadcast({ type: 'compaction', key, state: 'failed', error: e.message });
+    throw e;
+  } finally {
+    compactingSessions.delete(path.resolve(sessionPath));
+  }
 }
 
 // ---------- distillation ----------
@@ -15955,8 +16014,17 @@ async function handleRequest(req, res) {
       for await (const chunk of req) body += chunk;
       try {
         const p = JSON.parse(body || '{}');
+        assertCan(identity, 'act', targetOf(p.id), 'this conversation');
         json(res, 200, await setConversationThinking(p.id, p.level, !!p.force));
-      } catch (e) { json(res, e.needsForce ? 409 : 400, { error: e.message, needsForce: !!e.needsForce }); }
+      } catch (e) { json(res, e.needsForce ? 409 : e.status || 400, { error: e.message, needsForce: !!e.needsForce }); }
+    } else if (u.pathname === '/api/conversation/compact' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 16000) return json(res, 413, { error: 'request too large' }); }
+      try {
+        const p = JSON.parse(body || '{}');
+        assertCan(identity, 'act', targetOf(p.id), 'this conversation');
+        json(res, 200, await compactConversation(p.id, p.instructions, !!p.force));
+      } catch (e) { json(res, e.needsForce ? 409 : e.status || 400, { error: e.message, needsForce: !!e.needsForce }); }
     } else if (u.pathname === '/api/conversation/project' && req.method === 'PUT') {
       let body = '';
       for await (const chunk of req) body += chunk;

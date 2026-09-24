@@ -118,6 +118,7 @@ function createWorkerController({ send, exit, engineFactory = createRuntimeEngin
       finally { active = null; }
     }
     if (method === 'thinking') return engine.piSetThinking(...args);
+    if (method === 'compact') return engine.piCompact(...args);
     throw new Error('Unknown Pi worker method: ' + method);
   }
   function reply(message, work) {

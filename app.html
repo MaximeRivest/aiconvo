@@ -9298,6 +9298,12 @@ function msgBlock(m, hl, keepOpen = false, q = '', copyIndex = -1, messageKey = 
     const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
     return `<div class="abortbar"${anchor}${idxAttr}>⏹ ${esc(m.text || 'aborted')}</div>`;
   }
+  if (m.role === 'event' && m.customType === 'compaction') {
+    // pi compacted here: the model reads this summary instead of what came
+    // before. The history above stays, for people.
+    const anchor = m.ts ? ` data-ts="${esc(m.ts)}"` : '';
+    return `<details class="dg-event compaction-mark"${anchor}${idxAttr}><summary title="From here on the model reads this summary instead of the messages above. They stay here to read. Click to read the summary.">▤ compacted${m.tokensBefore ? ' · ' + esc(fmtTokens(m.tokensBefore)) + ' tokens summarized' : ''} · the model continues from the summary</summary><div class="tool-out">${hl(m.text)}</div></details>`;
+  }
   if (m.role === 'event') {
     // The runner's return lands as a quiet bar, like a model change: what
     // came back, in one line. The raw event text stays one click away.
@@ -10552,6 +10558,14 @@ async function openModePicker(anchor) {
 }
 function paintCtxMeter(el, c) {
   if (!el) return;
+  if (current && compactingKeys.has(current.key)) {
+    el.className = 'ctxmeter';
+    el.textContent = '◌ compacting… the model is summarizing the older messages';
+    el.title = 'Compacting takes a minute or two. You can keep reading; sending waits until it is done.';
+    el.onclick = null;
+    el.hidden = false;
+    return;
+  }
   if (!c || !c.ctxTokens || (!c.usedTokens && !c.model)) { el.hidden = true; return; }
   const money = v => '$' + (v >= 0.1 ? v.toFixed(2) : v.toFixed(4));
   const approx = c.estimate ? '~' : '';
@@ -10869,6 +10883,7 @@ function agentComposerHtml(d) {
       <button id="agentAt" type="button" title="Inspect and attach background knowledge to this conversation">Context</button>
       <button id="agentSnip" type="button" title="Insert a snippet at the cursor (alt+;). Or type the trigger while writing.">Snippets ;;</button>
       <button id="agentTree" type="button" title="Open the conversation tree (shift+T): branches, forks, parallel replies">Conversation tree</button>
+      ${d.source !== 'claude' && !d.draft ? '<button id="agentCompact" type="button" title="Summarize the older messages so the model reads less (or type /compact)">Compact conversation…</button>' : ''}
       <button id="agentAttach" type="button">Attach image</button>
       <input id="agentFiles" type="file" accept="image/*" multiple hidden>
       </div></details>
@@ -10907,6 +10922,65 @@ function echoUserPrompt(prompt) {
   v.scrollTop = v.scrollHeight;
 }
 
+// ---- compaction ----
+// As /compact in the terminal: the older messages become a written summary
+// (images are not carried) and the model continues from it. The way out
+// when a conversation is too large to send, and a way to go lighter.
+// Several screens may watch the same conversation: the server announces
+// the start and the end (SSE 'compaction'), so every meter says so.
+const compactingKeys = new Set();
+function repaintCompacting(key) {
+  if (current && current.key === key && viewKind === 'conversation') {
+    const el = $('ctxMeter');
+    if (compactingKeys.has(key)) paintCtxMeter(el, null);
+    else { ctxMeterCache.delete(key); refreshCtxMeter(current); }
+  }
+}
+async function runCompaction(key, instructions = '') {
+  if (!key || compactingKeys.has(key)) return;
+  compactingKeys.add(key);
+  repaintCompacting(key);
+  try {
+    let out = await postJson('/api/conversation/compact', { id: key, instructions });
+    if (out && out.needsForce) {
+      if (confirm('A terminal owns this conversation. Stop the terminal and compact from the web?')) out = await postJson('/api/conversation/compact', { id: key, instructions, force: true });
+      else return;
+    }
+    if (!out || out.error) throw new Error((out && out.error) || 'no answer from the server');
+    toast('✓ compacted' + (out.tokensBefore ? ' · ' + fmtTokens(out.tokensBefore) + (out.tokensAfter ? ' → about ' + fmtTokens(out.tokensAfter) : '') + ' tokens' : '') + ' · the model continues from the summary');
+    if (current && current.key === key && viewKind === 'conversation') refreshTranscript();
+  } catch (e) {
+    errToast('could not compact: ' + e.message);
+  } finally {
+    compactingKeys.delete(key);
+    repaintCompacting(key);
+  }
+}
+function openCompactDialog(key) {
+  if (!key || !current || current.draft || current.key !== key) return;
+  if (compactingKeys.has(key)) return toast('already compacting');
+  const trigger = document.activeElement;
+  const hit = ctxMeterCache.get(key), c = hit && hit.data;
+  const now = c && c.usedTokens ? ` It holds about ${esc(fmtTokens(c.usedTokens))} tokens now.` : '';
+  const dialog = document.createElement('dialog');
+  dialog.className = 'flow-merge-dialog compact-dialog';
+  dialog.setAttribute('aria-labelledby', 'compactTitle');
+  dialog.innerHTML = `<h2 id="compactTitle">Compact this conversation</h2>
+    <p>The model writes a summary of the older messages, then continues from that summary and the most recent messages instead of everything.${now} Nothing is deleted: the whole history stays here to read. Images in the older part are not carried into the summary.</p>
+    <label class="flow-instruction">What the summary must keep <span>(optional)</span><textarea rows="3" placeholder="For example: the slide order, the numbers we settled on, and the open questions"></textarea></label>
+    <p class="dim" style="font-size:13px">It takes a minute or two. You can close this and keep reading.</p>
+    <div class="flow-merge-footer"><button type="button" data-compact-cancel>Cancel</button><button type="button" class="primary" data-compact-start>Compact</button></div>`;
+  document.body.appendChild(dialog);
+  dialog.addEventListener('keydown', event => event.stopPropagation());
+  const ta = dialog.querySelector('textarea');
+  const close = () => { dialog.close(); dialog.remove(); if (trigger && trigger.isConnected) trigger.focus(); };
+  dialog.querySelector('[data-compact-cancel]').onclick = close;
+  dialog.addEventListener('cancel', e => { e.preventDefault(); close(); });
+  dialog.querySelector('[data-compact-start]').onclick = () => { const focus = ta.value.trim(); close(); runCompaction(key, focus); };
+  dialog.showModal();
+  ta.focus();
+}
+
 // Headless send: the blessed path. Continues from the trace leaf when you
 // follow an older branch. Images ride along natively (pi RPC ImageContent).
 // Slash commands still need the terminal.
@@ -10921,6 +10995,15 @@ async function headlessSendFromComposer(btn, promptOverride) {
   const fromBox = promptOverride == null;
   const prompt = (fromBox ? (ta && ta.value || '') : String(promptOverride)).trim();
   if (!prompt) return errToast('type a prompt first');
+  if (compactingKeys.has(activeRel)) return errToast('this conversation is being compacted — send when it is done');
+  // /compact [what to keep]: Chattering runs it (pi's own command lives in the terminal only).
+  const compactCmd = /^\/compact(?:\s+([\s\S]*))?$/.exec(prompt);
+  if (compactCmd) {
+    if (fromBox && ta) { ta.value = ''; readerDrafts.delete(activeRel); autoGrowCompose(); }
+    hideSlashPop();
+    runCompaction(activeRel, (compactCmd[1] || '').trim());
+    return;
+  }
   // The heartbeat answers the send instantly — the reader sees life
   // before the first run event arrives.
   if ($('lsSum')) setLiveText($('lsSum'), '◌ sent — waiting for the model…');
@@ -12487,7 +12570,7 @@ function wireAgentComposer() {
   if (tools) {
     tools.addEventListener('click', e => {
       // These open their own surfaces. Mode/thinking stay in the menu.
-      if (e.target.closest('#agentAttach, #agentAt, #agentSlash, #agentSnip, #agentTree')) tools.open = false;
+      if (e.target.closest('#agentAttach, #agentAt, #agentSlash, #agentSnip, #agentTree, #agentCompact')) tools.open = false;
     });
     tools.addEventListener('keydown', e => {
       if (e.key === 'Escape' && tools.open) { e.preventDefault(); e.stopPropagation(); tools.open = false; tools.querySelector('summary').focus(); }
@@ -12534,6 +12617,8 @@ function wireAgentComposer() {
   renderAgentContext();
   const treeBtn = $('agentTree');
   if (treeBtn) treeBtn.onclick = () => { if (activeRel) showTree(activeRel); };
+  const compactBtn = $('agentCompact');
+  if (compactBtn) compactBtn.onclick = () => { if (activeRel) openCompactDialog(activeRel); };
   window._slashOpen = false;
   window._slashDetached = false; // a re-render replaced the pop's DOM
   window._atOpen = false;
@@ -16345,6 +16430,7 @@ $('phoneMore').onclick = e => {
     !$('shareBtn').hidden ? ['Who can see this', () => $('shareBtn').click()] : null,
     !current?.draft ? ['Move to another project', () => $('chMove').click()] : null,
     !current?.draft ? ['Conversation tree', () => $('agentTree')?.click()] : null,
+    !current?.draft && current?.source !== 'claude' ? ['Compact conversation…', () => openCompactDialog(activeRel)] : null,
     inProject ? ['Browse project files', () => $('conversationFiles').click()] : null,
     !$('machineBtn').hidden ? ['Switch machine', () => $('machineBtn').click()] : null,
   ].filter(Boolean);
@@ -17585,6 +17671,12 @@ live.onmessage = ev => {
       if (stage) stage.dataset.settling = d.fanoutId;
       open(d.key, 'preserve').then(clearLedgers, () => {});
     } else clearLedgers();
+    return;
+  }
+  if (d.type === 'compaction') {
+    // Another screen (or this one) compacts a conversation: every meter says so.
+    if (d.state === 'running') compactingKeys.add(d.key); else compactingKeys.delete(d.key);
+    repaintCompacting(d.key);
     return;
   }
   if (d.type === 'agent-read') {

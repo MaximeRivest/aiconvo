@@ -337,6 +337,25 @@ async function piSetThinking(target, level) {
   }
 }
 
+// Compact through pi's own runtime (the RPC `compact` command), as /compact
+// in the terminal. No timeout: summarizing a long conversation takes a while.
+async function piCompact(target, instructions) {
+  await ensurePiProtocol(target.env);
+  const w = getWarmSession({ ...target, discoverExtensions: true });
+  clearTimeout(w.idleTimer);
+  if (w.busy) throw new Error('This conversation is busy. Wait for the reply to finish, then compact.');
+  w.busy = true;
+  try {
+    const out = await w.sess.request({ type: 'compact', ...(instructions ? { customInstructions: instructions } : {}) });
+    const r = out.data || {};
+    return { tokensBefore: r.tokensBefore ?? null, tokensAfter: r.estimatedTokensAfter ?? null };
+  } finally {
+    w.busy = false;
+    w.fileSig = fileSigOf(warmKey(target.sessionPath));
+    armWarmIdle(w, target.sessionPath);
+  }
+}
+
 // Queue a message into a run that is ALREADY STREAMING on the warm process.
 // pi's own runtime queues it (streamingBehavior): "followUp" waits for the
 // current turn, "steer" interrupts after the current step. agent_settled of
@@ -497,4 +516,4 @@ async function piBeginWarm(target) {
   return { file, sessionId, pid: sess.pid };
 }
 
-module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetThinking, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };
+module.exports = { piRpcOperation, piForkAt, piForkBefore, piSetThinking, piCompact, piHeadlessRun, piQueuePrompt, piListCommands, stopWarmSession, stopAllWarmSessions, listWarmSessions, piBeginWarm, ensurePiProtocol, piProtocolInfo };

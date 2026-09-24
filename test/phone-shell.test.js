@@ -75,7 +75,7 @@ test('phone shell: bottom bar, sheets, one-row head, back hook, desktop untouche
   await ev(`$('phoneMore').click()`);
   await until(`!!document.querySelector('.phone-more-menu')`);
   // The fixture's folder is not a project: no "new here", no project page, no file browser.
-  assert.deepEqual(await ev(`[...document.querySelectorAll('.phone-more-menu button')].map(b=>b.textContent)`), ['Rename', 'Who can see this', 'Move to another project', 'Conversation tree']);
+  assert.deepEqual(await ev(`[...document.querySelectorAll('.phone-more-menu button')].map(b=>b.textContent)`), ['Rename', 'Who can see this', 'Move to another project', 'Conversation tree', 'Compact conversation…']);
   assert.equal(await ev(`[...document.querySelectorAll('.phone-more-menu button')].every(b=>b.getBoundingClientRect().height>=44)`), true);
   assert.equal(await ev(`window.chatteringBack()`), true, 'back closes the menu');
   assert.equal(await ev(`!document.querySelector('.phone-more-menu') && $('phoneMore').getAttribute('aria-expanded')==='false'`), true);

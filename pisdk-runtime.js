@@ -735,6 +735,28 @@ async function piSetThinking(target, level) {
   }
 }
 
+// Compact through pi's own runtime, as /compact in the terminal: older
+// messages become a written summary (text only; images are not carried), a
+// compaction entry lands in the session, and the next request starts from
+// the summary plus the recent messages. instructions: optional focus for
+// the summary.
+async function piCompact(target, instructions) {
+  const S = await ensureS(target);
+  clearTimeout(S.idleTimer);
+  if (sessionBusy(S)) throw new Error('This conversation is busy. Wait for the reply to finish, then compact.');
+  S.busy = true;
+  publishState(S);
+  try {
+    const result = await S.session.compact(instructions || undefined);
+    return { tokensBefore: result.tokensBefore, tokensAfter: result.estimatedTokensAfter ?? null };
+  } finally {
+    S.busy = false;
+    S.fileSig = fileSigOf(S.file);
+    publishState(S);
+    armIdle(S);
+  }
+}
+
 // Start a new pi session in cwd and keep it in the pool.
 async function piBeginWarm(target) {
   const S = target.sessionPath ? await ensureS(target) : await createS(target);
@@ -840,7 +862,7 @@ function setEditorTextFor(sessionPath, text) {
 }
 
 return {
-  piForkAt, piForkBefore, piSetThinking, piHeadlessRun, piQueuePrompt, piBeginWarm, piDeriveAt,
+  piForkAt, piForkBefore, piSetThinking, piCompact, piHeadlessRun, piQueuePrompt, piBeginWarm, piDeriveAt,
   stopWarmSession, stopAllWarmSessions, listWarmSessions,
   setEditorTextFor, abort, respondUi, uiInput, waitForIdle, dispose,
 };
