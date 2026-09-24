@@ -522,6 +522,13 @@ body:not(.home) .count { display: none !important; }
 .ag-item { display: block; }
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .ag-row .ag-sub { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+/* How full the conversation's context window is: a hairline under the row,
+   filled left to right, no track. Quiet until it matters: amber when under
+   15% is left, as the composer's meter. */
+.ag-row .ag-ctx { position: absolute; left: 10px; right: 10px; bottom: 1px; height: 2px; pointer-events: none; }
+.ag-row .ag-ctx::before { content: ""; display: block; height: 100%; width: var(--fill); background: color-mix(in srgb, var(--text) 16%, transparent); }
+.ag-row:hover .ag-ctx::before, .ag-row.current .ag-ctx::before { background: color-mix(in srgb, var(--text) 26%, transparent); }
+.ag-row .ag-ctx.warn::before { background: color-mix(in srgb, var(--warn) 75%, transparent); }
 .ag-row .ag-dir { flex: 1 1 auto; color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ag-row .ag-age { flex: 0 0 auto; color: var(--text-faint); font-size: 10px; white-space: nowrap; }
 .ag-row .ag-acts { position: absolute; right: 6px; top: 3px; display: none; gap: 2px; align-items: center; padding-left: 8px; background: linear-gradient(90deg, transparent, var(--surface-2) 8px); }
@@ -546,6 +553,8 @@ body:not(.home) .count { display: none !important; }
 :root[data-theme-mode="binary"] .ag-row.unread .ag-mark::before { background: var(--text); }
 :root[data-theme-mode="binary"] .ag-row.asks .ag-mark, :root[data-theme-mode="binary"] .ag-row.stopped .ag-mark,
 :root[data-theme-mode="binary"] .ag-row .ag-doing { color: var(--text); }
+:root[data-theme-mode="binary"] .ag-row .ag-ctx::before { background: var(--text); height: 1px; }
+:root[data-theme-mode="binary"] .ag-row .ag-ctx.warn::before { background: var(--text); height: 2px; } /* no amber on e-ink: nearly full is thicker */
 :root[data-theme-mode="binary"] .ag-typing i { background: var(--text); opacity: 1; animation: none; }
 
 /* filter popover */
@@ -4275,13 +4284,18 @@ async function renderAgentsPop(refetch) {
     const sub = [projectLink(s), esc(origin(key)), what].filter(Boolean).join(' · ');
     const acts = (r ? resumeBtn(r) : '') + (state === 'working' && !delegatedBy.has(key) ? kill(pidOf(key), title) : '') + more(s, key) + (closable ? closeBtn(key, r) : '');
     const activity = s ? agentActivityAt(s) : r ? r.createdAt : 0;
-    const tip = (r ? r.reason + '\n' : '') + (isUnread && agentIsFlagged(s) ? 'Marked unread\n' : '') + title;
-    // The marker is a shape; the state is also said, for a screen reader.
-    const said = [isUnread ? 'unread' : '', stateWord[state]].filter(Boolean).join(', ');
+    const fill = contextFill(s);
+    const fillSaid = fill ? `context ${fill.pct}% full \u00b7 ${fmtTokens(fill.used)} of ${fmtTokens(fill.size)} tokens${fill.sized ? '' : ' (window assumed)'}` : '';
+    const tip = (r ? r.reason + '\n' : '') + (isUnread && agentIsFlagged(s) ? 'Marked unread\n' : '') + title + (fill ? '\n' + fillSaid : '');
+    // The marker is a shape; the state is also said, for a screen reader
+    // (the context line only once it is nearly full: said on every row it
+    // would bury the titles).
+    const said = [isUnread ? 'unread' : '', stateWord[state], fill && fill.warn ? 'context nearly full' : ''].filter(Boolean).join(', ');
     return `<div class="ag-row${state ? ' ' + state : ''}${isUnread ? ' unread' : ''}${key === activeRel && ['conversation', 'tree'].includes(viewKind) ? ' current' : ''}${agentIsPinned(key) ? ' pinned' : ''}" data-key="${esc(key)}">` +
       `<span class="ag-main"><span class="ag-title" title="${esc(tip)}"><span>${esc(title)}</span>${said ? `<span class="sr-only">, ${esc(said)}</span>` : ''}${isUnread || state === 'asks' || state === 'stopped' ? markHtml : ''}${state === 'working' ? typingHtml : ''}${presenceSlotHtml(key)}${s ? participantsHtml(s) : ''}${s && s.mirror ? `<span class="badge-mirror" title="Mirrored from ${esc(s.mirror.peerName)}: read here, driven there">${esc(s.mirror.peerName)}</span>` : ''}<span class="ag-age">${esc(activity ? tinyAge(now - activity) : '')}</span></span>` +
       (sub || o.badge ? `<span class="ag-sub"><span class="ag-dir">${sub}</span>${o.badge}</span>` : '') + `</span>` +
-      `<span class="ag-acts">${acts}</span></div>` + o.children;
+      `<span class="ag-acts">${acts}</span>` +
+      (fill ? `<span class="ag-ctx${fill.warn ? ' warn' : ''}" style="--fill:${fill.pct}%" aria-hidden="true"></span>` : '') + `</div>` + o.children;
   };
   // Order: pinned first (newest pin on top), then by the conversation's
   // first message, newest on top. A reply does not move a row: the list
@@ -9928,6 +9942,22 @@ let _modelCatalogAt = 0;
 let _modelCatalogPending = null;
 // Keep the last good catalog for instant opening. Refresh stale data in the
 // background; the manual reload remains available when credentials change.
+// How full a conversation's context window is, from its index entry: the
+// tokens the next turn carries over the window of the model that serves
+// it (the catalog's size; the configured default for a model it does not
+// size). The same numbers as the composer's meter. null: nothing counted
+// yet, or the catalog has not arrived.
+function contextFill(s) {
+  const c = s && s.ctx;
+  if (!c || !(c.used > 0) || !_modelCatalog) return null;
+  const models = _modelCatalog.models || [];
+  const hit = c.model ? models.find(m => m.provider === c.provider && m.model === c.model) || models.find(m => m.model === c.model || m.id === c.model) : null;
+  const size = (hit && hit.context) || _modelCatalog.defaultContext || 0;
+  if (!size) return null;
+  const left = Math.max(0, Math.min(100, Math.round(100 * (1 - c.used / size))));
+  // Under 15% left the composer warns too: time to compact or start fresh.
+  return { used: c.used, size, pct: Math.min(100, Math.round(100 * c.used / size)), warn: left < 15, sized: !!(hit && hit.context) };
+}
 async function modelCatalog(refresh = false) {
   if (!refresh && _modelCatalog) {
     if (Date.now() - _modelCatalogAt > 5 * 60 * 1000 && !_modelCatalogPending) modelCatalog(true).catch(() => {});
@@ -17697,7 +17727,8 @@ applyGanttMode();
 loadJobs();
 loadSettings();
 // Pay the catalog cost during normal startup, not after the user opens a picker.
-modelCatalog().catch(() => {});
+// The side list's context lines need the window sizes: draw them once known.
+modelCatalog().then(() => renderAgentsPopSoon(), () => {});
 // Repo cards power the home-row ⌂ glyphs.
 fetch('/api/git/repos').then(r => r.json()).then(d => {
   gitReposCache = (d && d.repos) || [];

@@ -711,6 +711,10 @@ async function parseFile(absPath) {
   // How fast each reply streamed: a chattering-speed entry after the run
   // names the reply entries it measured (pisdk-runtime.js writes it).
   const speedByEntry = new Map(); // reply entry id → compact sample
+  // How full the context window is (the side list's fill line): the usage
+  // of each reply, each model switch, and each compaction, by entry. Read
+  // along the active path once the leaf is known.
+  const ctxUsage = new Map(), ctxModels = new Map(), ctxCompactions = new Set();
   const stream = fs.createReadStream(absPath, { encoding: 'utf8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   for await (const line of rl) {
@@ -729,6 +733,15 @@ async function parseFile(absPath) {
     if (eid && !d.isSidechain) {
       parents.set(eid, d.parentId !== undefined ? d.parentId : (d.parentUuid !== undefined ? d.parentUuid : null));
       leafId = eid;
+      // pi: { type: 'message', message: { role: 'assistant', usage } };
+      // Claude: { type: 'assistant', message: { usage } }.
+      const reply = d.type === 'message' && d.message && d.message.role === 'assistant' ? 'pi'
+        : d.type === 'assistant' && d.message && !d.isMeta ? 'claude' : null;
+      if (reply && d.message.usage) {
+        const used = settingsLib.usageContextTokens(d.message.usage, reply);
+        if (used > 0) ctxUsage.set(eid, { used, provider: d.message.provider || null, model: d.message.model || null });
+      } else if (d.type === 'model_change' && d.modelId) ctxModels.set(eid, { provider: d.provider || null, model: d.modelId });
+      else if (d.type === 'compaction') ctxCompactions.add(eid);
     }
     let role, content;
     if (d.type === 'user' || d.type === 'assistant') {
@@ -833,6 +846,22 @@ async function parseFile(absPath) {
     active.add(cur);
     cur = parents.get(cur);
   }
+  // The context the next turn carries: the newest reply's usage on the
+  // active path (unknown when a compaction came after it), and the model
+  // that serves the next turn (the nearest switch or reply), whose window
+  // it fills. The same rule as the composer's meter.
+  let ctxUsed = null, ctxProvider = null, ctxModel = null;
+  for (let cur = leafId, walked = new Set(); cur != null && parents.has(cur) && !walked.has(cur); cur = parents.get(cur)) {
+    walked.add(cur);
+    const u = ctxUsage.get(cur), mc = ctxModels.get(cur);
+    if (!ctxModel && (mc || (u && u.model))) { ctxProvider = (mc || u).provider; ctxModel = (mc || u).model; }
+    if (ctxUsed == null) {
+      if (ctxCompactions.has(cur)) ctxUsed = 0;
+      else if (u) ctxUsed = u.used;
+    }
+    if (ctxUsed != null && ctxModel) break;
+  }
+  meta.ctx = ctxUsed ? { used: ctxUsed, provider: ctxProvider, model: ctxModel } : null;
   for (const m of messages) {
     if (m._eid && !active.has(m._eid)) m.off = true;
     m.eid = m._eid || null;
@@ -1207,6 +1236,13 @@ let indexRevision = 0;
 // are never re-read just to learn that.
 const ARTIFACTS_SINCE = Date.parse('2026-09-23T00:00:00Z');
 const artifactsStale = (cur, stat) => cur.av !== ARTIFACT_INDEX_V && stat.mtimeMs >= ARTIFACTS_SINCE;
+// The context fill (the side list's line under each row) arrived later:
+// conversations of the last month are read again once to learn it; older
+// ones learn it when they next change.
+const CTX_INDEX_V = 1;
+const CTX_SINCE = Date.parse('2026-08-24T00:00:00Z');
+const ctxStale = (cur, stat) => cur.cv !== CTX_INDEX_V && stat.mtimeMs >= CTX_SINCE;
+const indexStale = (cur, stat) => artifactsStale(cur, stat) || ctxStale(cur, stat);
 function artifactsOfMessages(messages, cwd) {
   const failed = new Set(), done = new Set();
   for (const m of messages) if (m.role === 'toolresult' && m.tid) (m.err ? failed : done).add(m.tid);
@@ -1307,6 +1343,9 @@ async function indexFile(source, relPath, stat) {
       assistantCount: messages.filter(m => m.role === 'assistant').length,
       artifacts: artifactsOfMessages(messages, meta.cwd),
       av: ARTIFACT_INDEX_V,
+      // Tokens the next turn carries and the model whose window they fill.
+      ctx: meta.ctx || undefined,
+      cv: CTX_INDEX_V,
       densityChat: densityProfile(messages, meta.firstTs, meta.lastTs, false),
       densityAll: densityProfile(messages, meta.firstTs, meta.lastTs, true),
     };
@@ -1389,7 +1428,7 @@ async function fullScan() {
       let stat;
       try { stat = await fsp.stat(path.join(baseDir, relPath)); } catch { continue; }
       const cur = index[key];
-      if (!cur || cur.v !== CACHE_VERSION || cur.mtimeMs !== stat.mtimeMs || cur.size !== stat.size || artifactsStale(cur, stat)) {
+      if (!cur || cur.v !== CACHE_VERSION || cur.mtimeMs !== stat.mtimeMs || cur.size !== stat.size || indexStale(cur, stat)) {
         await indexFile(source, relPath, stat);
         n++;
       }
@@ -1461,7 +1500,7 @@ function reindexIfChanged(key) {
     try { stat = await fsp.stat(path.join(baseDir, relPath)); }
     catch (e) { if (e.code === 'ENOENT') dropIndexed(key); else console.error('reindex stat failed:', key, e.message); return; }
     const cur = index[key];
-    if (cur && cur.v === CACHE_VERSION && cur.mtimeMs === stat.mtimeMs && cur.size === stat.size && !artifactsStale(cur, stat)) return;
+    if (cur && cur.v === CACHE_VERSION && cur.mtimeMs === stat.mtimeMs && cur.size === stat.size && !indexStale(cur, stat)) return;
     const t0 = Date.now();
     await indexFile(source, relPath, stat);
     parseCostMs.set(key, Date.now() - t0);
@@ -16536,6 +16575,8 @@ async function handleRequest(req, res) {
         fetchedAt: listed.at,
         error: listed.error,
         piDefault: readPiDefault(),
+        // The window assumed for a model the catalog does not size.
+        defaultContext: piContextTokens(),
         speed: usersLib.canManageUsers(identity) ? speedCatalog() : null,
       });
     } else if (u.pathname === '/api/delegations' && req.method === 'GET') {
