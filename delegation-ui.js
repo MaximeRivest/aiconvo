@@ -611,7 +611,10 @@
     }
     return { mount, attachCards, refresh, invalidate: refresh, repaint: paintAll, index: () => index,
       control: (id, action) => control(id, action), state: () => ({ loaded, error, limited }),
-      visibilityChanged() { if (visible()) refresh(); else schedule(); },
+      // A page change needs no new request once a snapshot is here: the
+      // server pushes every change (delegation-update), and a request per
+      // navigation made each conversation load wait behind it.
+      visibilityChanged() { if (visible() && (!loaded || dirty || error)) refresh(); else schedule(); },
       destroy() { destroyed = true; clearTimeout(timer); clearInterval(tick); for (const abort of requests) abort.abort(); views.clear(); cards.clear(); details.clear(); } };
   }
   return { escape, indexTasks, descendants, contextTasks, trackedProcess, taskState, isLive, summaryState, canContinue, failureWord,

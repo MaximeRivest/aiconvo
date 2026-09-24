@@ -40,13 +40,16 @@ function appendEvent(dir, type, data = {}) {
   finally { fs.closeSync(fd); }
 }
 // Linux boot ID and start ticks distinguish reused process IDs, including across reboot.
+// The boot ID cannot change under a running process: read it once.
+let bootId = null;
+function currentBootId() { return bootId || (bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim()); }
 function identity(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
     const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
     if (fields[0] === 'Z' || fields[0] === 'X') return null;
-    return { pid, start: fields[19], boot: fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(), pgrp: Number(fields[2]) };
+    return { pid, start: fields[19], boot: currentBootId(), pgrp: Number(fields[2]) };
   } catch (e) { if (['ENOENT', 'ESRCH'].includes(e.code)) return null; throw e; }
 }
 function sameProcess(saved) {
@@ -118,8 +121,29 @@ function resumeFiles(dir) {
   return names.map(n => /^resume-(\d+)\.json$/.exec(n)).filter(Boolean).map(m => Number(m[1])).sort((a, b) => a - b)
     .map(n => ({ n, ...readJson(path.join(dir, `resume-${n}.json`)) }));
 }
+// A task is read from nine files; the listing reads every task every two
+// seconds. Every task file is written by atomic() (a new file renamed into
+// place), which changes the folder's modification time, so a folder whose
+// time did not move holds the same task. Timestamps can be coarse (a clock
+// tick): a folder that changed in the last two seconds is always read again,
+// the rule git uses for its index. Callers get their own copy.
+const TASK_CACHE_SETTLE_MS = 2000;
+const taskCache = new Map(); // dir → { sig, task }
 function readTask(root, id) {
   const dir = taskDir(root, id);
+  let st = null;
+  try { st = fs.statSync(dir, { bigint: true }); } catch {}
+  const sig = st ? `${st.mtimeNs}:${st.ctimeNs}:${st.ino}` : null;
+  const hit = sig && taskCache.get(dir);
+  if (hit && hit.sig === sig) return structuredClone(hit.task);
+  const task = readTaskFiles(dir);
+  if (sig && Date.now() - Number(st.mtimeNs / 1000000n) > TASK_CACHE_SETTLE_MS) {
+    if (taskCache.size >= 5000) taskCache.delete(taskCache.keys().next().value);
+    taskCache.set(dir, { sig, task: structuredClone(task) });
+  } else taskCache.delete(dir);
+  return task;
+}
+function readTaskFiles(dir) {
   const spec = readJson(path.join(dir, 'request.json'));
   const state = readJson(path.join(dir, 'state.json'), {});
   const lost = readJson(path.join(dir, 'lost.json'), null);

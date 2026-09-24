@@ -136,11 +136,27 @@ function peopleSetPosition(position, kind) {
   clearTimeout(peoplePositionTimer);
   peoplePositionTimer = setTimeout(() => peopleReportRoute({ kind, position: peoplePosition }), 600);
 }
+// The message at the top of the view: asked of the browser at that point
+// (one hit test), a little lower when the point falls between messages or
+// on a sticky head. The display order is not the document order (a turn's
+// folded work shows under its answer), so no search over the list is
+// valid; the full scan (a measure of every message above the reader, which
+// forced layout again and again while a long conversation was landing) is
+// the fallback only when nothing is hit.
 function peopleReadingEntry() {
   const view = $('view');
   if (!view || typeof viewKind === 'undefined' || viewKind !== 'conversation') return null;
-  const top = view.getBoundingClientRect().top;
-  const el = [...view.querySelectorAll('#conversationTranscript .msg[data-eid]')].find(e => e.getBoundingClientRect().bottom > top + 8 && e.getClientRects().length);
+  const transcript = $('conversationTranscript');
+  if (!transcript) return null;
+  const vr = view.getBoundingClientRect(), tr = transcript.getBoundingClientRect();
+  const x = Math.min(Math.max(tr.left + tr.width / 2, vr.left + 1), vr.right - 1);
+  for (let y = vr.top + 8, n = 0; n < 12 && y < vr.bottom; y += 24, n++) {
+    const hit = document.elementFromPoint(x, y);
+    const msg = hit && hit.closest && hit.closest('.msg[data-eid]');
+    if (msg && transcript.contains(msg)) return msg.dataset.eid;
+  }
+  const line = vr.top + 8;
+  const el = [...transcript.querySelectorAll('.msg[data-eid]')].find(e => e.getBoundingClientRect().bottom > line && e.getClientRects().length);
   return el ? el.dataset.eid : null;
 }
 function peopleEditorLine() {
@@ -149,9 +165,16 @@ function peopleEditorLine() {
 }
 document.addEventListener('DOMContentLoaded', () => {
   const view = $('view');
+  // Measured once the scrolling rests: a landing scrolls many times while
+  // the page is still being built, and the report waits 600 ms anyway.
+  let readingTimer = 0;
   if (view) view.addEventListener('scroll', () => {
-    if (typeof viewKind === 'undefined') return;
-    if (viewKind === 'conversation') { const entry = peopleReadingEntry(); if (entry) peopleSetPosition({ entry }); }
+    clearTimeout(readingTimer);
+    readingTimer = setTimeout(() => {
+      if (typeof viewKind === 'undefined' || viewKind !== 'conversation') return;
+      const entry = peopleReadingEntry();
+      if (entry) peopleSetPosition({ entry });
+    }, 180);
   }, { passive: true });
   // The composer: "typing" for a few seconds after each keystroke.
   document.addEventListener('input', e => {
