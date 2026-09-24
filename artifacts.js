@@ -272,7 +272,14 @@
     pane.querySelector('.art-version').onchange = e => { if (state) { state.version = e.target.value || null; render(false); } };
     // Resize: drag the left edge; the width is this device's choice.
     const grip = pane.querySelector('.art-resize');
-    const setW = px => { const w = Math.max(320, Math.min(window.innerWidth - 360, px)); document.body.style.setProperty('--art-w', w + 'px'); localStorage.setItem('chattering.artifact.width', String(Math.round(w))); };
+    // Save only a width the window can give: the side list and the
+    // conversation's 420px come first (the stylesheet enforces the same).
+    const setW = px => {
+      const side = document.body.classList.contains('side-layout') ? (document.getElementById('side')?.getBoundingClientRect().width || 0) : 0;
+      const w = Math.max(320, Math.min(window.innerWidth - side - 420, px));
+      document.body.style.setProperty('--art-w', w + 'px');
+      localStorage.setItem('chattering.artifact.width', String(Math.round(w)));
+    };
     grip.addEventListener('pointerdown', e => {
       e.preventDefault(); grip.setPointerCapture(e.pointerId); pane.classList.add('art-dragging');
       const move = ev => setW(window.innerWidth - ev.clientX);

@@ -9,6 +9,7 @@ const path = require('node:path');
 const net = require('node:net');
 const { spawn, spawnSync } = require('node:child_process');
 const preview = require('../preview.js');
+const { chromiumBinary } = require('./helpers/chromium.js');
 
 const freePort = async () => { const s = net.createServer(); await new Promise(r => s.listen(0, '127.0.0.1', r)); const p = s.address().port; await new Promise(r => s.close(r)); return p; };
 
@@ -154,7 +155,7 @@ test('a real server: versions follow the head, the preview origin serves them, w
   assert.match(declared.urls[0], new RegExp(`^http://[0-9a-f]{20}\\.localhost:${previewPort}/a/`));
 
   // ---- the browser --------------------------------------------------------
-  const bin = process.env.CHROMIUM_BIN || process.env.CHROMIUM || 'chromium';
+  const bin = chromiumBinary();
   if (spawnSync(bin, ['--version']).error) return t.skip('chromium is not installed');
   browser = spawn(bin, ['--headless', '--no-sandbox', '--disable-gpu', '--disable-background-networking', '--disable-sync', '--no-first-run', '--user-data-dir=' + path.join(home, 'browser'), '--remote-debugging-port=0', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const endpoint = await new Promise((resolve, reject) => {
@@ -195,6 +196,31 @@ test('a real server: versions follow the head, the preview origin serves them, w
   const [paneLeft, viewRight] = JSON.parse(box);
   assert.ok(paneLeft >= viewRight - 2, 'beside, not over, the conversation: ' + box);
   assert.deepEqual(await evaluate(`[...document.querySelectorAll('.art-version option')].map(o => o.value)`), [v1.snapshot, v2.snapshot]);
+
+  // The conversation keeps a readable column whatever width was saved: a
+  // panel dragged wide on a big screen, or a window made smaller since.
+  // The reading column keeps 420px; the composer in it, its margins aside.
+  const convWidth = `(() => { const v = document.getElementById('view').getBoundingClientRect().width, c = document.getElementById('composerDock')?.getBoundingClientRect().width; return v >= 419 && (c == null || c >= 380) ? v : 0; })()`;
+  await evaluate(`document.body.style.setProperty('--art-w', '5000px'); 1`);
+  await until(`${convWidth} > 0`, 'a saved width that leaves no room');
+  const shot = async name => { if (!process.env.CHATTERING_SHOTS) return; await evaluate(`document.querySelector('dialog.bg-ask [data-none]')?.click(); 1`); await new Promise(r => setTimeout(r, 800)); const r = await send('Page.captureScreenshot', { format: 'png' }, sid); fs.writeFileSync(path.join(process.env.CHATTERING_SHOTS, name), Buffer.from(r.result.data, 'base64')); };
+  await shot('artifact-wide.png');
+  // Too narrow for list, conversation and panel side by side: the panel
+  // lies over the conversation, as the Files panel does, and every part of
+  // it stays inside the window.
+  for (const w of [1000, 760]) {
+    await send('Emulation.setDeviceMetricsOverride', { width: w, height: 900, deviceScaleFactor: 1, mobile: false }, sid);
+    await until(`innerWidth === ${w} && document.body.classList.contains('side-layout')`);
+    const r = JSON.parse(await evaluate(`JSON.stringify({ pane: document.getElementById('artifactPane').getBoundingClientRect(), conv: ${convWidth} })`));
+    assert.ok(r.pane.left >= 0 && r.pane.right <= w + 1 && r.pane.width >= 320, w + ': the panel fits the window: ' + JSON.stringify(r));
+    assert.ok(r.conv > 0, w + ': the conversation under it keeps its width: ' + JSON.stringify(r));
+    // The voice button follows the files square on its own timer.
+    await until(`(() => { const s = document.getElementById('side').getBoundingClientRect(); return [...document.querySelectorAll('#filesToggle, #voiceOnButton')].every(b => { const r = b.getBoundingClientRect(); return !r.width || r.left >= s.right; }); })()`, w + ': no floating button over the list');
+    await shot('artifact-' + w + '.png');
+  }
+  await send('Emulation.setDeviceMetricsOverride', { width: 1500, height: 1000, deviceScaleFactor: 1, mobile: false }, sid);
+  await evaluate(`document.body.style.removeProperty('--art-w'); 1`);
+  await until(`innerWidth === 1500`);
   // Moving the head to before the change shows the first version.
   await evaluate(`moveReading(current.key, 'a3', { exact: true })`);
   await until(`document.querySelector('#artifactPane iframe')?.src.includes(${JSON.stringify('/' + v1.snapshot + '/')})`, 'the earlier version');

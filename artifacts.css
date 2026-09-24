@@ -25,14 +25,36 @@
 /* ---- the panel ---- */
 #artifactPane { display: none; }
 body.artifact-open #artifactPane { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); border-left: 1px solid var(--panel-border, var(--border)); position: relative; }
-/* Beside the conversation in the side layout: the right column. */
-body.side-layout.artifact-open { --right-w: var(--art-w, min(46vw, 900px)); }
+/* Beside the conversation in the side layout: the right column.
+   --art-w is the width the reader chose (dragged, saved per device); the
+   column is that choice fitted to the window now. The conversation always
+   keeps --conv-min, the panel at least 320px: a width saved on a big screen
+   or before the window shrank can no longer crush the conversation (and its
+   composer) to a sliver. */
+body.side-layout { --conv-min: 420px; }
+body.side-layout.artifact-open { --art-col: clamp(320px, var(--art-w, min(46vw, 900px)), calc(100vw - var(--side-w, 288px) - var(--conv-min))); --right-w: var(--art-col); }
 body.side-layout.artifact-open > #artifactPane { grid-column: 3; grid-row: 1 / 3; }
 body.side-layout.artifact-open.file-side-open { --right-w: 288px; }
 body.side-layout.artifact-open.file-side-open > #artifactPane { display: none; }
-body.side-layout.artifact-open > #filesToggle { right: calc(var(--art-w, min(46vw, 900px)) + 12px); }
+body.side-layout.artifact-open > #filesToggle { right: calc(var(--art-col) + 12px); }
+/* Too narrow for list, conversation (420) and panel (320) side by side
+   (1028px with the list, 740px with it folded): the panel lies over the
+   conversation, which keeps its full width underneath, as the Files panel
+   does below 1100px. The list stays uncovered. */
+@media (min-width: 701px) and (max-width: 1040px) {
+  body.side-layout.artifact-open:not(.side-fold):not(.file-side-open) { --right-w: 0px; --art-col: clamp(320px, var(--art-w, 900px), calc(100vw - var(--side-w, 288px))); }
+  body.side-layout.artifact-open:not(.side-fold) > #artifactPane { position: fixed; z-index: 47; top: 0; right: 0; bottom: 0; width: var(--art-col); box-shadow: -8px 0 24px var(--shadow-color); }
+  /* Beside the panel would be over the list; Files is one close away. The
+     voice button follows the square, so it steps aside too. */
+  body.side-layout.artifact-open:not(.side-fold):not(.file-side-open) > #filesToggle { display: none; }
+}
+@media (min-width: 701px) and (max-width: 760px) {
+  body.side-layout.side-fold.artifact-open:not(.file-side-open) { --right-w: 0px; --art-col: clamp(320px, var(--art-w, 900px), 100vw); }
+  body.side-layout.side-fold.artifact-open > #artifactPane { position: fixed; z-index: 47; top: 0; right: 0; bottom: 0; width: var(--art-col); box-shadow: -8px 0 24px var(--shadow-color); }
+  body.side-layout.side-fold.artifact-open:not(.file-side-open) > #filesToggle { display: none; }
+}
 /* Without the side layout: a sheet over the right of the screen. */
-body:not(.side-layout).artifact-open > #artifactPane { position: fixed; z-index: 45; top: 0; right: 0; bottom: 0; width: var(--art-w, min(56vw, 900px)); box-shadow: -8px 0 24px var(--shadow-color); }
+body:not(.side-layout).artifact-open > #artifactPane { position: fixed; z-index: 45; top: 0; right: 0; bottom: 0; width: min(var(--art-w, min(56vw, 900px)), calc(100vw - 48px)); box-shadow: -8px 0 24px var(--shadow-color); }
 #artifactPane.art-max { position: fixed !important; z-index: 60; inset: 0 !important; width: auto !important; }
 #artifactPane.art-dragging .art-frame { pointer-events: none; }
 .art-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 2; }
@@ -43,6 +65,15 @@ body:not(.side-layout).artifact-open > #artifactPane { position: fixed; z-index:
 .art-head a[hidden] { display: none; }
 .art-close { background: transparent; border: 0; padding: 0 6px; color: var(--text-dim); }
 .art-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+/* The head follows the panel's own width, not the window's: a narrow panel
+   gives the title its row and puts versions and tools on the next. */
+body.artifact-open #artifactPane { container-type: inline-size; }
+@container (max-width: 560px) {
+  .art-head { flex-wrap: wrap; row-gap: 4px; }
+  .art-titles { flex-basis: calc(100% - 48px); }
+  .art-versions { flex: 1 1 200px; min-width: 0; }
+  .art-versions select { flex: 1; min-width: 0; max-width: none; }
+}
 .art-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .art-sub { color: var(--text-dim); font-size: var(--fs-meta); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .art-versions { display: inline-flex; align-items: center; gap: 2px; }

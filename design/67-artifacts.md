@@ -39,6 +39,15 @@ Decisions taken while building, with their reasons:
   the saved conversation, so a reload shows the same thing.
 - On a phone the panel is a full-screen sheet opened from the card; it never
   opens by itself there.
+- **The conversation keeps 420px beside the panel.** The dragged width is a
+  wish; the column is that wish fitted to the window now (`--art-col`, a CSS
+  `clamp`), so a width saved on a big screen, or before the window shrank,
+  cannot crush the conversation and its composer to a sliver (it did: one
+  letter per line). When list, 420px and the panel's 320px do not fit side by
+  side (under 1028px, or 740px with the list folded) the panel lies over the
+  conversation like the Files panel, and the files square and the voice
+  button step aside instead of landing on the list. The head wraps by the
+  panel's own width (a container query), not the window's.
 
 ## Finding artifacts later (the library)
 
