@@ -91,5 +91,8 @@
 #voiceOnButton.inline { width: 32px; height: 32px; min-height: 32px; box-shadow: none; border-color: transparent; background: transparent; }
 #voiceOnButton.inline svg { width: 18px; height: 18px; }
 @media (pointer: coarse) { #voiceOnButton.inline { width: 40px; height: 40px; } }
-/* Beside the files square at the top right: its size and look. */
-#voiceOnButton.top { position: fixed; z-index: 48; width: 38px; height: 38px; min-height: 38px; border-radius: var(--r); box-shadow: 0 2px 12px var(--shadow-color); }
+/* In the side column's foot, beside You: the size of its other buttons. */
+#voiceOnButton.side { width: 30px; height: 30px; min-height: 30px; box-shadow: none; border-color: transparent; background: transparent; }
+#voiceOnButton.side svg { width: 18px; height: 18px; }
+/* The column folded: beside its ▸ at the top left, its size and look. */
+#voiceOnButton.corner { position: fixed; z-index: 48; width: 38px; height: 38px; min-height: 38px; border-radius: var(--r); box-shadow: 0 2px 12px var(--shadow-color); }

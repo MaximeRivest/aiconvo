@@ -214,8 +214,8 @@ test('a real server: versions follow the head, the preview origin serves them, w
     const r = JSON.parse(await evaluate(`JSON.stringify({ pane: document.getElementById('artifactPane').getBoundingClientRect(), conv: ${convWidth} })`));
     assert.ok(r.pane.left >= 0 && r.pane.right <= w + 1 && r.pane.width >= 320, w + ': the panel fits the window: ' + JSON.stringify(r));
     assert.ok(r.conv > 0, w + ': the conversation under it keeps its width: ' + JSON.stringify(r));
-    // The voice button follows the files square on its own timer.
-    await until(`(() => { const s = document.getElementById('side').getBoundingClientRect(); return [...document.querySelectorAll('#filesToggle, #voiceOnButton')].every(b => { const r = b.getBoundingClientRect(); return !r.width || r.left >= s.right; }); })()`, w + ': no floating button over the list');
+    // Floating buttons only: the voice button now lives in the list's foot.
+    await until(`(() => { const s = document.getElementById('side').getBoundingClientRect(); return [...document.querySelectorAll('#filesToggle, #voiceOnButton.corner')].every(b => { const r = b.getBoundingClientRect(); return !r.width || r.left >= s.right; }); })()`, w + ': no floating button over the list');
     await shot('artifact-' + w + '.png');
   }
   await send('Emulation.setDeviceMetricsOverride', { width: 1500, height: 1000, deviceScaleFactor: 1, mobile: false }, sid);

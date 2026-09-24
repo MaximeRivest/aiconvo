@@ -358,3 +358,19 @@ too common a word to press Enter on).
   "undo that", calibrating the thresholds from the record, selecting text
   inside a message (the cursor highlights whole messages), an agent that
   may change the screen beyond opening one thing.
+
+## Where the off button lives (2026-09-24)
+
+Off, one tap on a microphone starts listening. Voice is a setting of the
+device for the whole app, like the profile, so on wide screens the button
+sits in the side column's foot beside You: part of the layout, over nothing.
+With the column folded it sits beside the ▸ at the top left; the page heads
+keep that corner free (`--corner-l`), as they keep the files square's
+(`--corner-r`). On a phone it stays in the message box's row.
+
+It was beside the files square at the top right for a day. That covered
+the file editor's Save and ⋯. And when Files opened, the square went away
+and the button fell into the message box, next to the dictation microphone
+that looks the same and does something else. `test/floating-corners.test.js`
+checks every view, with the column shown and folded, for a floating button
+over a page's buttons, and the button's home.

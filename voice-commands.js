@@ -1654,7 +1654,7 @@ function voicePill() {
 function voicePaintOffButton() {
   const want = voicePrefs().button && !voice.refused;
   let b = $('voiceOnButton');
-  if (!want) { if (b) b.remove(); return; }
+  if (!want) { if (b) b.remove(); document.body.classList.remove('voice-corner'); return; }
   if (!b) {
     b = document.createElement('button');
     b.id = 'voiceOnButton';
@@ -1664,27 +1664,32 @@ function voicePaintOffButton() {
     b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="12" rx="4"></rect><path d="M5 11v1a7 7 0 0 0 14 0v-1M12 19v3M8 22h8"></path></svg>';
     b.onclick = () => voiceSetOn(true);
   }
-  // With a message box on screen: in its row of buttons, beside the
-  // dictation microphone, never over send or abort. Elsewhere: the corner.
-  // Wide screens (the tablet, a laptop): at the top, beside the files
-  // square, away from everything at the bottom. A phone: in the message
-  // box's row, beside the dictation microphone. Else the corner.
-  const files = $('filesToggle');
-  const top = files && getComputedStyle(files).display !== 'none' ? files.getBoundingClientRect() : null;
+  // Voice is a setting of this device for the whole app, like the profile:
+  // wide screens (the tablet, a laptop) keep it in the side column's foot,
+  // beside You — in the layout, so it covers nothing, and never beside the
+  // message box's dictation microphone, which looks the same and does
+  // something else. The column folded: beside its ▸, whose corner the page
+  // heads keep free (--corner-l). A phone: in the message box's row. Else
+  // the bottom corner.
+  const foot = $('sideFootSlot');
+  const unfold = $('sideUnfold');
+  const corner = !voiceVisible(foot) && unfold && getComputedStyle(unfold).display !== 'none' ? unfold.getBoundingClientRect() : null;
   const row = document.querySelector('#agentCompose .compose-left');
-  const home = top ? document.body : row && voiceVisible(row) ? row : voiceDock();
+  const home = voiceVisible(foot) ? foot : corner ? document.body : row && voiceVisible(row) ? row : voiceDock();
   b.classList.toggle('inline', home === row);
-  b.classList.toggle('top', !!top);
+  b.classList.toggle('side', home === foot);
+  b.classList.toggle('corner', !!corner);
+  document.body.classList.toggle('voice-corner', !!corner);
   if (b.parentElement !== home) home.appendChild(b);
-  if (top) { b.style.top = Math.round(top.top) + 'px'; b.style.right = Math.round(window.innerWidth - top.left + 8) + 'px'; }
-  else { b.style.top = ''; b.style.right = ''; }
+  if (corner) { b.style.top = Math.round(corner.top) + 'px'; b.style.left = Math.round(corner.right + 8) + 'px'; }
+  else { b.style.top = ''; b.style.left = ''; }
   voicePlaceDock();
 }
 
 function voicePaint() {
   const shown = voice.on || voice.status === 'error';
   const pill = $('voiceListenPill');
-  if (shown) { const b = $('voiceOnButton'); if (b) b.remove(); }
+  if (shown) { const b = $('voiceOnButton'); if (b) b.remove(); document.body.classList.remove('voice-corner'); }
   if (!shown) {
     if (pill) pill.remove(); voiceShowOverlay(false); voicePaintSettings(); voicePaintHints(); voicePaintOffButton();
     // The view changes under it (a conversation opens): follow.

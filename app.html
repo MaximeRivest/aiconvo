@@ -184,7 +184,19 @@ body.side-layout.file-side-open { --right-w: 288px; }
 #rightFiles, #filesToggle { display: none; }
 body.side-layout > #filesToggle { display: flex; align-items: center; justify-content: center; position: fixed; top: 12px; right: 12px; z-index: 48; width: 38px; height: 38px; min-height: 38px; padding: 0; border-radius: var(--r); background: var(--surface-1); box-shadow: 0 2px 12px var(--shadow-color); font-size: 18px; }
 body.side-layout.file-side-open > #filesToggle { display: none; }
-body.side-layout.conv:not(.file-side-open) #floatHead { padding-right: 62px; }
+/* The floating corners: the files square at the top right, and with the
+   column folded its ▸ (and the voice button beside it) at the top left.
+   Their size is said once here; every head at the top of the main column
+   keeps it free (--corner-r, --corner-l), and test/floating-corners.test.js
+   checks each view, so a new head cannot slide a button under them. */
+body.side-layout { --corner-r: 62px; --corner-l: 0px; }
+body.side-layout.file-side-open { --corner-r: 0px; }
+body.side-layout.side-fold { --corner-l: 62px; }
+body.side-layout.side-fold.voice-corner { --corner-l: 108px; }
+body.zen:not(.home).side-layout { --corner-r: 0px; --corner-l: 0px; }
+/* `html` outranks the head's own `padding: 8px 20px` further down. */
+html body.side-layout.conv #floatHead { padding-right: max(20px, var(--corner-r)); padding-left: max(20px, var(--corner-l)); }
+body.side-layout .live-file-view .live-file-head { padding-right: max(8px, var(--corner-r)); padding-left: max(8px, var(--corner-l)); }
 body.side-layout.file-side-open > #rightFiles { display: flex; grid-column: 3; grid-row: 1 / 3; min-width: 0; min-height: 0; background: var(--panel-bg); border-left: 1px solid var(--panel-border); }
 #rightFilePanel { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .file-scope-switch { display: flex; gap: 4px; padding: 0 10px 8px; }
@@ -321,8 +333,7 @@ body.side-layout.side-fold { --side-w: 0px; }
 body.side-layout.side-fold > #side { display: none !important; }
 #sideUnfold { display: none; }
 body.side-layout.side-fold > #sideUnfold { display: flex; align-items: center; justify-content: center; position: fixed; top: 12px; left: 12px; z-index: 48; width: 38px; height: 38px; min-height: 38px; padding: 0; background: var(--surface-1); box-shadow: 0 2px 12px var(--shadow-color); }
-body.side-layout.side-fold.conv #floatHead { padding-left: 62px; }
-body.side-layout.side-fold.home #ganttBar { padding-left: 48px; }
+body.side-layout.side-fold.home #ganttBar { padding-left: max(48px, var(--corner-l)); }
 body.side-layout > #side { position: relative; }
 /* Pop-ups that hung from the bar's right edge hang from the column's foot. */
 body.side-layout #machinePop { bottom: auto; right: auto; z-index: 60; max-width: calc(100vw - 16px); overflow: auto; }

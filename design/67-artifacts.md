@@ -45,8 +45,8 @@ Decisions taken while building, with their reasons:
   cannot crush the conversation and its composer to a sliver (it did: one
   letter per line). When list, 420px and the panel's 320px do not fit side by
   side (under 1028px, or 740px with the list folded) the panel lies over the
-  conversation like the Files panel, and the files square and the voice
-  button step aside instead of landing on the list. The head wraps by the
+  conversation like the Files panel, and the files square steps aside
+  instead of landing on the list. The head wraps by the
   panel's own width (a container query), not the window's.
 
 ## Finding artifacts later (the library)
