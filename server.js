@@ -3740,15 +3740,23 @@ async function assignConversationProject(key, rawProject) {
   return { ok: true, key, project, reextract };
 }
 
-// Model choices are user preferences, not derived cache. Keep one project
-// default and one explicit model set per conversation, shared by every UI
-// connected to this server.
+// Model choices are user preferences, not derived cache, shared by every UI
+// connected to this server. Two kinds:
+// - each conversation's own model set: it never changes unless the person
+//   changes it in that conversation;
+// - each person's last pick: what their next new conversation starts with.
+// There is no per-project default: models come and go faster than
+// projects do, so a pinned project model goes stale while the person has
+// long moved on.
 const MODEL_PREFS_FILE = path.join(NOTES_DIR, 'model-preferences.json');
-let modelPrefs = { projects: {}, conversations: {}, context: {} };
+let modelPrefs = { conversations: {}, context: {}, last: {} };
 try {
-  modelPrefs = { projects: {}, conversations: {}, context: {}, ...JSON.parse(fs.readFileSync(MODEL_PREFS_FILE, 'utf8')) };
+  modelPrefs = { conversations: {}, context: {}, last: {}, ...JSON.parse(fs.readFileSync(MODEL_PREFS_FILE, 'utf8')) };
 } catch {}
-if (!modelPrefs.context || typeof modelPrefs.context !== 'object' || Array.isArray(modelPrefs.context)) modelPrefs.context = {};
+for (const field of ['conversations', 'context', 'last']) {
+  if (!modelPrefs[field] || typeof modelPrefs[field] !== 'object' || Array.isArray(modelPrefs[field])) modelPrefs[field] = {};
+}
+delete modelPrefs.projects; // retired per-project defaults; dropped on the next save
 function normalizePickedModel(raw) {
   const provider = String(raw && raw.provider || '').trim();
   const modelId = String(raw && (raw.modelId || raw.model) || '').trim();
@@ -3770,24 +3778,35 @@ function saveModelPrefs() {
   fs.writeFileSync(tmp, JSON.stringify(modelPrefs, null, 2) + '\n', { mode: 0o600 });
   fs.renameSync(tmp, MODEL_PREFS_FILE);
 }
-function projectDefaultModel(project) {
-  return normalizePickedModel(modelPrefs.projects[canonicalProjectName(String(project || ''))]);
+// Whose pick: a principal, an identity's user, or a bare user id. Without
+// one, the install owner (requests that predate people, internal starts).
+function modelPickUserId(who) {
+  if (typeof who === 'string' && who) return who;
+  const user = who && (who.user || (who.id ? who : null));
+  return (user && user.id) || usersLib.ownerOf(roster).id;
 }
-function resolvedProjectDefaultModel(project) {
-  const explicit = projectDefaultModel(project);
-  if (explicit) return { ...explicit, source: 'project' };
+// The models a new conversation starts with: the person's last pick, or
+// pi's own default before they have ever picked. The result is a fresh
+// list; `source` says which of the two it is.
+function newConversationModels(who) {
+  const last = normalizePickedModels(modelPrefs.last[modelPickUserId(who)]?.models);
+  if (last.length) return { models: last, source: 'last' };
   const pi = readPiDefault();
   const fallback = normalizePickedModel({ provider: pi.provider, modelId: pi.model });
-  return fallback ? { ...fallback, source: 'pi' } : null;
+  return { models: fallback ? [fallback] : [], source: fallback ? 'pi' : null };
 }
-function setProjectDefaultModel(project, raw) {
-  const key = canonicalProjectName(String(project || ''));
-  if (!projectMetaFor(key)) throw new Error('project not found');
-  const model = normalizePickedModel(raw);
-  if (model) modelPrefs.projects[key] = model;
-  else delete modelPrefs.projects[key];
+// A person picked models (in a started conversation or a draft): the next
+// new conversation starts from them. Conversations already underway keep
+// their own set.
+function rememberModelPick(who, raw) {
+  const models = normalizePickedModels(raw);
+  if (!models.length) return [];
+  const id = modelPickUserId(who);
+  const before = normalizePickedModels(modelPrefs.last[id]?.models);
+  if (JSON.stringify(before) === JSON.stringify(models)) return models;
+  modelPrefs.last[id] = { models, at: Date.now() };
   saveModelPrefs();
-  return { ok: true, model: projectDefaultModel(key), resolved: resolvedProjectDefaultModel(key) };
+  return models;
 }
 function saveConversationModels(key, raw) {
   if (!index[key]) throw new Error('conversation not found');
@@ -4070,9 +4089,10 @@ async function inferredConversationModels(key, cached) {
       }
     }
   } catch {}
+  // Nothing in the file says which model: the one who started it, as they
+  // would start a new conversation now. Remembered, so it stays put.
   const entry = index[key];
-  const fallback = entry && resolvedProjectDefaultModel(projectOfEntry(entry, key));
-  return fallback ? remember([{ provider: fallback.provider, modelId: fallback.modelId }]) : [];
+  return entry ? remember(newConversationModels(entry.createdBy || null).models) : [];
 }
 
 // A linked worktree's cwd resolves to the MAIN worktree root; that is the
@@ -10082,10 +10102,10 @@ async function filesAskTargetResponse(pathValue, projectValue, identity) {
   candidates.sort((a, b) => b.lastMs - a.lastMs);
   const area = meta && meta.cwd ? areaOfCwdIn(project, path.dirname(abs)) : null;
   const now = Date.now();
-  const inherited = resolvedProjectDefaultModel(project);
+  const inherited = newConversationModels(identity).models[0] || null;
   return {
     path: abs, project, area, continue: candidates[0] || null, candidates: candidates.slice(0, 5), newAllowed: !!(meta && meta.cwd),
-    defaultModel: inherited ? { provider: inherited.provider, modelId: inherited.modelId } : null,
+    defaultModel: inherited,
     // For the box to show where things stand: the recent edits it would
     // send, and the earlier asks (with their conversation, so the box can
     // leave out those made in the conversation it continues).
@@ -10257,7 +10277,7 @@ async function filesAskResponse(body, identity) {
     context = conversationContextOf(key).filter(c => !(c.type === 'file' && c.path === abs)).concat([item]);
     if (models.length) saveConversationModels(key, models);
   }
-  const lead = models[0] || (created ? resolvedProjectDefaultModel(project) : null);
+  const lead = models[0] || (created ? newConversationModels(principal).models[0] || null : null);
   const out = await startAgentRun(key, {
     node: null, provider: lead ? lead.provider : undefined, modelId: lead ? lead.modelId : undefined,
     message: prompt, images, force: false, allowQueue: true, context, brief, thinking, principal,
@@ -12021,13 +12041,10 @@ async function projectResponse(project) {
   const memory = await projectMemoryInfo(project, meta);
   const backfill = memoryBackfillJobs.get(project);
   const docsJob = memoryDocsJobs.get(project);
-  const explicitDefault = projectDefaultModel(project);
   return {
     project, cwd, conversations: entries.length, notes, epics: projectEpics, memory, areas,
     title: (projectTitles[project] && projectTitles[project].title) || null,
     created: !!meta.created,
-    defaultModel: explicitDefault,
-    resolvedDefaultModel: resolvedProjectDefaultModel(project),
     latestTs: latestMs ? new Date(latestMs).toISOString() : null,
     freshness: {
       freshNotes, staleNotes: notes - freshNotes, missingNotes: entries.length - notes,
@@ -12849,9 +12866,10 @@ async function waitForNewConversation(kind, cwd, sinceMs, existing, timeoutMs = 
 
 // What a start folder means, before anything runs: does it exist, which
 // project it implies (the same cwd rule the index applies to every
-// conversation), which AGENTS.md files pi would read from it, and the
-// default model that project sets. The draft shows this next to the folder
-// so the choice is made with its consequences visible.
+// conversation), and which AGENTS.md files pi would read from it. The draft
+// shows this next to the folder so the choice is made with its consequences
+// visible. The folder does not decide the model: that is the person's last
+// pick, whatever the folder (draftDefaults).
 function describeStartFolder(raw) {
   const text = String(raw == null ? '' : raw).trim();
   const home = os.homedir();
@@ -12879,19 +12897,18 @@ function describeStartFolder(raw) {
   if (fs.existsSync(globalAgents) && !contextFiles.includes(globalAgents)) contextFiles.push(globalAgents);
   const meta = loose ? null : projectMetaFor(project);
   const area = !loose && meta && meta.cwd ? areaOfCwdIn(project, abs) : null;
-  const model = resolvedProjectDefaultModel(loose ? LOOSE_PROJECT : project);
   return {
     path: abs, display, exists, loose,
     project: loose ? null : project, known: !!meta, area: area || null,
     contextFiles,
-    defaultModel: model ? { provider: model.provider, modelId: model.modelId, source: model.source } : null,
   };
 }
 
-// What a fresh draft starts from: home as the folder, pi's own defaults
-// for reasoning and mode. The client shows these until the user changes
-// them; nothing here is stored anywhere.
-function draftDefaults() {
+// What a fresh draft starts from: home as the folder, the person's last
+// model pick (pi's default before their first), pi's own defaults for
+// reasoning and mode. The client shows these until the user changes them;
+// nothing here is stored anywhere.
+function draftDefaults(identity) {
   let thinking = null;
   try {
     const raw = JSON.parse(fs.readFileSync(PI_SETTINGS_FILE, 'utf8'));
@@ -12899,8 +12916,10 @@ function draftDefaults() {
   } catch {}
   const modes = listPromptModes();
   const coding = modes.find(m => m.key === 'coding') || null;
+  const start = newConversationModels(identity);
   return {
     folder: describeStartFolder(''),
+    models: start.models, modelsSource: start.source,
     thinking, thinkingLevels: settingsLib.THINKING_LEVELS,
     mode: coding ? { key: coding.key, label: coding.label } : { key: 'coding', label: 'Coding' },
   };
@@ -13014,15 +13033,13 @@ async function startProjectConversation(options) {
   const label = String(options.name || (impliedProject === LOOSE_PROJECT ? 'Loose conversation' : 'Project: ' + impliedProject)).slice(0, 80);
   const name = 'chattering-' + (projectless ? 'loose-' : 'project-') + crypto.createHash('sha256').update(project + ':' + Date.now() + ':' + kind).digest('hex').slice(0, 12);
   const mode = kind === 'pi' && typeof options.mode === 'string' && options.mode.trim() ? options.mode.trim() : null;
-  // Lead model for the kickoff run; any further models stay in the project's
-  // composer strip for later fan-out sends.
+  // Lead model for the kickoff run; any further models stay in the new
+  // conversation's composer strip for later fan-out sends. Nothing asked
+  // for: the models the starting person picked last (pi's default before
+  // their first pick), whatever the folder or project.
   const requestedModels = normalizePickedModels(options.models);
-  // The folder's project sets the default model, also for a loose start
-  // whose folder sits inside a project (it indexes as that project).
-  const inheritedModel = kind === 'pi' ? resolvedProjectDefaultModel(projectless ? projectNameOf(cwd) : project) : null;
-  const launchModels = requestedModels.length
-    ? requestedModels
-    : inheritedModel ? [{ provider: inheritedModel.provider, modelId: inheritedModel.modelId }] : [];
+  const launchModels = requestedModels.length ? requestedModels
+    : kind === 'pi' ? newConversationModels(options.principal || null).models : [];
   const leadModel = kind === 'pi' ? (launchModels[0] || null) : null;
   const include = { ...(options.include || {}) };
   if (areaRel) include.area = areaRel; // briefing and context go narrow-first
@@ -14308,7 +14325,7 @@ async function voiceDelegateStart(body, identity) {
     : { project: LOOSE_PROJECT, projectless: true, agent: 'pi', surface: 'rpc', silent: true, models, include: { map: false }, principal });
   const key = started.key;
   if (!key) throw new Error('the agent\u2019s conversation did not start');
-  const lead = models[0] || (project ? resolvedProjectDefaultModel(project) : null);
+  const lead = models[0] || newConversationModels(principal).models[0] || null;
   const out = await startAgentRun(key, {
     node: null, provider: lead ? lead.provider : undefined, modelId: lead ? lead.modelId : undefined,
     message: voiceDelegatePrompt({ said, screen: String(body.screen || '').slice(0, 200), project }), force: false, allowQueue: false, principal,
@@ -15632,17 +15649,21 @@ async function handleRequest(req, res) {
         json(res, 200, await startConversationFromDraft(JSON.parse(body || '{}'), principalFor(identity)));
       } catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/draft-defaults' && req.method === 'GET') {
-      try { json(res, 200, draftDefaults()); }
+      try { json(res, 200, draftDefaults(identity)); }
       catch (e) { json(res, 500, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/folder-info' && req.method === 'GET') {
       try { json(res, 200, describeStartFolder(u.searchParams.get('path') || '')); }
       catch (e) { json(res, 400, { error: e.message }); }
-    } else if (u.pathname === '/api/project/model' && req.method === 'PUT') {
+    } else if (u.pathname === '/api/models/last' && req.method === 'PUT') {
+      // A pick in a draft: no conversation exists yet, but the next new
+      // conversation should start from it all the same.
       let body = '';
-      for await (const chunk of req) body += chunk;
+      for await (const chunk of req) { body += chunk; if (body.length > 64000) return json(res, 413, { error: 'request too large' }); }
       try {
         const p = JSON.parse(body || '{}');
-        json(res, 200, setProjectDefaultModel(p.project, p.model));
+        const models = rememberModelPick(identity, p.models);
+        if (!models.length) throw new Error('pick at least one model');
+        json(res, 200, { ok: true, models });
       } catch (e) { json(res, 400, { error: e.message }); }
     } else if (u.pathname === '/api/fs/dirs' && req.method === 'GET') {
       // Folder picker: list subdirectories, so an existing folder can be
@@ -15898,8 +15919,11 @@ async function handleRequest(req, res) {
       for await (const chunk of req) body += chunk;
       try {
         const p = JSON.parse(body || '{}');
-        json(res, 200, { ok: true, models: saveConversationModels(p.id, p.models) });
-      } catch (e) { json(res, 400, { error: e.message }); }
+        assertCan(identity, 'act', targetOf(p.id), 'this conversation');
+        const models = saveConversationModels(p.id, p.models);
+        rememberModelPick(identity, models);
+        json(res, 200, { ok: true, models });
+      } catch (e) { json(res, e.status || 400, { error: e.message }); }
     } else if (u.pathname === '/api/conversation/context-preview' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 64000) return json(res, 413, { error: 'Selection too large' }); }

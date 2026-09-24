@@ -85,13 +85,14 @@ function draftSummary(d) {
 }
 
 // ---- the draft as the composer's "current" conversation ----
-function draftModels(d, folderInfo) {
+// The draft's own pick, else what a new conversation starts with: the
+// person's last pick (pi's default before their first), from the server.
+function draftModels(d, defaults) {
   if (d.models && d.models.length) return d.models;
-  const m = folderInfo && folderInfo.defaultModel;
-  return m ? [{ provider: m.provider, modelId: m.modelId }] : [];
+  return defaults && Array.isArray(defaults.models) ? defaults.models : [];
 }
-function draftAsCurrent(d, folderInfo) {
-  return { key: draftKey(d.id), draft: true, source: 'pi', messages: [], selectedModels: draftModels(d, folderInfo).slice(), attachedContext: (d.context || []).slice(), cwd: folderInfo ? folderInfo.path : null };
+function draftAsCurrent(d) {
+  return { key: draftKey(d.id), draft: true, source: 'pi', messages: [], selectedModels: draftModels(d, null).slice(), attachedContext: (d.context || []).slice(), cwd: null };
 }
 function draftScheduleSave() {
   if (!draftState) return;
@@ -111,6 +112,11 @@ function draftSetModels(list) {
   current.selectedModels = list.slice();
   renderModelStrip();
   saveDraft(draftState.d);
+  // A pick is a pick, started conversation or not: the next new one starts
+  // from it. The draft keeps its own copy either way.
+  postJsonMethod('/api/models/last', 'PUT', { models: list }).then(out => {
+    if (out && out.error) errToast('could not remember this model pick: ' + out.error);
+  });
 }
 function draftSaveContext() {
   if (!isDraftOpen()) return;
@@ -185,7 +191,7 @@ async function showDraft(id) {
   window._ctxTouched = false;
   window._agentContext = (d.context || []).slice();
   window._agentImages = (d.images || []).slice();
-  current = draftAsCurrent(d, null);
+  current = draftAsCurrent(d);
   if (d.thinking) thinkLevels.set(activeRel, d.thinking);
   if (d.mode) convModes.set(activeRel, { key: d.mode, label: d.mode });
   const others = listDrafts().filter(x => x.id !== d.id);
@@ -230,6 +236,11 @@ async function showDraft(id) {
     if (mine.defaults) {
       if (!d.thinking && mine.defaults.thinking) thinkLevels.set(activeRel, mine.defaults.thinking);
       if (!d.mode && mine.defaults.mode) convModes.set(activeRel, mine.defaults.mode);
+      // No pick in this draft yet: show the models it will start with.
+      if (!(d.models && d.models.length) && isDraftOpen()) {
+        current.selectedModels = draftModels(d, mine.defaults).slice();
+        renderModelStrip();
+      }
     }
     draftApplyFolderInfo(info && !info.error ? info : null);
     draftPaintMeter();
@@ -291,14 +302,8 @@ function draftApplyFolderInfo(info) {
     const files = info.contextFiles && info.contextFiles.length
       ? 'pi reads ' + info.contextFiles.map(f => `<code>${esc(shortDir(f))}</code>`).join(', ')
       : 'no AGENTS.md on this path';
-    const model = info.defaultModel ? `default model ${esc(shortModelName(info.defaultModel.modelId))} (${info.defaultModel.source === 'project' ? 'project setting' : 'pi default'})` : 'no default model set in pi';
-    status.innerHTML = `${where} · ${files} · ${model}`;
+    status.innerHTML = `${where} · ${files}`;
     implies.textContent = info.loose ? ' · No project' : ' · ' + info.project;
-  }
-  // No explicit model pick: the folder's default is what will run. Show it.
-  if (!(d.models && d.models.length) && current && current.draft) {
-    current.selectedModels = draftModels(d, info).slice();
-    renderModelStrip();
   }
 }
 
@@ -396,7 +401,7 @@ async function sendDraft(btn) {
   if ($('liveStrip')) $('liveStrip').hidden = false;
   const state = $('draftSetup') && $('draftSetup').querySelector('.ds-state');
   if (state) state.textContent = 'starting';
-  const models = draftModels(d, draftState.folderInfo);
+  const models = draftModels(d, draftState.defaults);
   try {
     const images = [];
     for (const img of (window._agentImages || [])) images.push(await shrinkAgentImage(img));
@@ -423,6 +428,13 @@ async function sendDraft(btn) {
     window._sendPendingKey = out.runError ? null : out.key;
     window._sendPendingAt = Date.now();
     await open(out.key, 'bottom');
+    // Your words on screen at once, as for every later send. The run has
+    // only just begun writing the session, so the transcript just loaded
+    // rarely holds the prompt yet, and while the reply streams the page
+    // does not reload it. The settled refresh replaces this echo with the
+    // saved record.
+    if (!out.runError && current && current.key === out.key && viewKind === 'conversation'
+        && !(current.messages || []).some(m => m && m.role === 'user')) echoUserPrompt(prompt);
     for (const w of out.warnings || []) errToast(w);
     if (out.runError) errToast('the conversation exists but the first message did not go: ' + out.runError);
     else toast('✓ started · ' + shortDir(out.cwd) + (out.project && out.project !== LOOSE_PROJECT ? ' · ' + out.project : ' · No project') + (out.runs ? ' · ' + out.runs.length + ' models' : ''));

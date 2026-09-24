@@ -100,14 +100,13 @@ function folderHarness(home, projectNameOf) {
     PI_SETTINGS_FILE: path.join(home, '.pi', 'agent', 'settings.json'),
     projectMetaFor: name => (name === 'demo' ? { cwd: path.join(home, 'Projects', 'demo') } : null),
     areaOfCwdIn: () => null,
-    resolvedProjectDefaultModel: name => (name === 'demo' ? { provider: 'p', modelId: 'demo-model', source: 'project' } : { provider: 'p', modelId: 'pi-default', source: 'pi' }),
   };
   vm.createContext(context);
   vm.runInContext(slice(serverSource, 'function describeStartFolder(', '// What a fresh draft starts from'), context);
   return context;
 }
 
-test('describeStartFolder: existence, implied project, AGENTS.md files, default model', () => {
+test('describeStartFolder: existence, implied project, AGENTS.md files; the folder does not pick the model', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-home-'));
   try {
     fs.mkdirSync(path.join(home, '.pi', 'agent'), { recursive: true });
@@ -123,18 +122,57 @@ test('describeStartFolder: existence, implied project, AGENTS.md files, default 
     assert.equal(atHome.loose, true);
     assert.equal(atHome.project, null);
     assert.deepEqual(plain(atHome.contextFiles), [path.join(home, '.pi', 'agent', 'AGENTS.md')]);
-    assert.equal(atHome.defaultModel.modelId, 'pi-default');
+    assert.equal('defaultModel' in atHome, false, 'models follow the person, not the folder');
     const inProject = h.describeStartFolder('~/Projects/demo/sub');
     assert.equal(inProject.display, '~/Projects/demo/sub');
     assert.equal(inProject.loose, false);
     assert.equal(inProject.project, 'demo');
     assert.equal(inProject.known, true);
     assert.deepEqual(plain(inProject.contextFiles), [path.join(home, 'Projects', 'demo', 'AGENTS.md'), path.join(home, '.pi', 'agent', 'AGENTS.md')]);
-    assert.equal(inProject.defaultModel.modelId, 'demo-model');
+    assert.equal('defaultModel' in inProject, false);
     const missing = h.describeStartFolder('~/nowhere');
     assert.equal(missing.exists, false);
     assert.equal(missing.contextFiles.length, 1, 'only the global file when the folder does not exist');
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+// ---- server: which models a new conversation starts with ----
+function modelPrefsHarness(piDefault) {
+  const saves = [];
+  const context = {
+    String, Array, Object, JSON, Date, Set,
+    modelPrefs: { conversations: {}, context: {}, last: {} },
+    usersLib: { ownerOf: () => ({ id: 'owner' }) }, roster: {},
+    readPiDefault: () => piDefault,
+    saveModelPrefs: () => saves.push(JSON.stringify(context.modelPrefs.last)),
+  };
+  vm.createContext(context);
+  vm.runInContext(slice(serverSource, 'function normalizePickedModel(', 'function saveModelPrefs('), context);
+  vm.runInContext(slice(serverSource, '// Whose pick: a principal', 'function saveConversationModels('), context);
+  return { ...context, saves };
+}
+
+test('a new conversation starts with the person\u2019s last pick; pi\u2019s default only before the first', () => {
+  const h = modelPrefsHarness({ provider: 'pi', model: 'pi-default' });
+  const start = h.newConversationModels({ user: { id: 'maxime' } });
+  assert.deepEqual(plain(start), { models: [{ provider: 'pi', modelId: 'pi-default' }], source: 'pi' });
+  const picked = [{ provider: 'a', modelId: 'one' }, { provider: 'b', modelId: 'two' }];
+  h.rememberModelPick({ user: { id: 'maxime' } }, picked);
+  assert.deepEqual(plain(h.newConversationModels({ user: { id: 'maxime' } })), { models: picked, source: 'last' }, 'every picked model carries over, not only the first');
+  assert.deepEqual(plain(h.newConversationModels('maxime').models), picked, 'a bare user id reads the same pick');
+  assert.equal(h.newConversationModels({ user: { id: 'lilly' } }).source, 'pi', 'one person\u2019s pick is not another\u2019s');
+  // Without a person: the install owner's pick.
+  h.rememberModelPick(null, [{ provider: 'c', modelId: 'owner-model' }]);
+  assert.equal(h.newConversationModels(null).models[0].modelId, 'owner-model');
+  assert.equal(h.newConversationModels({ user: { id: 'owner' } }).models[0].modelId, 'owner-model');
+  // The same pick again writes nothing; an empty pick changes nothing.
+  const before = h.saves.length;
+  h.rememberModelPick({ user: { id: 'maxime' } }, picked);
+  assert.equal(h.saves.length, before);
+  assert.deepEqual(plain(h.rememberModelPick({ user: { id: 'maxime' } }, [])), []);
+  assert.deepEqual(plain(h.newConversationModels('maxime').models), picked);
+  // Nobody picked and pi has no default: no model, and the start says so.
+  assert.deepEqual(plain(modelPrefsHarness({ provider: '', model: '' }).newConversationModels('x')), { models: [], source: null });
 });
 
 // ---- browser: the draft store ----

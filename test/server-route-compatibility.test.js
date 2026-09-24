@@ -46,7 +46,7 @@ test('path/read keeps the existing error response', async () => {
 
 test('cleanup keeps standalone APIs and terminal slash-key support', () => {
   for (const route of ['/api/here', '/api/modes/delete', '/api/conversation/diffs',
-    '/api/project/memory', '/api/memory/leaf', '/api/project/model',
+    '/api/project/memory', '/api/memory/leaf', '/api/models/last',
     '/api/conversation/act', '/api/conversation/thinking', '/api/conversation/models']) {
     assert.ok(source.includes("u.pathname === '" + route + "'"), route);
   }

@@ -7641,8 +7641,6 @@ async function refreshLauncherModes() {
   return launcherModes;
 }
 
-// A launcher starts by inheriting the project default. Picking models here
-// creates an override for this new conversation only.
 const MODE_SECTION_LABELS = {
   available_tools: 'available tools', custom_tools_note: 'custom tools note', guidelines: 'guidelines',
   pi_docs: 'pi docs', append_prompt: 'additional instructions (injected memory!)', project_context: 'project context files',
@@ -8014,7 +8012,7 @@ async function startReviewedConversation(project, opts = {}) {
     : '';
   ov.innerHTML = `<div class="cc-card">
     <div class="cc-head"><b>review the context before it goes</b><span class="dim cc-size"></span></div>
-    <div class="cc-meta dim">${whereHtml}project map${opts.epicId ? ' + epic memory' : ''} · injected into the system prompt · project default model</div>
+    <div class="cc-meta dim">${whereHtml}project map${opts.epicId ? ' + epic memory' : ''} · injected into the system prompt · your last-picked model</div>
     <textarea class="cc-text" spellcheck="false"></textarea>
     <div class="hint">Edit freely — what you see is what the model gets.</div>
     <div class="cc-foot">
@@ -10566,10 +10564,10 @@ function wireHead() {
   wireContextNav();
 }
 
-// The + in the bar: a fresh conversation in this project — the model and
-// thinking level this conversation serves next, the project map in the
-// system prompt, and nothing else. No first message goes out: the new
-// conversation opens as an empty composer.
+// The + in the bar: a fresh conversation in this project — your last model
+// pick (as every new conversation), this conversation's thinking level, the
+// project map in the system prompt, and nothing else. No first message goes
+// out: the new conversation opens as an empty composer.
 async function startSiblingConversation() {
   if (!current || window._chNewBusy) return;
   const project = projectOf(current);
@@ -10577,13 +10575,8 @@ async function startSiblingConversation() {
   window._chNewBusy = true;
   const prevKey = activeRel;
   // Everything the new conversation inherits is known NOW, from caches:
-  // read it before navigating, then move the screen at once.
-  let models = fanModels().slice(0, 1);
-  if (!models.length) {
-    const hit = ctxMeterCache.get(prevKey);
-    const c = hit && hit.data;
-    if (c && c.provider && c.model) models = [{ provider: c.provider, modelId: c.model }];
-  }
+  // read it before navigating, then move the screen at once. The models are
+  // not among them: the server starts it with the last pick.
   const thinking = thinkLevels.get(prevKey) || null;
   // A sibling stays in place: it inherits the current conversation's area.
   const areaRel = areaOfSession(current);
@@ -10593,7 +10586,7 @@ async function startSiblingConversation() {
   $('view').innerHTML = `<div class="dprog" style="margin-top:70px;text-align:center">
     <div style="font-size:15px"><span class="spin">░</span> new conversation · <b>${esc(project)}${areaRel ? '/' + esc(areaRel) : ''}</b></div>
     <div class="hint" id="launchStatus" style="margin-top:10px">composing the project map…</div>
-    <div class="hint" style="color:var(--text-faint);margin-top:6px">${esc(models.length ? models[0].modelId : 'project default model')}${thinking && thinking !== 'off' ? ' · thinking ' + esc(thinking) : ''} · map in the system prompt</div>
+    <div class="hint" style="color:var(--text-faint);margin-top:6px">your last-picked model${thinking && thinking !== 'off' ? ' · thinking ' + esc(thinking) : ''} · map in the system prompt</div>
   </div>`;
   const stage = t => { const el = $('launchStatus'); if (el) el.textContent = t; };
   try {
@@ -10603,7 +10596,7 @@ async function startSiblingConversation() {
     stage('starting the session…');
     const out = await postJson('/api/project/start', {
       project, agent: 'pi', name: '', surface: 'rpc', mode: null,
-      models, area: areaRel || undefined, context: bundle.text, include, silent: true,
+      models: [], area: areaRel || undefined, context: bundle.text, include, silent: true,
     });
     if (out.error) throw new Error(out.error);
     if (!out.key) throw new Error('no conversation came back');

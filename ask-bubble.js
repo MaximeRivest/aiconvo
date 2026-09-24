@@ -423,7 +423,7 @@ function askBubblePaintControls() {
   const shown = prefs.model || own;
   model.innerHTML = `◇ <span class="mname">${esc(shown ? shortModelName(shown) : key ? 'its model' : 'default model')}</span> ▾`;
   model.title = (prefs.model ? 'Answers with ' + prefs.model + ', chosen for the ask box.'
-    : 'Answers with ' + (own || (key ? 'the conversation’s model' : 'the project’s default model')) + '.') + ' Click to choose (Alt+M).';
+    : 'Answers with ' + (own || (key ? 'the conversation’s model' : 'your last-picked model')) + '.') + ' Click to choose (Alt+M).';
   const think = b.root.querySelector('.ask-think');
   think.textContent = '∴ ' + (prefs.thinking || 'default') + ' ▾';
   think.title = (prefs.thinking ? 'Reasoning for asks from this box: ' + prefs.thinking + '.' : 'Reasoning: the conversation’s own level.') + ' Click to choose (Shift+Tab). Less reasoning answers sooner.';
