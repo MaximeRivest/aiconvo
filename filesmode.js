@@ -177,21 +177,28 @@ async function fileWsOpenFolder(pathValue, label) {
   if (info.error) return errToast(info.error);
   return openFolderInApp(info);
 }
+// Once per editor host: a notebook parked in the side list comes back with
+// the same host, and its links then belong to the workspace showing it now.
+const docLinkHosts = new WeakSet();
 function fileWsWireDocLinks(ws) {
   const host = $('docEditor');
-  if (!host) return;
+  if (!host || docLinkHosts.has(host)) return;
+  docLinkHosts.add(host);
   // The bundle (0.13.0) reports the click's modifier keys with the event;
   // Ctrl/Cmd means the system application, as on every file control. The
   // 0.12.0 fallback bundle reports none, so a modified click opens in-app.
   host.addEventListener('file-link-navigate', e => {
     const detail = e.detail || {};
     const modifiers = detail.modifiers || {};
-    fileWsFollowLink(ws, detail.path, { system: !!(modifiers.ctrl || modifiers.meta) });
+    fileWsFollowLink(fileWs || ws, detail.path, { system: !!(modifiers.ctrl || modifiers.meta) });
   });
 }
 
 function fileWsCloseEditor({ keepDraft = true } = {}) {
   if (!fileWs) return;
+  // A notebook the side list keeps is parked first: it takes the shared
+  // text with it, so the leave below lets go of nothing it still uses.
+  const parked = fileWs.kind === 'md' && parkDocument();
   fileWsLeaveShared(fileWs);
   fileWs.live?.dispose?.();
   fileWs.imageView?.dispose();
@@ -200,7 +207,7 @@ function fileWsCloseEditor({ keepDraft = true } = {}) {
   if (fileWs.editor && fileWs.editor.selection) {
     try { localStorage.setItem('chattering.cursor:' + fileWs.path, String(fileWs.editor.selection().line)); } catch {}
   }
-  if (fileWs.kind === 'md') { flushAndCloseDocument(); }
+  if (fileWs.kind === 'md') { if (!parked) flushAndCloseDocument(); }
   else if (fileWs.editor) {
     if (keepDraft && fileWs.dirty && !fileWs.wasShared) {
       // Code never autosaves (design §5.3). An unsaved draft survives a
@@ -283,14 +290,18 @@ async function fileWsMountMarkdown(ws, opts) {
   if (!host) return;
   host.innerHTML = `<div class="doc-view">${liveFileHead(ws)}<div class="fw-banner" id="fwBanner" hidden></div><div class="doc-body"><div class="doc-editor-host"><div id="docEditor"></div></div></div></div>`;
   $('liveBack').onclick = () => liveFileGoBack(ws);
-  await mountDocumentEditor(ws.path, ws.project, { focused: true });
+  // A notebook kept in the side list comes back as it was left: the same
+  // editor, a cell still running where it runs (design/68).
+  const parked = typeof NotebookTabs !== 'undefined' ? NotebookTabs.take(ws.path) : null;
+  const resumed = !!parked && resumeDocumentEditor(parked.st, ws, parked.scroll);
+  if (!resumed) await mountDocumentEditor(ws.path, ws.project, { focused: true });
   if (fileWs !== ws) return;
   // Markdown the project cannot edit still opens, read-only, as text.
   if (!docState || docState.path !== ws.path) { ws.kind = 'code'; return fileWsMountCode(ws, opts); }
   ws.editor = docState.editor;
   ws.sha = docState.sha;
   fileWsWireDocLinks(ws);
-  fileWsAfterMount(ws, opts);
+  fileWsAfterMount(ws, resumed ? { ...opts, resumed: true } : opts);
 }
 
 // The whole-file editor's AI commands (app.html fileAiOptions). A shared
@@ -492,7 +503,8 @@ function fileWsMountLine(ws, opts) {
 function fileWsAfterMount(ws, opts) {
   if (fileWs !== ws || !ws.editor) return;
   if (typeof renderPresenceMarks === 'function') renderPresenceMarks();
-  const line = fileWsMountLine(ws, opts);
+  // A notebook back from the side list keeps its place unless a line was asked for.
+  const line = opts.resumed && !opts.line && !ws.line ? null : fileWsMountLine(ws, opts);
   if (line && ws.editor.gotoLine) { try { ws.editor.gotoLine(line); } catch {} }
   ws.line = null;
   liveFileAfterMount(ws);

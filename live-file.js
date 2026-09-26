@@ -316,6 +316,7 @@ function liveFileRememberOpen(ws) {
   ws.recentOpened = true;
   if (typeof recordRecentFile === 'function') recordRecentFile(ws.path, ws.project);
 }
+const liveKeyEditors = new WeakSet();
 function liveFileAfterMount(ws) {
   if (fileWs !== ws || !ws.editor) return;
   liveFileRememberOpen(ws);
@@ -333,10 +334,17 @@ function liveFileAfterMount(ws) {
   };
   wireFileViewControls($('ffCompare'));
   const editor = ws.editor;
-  if (editor.view?.dom) editor.view.dom.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); fileWsToggleAsk(true); }
-    else fileViewKey(ws, e);
-  });
+  // Once per editor: a notebook parked in the side list comes back with the
+  // same one, shown by a new workspace.
+  if (editor.view?.dom && !liveKeyEditors.has(editor)) {
+    liveKeyEditors.add(editor);
+    editor.view.dom.addEventListener('keydown', e => {
+      const shown = fileWs && fileWs.editor === editor ? fileWs : null;
+      if (!shown) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); fileWsToggleAsk(true); }
+      else fileViewKey(shown, e);
+    });
+  }
   const savedText = ws.kind === 'md' ? docState.baseText : ws.baseText;
   $('docReload').onclick = () => liveFileReload(ws);
   const state = ws.live = { version: 0, original: savedText, sha: ws.kind === 'md' ? docState.sha : ws.sha,

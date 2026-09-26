@@ -15054,6 +15054,7 @@ async function handleRequest(req, res) {
       '/ai-commands.js': { file: 'ai-commands.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/delegation-ui.js': { file: 'delegation-ui.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/filesmode.js': { file: 'filesmode.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
+      '/notebook-tabs.js': { file: 'notebook-tabs.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/navigation.js': { file: 'navigation.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/timeline-chart.js': { file: 'timeline-chart.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },
       '/files-browser.js': { file: 'files-browser.js', type: 'text/javascript; charset=utf-8', cache: 'no-cache' },

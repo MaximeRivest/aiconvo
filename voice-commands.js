@@ -251,8 +251,11 @@ function voiceFlash(el) {
 // own handler does what the mouse does.
 const voiceText = el => (el ? el.textContent.replace(/\s+/g, ' ').trim().slice(0, 140) : '');
 const VOICE_PICKABLE = [
-  { sel: '.ag-row[data-key]:not(.ag-file)', kind: 'conversation', key: el => el.dataset.key && 'conv:' + el.dataset.key,
+  { sel: '.ag-row[data-key]:not(.ag-file):not(.ag-nb)', kind: 'conversation', key: el => el.dataset.key && 'conv:' + el.dataset.key,
     title: el => voiceText(el.querySelector('.ag-title span') || el.querySelector('.ag-title')) },
+  // Notebooks kept open in the side list (notebook-tabs.js).
+  { sel: '.ag-row.ag-nb[data-key]', kind: 'notebook', key: el => 'nb:' + el.dataset.key,
+    title: el => voiceText(el.querySelector('.ag-title span:not(.ag-nb-glyph)') || el.querySelector('.ag-title')) },
   { sel: '.ag-row[data-open-project]', kind: 'project', key: el => 'proj:' + el.dataset.openProject,
     title: el => voiceText(el.querySelector('.ag-title span') || el) },
   { sel: '.ag-row.ag-file[data-path]', kind: 'file', key: el => 'file:' + el.dataset.path,
@@ -271,7 +274,7 @@ const VOICE_PICKABLE = [
   { sel: '.tnode[data-tn]', kind: 'box', key: el => 'tn:' + el.dataset.tn, title: el => voiceText(el) },
 ];
 const VOICE_REGIONS = [['#side', 'left panel'], ['#rightFiles', 'right panel'], ['#agentsPop', 'agents panel'], ['.mgantt', 'project timeline'], ['#list', 'timeline'], ['#treewrap', 'tree'], ['#treebar', 'tree bar'], ['#view', 'main view']];
-const VOICE_PLURAL = { conversation: 'conversations', file: 'files', folder: 'files and folders', project: 'projects', mark: 'marks', box: 'boxes' };
+const VOICE_PLURAL = { conversation: 'conversations', notebook: 'notebooks', file: 'files', folder: 'files and folders', project: 'projects', mark: 'marks', box: 'boxes' };
 
 function voiceMarkTitle(el) {
   const key = el.dataset.rel || el.dataset.mg;

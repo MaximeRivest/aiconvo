@@ -108,9 +108,9 @@ test('MDX disables prose unwrapping even when invoked directly', () => {
   for (const file of ['guide.mdx', 'guide.MDX', 'guide.md']) {
     const button = {};
     let changes = 0;
-    const ctx = vm.createContext({ d: { path: file, text: mdx }, $: () => button,
+    const ctx = vm.createContext({ text: mdx, $: () => button,
       unwrapHardLines: () => ({ text: 'joined', joins: 3 }),
-      st: { editor: { getContent: () => mdx, setContent: () => changes++ } }, toast() {},
+      st: { path: file, editor: { getContent: () => mdx, setContent: () => changes++ } }, toast() {},
     });
     vm.runInContext(code, ctx);
     assert.equal(button.hidden, file !== 'guide.md');

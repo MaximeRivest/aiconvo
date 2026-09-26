@@ -552,6 +552,13 @@ body:not(.home) .count { display: none !important; }
 .ag-notifications > summary .ag-notify-count { margin-left: auto; color: var(--text-faint); font-size: 10px; letter-spacing: 0; }
 .ag-notifications .job { margin: 0; border-width: 1px 0 0; padding: 7px 10px; }
 .ag-notifications .job:last-child { border-bottom: 1px solid var(--border); }
+/* Notebooks kept open (notebook-tabs.js, design/68): conversation rows with a
+   page glyph. A failed run's "!" does not pin the actions open (it has no
+   Resume to offer). A row not loaded in this window says so, quietly. */
+.ag-row.ag-nb .ag-nb-glyph { flex: 0 0 auto; color: var(--text-faint); font-size: 10px; }
+.ag-row.ag-nb.current .ag-nb-glyph { color: inherit; }
+.ag-row .ag-nb-cold { font-style: italic; }
+@media (pointer: fine) { .ag-row.ag-nb.stopped:not(:hover):not(.kbd-selected) .ag-acts { display: none; } }
 :root[data-theme-mode="binary"] #activeBtn.unread::after,
 :root[data-theme-mode="binary"] .ag-row.unread .ag-mark::before { background: var(--text); }
 :root[data-theme-mode="binary"] .ag-row.asks .ag-mark, :root[data-theme-mode="binary"] .ag-row.stopped .ag-mark,
@@ -2422,6 +2429,7 @@ if (document.documentElement.dataset.layout === 'side' && matchMedia('(min-width
 <script src="/recent-files.js"></script>
 <script src="/sidebar-projects.js"></script>
 <script src="/project-scope.js"></script>
+<script src="/notebook-tabs.js"></script>
 <script src="/filesmode.js"></script>
 <script src="/files-browser.js"></script>
 <script src="/live-file.js"></script>
@@ -2527,9 +2535,10 @@ function setRouteKind(kind) {
   // The home chart stays mounted behind the route; it just stops moving.
   mgDestroyChart();
   homeTimeline?.stop();
-  // Leaving a document flushes its pending autosave and destroys the editor.
-  // The file workspace flushes itself when it swaps one document for another.
-  if (kind !== 'file' && kind !== 'files-project' && typeof docState !== 'undefined' && docState) flushAndCloseDocument();
+  // Leaving a document flushes its pending autosave and destroys the editor,
+  // or parks it when the side list keeps it (a notebook run here, design/68).
+  // The file workspace does the same when it swaps one document for another.
+  if (kind !== 'file' && kind !== 'files-project' && typeof docState !== 'undefined' && docState) leaveDocument();
   // The file workspace (files mode) owns an editor too: leaving it saves
   // the draft and destroys the editor. Re-entering rebuilds from scratch.
   if (kind !== 'file' && kind !== 'files-project' && typeof fileWs !== 'undefined' && fileWs) closeFileWorkspace();
@@ -4355,15 +4364,21 @@ async function renderAgentsPop(refetch) {
   const tail = $('agentsUnread').querySelector(':scope > .ag-tail');
   const tailHtml = items.length ? panelListMore('open', listed.length) : '<div class="ag-empty">Nothing open yet. Conversations you open appear here.</div>';
   if (listMarkup.get(tail) !== tailHtml) { tail.innerHTML = tailHtml; listMarkup.set(tail, tailHtml); }
-  $('agentsLegacy').innerHTML =
+  // Notebooks kept open in this window (notebook-tabs.js, design/68): under
+  // the conversations, above the processes nobody listed.
+  const notebooks = NotebookTabs.sectionHtml({ markHtml, typingHtml, isOpen: NotebookTabs.sectionOpen(),
+    currentPath: viewKind === 'file' && typeof fileWs !== 'undefined' && fileWs ? fileWs.path : null });
+  $('agentsLegacy').innerHTML = notebooks +
     (otherRows ? `<details class="ag-notifications ag-others"${agentIdleOpen ? ' open' : ''}><summary>Other processes<span class="ag-notify-count">${otherCount}</span></summary>${otherRows}</details>` : '') + recoverySection;
   renderPresenceMarks();
   ensureElapsedTicker();
 
   const recovery = pop.querySelector('details.ag-recovery');
   if (recovery) recovery.ontoggle = () => { agentRecoveryOpen = recovery.open; };
-  const idle = pop.querySelector('.ag-notifications:not(.ag-recovery)');
+  const idle = pop.querySelector('.ag-others');
   if (idle) idle.ontoggle = () => { agentIdleOpen = idle.open; };
+  const nbs = pop.querySelector('.ag-notebooks');
+  if (nbs) nbs.ontoggle = () => NotebookTabs.setSectionOpen(nbs.open);
   const autoResume = $('agentAutoResume');
   if (autoResume) autoResume.onchange = async () => {
     autoResume.disabled = true;
@@ -4432,7 +4447,8 @@ function agentsPopKeydown(e) {
   if (e.key === 'Enter') {
     e.preventDefault();
     const row = selectAgentRow(agentsSelectedKey, false);
-    if (row) { toggleAgents(false); openPanelConversation(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined); }
+    if (row && NotebookTabs.isRowKey(row.dataset.key)) { toggleAgents(false); NotebookTabs.open(NotebookTabs.pathOfKey(row.dataset.key)); }
+    else if (row) { toggleAgents(false); openPanelConversation(row.dataset.key, row.classList.contains('unread') ? 'reply' : undefined); }
     return true;
   }
   // Marks on the row under the cursor (design/42, design/59): pin, unread, close.
@@ -4531,6 +4547,10 @@ $('agentsPop').addEventListener('contextmenu', e => {
   openAgentRowMenu(row.dataset.key, e.clientX, e.clientY);
 });
 $('rightFileList').onclick = $('agentsPop').onclick = async e => {
+  if (NotebookTabs.handleClick(e, () => {
+    if (sideLayoutOn()) setAgentsKbd(false); else toggleAgents(false);
+    if (typeof closePhoneSheets === 'function') closePhoneSheets();
+  })) return;
   const scopeButton = e.target.closest('[data-project-scope-picker]');
   if (scopeButton) { e.stopPropagation(); openWorkspaceProjectPicker(scopeButton); return; }
   const projectButton = e.target.closest('[data-open-project]');
@@ -6602,27 +6622,113 @@ function mrmdHostTheme() {
   };
 }
 
-let docState = null; // { path, project, sha, editor, dirty, saveTimer, saving }
+// The document on screen: { path, project, sha, editor, runner, dirty,
+// saveTimer, saving, collab, ws, body, closed… }. A notebook that is running
+// or was run here outlives its visit: leaving parks it (notebook-tabs.js,
+// design/68) and docState goes to whatever is on screen next, so work that
+// continues in the background checks `st.closed`, never `docState !== st`.
+let docState = null;
+
+// A document's editor, runner and (when parked) shared text, released for
+// good. Unsaved single-player edits are sent first: the text is read now,
+// before the editor goes, and saved after.
+function disposeDocSession(st) {
+  if (!st || st.closed) return;
+  clearTimeout(st.saveTimer);
+  if (!st.collab) {
+    // The recovery draft follows the text being saved; a clean parked
+    // document leaves none (an old one would come back as "recovered").
+    const key = 'chattering.draft:' + st.path;
+    const text = st.dirty ? st.editor.getContent() : null;
+    try {
+      if (text !== null) sessionStorage.setItem(key, JSON.stringify({ sha: st.sha, text, at: Date.now() }));
+      else if (!st.ws) sessionStorage.removeItem(key);
+    } catch {}
+    if (text !== null) st.saveQueue = (st.saveQueue || Promise.resolve()).then(() => docSaveIfDirty(st, { text })).catch(e => console.error('document save', e));
+  }
+  st.closed = true;
+  if (typeof NotebookTabs !== 'undefined') NotebookTabs.released(st);
+  if (st.runner) { try { st.runner.destroy(); } catch {} }
+  if (docState === st) docUnfollow();
+  if (st.editor) { try { st.editor.destroy(); } catch {} }
+  // On screen, the file workspace holds the shared text and leaves it; a
+  // parked document holds it itself.
+  if (st.ownsCollab && st.collab) { collabLeave(st.collab); st.ownsCollab = false; }
+}
 
 function closeDocument() {
   if (!docState) return;
-  clearTimeout(docState.saveTimer);
-  if (docState.runner) { try { docState.runner.destroy(); } catch {} docUnfollow(); }
-  if (docState.editor) { try { docState.editor.destroy(); } catch {} }
+  disposeDocSession(docState);
   docState = null;
 }
 
 // Every path that replaces the editor goes through here: unsaved edits are
-// written first (autosave reads the text synchronously, before the editor
-// is destroyed), then the editor goes away.
+// written first, then the editor goes away.
 function flushAndCloseDocument() {
   if (!docState) return;
   if (docState.focused && !docState.collab) liveFileStash(fileWs);
-  if (docState.dirty && !docState.collab) autosaveDocument();
   closeDocument();
 }
 
-function docStatusLine(text) {
+// Leaving the document on screen: a notebook the side list keeps is parked
+// (its runner goes on writing into it); anything else is closed.
+function leaveDocument() {
+  if (!docState) return;
+  if (!parkDocument()) flushAndCloseDocument();
+}
+
+// Park the document on screen: its editor (the .doc-body, which is also its
+// scroll parent) leaves the page but stays alive, joined to the shared text,
+// until it comes back or the list lets it go. The file workspace's hold on
+// the shared text passes to the document.
+function parkDocument() {
+  const st = docState;
+  if (!st || !st.body || typeof NotebookTabs === 'undefined' || !NotebookTabs.keeps(st)) return false;
+  // An agent asked from this file is editing it (ask-bubble.js): its settle
+  // and review are bound to this visit, so the visit ends as it always did.
+  if (st.ws && st.ws.run) return false;
+  const scroller = st.body.querySelector('.doc-editor-host');
+  const scroll = scroller ? scroller.scrollTop : 0;
+  const ws = st.ws;
+  if (ws) {
+    if (ws.collabUnsub) { try { ws.collabUnsub(); } catch {} ws.collabUnsub = null; }
+    if (ws.collab && ws.collab === st.collab) { ws.collab = null; st.ownsCollab = true; }
+  }
+  docUnfollow();
+  st.ws = null;
+  st.body.remove();
+  docState = null;
+  NotebookTabs.park(st, { scroll });
+  return true;
+}
+
+// Put a parked document back on screen, in the frame fileWsMountMarkdown
+// just drew. Same editor, same runner: a cell still running shows its
+// panel where it was.
+function resumeDocumentEditor(st, ws, scroll = 0) {
+  const slot = document.querySelector('#ffCompare .doc-body');
+  if (!slot || st.closed) return false;
+  ++docMountSeq; // a slower mount started before this must not land
+  slot.replaceWith(st.body);
+  st.ws = ws;
+  st.focused = true;
+  if (st.ownsCollab) { ws.collab = st.collab; st.ownsCollab = false; }
+  docState = st;
+  try { st.editor.setTheme(mrmdHostTheme()); } catch {}
+  st.editor.view?.requestMeasure?.();
+  wireDocumentChrome(st, st.editor.getContent());
+  docFollow(st);
+  if (st.paintRun) st.paintRun();
+  if (st.varsOpen) refreshDocVars(st);
+  if (st.editor.listCells && st.editor.listCells().length) refreshDocDoctor();
+  NotebookTabs.shown(st);
+  // A detached element forgets its scroll offset; put it back once laid out.
+  if (scroll) requestAnimationFrame(() => { if (docState === st) { const s = st.body.querySelector('.doc-editor-host'); if (s) s.scrollTop = scroll; } });
+  return true;
+}
+
+function docStatusLine(text, st = docState) {
+  if (st !== docState) return; // a parked document has no status line
   const el = $('docStatus');
   if (el) { el.textContent = text; el.title = text; }
   if (docState?.focused && $('docSave')) $('docSave').disabled = docState.collab ? false : (!docState.dirty || docState.saving);
@@ -6631,12 +6737,14 @@ function docStatusLine(text) {
 // Autosave after a 2 s pause. Autosave writes to disk (with the SHA conflict
 // check) and records provenance; it does NOT create a Git commit. The save
 // button / Mod-S creates the real commit (with an AI title in background).
-function scheduleDocAutosave() {
-  if (!docState) return;
-  docState.dirty = true;
-  docStatusLine(docState.focused ? 'Unsaved' : 'editing…');
-  clearTimeout(docState.saveTimer);
-  docState.saveTimer = setTimeout(autosaveDocument, 2000);
+// Bound to its document: a parked notebook's runner writes results, and
+// they save with it, not with whatever is on screen.
+function scheduleDocAutosave(st = docState) {
+  if (!st || st.closed) return;
+  st.dirty = true;
+  docStatusLine(st.focused ? 'Unsaved' : 'editing…', st);
+  clearTimeout(st.saveTimer);
+  st.saveTimer = setTimeout(() => autosaveDocumentOf(st), 2000);
 }
 
 // One save at a time per document: a save asked for while one is in flight
@@ -6644,24 +6752,38 @@ function scheduleDocAutosave() {
 // typed so far is on disk" (AI commands save pending typing before applying
 // a suggestion). Also a click handler: it ignores its argument.
 function autosaveDocument() {
-  const st = docState;
-  if (!st) return Promise.resolve();
+  return autosaveDocumentOf(docState);
+}
+function autosaveDocumentOf(st) {
+  if (!st || st.closed) return Promise.resolve();
   st.saveQueue = (st.saveQueue || Promise.resolve()).then(() => docSaveIfDirty(st)).catch(e => console.error('document save', e));
   return st.saveQueue;
 }
 
-async function docSaveIfDirty(st) {
-  if (docState !== st || !st.dirty) return;
+// `text`: the content to write when the editor is already gone (a closing
+// document hands it over as it closes).
+async function docSaveIfDirty(st, { text = null } = {}) {
+  if (!st.dirty || (st.closed && text === null)) return;
   st.saving = true;
   st.dirty = false;
-  if (st.focused) docStatusLine('Saving…');
-  const text = st.editor.getContent();
+  if (st.focused) docStatusLine('Saving…', st);
+  if (text === null) text = st.editor.getContent();
   let out;
   try {
     out = await postJson('/api/doc/save', { path: st.path, baseSha: st.sha, text, actor: 'human', input: 'keyboard', reviewId: st.reviewId });
   } catch { out = { error: 'network failure' }; }
   st.saving = false;
-  if (docState !== st) return;
+  if (st.closed) {
+    if (out.error) errToast('could not save ' + st.path.split('/').pop() + ': ' + out.error + ' · the text is kept as a draft for the next time it opens');
+    else try { sessionStorage.removeItem('chattering.draft:' + st.path); } catch {}
+    return;
+  }
+  if (docState !== st) {
+    // Parked: keep the bookkeeping, retry later; the status line is not its.
+    if (out.error) { st.dirty = true; if (out.error === 'network failure') scheduleDocAutosave(st); }
+    else { st.sha = out.sha; st.baseText = text; }
+    return;
+  }
   if (out.error) {
     st.dirty = true;
     docStatusLine('⚠ ' + out.error);
@@ -6679,7 +6801,7 @@ async function docSaveIfDirty(st) {
     fileWsBanner(fileWs, out.historyWarning ? 'Saved, but history capture failed: ' + out.historyWarning : null);
   }
   docStatusLine(out.historyWarning ? 'Saved · history warning: ' + out.historyWarning : st.dirty ? st.focused ? 'Unsaved' : 'editing…' : st.focused ? 'Saved' : 'autosaved · ' + new Date().toLocaleTimeString());
-  if (st.dirty) scheduleDocAutosave();
+  if (st.dirty) scheduleDocAutosave(st);
 }
 
 async function commitDocument() {
@@ -6857,8 +6979,8 @@ async function ensureDocEnvironment(st, opts) {
   try { r = await postJson('/api/doc/ensure', { doc: st.path, ...opts }); }
   catch { r = { error: 'network failure' }; }
   clearInterval(tick);
-  if (docState !== st) return null;
   st.running = null;
+  if (docState !== st) return null;
   if (r.error && !r.checks) { state.textContent = '✗ ' + r.error + (r.detail ? ' · ' + String(r.detail).trim().split('\n').at(-1) : ''); if (line) line.querySelectorAll('button').forEach(b => b.disabled = false); return null; }
   const steps = r.steps || [];
   const failed = steps.find(s => !s.ok);
@@ -6893,16 +7015,40 @@ async function runDocCell(cell, opts = {}) {
 }
 
 // The notebook runner for this document, or null with an older bundle.
+// It outlives the document's visits (a parked notebook keeps running, see
+// parkDocument): every hook updates the side list, and touches the page's
+// run strip only while this document is the one on screen.
 function createDocRunner(st, bundle) {
   if (typeof bundle.createNotebookRunner !== 'function') return null;
-  let strip = null, state = null, cancelBtn = null, tick = 0, t0 = 0, waiting = false, current = null;
+  let tick = 0, t0 = 0, waiting = false, current = null;
+  const shown = () => docState === st;
+  // The strip's parts on screen, or {} when this document is not shown.
+  const strip = () => {
+    const el = shown() ? docRunStrip() : null;
+    return el ? { el, state: el.querySelector('.doc-run-state'), cancelBtn: el.querySelector('.doc-run-cancel') } : {};
+  };
+  const say = text => { const { state } = strip(); if (state) state.textContent = text; };
   const label = () => (waiting ? '✋ ' + (current.lang || '?') + ' cell is waiting for input · ' : '● ' + (current.lang || '?') + ' cell · ') + Math.round((Date.now() - t0) / 1000) + 's';
+  // Draw the strip for where the run is now: on a run's start, and when a
+  // parked notebook comes back on screen.
+  st.paintRun = () => {
+    const { el, state, cancelBtn } = current || st.lastRunText ? strip() : {};
+    if (!el) return;
+    // The strip may be appearing for the first time (focused view, ready
+    // notebook): fill the chip from the doctor report already in hand.
+    if (st.doctor && !el.querySelector('.doc-run-chip').textContent) renderDocDoctor(st, el, st.doctor);
+    if (!current) { state.textContent = st.lastRunText; cancelBtn.hidden = true; return; }
+    state.textContent = st.cancelling ? '■ interrupting the kernel…' : label();
+    cancelBtn.hidden = false;
+    cancelBtn.disabled = !!st.cancelling;
+    cancelBtn.onclick = () => st.cancelRun && st.cancelRun();
+  };
   const runner = bundle.createNotebookRunner(st.editor, {
     runnable: lang => Object.hasOwn(NotebookEnv.RUN_LANGS, lang),
     transport: {
       run: ({ lang, code, runId }, onEvent) => docRunRequest({ lang, code, doc: st.path, runId }, onEvent),
       answer: (runId, text) => postJson('/api/doc/run-input', { runId, text }),
-      cancel: runId => { if (state) state.textContent = '■ interrupting the kernel…'; if (cancelBtn) cancelBtn.disabled = true; return postJson('/api/doc/cancel-run', { runId }); },
+      cancel: runId => { st.cancelling = true; st.paintRun(); return postJson('/api/doc/cancel-run', { runId }); },
       interrupt: cell => postJson('/api/doc/kernel', { doc: st.path, lang: cell && cell.lang || DOC_KERNEL_LANG, op: 'cancel' }),
       plotUrl: p => '/api/doc/plot?' + new URLSearchParams({ path: p }),
       savePlots: async paths => {
@@ -6910,68 +7056,62 @@ function createDocRunner(st, bundle) {
         if (r.error) throw new Error(r.error);
         return r.images;
       },
-      prepare: () => docPlayPrerequisites(st, msg => { if (state) state.textContent = msg; }),
+      prepare: () => docPlayPrerequisites(st, say),
     },
     hooks: {
       onRunStart({ cell, runId, cancel }) {
         current = cell; waiting = false; t0 = Date.now();
         st.running = runId;
-        strip = docRunStrip();
-        // The strip may be appearing for the first time (focused view, ready
-        // notebook): fill the chip from the doctor report already in hand.
-        if (st.doctor && !strip.querySelector('.doc-run-chip').textContent) renderDocDoctor(st, strip, st.doctor);
-        state = strip.querySelector('.doc-run-state');
-        cancelBtn = strip.querySelector('.doc-run-cancel');
-        state.textContent = label();
-        tick = setInterval(() => { if (st.running === runId) state.textContent = label(); }, 1000);
-        cancelBtn.hidden = false;
-        cancelBtn.disabled = false;
-        cancelBtn.onclick = () => cancel();
         st.cancelRun = cancel;
+        st.cancelling = false;
+        clearInterval(tick);
+        tick = setInterval(() => { if (st.running === runId && !st.cancelling) say(label()); }, 1000);
+        st.paintRun();
+        NotebookTabs.runStarted(st);
       },
       onRunState({ waiting: w, error }) {
-        if (typeof w === 'boolean') { waiting = w; if (state) state.textContent = label(); }
+        if (typeof w === 'boolean') { waiting = w; say(label()); NotebookTabs.runState(st, { waiting: w }); }
         if (error) toast(error, null, 'err');
       },
       onRunEnd({ cell, result, ok, wrote }) {
         clearInterval(tick);
+        current = null;
         st.cancelRun = null;
-        if (docState !== st) return;
+        st.cancelling = false;
         st.running = null;
+        const secs = Math.round((result.ms || 0) / 100) / 10;
+        st.lastRunText = result.error ? '✗ ' + result.error
+          : (ok ? '✓ ' : '✗ exit ' + result.code + ' · ') + (result.runtime || cell.lang) + ' · ' + secs + 's'
+            + (wrote ? '' : ' · cell edited during run, output dropped');
+        NotebookTabs.runEnded(st, { ok, result, wrote });
+        if (!shown()) return;
+        const { el, state, cancelBtn } = strip();
         if (cancelBtn) cancelBtn.hidden = true;
+        if (state) state.textContent = st.lastRunText;
         refreshDocVars(st); // the drawer, if open, shows what the cell left
         if (result.error) {
-          if (state) state.textContent = '✗ ' + result.error;
           if (result.missing) refreshDocDoctor();
           return;
         }
-        const secs = Math.round((result.ms || 0) / 100) / 10;
-        state.textContent = (ok ? '✓ ' : '✗ exit ' + result.code + ' · ') + (result.runtime || cell.lang) + ' · ' + secs + 's';
         if (result.missing) refreshDocDoctor(); // rat vanished: say so in the strip, not per cell
-        if (!wrote) {
-          // The cell's code changed while it ran: its result would describe other code.
-          toast('the cell changed while it ran — output not written');
-          state.textContent += ' · cell edited during run, output dropped';
-        }
+        // The cell's code changed while it ran: its result would describe other code.
+        if (!wrote) toast('the cell changed while it ran — output not written');
         if (!st.doctor || !st.doctor.python || !st.doctor.python.kernel_running) refreshDocDoctor(); // the first run started the kernel
-        offerDeclareDependency(strip, result, cell);
+        if (el) offerDeclareDependency(el, result, cell);
       },
       // Other clients' runs on this notebook's kernels (followed below).
-      onExternal({ kind, run, shown }) {
-        if (docState !== st) return;
+      onExternal({ kind, run, shown: drawn }) {
+        if (!shown()) return;
         if (kind === 'run_ended') refreshDocVars(st);
-        if (shown || st.running) return;
+        if (drawn || st.running) return;
         // A run on no cell of this notebook (a terminal, an agent's own
         // code): the strip says so; the variables drawer follows.
-        const s = docRunStrip();
-        const line = s && s.querySelector('.doc-run-state');
-        if (!line) return;
-        if (kind === 'run_started') line.textContent = '● ' + run.caller + ' is running code in this kernel';
-        else if (kind === 'run_waiting') line.textContent = '✋ ' + run.caller + '\u2019s code is waiting for input';
-        else if (kind === 'run_ended') line.textContent = (run.ok ? '✓ ' : '✗ ') + run.caller + ' ran code · ' + Math.round((run.ms || 0) / 100) / 10 + 's';
+        if (kind === 'run_started') say('● ' + run.caller + ' is running code in this kernel');
+        else if (kind === 'run_waiting') say('✋ ' + run.caller + '\u2019s code is waiting for input');
+        else if (kind === 'run_ended') say((run.ok ? '✓ ' : '✗ ') + run.caller + ' ran code · ' + Math.round((run.ms || 0) / 100) / 10 + 's');
       },
       onKernelEvent(ev) {
-        if (docState !== st) return;
+        if (!shown()) return;
         if (ev.event === 'kernel') refreshDocDoctor();
         if (ev.event === 'kernel' || ev.event === 'ctl_called' || ev.event === 'gap') refreshDocVars(st);
       },
@@ -6989,13 +7129,14 @@ async function docPlayPrerequisites(st, say) {
   let pr;
   try { pr = await postJson('/api/doc/play-prerequisites', { doc: st.path }); }
   catch { pr = { error: 'network failure' }; }
-  if (docState !== st) return { ok: false, error: 'the document closed' };
+  // Parked is not closed: run all goes on while the notebook is off screen.
+  if (st.closed) return { ok: false, error: 'the document closed' };
   if (pr.error || !pr.ok) {
     const failedRun = (pr.runs || []).find(x => !x.ok && !x.skipped);
     const failedCell = failedRun && failedRun.cells.find(c => !c.ok);
     const msg = 'prerequisite ' + (failedRun ? failedRun.notebook.split('/').pop() + (failedCell ? ' failed at line ' + failedCell.line : '') : 'failed') + (pr.error ? ' · ' + pr.error : '');
     if (failedCell) toast('✗ ' + failedRun.notebook.split('/').pop() + ': ' + (failedCell.output || '').trim().split('\n').at(-1), null, 'err');
-    refreshDocDoctor();
+    if (docState === st) refreshDocDoctor();
     return { ok: false, error: msg, label: 'prerequisite failed' };
   }
   st.doctor.after = st.doctor.after.map(a => ({ ...a, played: true }));
@@ -7350,7 +7491,12 @@ async function runAllDocCells() {
   if (!st) return;
   if (st.running) return toast(st.running === 'ensure' ? 'the environment is being set up — one moment' : 'a cell is already running — cancel it first');
   if (!st.runner) return toast('this editor version cannot run cells — reload the page');
+  // The side list follows the queue (and reports its end if the notebook
+  // is off screen by then).
+  const total = st.editor.listCells().filter(c => Object.hasOwn(NotebookEnv.RUN_LANGS, String(c.lang || '').toLowerCase())).length;
+  if (total && !st.runner.running) NotebookTabs.runAllStarted(st, total);
   const r = await st.runner.runAll();
+  NotebookTabs.runAllEnded(st, r);
   if (docState !== st) return;
   if (r.empty) return toast('no runnable code cells in this document');
   if (r.busy) return toast('a cell is already running — cancel it first');
@@ -7537,22 +7683,26 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   if (focused && !shared) try { draft = JSON.parse(sessionStorage.getItem('chattering.draft:' + d.path) || 'null'); } catch {}
   if (draft?.text === d.text) { try { sessionStorage.removeItem('chattering.draft:' + d.path); } catch {} draft = null; }
   const st = { path: d.path, project, sha: draft?.sha || d.sha, baseText: d.text, dirty: !!draft, saveTimer: 0, saving: false, source: false, focused };
-  const ws = focused ? fileWs : null;
-  st.reviewId = ws?.reviewRef?.id || null;
+  // The workspace showing this document now: null while it is parked, a
+  // new one each time it comes back. Callbacks read it at call time.
+  st.ws = focused ? fileWs : null;
+  st.reviewId = st.ws?.reviewRef?.id || null;
   st.collab = shared;
+  st.body = $('docEditor').closest('.doc-body');
   st.editor = bundle.createDocumentEditor($('docEditor'), {
     doc: shared ? shared.ytext.toString() : draft?.text ?? d.text,
     extensions: shared ? collabEditorExtension(shared) : [],
     filename: d.path, lineGutter: focused,
-    onLineHover: focused ? line => liveFileHover(ws, line) : undefined,
-    onNavigateLocation: focused ? location => liveFileNavigate(ws, location) : undefined,
-    onLineHoverEnd: () => { if (ws?.live) { ws.live.hover++; ws.live.hoverController?.abort(); } },
+    onLineHover: focused ? line => liveFileHover(st.ws, line) : undefined,
+    onNavigateLocation: focused ? location => liveFileNavigate(st.ws, location) : undefined,
+    onLineHoverEnd: () => { const live = st.ws?.live; if (live) { live.hover++; live.hoverController?.abort(); } },
     theme: mrmdHostTheme(),
     placeholder: 'Start writing…',
     assetResolver: url => '/api/doc/asset?doc=' + encodeURIComponent(d.path) + '&src=' + encodeURIComponent(url),
     diagrams: mermaidDiagrams,
-    onChange: shared ? () => fileWsSharedStatus(fileWs) : scheduleDocAutosave,
-    onSave: shared ? () => fileWsSharedSave(fileWs) : focused ? autosaveDocument : commitDocument,
+    // A parked notebook's results change its text too: they save with it.
+    onChange: shared ? () => { if (st.ws) fileWsSharedStatus(st.ws); } : () => scheduleDocAutosave(st),
+    onSave: shared ? () => st.ws && fileWsSharedSave(st.ws) : focused ? () => autosaveDocumentOf(st) : commitDocument,
     onRunCell: (cell, o) => runDocCell(cell, o),
     // The Run button goes on cells rat can run; Stop on a busy cell.
     runnableLanguages: Object.keys(NotebookEnv.RUN_LANGS),
@@ -7564,23 +7714,39 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
     review: aiReviewHost(d.path),
   });
   st.runner = createDocRunner(st, bundle);
+  if (st.runner && st.editor.setLanguageServices) st.editor.setLanguageServices(docCompletionService(st));
+  docState = st;
+  NotebookTabs.shown(st); // a notebook the side list names is kept again
+  docFollow(st);
+  wireDocumentChrome(st, d.text);
+  if (focused && draft) docStatusLine('Recovered unsaved draft');
+  if (focused && draft && draft.sha !== d.sha) fileWsBanner(st.ws, 'This draft predates the disk file. Your text is preserved; saving will not overwrite newer disk changes.', [['Reload disk', () => liveFileReload(st.ws)]]);
+  if (localStorage.getItem('chattering.docVars') === 'open' && st.editor.listCells && st.editor.listCells().length) toggleDocVars(st, true);
+  if (st.editor.listCells && st.editor.listCells().length) refreshDocDoctor();
+  st.editor.focus();
+}
+
+// The document's controls in the file head, for a document just mounted or
+// one coming back from the side list: the head is drawn anew on each visit.
+function wireDocumentChrome(st, text) {
+  const ws = st.ws, shared = st.collab;
   if (st.runner && st.editor.setLanguageServices) {
-    st.editor.setLanguageServices(docCompletionService(st));
     const el = $('liveServiceStatus');
     if (el) el.title = 'Code cells complete from the notebook\u2019s running kernel (rat); Ctrl+Space asks';
   }
-  docState = st;
-  docFollow(st);
-  if (shared) { fileWs.wasShared = true; fileWs.collabUnsub = collabOnPeople(shared, () => fileWsSharedStatus(fileWs)); $('docSave').disabled = false; $('docSave').title = 'Shared: the disk follows as you type. Save writes it right now · Ctrl+S'; }
-  docStatusLine(focused ? draft ? 'Recovered unsaved draft' : 'Saved · autosaves' : 'autosaves after a 2 s pause · save revision = Git commit');
-  if (shared) fileWsSharedStatus(fileWs);
-  $('docSave').onclick = shared ? () => fileWsSharedSave(fileWs) : focused ? autosaveDocument : commitDocument;
-  if (focused && draft && draft.sha !== d.sha) fileWsBanner(ws, 'This draft predates the disk file. Your text is preserved; saving will not overwrite newer disk changes.', [['Reload disk', () => liveFileReload(ws)]]);
+  if (shared && ws) {
+    ws.wasShared = true;
+    ws.collabUnsub = collabOnPeople(shared, () => fileWsSharedStatus(ws));
+    $('docSave').disabled = false;
+    $('docSave').title = 'Shared: the disk follows as you type. Save writes it right now · Ctrl+S';
+    fileWsSharedStatus(ws);
+  } else docStatusLine(st.dirty ? 'Unsaved' : st.focused ? 'Saved · autosaves' : 'autosaves after a 2 s pause · save revision = Git commit', st);
+  $('docSave').onclick = shared ? () => st.ws && fileWsSharedSave(st.ws) : st.focused ? () => autosaveDocumentOf(st) : commitDocument;
   // The unwrap affordance appears only when the file actually looks
   // machine-wrapped (2+ joinable pairs), so hand-written docs stay quiet.
   // MDX imports, expressions and JSX are not prose; joining lines can change code.
-  const canUnwrap = !/\.mdx$/i.test(d.path);
-  $('docUnwrap').hidden = !canUnwrap || unwrapHardLines(d.text).joins < 2;
+  const canUnwrap = !/\.mdx$/i.test(st.path);
+  $('docUnwrap').hidden = !canUnwrap || unwrapHardLines(text).joins < 2;
   $('docUnwrap').onclick = () => {
     if (!canUnwrap) return;
     const now = unwrapHardLines(st.editor.getContent());
@@ -7599,14 +7765,12 @@ async function mountDocumentEditor(docPath, project = null, { focused = false } 
   $('docRunAll').onclick = runAllDocCells;
   if ($('docVars')) $('docVars').onclick = () => toggleDocVars(st);
   if ($('docKernel')) $('docKernel').onclick = e => { e.stopPropagation(); e.currentTarget.closest('details')?.removeAttribute('open'); const r = e.currentTarget.getBoundingClientRect(); openDocKernelMenu(r.left, r.bottom + 4); };
-  if (localStorage.getItem('chattering.docVars') === 'open' && st.editor.listCells && st.editor.listCells().length) toggleDocVars(st, true);
-  if (st.editor.listCells && st.editor.listCells().length) refreshDocDoctor();
+  $('docSource').classList.toggle('on', !!st.source);
   $('docSource').onclick = () => {
     st.source = !st.source;
     st.editor.setSourceMode(st.source);
     $('docSource').classList.toggle('on', st.source);
   };
-  st.editor.focus();
 }
 
 // New document: preserve a Markdown-family extension; default to .md.
