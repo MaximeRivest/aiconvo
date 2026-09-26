@@ -146,6 +146,22 @@ function cookieValue(req, name) {
   }
   return '';
 }
+// The sign-in cookie. Until the rename (2026-09-22) it was called `aiconvo`;
+// a browser signed in before then still presents that one, holding the
+// same credential. It is honoured, and moved to the new name on the first
+// signed-in answer (moveLegacySignInCookie), so nobody is asked for the
+// token again because of a rename.
+const LEGACY_SIGN_IN_COOKIE = 'aiconvo';
+function signInCookie(req) {
+  return cookieValue(req, 'chattering') || cookieValue(req, LEGACY_SIGN_IN_COOKIE);
+}
+function moveLegacySignInCookie(req, res) {
+  const old = cookieValue(req, LEGACY_SIGN_IN_COOKIE);
+  if (!old) return;
+  const headers = [authGuard.cookieHeader(LEGACY_SIGN_IN_COOKIE, '', req, { maxAge: 0 })];
+  if (!cookieValue(req, 'chattering')) headers.unshift(authGuard.cookieHeader('chattering', old, req));
+  res.setHeader('Set-Cookie', headers);
+}
 // The pages shown before sign-in cannot fetch the icon (every other path
 // needs a signed-in visitor), so they carry it inline.
 const FAVICON_LINK = (() => {
@@ -4791,7 +4807,7 @@ const currentIdentity = () => (requestContext.getStore() || {}).identity || null
 const currentPrincipal = async project => { const id = currentIdentity(); return id ? principalInProject(principalFor(id), project) : principalFor(null); };
 function identifyRequest(req) {
   if (!LAN_TOKEN) return ownerIdentity();
-  return usersLib.identify({ roster, installToken: LAN_TOKEN, isLocal: isLocalRequest(req), cookie: cookieValue(req, 'chattering'), authorization: req.headers.authorization });
+  return usersLib.identify({ roster, installToken: LAN_TOKEN, isLocal: isLocalRequest(req), cookie: signInCookie(req), authorization: req.headers.authorization });
 }
 const publicUsers = () => roster.users.map(usersLib.publicUser);
 const userById = id => usersLib.publicUser(usersLib.findUser(roster, id));
@@ -15008,16 +15024,17 @@ async function handleRequest(req, res) {
     if (!identity) {
       // A credential was presented and named nobody: that is a guess. A bare
       // visit to the page costs nothing.
-      const stale = cookieValue(req, 'chattering');
+      const stale = signInCookie(req);
       const presented = stale || String(req.headers.authorization || '');
       if (presented) { if (!(await gate())) return; noteSignIn('fail', { via: stale ? 'cookie' : 'bearer' }, presented); }
       // A stale cookie is cleared so the browser stops presenting it.
-      if (stale) res.setHeader('Set-Cookie', authGuard.cookieHeader('chattering', '', req, { maxAge: 0 }));
+      if (stale) res.setHeader('Set-Cookie', [authGuard.cookieHeader('chattering', '', req, { maxAge: 0 }), authGuard.cookieHeader(LEGACY_SIGN_IN_COOKIE, '', req, { maxAge: 0 })]);
       if (u.pathname.startsWith('/api/')) return json(res, 401, { error: 'sign in first' });
       res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(lanLoginPage());
     }
     req.identity = identity;
+    moveLegacySignInCookie(req, res);
     requestContext.getStore().identity = identity;
     // A browser request that another site started (a preview page on another
     // port of this host is "same-site"; any other page is "cross-site") never
@@ -15258,7 +15275,7 @@ async function handleRequest(req, res) {
         assertPathAccess(identity, found.abs, 'see');
         // Retain only the proof, not the HTTP request/socket. Re-resolve it so
         // sign-in revocation, disabled accounts and sharing changes take effect.
-        const proof = { isLocal: isLocalRequest(req), cookie: cookieValue(req, 'chattering'), authorization: req.headers.authorization };
+        const proof = { isLocal: isLocalRequest(req), cookie: signInCookie(req), authorization: req.headers.authorization };
         const authorize = abs => assertPathAccess(LAN_TOKEN ? usersLib.identify({ roster, installToken: LAN_TOKEN, ...proof }) : ownerIdentity(), abs, 'see');
         json(res, 200, { ...previewAssets.create(found, { authorize }), folder: path.dirname(found.abs) });
       } catch (e) { json(res, 400, { error: e.message }); }

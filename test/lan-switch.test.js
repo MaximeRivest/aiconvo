@@ -74,6 +74,18 @@ test('the reach switch rebinds the listener both ways without a restart', async 
   assert.equal(await reachable('127.0.0.1', port), 401, 'locality alone no longer signs in');
   const installToken = new URL(s.connectLinks[0] || 'http://x/?token=').searchParams.get('token');
   if (installToken) assert.equal((await fetch(base + '/api/settings', { headers: { Authorization: 'Bearer ' + installToken } })).status, 200, 'answers locally with the token');
+  // A browser signed in before the rename presents the old cookie name:
+  // it is still signed in, and its cookie moves to the new name.
+  if (installToken) {
+    const legacy = await fetch(base + '/api/settings', { headers: { Cookie: 'aiconvo=' + installToken } });
+    assert.equal(legacy.status, 200, 'the pre-rename cookie still signs in');
+    const set = legacy.headers.getSetCookie();
+    assert.ok(set.some(c => c.startsWith('chattering=' + installToken + ';')), 'moved to the new name: ' + set);
+    assert.ok(set.some(c => /^aiconvo=;.*Max-Age=0/.test(c)), 'the old name is cleared: ' + set);
+    const bogus = await fetch(base + '/api/settings', { headers: { Cookie: 'aiconvo=not-a-token' } });
+    assert.equal(bogus.status, 401, 'a wrong old cookie is still wrong');
+    assert.ok(bogus.headers.getSetCookie().some(c => /^aiconvo=;.*Max-Age=0/.test(c)), 'and is cleared');
+  }
   // Flipping the switch on from this machine also signs that browser in,
   // so the person who opened the door is not locked out by it.
   s = await putLan(base, false, home);
