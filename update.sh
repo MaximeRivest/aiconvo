@@ -50,15 +50,19 @@ if [ -n "${WSL_DISTRO_NAME:-}" ]; then
     winlocal=$("$PS" -NoProfile -Command 'Write-Output $env:LOCALAPPDATA' 2>/dev/null | tr -d '\r' || true)
     windest=""
     [ -n "$winlocal" ] && windest=$(wslpath -u "$winlocal" 2>/dev/null || true)
-    if [ -n "$windest" ] && [ -f "$windest/Chattering/config.json" ]; then
+    # Installs made before the rename (2026-09-22) keep %LOCALAPPDATA%\Aiconvo:
+    # their shortcut and scheduled task point there, and moving it would need
+    # an administrator. Their copies are refreshed in place.
+    for folder in Chattering Aiconvo; do
+      [ -n "$windest" ] && [ -f "$windest/$folder/config.json" ] || continue
       for script in launch.ps1 lan-forward.ps1; do
-        [ -f "$windest/Chattering/$script" ] || continue
-        if ! cmp -s "windows/$script" "$windest/Chattering/$script"; then
-          cp "windows/$script" "$windest/Chattering/$script"
-          echo "updated Windows copy: $script"
+        [ -f "$windest/$folder/$script" ] || continue
+        if ! cmp -s "windows/$script" "$windest/$folder/$script"; then
+          cp "windows/$script" "$windest/$folder/$script"
+          echo "updated Windows copy: $folder\\$script"
         fi
       done
-    fi
+    done
   fi
 fi
 
